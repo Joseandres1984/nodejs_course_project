@@ -34,6 +34,7 @@ def _ensure(state: Dict[str, Any]) -> Dict[str, Any]:
     memory.setdefault("history", [])
     state.setdefault("outbox", [])
     state.setdefault("inbox", [])
+    state.setdefault("deals", [])
     return memory
 
 
@@ -46,13 +47,63 @@ def _opportunities(state: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     return {str(x.get("id")): x for x in rows if x.get("id")}
 
 
-def _deals(state: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
-    return {str(x.get("id")): x for x in state.get("deals", []) if x.get("id")}
-
-
 def _deal_for_opportunity(state: Dict[str, Any], opportunity_id: Any) -> Dict[str, Any]:
     target = str(opportunity_id or "")
     return next((x for x in state.get("deals", []) if str(x.get("opportunity_id") or "") == target), {})
+
+
+def _counterparty_name(account: Dict[str, Any]) -> str:
+    return str(account.get("company_name") or account.get("name_hint") or account.get("site_title") or account.get("domain") or "Contraparte")
+
+
+def _ensure_execution_deal(state: Dict[str, Any], interlocution: Dict[str, Any]) -> Dict[str, Any]:
+    opportunity_id = str(interlocution.get("opportunity_id") or "")
+    existing = _deal_for_opportunity(state, opportunity_id)
+    if existing:
+        return existing
+    opportunity = _opportunities(state).get(opportunity_id, {})
+    if opportunity.get("source") != "public_evidence" or not interlocution.get("supplier_rfq_ready"):
+        return {}
+    accounts = _accounts(state)
+    buyer = accounts.get(str(interlocution.get("buyer_account_id") or ""), {})
+    supplier = accounts.get(str(interlocution.get("supplier_account_id") or ""), {})
+    score = _f(opportunity.get("portfolio_priority_score") or opportunity.get("score"), 50.0)
+    close_prob = round(max(0.20, min(0.72, 0.18 + score / 200.0)), 2)
+    deal = {
+        "id": f"DEAL-{len(state.setdefault('deals', []))+1:04d}",
+        "opportunity_id": opportunity_id,
+        "buyer": _counterparty_name(buyer),
+        "supplier": _counterparty_name(supplier),
+        "buyer_account_id": buyer.get("id"),
+        "supplier_account_id": supplier.get("id"),
+        "need": interlocution.get("category") or opportunity.get("category"),
+        "pipeline": 0.0,
+        "stage": "revops_active",
+        "close_prob": close_prob,
+        "expected_value": 0.0,
+        "company_profit": 0.0,
+        "company_share_pct": 0.0,
+        "economic_value_known": False,
+        "next_action": "Obtener y normalizar cotizaciones reales antes de calcular economía",
+        "source": "public_evidence",
+        "created_at": utcnow(),
+    }
+    state["deals"].append(deal)
+    opportunity["ready_for_deal"] = True
+    opportunity["deal_id"] = deal["id"]
+    opportunity["updated_at"] = utcnow()
+    record_decision(
+        state,
+        engine="Commercial Execution Brain / RevOps",
+        object_type="deal",
+        object_id=deal["id"],
+        decision="real_deal_opened_without_invented_value",
+        reason="Requerimiento confirmado y oportunidad respaldada por evidencia; el valor económico queda en cero/desconocido hasta recibir cotizaciones reales.",
+        action="score_opportunity",
+        confidence=max(0.55, min(0.95, score / 100.0)),
+        evidence_refs=list(opportunity.get("evidence_refs") or [])[:6],
+    )
+    return deal
 
 
 def _account_contact(account: Dict[str, Any]) -> Tuple[str | None, bool, str | None]:
@@ -62,10 +113,6 @@ def _account_contact(account: Dict[str, Any]) -> Tuple[str | None, bool, str | N
     if account.get("commercial_form_url") and account.get("commercial_channel_verified"):
         return str(account.get("commercial_form_url")), True, "web_form"
     return None, False, None
-
-
-def _counterparty_name(account: Dict[str, Any]) -> str:
-    return str(account.get("company_name") or account.get("name_hint") or account.get("site_title") or account.get("domain") or "Contraparte")
 
 
 def _existing_execution_keys(state: Dict[str, Any]) -> set[str]:
@@ -84,7 +131,7 @@ def _message(
     contact: str, contact_verified: bool, subject: str, body: str,
     deal_id: str | None = None, revops_case_id: str | None = None,
     interlocution_case_id: str | None = None, opportunity_id: str | None = None,
-    purpose: str | None = None,
+    counterparty_account_id: str | None = None, purpose: str | None = None,
 ) -> bool:
     if not contact or "@" not in contact or not contact_verified:
         return False
@@ -96,6 +143,7 @@ def _message(
         "revops_case_id": revops_case_id,
         "interlocution_case_id": interlocution_case_id,
         "opportunity_id": opportunity_id,
+        "counterparty_account_id": counterparty_account_id,
         "kind": kind,
         "purpose": purpose,
         "counterparty": counterparty,
@@ -272,17 +320,28 @@ def _apply_buyer_reply_to_requirement(state: Dict[str, Any], incoming: Dict[str,
         requirement["source"] = "buyer_email_evidence"
         requirement["last_buyer_evidence_at"] = incoming.get("received_at") or utcnow()
         requirement.setdefault("evidence_message_ids", []).append(incoming.get("id"))
-    # Explicit email evidence can fill fields, but full confirmation is only asserted when every required field exists.
     required = ["technical_scope", "quantity", "delivery_target", "delivery_location", "commercial_terms"]
-    if all(requirement.get(x) not in (None, "", [], {}) for x in required):
+    missing = [x for x in required if requirement.get(x) in (None, "", [], {})]
+    case["missing_required_fields"] = missing
+    case["requirement_completeness"] = round((len(required) - len(missing)) / len(required) * 85)
+    if not missing:
         requirement["confirmed_by_buyer"] = True
         requirement["confirmed_at"] = incoming.get("received_at") or utcnow()
+        case["supplier_rfq_ready"] = True
+        case["status"] = "ready_for_supplier_rfq"
+        case["buyer_questions"] = []
+        case["next_action"] = "Solicitar ofertas comparables a proveedores validados"
+        opportunity = _opportunities(state).get(str(case.get("opportunity_id") or ""), {})
+        if opportunity:
+            opportunity["requirement_confirmed"] = True
+            opportunity["next_action"] = "Solicitar/normalizar ofertas comparables y completar economía real"
+            opportunity["updated_at"] = utcnow()
     _case_history(case, "buyer_reply_evidence", f"Buyer reply aportó campos: {', '.join(changed) or 'sin campos estructurados suficientes'}", inbox_id=incoming.get("id"))
-    return {"applied": bool(changed), "changed": changed, "case_id": case_id}
+    return {"applied": bool(changed), "changed": changed, "case_id": case_id, "requirement_ready": not missing}
 
 
 def _process_new_inbound(state: Dict[str, Any]) -> Dict[str, int]:
-    stats = {"reviewed": 0, "requirement_updates": 0, "commercial_signals": 0}
+    stats = {"reviewed": 0, "requirement_updates": 0, "requirements_completed": 0, "commercial_signals": 0}
     for incoming in state.get("inbox", []):
         if incoming.get("revops_processed"):
             continue
@@ -299,6 +358,8 @@ def _process_new_inbound(state: Dict[str, Any]) -> Dict[str, int]:
             result = _apply_buyer_reply_to_requirement(state, incoming, source)
             if result.get("applied"):
                 stats["requirement_updates"] += 1
+            if result.get("requirement_ready"):
+                stats["requirements_completed"] += 1
         if kind in {"commercial_offer", "buyer_interest", "price_objection", "delivery_question"}:
             stats["commercial_signals"] += 1
         incoming["revops_processed"] = True
@@ -397,14 +458,14 @@ def _drive_case(state: Dict[str, Any], revops: Dict[str, Any], message_budget: L
 
     opportunity_id = str(interlocution.get("opportunity_id") or "")
     deal = _deal_for_opportunity(state, opportunity_id)
-    deal_id = str(deal.get("id") or revops.get("deal_id") or "") or None
-    revops["deal_id"] = deal_id
     requirement = interlocution.setdefault("requirement", {})
     buyer = _buyer_account_for_case(state, interlocution)
     created = 0
 
     # Phase 1: requirement discovery with the buyer.
     if not interlocution.get("supplier_rfq_ready"):
+        deal_id = str(deal.get("id") or revops.get("deal_id") or "") or None
+        revops["deal_id"] = deal_id
         revops["status"] = "requirement_discovery"
         revops["next_action"] = "obtain_buyer_requirement"
         contact, verified, channel = _account_contact(buyer)
@@ -423,6 +484,7 @@ def _drive_case(state: Dict[str, Any], revops: Dict[str, Any], message_budget: L
                 revops_case_id=revops["id"],
                 interlocution_case_id=interlocution.get("id"),
                 opportunity_id=opportunity_id,
+                counterparty_account_id=str(buyer.get("id") or "") or None,
                 purpose="requirement_discovery",
             ):
                 message_budget[0] -= 1; created += 1
@@ -430,6 +492,12 @@ def _drive_case(state: Dict[str, Any], revops: Dict[str, Any], message_budget: L
         elif channel == "web_form":
             revops["next_action"] = "buyer_web_form_requires_supported_execution_channel"
         return {"action": revops["next_action"], "created": created}
+
+    # Requirement is confirmed: materialize a real deal with unknown economics so all future quotes stay traceable.
+    if not deal:
+        deal = _ensure_execution_deal(state, interlocution)
+    deal_id = str(deal.get("id") or "") or None
+    revops["deal_id"] = deal_id
 
     # Phase 2: RFQ to multiple verified suppliers.
     suppliers = _supplier_accounts_for_case(state, interlocution)
@@ -464,6 +532,7 @@ def _drive_case(state: Dict[str, Any], revops: Dict[str, Any], message_budget: L
                 revops_case_id=revops["id"],
                 interlocution_case_id=interlocution.get("id"),
                 opportunity_id=opportunity_id,
+                counterparty_account_id=str(supplier.get("id") or "") or None,
                 purpose="supplier_quote_collection",
             ):
                 message_budget[0] -= 1; created += 1
@@ -494,6 +563,7 @@ def _drive_case(state: Dict[str, Any], revops: Dict[str, Any], message_budget: L
             revops_case_id=revops["id"],
             interlocution_case_id=interlocution.get("id"),
             opportunity_id=opportunity_id,
+            counterparty_account_id=str(supplier.get("id") or "") or None,
             purpose="quote_normalization",
         ):
             message_budget[0] -= 1; created += 1
@@ -508,7 +578,7 @@ def _drive_case(state: Dict[str, Any], revops: Dict[str, Any], message_budget: L
     inbound_kind = str((inbound.get("classification") or {}).get("kind") or "") if inbound else ""
     if inbound_kind == "price_objection" and deal:
         offer = _latest_real_offer_for_deal(state, deal_id)
-        supplier = _supplier_account_by_name(state, deal.get("supplier") or (offer or {}).get("supplier"))
+        supplier = _supplier_account_by_name(state, (offer or {}).get("supplier") or deal.get("supplier"))
         contact, verified, channel = _account_contact(supplier)
         key = f"supplier_negotiation|{revops['id']}|{inbound.get('id')}"
         if channel == "email" and message_budget[0] > 0 and _message(
@@ -524,6 +594,7 @@ def _drive_case(state: Dict[str, Any], revops: Dict[str, Any], message_budget: L
             revops_case_id=revops["id"],
             interlocution_case_id=interlocution.get("id"),
             opportunity_id=opportunity_id,
+            counterparty_account_id=str(supplier.get("id") or "") or None,
             purpose="nonbinding_supplier_negotiation",
         ):
             message_budget[0] -= 1; created += 1
@@ -552,6 +623,7 @@ def _drive_case(state: Dict[str, Any], revops: Dict[str, Any], message_budget: L
                 revops_case_id=revops["id"],
                 interlocution_case_id=interlocution.get("id"),
                 opportunity_id=opportunity_id,
+                counterparty_account_id=str(buyer_account.get("id") or "") or None,
                 purpose="answer_verified_delivery_question",
             ):
                 message_budget[0] -= 1; created += 1
@@ -637,6 +709,7 @@ def commercial_execution_tick(state: Dict[str, Any]) -> Dict[str, Any]:
             "max_rfq_suppliers": MAX_RFQ_SUPPLIERS,
             "contact_rule": "solo email corporativo público verificado; formularios quedan como acción pendiente si no existe ejecutor compatible",
             "evidence_rule": "no inventar requerimientos, precios, cantidades, plazos ni condiciones; usar respuestas y ofertas trazables",
+            "deal_rule": "un deal real puede abrirse con valor económico desconocido; nunca se inventa pipeline para habilitar ejecución",
             "negotiation_rule": "negociación autónoma solo no vinculante; no fabricar cotizaciones rivales ni presión falsa",
             "margin_rule": "ante objeción de precio, intentar mejorar costo/condiciones proveedor antes de sacrificar margen comprador",
             "binding_rule": "aceptar términos, emitir orden, contratar, pagar o asumir obligación requiere aprobación humana",
