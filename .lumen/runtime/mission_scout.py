@@ -7,6 +7,7 @@ from scout_connector import (
     API_KEY,
     PROVIDER,
     DAILY_QUERY_BUDGET,
+    MARKET,
     _budget,
     _buyer_queries,
     _supplier_queries,
@@ -33,18 +34,70 @@ def _interleave(a: List[Tuple[str, str, str]], b: List[Tuple[str, str, str]]) ->
     return out
 
 
+def _unique_queue(items: List[Tuple[str, str, str]]) -> List[Tuple[str, str, str]]:
+    seen = set()
+    out = []
+    for item in items:
+        if item[0] in seen:
+            continue
+        seen.add(item[0])
+        out.append(item)
+    return out
+
+
+def _focus_categories(state: Dict[str, Any]) -> List[str]:
+    drive = state.get("entrepreneurial_drive", {}) or {}
+    primary = drive.get("primary", {}) or {}
+    learning = state.get("profit_learning", {}) or {}
+    values: List[str] = []
+    if primary.get("focus_category"):
+        values.append(str(primary["focus_category"]))
+    for item in learning.get("focus_categories", []) or []:
+        cat = str(item.get("category") or "").strip()
+        if cat and cat not in values:
+            values.append(cat)
+    return values[:3]
+
+
+def _focused_queries(state: Dict[str, Any], side: str) -> List[Tuple[str, str, str]]:
+    categories = _focus_categories(state)
+    buyer: List[Tuple[str, str, str]] = []
+    supplier: List[Tuple[str, str, str]] = []
+    for category in categories:
+        buyer.append((f'empresa industria planta mantenimiento "{category}" {MARKET} -proveedor -distribuidor', "buyer", category))
+        supplier.append((f'"{category}" fabricante distribuidor proveedor {MARKET}', "supplier", category))
+    if side == "supplier":
+        return supplier + buyer
+    if side == "buyer":
+        return buyer + supplier
+    return _interleave(buyer, supplier)
+
+
+def _exploration_cycle(state: Dict[str, Any], exploit_pct: int) -> bool:
+    learning = state.get("profit_learning", {}) or {}
+    cycle = int(learning.get("cycles") or state.get("ticks") or 0)
+    exploit_slots = max(1, min(9, round(exploit_pct / 10)))
+    return cycle % 10 >= exploit_slots
+
+
 def mission_scout_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     drive = state.get("entrepreneurial_drive", {}) or {}
     primary = drive.get("primary", {}) or {}
+    learning = state.get("profit_learning", {}) or {}
     side = str(primary.get("research_side") or "balanced")
     action = str(primary.get("action") or "expand_market")
     objective = str(primary.get("objective") or "Expandir mercado")
+    exploit_pct = int(learning.get("exploit_pct") or 70)
+    explore = _exploration_cycle(state, exploit_pct)
 
     stats = {
         "configured": bool(PROVIDER and API_KEY),
         "mission_action": action,
         "research_side": side,
         "objective": objective,
+        "mode": "explore" if explore else "exploit",
+        "focus_categories": _focus_categories(state),
+        "exploit_pct": exploit_pct,
         "queries": 0,
         "new_leads": 0,
         "errors": 0,
@@ -61,11 +114,17 @@ def mission_scout_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     supplier_q = _supplier_queries(state)
     buyer_q = _buyer_queries(state)
     if side == "supplier":
-        queue = supplier_q + buyer_q
+        generic_queue = supplier_q + buyer_q
     elif side == "buyer":
-        queue = buyer_q + supplier_q
+        generic_queue = buyer_q + supplier_q
     else:
-        queue = _interleave(buyer_q, supplier_q)
+        generic_queue = _interleave(buyer_q, supplier_q)
+
+    focused = _focused_queries(state, side)
+    if explore or not focused:
+        queue = _unique_queue(generic_queue + focused)
+    else:
+        queue = _unique_queue(focused + generic_queue)
 
     allowed = min(MAX_MISSION_QUERIES, int(budget.get("queries_remaining") or 0))
     for query, lead_type, category in queue[:allowed]:
@@ -77,7 +136,7 @@ def mission_scout_tick(state: Dict[str, Any]) -> Dict[str, Any]:
             stats["new_leads"] += created
             _log(
                 state,
-                f"Mission Scout ejecutó la misión {action}: {lead_type}/{category}; {created} leads nuevos con evidencia pública.",
+                f"Mission Scout [{stats['mode']}] ejecutó {action}: {lead_type}/{category}; {created} leads nuevos con evidencia pública.",
             )
         except Exception as exc:
             stats["errors"] += 1
@@ -86,5 +145,7 @@ def mission_scout_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     budget["queries_remaining"] = max(0, DAILY_QUERY_BUDGET - int(budget.get("queries_used") or 0))
     budget["updated_at"] = utcnow()
     budget["last_mission_action"] = action
+    budget["last_mission_mode"] = stats["mode"]
+    budget["last_focus_categories"] = stats["focus_categories"]
     stats["budget_exhausted"] = int(budget.get("queries_remaining") or 0) <= 0
     return stats
