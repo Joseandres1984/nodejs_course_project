@@ -12,6 +12,7 @@ REAL_TRANSACTION_STATUSES = {"closed", "invoiced", "delivered", "paid", "settled
 MAX_LINKS = 160
 MAX_NEW_PREFERENCES_PER_CYCLE = 1
 MAX_NEW_MESSAGES_PER_CYCLE = 1
+BRAND_NAME = "LUMEN"
 
 
 def utcnow() -> str:
@@ -114,14 +115,15 @@ def _create_preference(*, txn_id: str, deal_id: str, amount_ars: float, invoice_
         "items": [
             {
                 "id": f"COM-{txn_id}",
-                "title": f"Liquidación de comisión comercial {invoice_ref}",
+                "title": f"LUMEN · Liquidación de comisión comercial {invoice_ref}",
                 "currency_id": "ARS",
                 "quantity": 1,
                 "unit_price": round(amount_ars, 2),
             }
         ],
+        "statement_descriptor": BRAND_NAME,
         "external_reference": external_reference,
-        "metadata": {"lumen_transaction_id": txn_id, "lumen_deal_id": deal_id},
+        "metadata": {"lumen_transaction_id": txn_id, "lumen_deal_id": deal_id, "brand": BRAND_NAME},
     }
     return _api_request("POST", "/checkout/preferences", payload)
 
@@ -164,7 +166,7 @@ def _prepare_collection_message(
         "channel": "email",
         "contact": email,
         "contact_verified": True,
-        "subject": "Link de pago para liquidación de comisión",
+        "subject": "LUMEN · Link de pago para liquidación de comisión",
         "body": (
             f"Para la liquidación de nuestra participación comercial correspondiente a {invoice_ref}, "
             f"el importe documentado es ARS {amount:,.2f}. Puede abonarse mediante el enlace seguro de Mercado Pago: {checkout_url}. "
@@ -286,6 +288,7 @@ def mercadopago_checkout_tick(state: Dict[str, Any]) -> Dict[str, Any]:
             "invoice_ref": invoice_ref,
             "init_point": init_point,
             "source": source,
+            "brand": BRAND_NAME,
             "updated_at": utcnow(),
         }
         links.append(link)
@@ -305,6 +308,7 @@ def mercadopago_checkout_tick(state: Dict[str, Any]) -> Dict[str, Any]:
         "updated_at": utcnow(),
         "configured": True,
         "status": "READY",
+        "brand": BRAND_NAME,
         "links": state.get("mercadopago_checkout_links", []),
         "active_links": len(state.get("mercadopago_checkout_links", [])),
         "created_or_recovered_this_cycle": created,
