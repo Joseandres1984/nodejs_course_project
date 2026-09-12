@@ -7,6 +7,7 @@ from autonomous_management_runtime import executive_management_cycle
 from business_controller import business_controller_tick
 from capital_margin_intelligence import capital_margin_tick
 from deal_room import deal_room_tick
+from negotiation_intelligence import negotiation_intelligence_tick
 from venture_attribution import propagate_venture_attribution
 from venture_builder import venture_builder_tick
 
@@ -97,25 +98,16 @@ def kpi_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     if len(real_offers) and not len(proposals):
         bottlenecks.append("proposal_gap")
 
-    # Executive Management gives the organizational view first.
     executive_management = executive_management_cycle(state)
-
-    # Capital & Margin Intelligence ranks economic opportunity cost and defended internal margin targets.
-    # It never invents cash capacity or turns sensitivity calculations into executable pricing commitments.
     capital_margin = capital_margin_tick(state)
-
-    # Business Controller compares cycles and applies only a bounded, reversible attention correction for
-    # the next cycle. Constitution, safety gates, caps and human financial authority remain superior.
     business_controller = business_controller_tick(state)
 
-    # Attribution is deliberately retrospective and evidence-preserving: venture tags follow only explicit
-    # lead/account/opportunity/deal lineage. No transaction is credited to a venture by category guesswork alone.
+    # Negotiation Intelligence learns counterparty behavior only from persisted evidence and produces the
+    # nonbinding strategy that RevOps/Communication can consume on the next operational cycle.
+    negotiation_intelligence = negotiation_intelligence_tick(state)
+
     venture_attribution = propagate_venture_attribution(state)
-
-    # Venture Builder sees the freshly controlled company state and may prepare bounded validation work.
     venture_builder = venture_builder_tick(state)
-
-    # The Deal Room is generated last so each dossier captures management + capital/controller + venture state.
     deal_room = deal_room_tick(state)
 
     report = {
@@ -127,6 +119,7 @@ def kpi_tick(state: Dict[str, Any]) -> Dict[str, Any]:
         "executive_management": executive_management,
         "capital_margin_intelligence": capital_margin,
         "business_controller": business_controller,
+        "negotiation_intelligence": negotiation_intelligence,
         "venture_attribution": venture_attribution,
         "venture_builder": venture_builder,
         "deal_room": deal_room,
