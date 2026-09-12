@@ -246,6 +246,8 @@ def mercadopago_checkout_tick(state: Dict[str, Any]) -> Dict[str, Any]:
         if existing_id and existing_url.startswith("https://"):
             preference = {"id": existing_id, "init_point": existing_url, "external_reference": external_reference}
         else:
+            if created >= MAX_NEW_PREFERENCES_PER_CYCLE:
+                continue
             try:
                 preference = _recover_or_create_preference(
                     txn_id=txn_id, deal_id=deal_id, amount_ars=outstanding, invoice_ref=invoice_ref
