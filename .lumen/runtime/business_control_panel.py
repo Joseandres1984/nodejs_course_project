@@ -4,6 +4,7 @@ import html
 from typing import Any, Dict
 
 from portfolio_goal_panel import render_goal_portfolio, css as goal_portfolio_css
+from go_live_panel import render_go_live, css as go_live_css
 
 
 def _esc(value: Any) -> str:
@@ -69,7 +70,7 @@ def css() -> str:
 
 
 def inject_business_control(page: str, state: Dict[str, Any]) -> str:
-    block = goal_portfolio_css() + render_goal_portfolio(state) + css() + render_business_control(state)
+    block = go_live_css() + render_go_live(state) + goal_portfolio_css() + render_goal_portfolio(state) + css() + render_business_control(state)
     marker = "</main>"
     if marker in page:
         return page.replace(marker, block + marker, 1)
