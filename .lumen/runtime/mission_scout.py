@@ -53,7 +53,6 @@ def _focus_categories(state: Dict[str, Any]) -> List[str]:
     deprioritized = {str(x).strip().lower() for x in strategic.get("deprioritized_categories", []) or []}
     values: List[str] = []
 
-    # Long-horizon strategy has first say, then the current entrepreneurial mission and learning engine fill gaps.
     for category in strategic.get("focus_categories", []) or []:
         cat = str(category or "").strip()
         if cat and cat.lower() not in deprioritized and cat not in values:
@@ -96,6 +95,11 @@ def mission_scout_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     drive = state.get("entrepreneurial_drive", {}) or {}
     primary = drive.get("primary", {}) or {}
     learning = state.get("profit_learning", {}) or {}
+    governance = state.get("master_governance", {}) or {}
+    switches = governance.get("kill_switches", {}) or {}
+    resource_plan = governance.get("resource_plan", {}) or state.get("master_resource_plan", {}) or {}
+    resource_cap = max(0, int(resource_plan.get("mission_queries_cap", MAX_MISSION_QUERIES) or 0))
+
     side = str(strategic.get("research_side") or primary.get("research_side") or "balanced")
     action = str(primary.get("action") or "expand_market")
     objective = str(primary.get("objective") or strategic.get("thesis") or "Expandir mercado")
@@ -110,6 +114,8 @@ def mission_scout_tick(state: Dict[str, Any]) -> Dict[str, Any]:
         "objective": objective,
         "corporate_strategy_mode": strategic.get("mode"),
         "corporate_strategy_epoch": strategic.get("strategy_epoch"),
+        "master_company_mode": governance.get("company_mode"),
+        "constitutional_query_cap": resource_cap,
         "mode": "explore" if explore else "exploit",
         "focus_categories": _focus_categories(state),
         "exploit_pct": exploit_pct,
@@ -118,7 +124,11 @@ def mission_scout_tick(state: Dict[str, Any]) -> Dict[str, Any]:
         "new_leads": 0,
         "errors": 0,
         "budget_exhausted": False,
+        "constitutional_block": None,
     }
+    if switches.get("global_pause") or switches.get("research_pause") or resource_cap <= 0:
+        stats["constitutional_block"] = "master_orchestrator_research_pause"
+        return stats
     if not stats["configured"]:
         return stats
 
@@ -142,7 +152,7 @@ def mission_scout_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     else:
         queue = _unique_queue(focused + generic_queue)
 
-    allowed = min(MAX_MISSION_QUERIES, int(budget.get("queries_remaining") or 0))
+    allowed = min(MAX_MISSION_QUERIES, resource_cap, int(budget.get("queries_remaining") or 0))
     for query, lead_type, category in queue[:allowed]:
         try:
             budget["queries_used"] = int(budget.get("queries_used") or 0) + 1
@@ -152,7 +162,7 @@ def mission_scout_tick(state: Dict[str, Any]) -> Dict[str, Any]:
             stats["new_leads"] += created
             _log(
                 state,
-                f"Mission Scout [{stats['mode']}/{strategic.get('mode') or 'operativo'}] ejecutó {action}: {lead_type}/{category}; {created} leads nuevos con evidencia pública.",
+                f"Mission Scout [{stats['mode']}/{strategic.get('mode') or 'operativo'}/{governance.get('company_mode') or 'sin-orquestar'}] ejecutó {action}: {lead_type}/{category}; {created} leads nuevos con evidencia pública.",
             )
         except Exception as exc:
             stats["errors"] += 1
@@ -164,5 +174,6 @@ def mission_scout_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     budget["last_mission_mode"] = stats["mode"]
     budget["last_focus_categories"] = stats["focus_categories"]
     budget["last_corporate_strategy"] = strategic.get("mode")
+    budget["last_master_company_mode"] = governance.get("company_mode")
     stats["budget_exhausted"] = int(budget.get("queries_remaining") or 0) <= 0
     return stats
