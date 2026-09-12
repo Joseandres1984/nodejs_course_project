@@ -5,6 +5,7 @@ from typing import Any, Dict
 
 from autonomy_governor import record_decision
 from deal_safeguards import deal_safeguards_tick
+from red_team_audit import red_team_tick
 from revenue_factory import revenue_factory_tick
 from master_orchestrator import master_orchestrator_tick
 from strategy_simulator import strategy_simulator_tick
@@ -103,6 +104,32 @@ def _safeguard_task(safeguards: Dict[str, Any]) -> Dict[str, Any] | None:
     }
 
 
+def _red_team_task(red_team: Dict[str, Any]) -> Dict[str, Any] | None:
+    primary = red_team.get("primary_finding") or {}
+    if not primary:
+        return None
+    blocking = bool(primary.get("blocking"))
+    severity = str(primary.get("severity") or "medium")
+    priority = 99.0 if blocking else 93.0 if severity in {"critical", "high"} else 76.0
+    return {
+        "key": f"red_team|{primary.get('kind') or 'audit'}|{primary.get('object_type') or 'system'}|{primary.get('object_id') or 'LUMEN'}",
+        "kind": "internal_red_team",
+        "title": f"Auditor Interno: {primary.get('title') or 'revisar contradicción'}",
+        "reason": str(primary.get("reason") or "La auditoría detectó una inconsistencia que merece revisión."),
+        "impact": 100.0 if blocking else 86.0,
+        "urgency": 100.0 if blocking else 82.0,
+        "confidence": 0.97 if blocking else 0.78,
+        "effort": 1.0,
+        "risk": "high" if blocking else "medium",
+        "autonomous": True,
+        "object_type": str(primary.get("object_type") or "system"),
+        "object_id": str(primary.get("object_id") or "LUMEN"),
+        "payload": {"verdict": red_team.get("verdict"), "audit_score": red_team.get("audit_score"), "blocking": blocking, "recommendation": primary.get("recommendation")},
+        "priority_score": priority,
+        "created_at": utcnow(),
+    }
+
+
 def _governance_task(governance: Dict[str, Any]) -> Dict[str, Any] | None:
     mode = str(governance.get("company_mode") or "")
     if mode != "RECOVERY":
@@ -185,7 +212,6 @@ def _apply_runtime_caps(state: Dict[str, Any], governance: Dict[str, Any]) -> Di
 
 def financial_priority_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     # Safeguards runs after Trade + RevOps + Professional OS and before Communication/Quality.
-    # It may prepare one evidence-seeking clarification, refresh Pre-Close, and hard-block unsafe close paths.
     deal_safeguards = deal_safeguards_tick(state)
     revenue_factory = revenue_factory_tick(state)
     preflight = state.get("operational_guard", {}) or {}
@@ -195,14 +221,19 @@ def financial_priority_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     simulator_overlay = _apply_simulator_overlay(state, master_governance, strategy_simulator)
     runtime_caps = _apply_runtime_caps(state, master_governance)
 
+    # Internal Red Team is the final adversarial check before Communication Director + Quality Gate.
+    # It may block reversible execution on strong contradictions, but never authorizes binding actions.
+    red_team = red_team_tick(state)
+
     existing = list(state.get("operating_action_queue", []) or [])
     finance_tasks = [_financial_task(x) for x in list(state.get("war_room", {}).get("top_money_opportunities", []) or [])[:8]]
     revenue_task = _revenue_task(revenue_factory); revenue_tasks = [revenue_task] if revenue_task else []
     safeguard_task = _safeguard_task(deal_safeguards); safeguard_tasks = [safeguard_task] if safeguard_task else []
+    red_team_task = _red_team_task(red_team); red_team_tasks = [red_team_task] if red_team_task else []
     governance_task = _governance_task(master_governance); governance_tasks = [governance_task] if governance_task else []
 
     by_key: Dict[str, Dict[str, Any]] = {}
-    for task in [*existing, *finance_tasks, *revenue_tasks, *safeguard_tasks, *governance_tasks]:
+    for task in [*existing, *finance_tasks, *revenue_tasks, *safeguard_tasks, *red_team_tasks, *governance_tasks]:
         key = str(task.get("key") or f"anon|{len(by_key)}")
         current = by_key.get(key)
         if current is None or _f(task.get("priority_score")) > _f(current.get("priority_score")):
@@ -216,12 +247,14 @@ def financial_priority_tick(state: Dict[str, Any]) -> Dict[str, Any]:
         "revenue_factory_actions": len(revenue_tasks), "revenue_factory_directive": (revenue_factory.get("directive") or {}).get("code"),
         "deal_safeguards_actions": len(safeguard_tasks), "deal_safeguards_blocked": deal_safeguards.get("blocked"),
         "deal_safeguards_open_incidents": deal_safeguards.get("open_incidents"),
+        "red_team_verdict": red_team.get("verdict"), "red_team_audit_score": red_team.get("audit_score"),
+        "red_team_blocking_findings": red_team.get("blocking"), "red_team_messages_blocked": red_team.get("messages_blocked"),
         "master_company_mode": master_governance.get("company_mode"), "master_conflicts_resolved": len(master_governance.get("conflicts_resolved", []) or []),
         "digital_twin_recommended": (strategy_simulator.get("recommended_scenario") or {}).get("id"),
         "digital_twin_active_experiment": (strategy_simulator.get("active_experiment") or {}).get("id"),
         "digital_twin_overlay_applied": bool(simulator_overlay.get("applied")),
         "autonomous_actions": sum(1 for x in merged if x.get("autonomous")), "human_decisions_required": sum(1 for x in merged if not x.get("autonomous")),
-        "operating_rule": "Deal Safeguards precede outbound quality; obey Operating Constitution + Master Orchestrator; optimize safe risk-adjusted close probability; binding commitments remain human-controlled",
+        "operating_rule": "Deal Safeguards + Counterparty Risk + Internal Red Team precede outbound quality; obey Constitution/Master; optimize safe risk-adjusted profit; binding commitments remain human-controlled",
     })
 
     top = merged[0] if merged else None
@@ -231,7 +264,7 @@ def financial_priority_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     report = {
         "updated_at": utcnow(), "queue_size": len(merged), "money_priority_actions": len(finance_tasks),
         "revenue_factory_actions": len(revenue_tasks), "revenue_factory": revenue_factory,
-        "deal_safeguards": deal_safeguards,
+        "deal_safeguards": deal_safeguards, "red_team": red_team,
         "master_governance": master_governance, "strategy_simulator": strategy_simulator,
         "strategy_experiment_overlay": simulator_overlay, "runtime_caps": runtime_caps,
         "top_action": top, "autonomous_actions": chief.get("autonomous_actions", 0), "human_decisions_required": chief.get("human_decisions_required", 0),
