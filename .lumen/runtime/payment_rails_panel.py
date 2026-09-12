@@ -8,6 +8,19 @@ def _esc(value: Any) -> str:
     return html.escape(str(value if value is not None else ""), quote=True)
 
 
+def _status(value: Any) -> str:
+    return {
+        "READY": "LISTO",
+        "RAIL_SETUP_REQUIRED": "FALTA CONFIGURAR",
+        "COUNTRY_REQUIRED": "FALTA PAÍS",
+        "NO_RAIL_AVAILABLE": "SIN RIEL DISPONIBLE",
+    }.get(str(value or ""), str(value or ""))
+
+
+def _scope(value: Any) -> str:
+    return {"domestic": "local", "international": "internacional", "international_eur": "internacional EUR"}.get(str(value or ""), str(value or ""))
+
+
 def render_payment_rails(state: Dict[str, Any]) -> str:
     report = state.get("payment_rails", {}) or {}
     rails = report.get("rails", []) or []
@@ -16,31 +29,31 @@ def render_payment_rails(state: Dict[str, Any]) -> str:
         return '<section class="pr-wrap"><div class="pr-eye">MEDIOS DE COBRO</div><h2>Ruteo autónomo de cobros</h2><p>Esperando el primer ciclo.</p></section>'
 
     rail_rows = "".join(
-        f'<div class="pr-row"><div><b>{_esc(x.get("label"))}</b><small>{_esc(x.get("scope"))} · {_esc(x.get("currency"))}</small></div>'
+        f'<div class="pr-row"><div><b>{_esc(x.get("label"))}</b><small>{_esc(_scope(x.get("scope")))} · {_esc(x.get("currency"))}</small></div>'
         f'<span class="pr-pill {"ok" if x.get("verified") else "warn"}">{"VERIFICADO" if x.get("verified") else "FALTA CONFIGURAR"}</span>'
-        f'<small>{"auto" if x.get("auto_prepare") else "manual"}</small></div>'
+        f'<small>{"automático" if x.get("auto_prepare") else "manual"}</small></div>'
         for x in rails
     ) or '<div class="pr-empty">Sin rieles disponibles.</div>'
 
     route_rows = "".join(
         f'<div class="pr-row"><div><b>{_esc(x.get("deal_id"))}</b><small>{_esc(x.get("buyer_country") or "país pendiente")}</small></div>'
         f'<span>{_esc(((x.get("selected_rail") or {}).get("label")) or "sin ruta")}</span>'
-        f'<span class="pr-pill {"ok" if x.get("status")=="READY" else "warn"}">{_esc(x.get("status"))}</span></div>'
+        f'<span class="pr-pill {"ok" if x.get("status")=="READY" else "warn"}">{_esc(_status(x.get("status")))}</span></div>'
         for x in routes[:10]
-    ) or '<div class="pr-empty">Todavía no hay deals con ruta de cobro.</div>'
+    ) or '<div class="pr-empty">Todavía no hay operaciones con ruta de cobro.</div>'
 
     return f"""
     <section class="pr-wrap">
       <div class="pr-head">
         <div><div class="pr-eye">MEDIOS DE COBRO · TESORERÍA</div><h2>Ruteo autónomo de cobros</h2>
-        <p>Argentina prioriza banco local; exterior prioriza Payoneer USD. Los datos sensibles nunca se muestran ni se persisten en el tablero.</p></div>
+        <p>Argentina: Mercado Pago primero y Prex como respaldo. Exterior USD: Payoneer. EUR/SEPA: Prex vIBAN si está habilitado.</p></div>
         <div class="pr-kpis"><div><b>{_esc(report.get('ready_routes',0))}</b><small>rutas listas</small></div><div><b>{_esc(report.get('setup_required',0))}</b><small>pendientes</small></div></div>
       </div>
       <div class="pr-grid">
-        <div class="pr-box"><h3>Rieles configurables</h3>{rail_rows}</div>
+        <div class="pr-box"><h3>Medios configurables</h3>{rail_rows}</div>
         <div class="pr-box"><h3>Ruta elegida por operación</h3>{route_rows}</div>
       </div>
-      <div class="pr-foot"><b>Principal internacional:</b> Payoneer USD · <b>Respaldo:</b> Wise USD · <b>Argentina:</b> banco local USD/ARS y Mercado Pago como alternativa.</div>
+      <div class="pr-foot"><b>Argentina:</b> Mercado Pago → Prex ARS · <b>Exterior USD:</b> Payoneer · <b>Europa/SEPA:</b> Prex vIBAN EUR · los datos sensibles nunca se muestran en el tablero.</div>
     </section>
     """
 
