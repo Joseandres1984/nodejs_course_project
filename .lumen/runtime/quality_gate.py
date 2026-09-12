@@ -45,6 +45,14 @@ REVOPS_MULTITURN_KINDS = {
     "terms_clarification",
 }
 
+RED_TEAM_SENSITIVE_KINDS = {
+    "buyer_proposal",
+    "supplier_negotiation",
+    "buyer_information_response",
+    "payment_status_reminder",
+    "customer_success_checkin",
+}
+
 
 def _log(state: Dict[str, Any], message: str) -> None:
     state.setdefault("activity", []).insert(0, {"ts": utcnow(), "msg": message})
@@ -96,6 +104,7 @@ def _review(state: Dict[str, Any], item: Dict[str, Any]) -> tuple[bool, List[str
     target = str(item.get("contact") or "").strip().lower()
     subject = str(item.get("subject") or "").strip()
     body = str(item.get("body") or "").strip()
+    kind = str(item.get("kind") or "")
 
     if not target or "@" not in target:
         reasons.append("No existe un email corporativo utilizable")
@@ -130,8 +139,8 @@ def _review(state: Dict[str, Any], item: Dict[str, Any]) -> tuple[bool, List[str
         reasons.append("Counterparty Risk bloquea esta contraparte")
 
     deal = _deal(state, item.get("deal_id"))
-    if deal and deal.get("red_team_hold"):
-        reasons.append("El Auditor Interno mantiene el deal en hold")
+    if deal and deal.get("red_team_hold") and kind in RED_TEAM_SENSITIVE_KINDS:
+        reasons.append("El Auditor Interno mantiene el deal en hold para comunicaciones comerciales sensibles")
     if deal and deal.get("incident_hold") and item.get("kind") not in {"terms_clarification"}:
         reasons.append("El deal tiene un incidente/reclamo abierto; se congelan comunicaciones comerciales que puedan ampliar exposición")
 
