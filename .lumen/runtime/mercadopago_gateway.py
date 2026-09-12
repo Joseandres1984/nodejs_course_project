@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict
 
 API_BASE = "https://api.mercadopago.com"
+IDENTITY_API = "https://api.mercadolibre.com/users/me"
 ACCESS_TOKEN = os.getenv("LUMEN_MP_ACCESS_TOKEN", "").strip()
 WEBHOOK_SECRET = os.getenv("LUMEN_MP_WEBHOOK_SECRET", "").strip()
 
@@ -26,6 +27,35 @@ def public_status() -> Dict[str, Any]:
         "webhook_path": "/webhooks/mercadopago",
         "secrets_persisted": False,
     }
+
+
+def verify_access_token() -> Dict[str, Any]:
+    """Validate the runtime token against Mercado Libre/Mercado Pago without exposing account data."""
+    if not ACCESS_TOKEN:
+        return {"authenticated": False, "reason": "access_token_not_configured"}
+    req = urllib.request.Request(
+        IDENTITY_API,
+        headers={"Authorization": f"Bearer {ACCESS_TOKEN}", "Accept": "application/json"},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=20) as response:
+            payload = json.loads(response.read().decode("utf-8", errors="replace"))
+            user_id = str(payload.get("id") or "")
+            site_id = str(payload.get("site_id") or "")
+            return {
+                "authenticated": bool(user_id),
+                "site_id": site_id or None,
+                "account_id_present": bool(user_id),
+                "test_user": "test_user" in (payload.get("tags") or []),
+                "checked_at": utcnow(),
+            }
+    except Exception as exc:
+        return {
+            "authenticated": False,
+            "reason": type(exc).__name__,
+            "checked_at": utcnow(),
+        }
 
 
 def _signature_parts(value: str) -> Dict[str, str]:
