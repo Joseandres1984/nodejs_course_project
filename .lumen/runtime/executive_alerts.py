@@ -62,16 +62,16 @@ def executive_alert_tick(state: Dict[str, Any]) -> Dict[str, Any]:
         if x.get("id")
     }
     active_ids: set[str] = set()
+    approvals = {str(x.get("id")): x for x in state.get("approvals", []) if x.get("id")}
 
-    deals = {str(x.get("id")): x for x in state.get("deals", []) if x.get("id")}
-
-    # 1) Binding approvals: these are the highest-value human interruptions.
+    # 1) Binding approvals: only a still-pending real approval may interrupt the executive.
     for brief in state.get("approval_briefs", []) or []:
         if brief.get("status") != "human_decision_required":
             continue
         approval_id = str(brief.get("approval_id") or "")
         deal_id = str(brief.get("deal_id") or "")
-        if not approval_id:
+        approval = approvals.get(approval_id)
+        if not approval_id or not approval or approval.get("status") != "pending":
             continue
         missing = list(brief.get("preclose_missing") or [])
         profit = _f(brief.get("company_profit"))
