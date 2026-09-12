@@ -8,6 +8,7 @@ from executive_alerts import executive_alert_tick, mark_alerts_seen, reject_appr
 from approval_cockpit import build_cockpit, inject_cockpit
 from revenue_factory_panel import inject_revenue_factory
 from master_command_panel import inject_master_panel
+from strategy_simulator_panel import inject_strategy_simulator
 
 
 @app.get("/health/persistence")
@@ -40,6 +41,7 @@ def command_center(_=Depends(auth)):
     html = inject_cockpit(base_html, cockpit)
     html = inject_revenue_factory(html, STATE)
     html = inject_master_panel(html, STATE)
+    html = inject_strategy_simulator(html, STATE)
     mark_alerts_seen(STATE)
     save_state()
     return HTMLResponse(html)
@@ -60,6 +62,8 @@ def api_control_tower(_=Depends(auth)):
         "operating_constitution": STATE.get("operating_constitution", {}),
         "master_governance": STATE.get("master_governance", {}),
         "constitutional_runtime_caps": STATE.get("constitutional_runtime_caps", {}),
+        "strategy_simulator": STATE.get("strategy_simulator", {}),
+        "strategy_experiment_overlay": STATE.get("strategy_experiment_overlay", {}),
         "postgres": DB_STATUS,
     }
 
