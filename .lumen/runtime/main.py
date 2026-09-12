@@ -9,6 +9,7 @@ from approval_cockpit import build_cockpit, inject_cockpit
 from revenue_factory_panel import inject_revenue_factory
 from master_command_panel import inject_master_panel
 from strategy_simulator_panel import inject_strategy_simulator
+from executive_management_panel import inject_executive_management
 from deal_room import build_deal_room
 from deal_room_panel import inject_deal_room_index, render_deal_room
 from supplier_network_panel import inject_supplier_network, inject_supplier_squad_detail
@@ -52,6 +53,7 @@ def command_center(_=Depends(auth)):
     html = inject_cockpit(base_html, cockpit)
     html = inject_revenue_factory(html, STATE)
     html = inject_master_panel(html, STATE)
+    html = inject_executive_management(html, STATE)
     html = inject_strategy_simulator(html, STATE)
     html = inject_deal_room_index(html, STATE)
     html = inject_supplier_network(html, STATE)
@@ -77,8 +79,10 @@ def api_deal_room(deal_id: str, _=Depends(auth)):
     _load_control_state()
     deal = _real_deal(deal_id)
     room = build_deal_room(STATE, deal)
+    management = next((x for x in (STATE.get("autonomous_management", {}) or {}).get("deal_portfolio", []) if str(x.get("deal_id")) == str(deal_id)), {})
     return {
         "deal_room": room,
+        "management": management,
         "supplier_squad": (STATE.get("supplier_squad_index", {}) or {}).get(str(deal_id), {}),
         "deal_safeguards": (STATE.get("deal_safeguard_index", {}) or {}).get(str(deal_id), {}),
         "commercial_incidents": [x for x in STATE.get("commercial_incidents", []) if str(x.get("deal_id")) == str(deal_id)],
@@ -107,6 +111,9 @@ def api_control_tower(_=Depends(auth)):
         "constitutional_runtime_caps": STATE.get("constitutional_runtime_caps", {}),
         "strategy_simulator": STATE.get("strategy_simulator", {}),
         "strategy_experiment_overlay": STATE.get("strategy_experiment_overlay", {}),
+        "autonomous_management": STATE.get("autonomous_management", {}),
+        "executive_management_overlay": STATE.get("executive_management_overlay", {}),
+        "management_category_directives": STATE.get("management_category_directives", []),
         "supplier_network": STATE.get("supplier_network", {}),
         "supplier_network_profiles": STATE.get("supplier_network_profiles", []),
         "supplier_squads": STATE.get("supplier_squads", []),
