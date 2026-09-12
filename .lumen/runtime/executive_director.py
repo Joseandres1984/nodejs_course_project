@@ -44,6 +44,8 @@ def plan_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     strategic = state.get("strategic_directive", {}) or {}
     growth = state.get("growth_directive", {}) or {}
     trade = state.get("trade_directive", {}) or {}
+    operations = state.get("operations_directive", {}) or {}
+    coo_report = state.get("autonomous_coo", {}) or {}
 
     priorities: List[Dict[str, Any]] = []
 
@@ -56,6 +58,20 @@ def plan_tick(state: Dict[str, Any]) -> Dict[str, Any]:
             "autonomous": autonomous,
             "source": source,
         })
+
+    # COO health from the previous completed cycle is an executive-level signal. Reliability outranks growth.
+    ops_status = str(operations.get("status") or "")
+    if ops_status in {"critical", "degraded"}:
+        recovery = (coo_report.get("recovery_actions") or [{}])[0]
+        autonomous_recovery = bool(recovery.get("autonomous", False))
+        add(
+            "operational_reliability",
+            100 if ops_status == "critical" else 97,
+            "Recuperar salud operativa antes de aumentar exposición comercial o complejidad",
+            str(operations.get("reason") or "Autonomous COO detectó degradación operacional."),
+            autonomous=autonomous_recovery,
+            source="autonomous_coo",
+        )
 
     if verified_suppliers == 0:
         add("supplier_gap", 100, "Encontrar y verificar proveedores sólidos", "No hay proveedores verificados para construir oferta real.")
@@ -74,8 +90,6 @@ def plan_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     if pending_approvals:
         add("approval_gap", 85, "Presentar decisiones de alto impacto para aprobación", f"Hay {pending_approvals} compromisos que requieren autorización humana.", autonomous=False)
 
-    # Corporate Brain supplies a long-horizon priority. It can steer research and resource allocation,
-    # but it intentionally remains below hard operational gaps scored at 100.
     if strategic.get("mode"):
         mode = str(strategic.get("mode"))
         priority = max(70, min(99, int(strategic.get("priority") or 88)))
@@ -92,8 +106,6 @@ def plan_tick(state: Dict[str, Any]) -> Dict[str, Any]:
             source="corporate_brain",
         )
 
-    # Growth & Expansion is allowed to compete for executive attention only after the base business passes
-    # readiness gates. It remains public-research first and cannot authorize cross-border commitments.
     if growth.get("ready") and growth.get("primary_category"):
         readiness = float(growth.get("readiness_score") or 0)
         growth_priority = max(78, min(93, int(78 + readiness * 0.15)))
@@ -108,8 +120,6 @@ def plan_tick(state: Dict[str, Any]) -> Dict[str, Any]:
             source="growth_expansion",
         )
 
-    # Trade & Logistics can elevate a sourcing decision only when there is actual trade evidence. Missing landed-cost
-    # inputs create a data-completion priority; a normalized route comparison can become an executive optimization.
     trade_mode = str(trade.get("mode") or "")
     if trade_mode == "route_optimization":
         savings = float(trade.get("landed_savings_pct") or 0)
@@ -149,13 +159,15 @@ def plan_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     plan = {
         "updated_at": utcnow(),
         "primary": primary,
-        "priorities": priorities[:8],
+        "priorities": priorities[:9],
         "snapshot": {
             "verified_suppliers": verified_suppliers,
             "verified_buyers": verified_buyers,
             "buyers_with_demand": demand_buyers,
             "market_opportunities": len(opportunities),
             "pending_approvals": pending_approvals,
+            "operations_status": ops_status or None,
+            "operations_health_score": coo_report.get("health_score"),
             "corporate_strategy_mode": strategic.get("mode"),
             "corporate_strategy_epoch": strategic.get("strategy_epoch"),
             "growth_ready": bool(growth.get("ready")),
@@ -166,7 +178,7 @@ def plan_tick(state: Dict[str, Any]) -> Dict[str, Any]:
             "trade_deal_id": trade.get("deal_id"),
             "trade_landed_savings_pct": trade.get("landed_savings_pct"),
         },
-        "decision_rule": "resolver primero gaps críticos; luego maximizar valor económico sostenible alineado con estrategia, expansión y landed cost verificables, riesgo, velocidad y calidad de relación",
+        "decision_rule": "salud operativa y controles críticos primero; luego maximizar valor económico sostenible alineado con estrategia, expansión y landed cost verificables",
     }
     state["executive_plan"] = plan
     record_decision(
@@ -179,5 +191,6 @@ def plan_tick(state: Dict[str, Any]) -> Dict[str, Any]:
         action="prioritize_company_objective",
         confidence=0.9,
         evidence_refs=[],
+        requires_approval=not bool(primary.get("autonomous", True)),
     )
     return plan
