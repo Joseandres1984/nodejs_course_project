@@ -175,7 +175,7 @@ def _review(state: Dict[str, Any], item: Dict[str, Any]) -> tuple[bool, List[str
             reasons.append("El mensaje de cobro no proviene de la configuración financiera verificada")
         if not case:
             reasons.append("No existe caso de liquidación de comisión trazable")
-        elif case.get("status") not in {"AWAITING_PAYMENT", "OVERDUE"}:
+        elif case.get("status") not in {"AWAITING_PAYMENT", "OVERDUE", "PARTIAL_RECEIVED"}:
             reasons.append("El estado de la comisión no autoriza solicitar liquidación")
 
     if item.get("kind") in REVOPS_MULTITURN_KINDS and not item.get("execution_key"):
