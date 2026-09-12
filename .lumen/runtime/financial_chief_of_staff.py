@@ -5,6 +5,7 @@ from typing import Any, Dict, List
 
 from autonomy_governor import record_decision
 from revenue_factory import revenue_factory_tick
+from master_orchestrator import master_orchestrator_tick
 
 
 MAX_QUEUE = 80
@@ -110,19 +111,49 @@ def _revenue_task(factory: Dict[str, Any]) -> Dict[str, Any] | None:
     }
 
 
+def _governance_task(governance: Dict[str, Any]) -> Dict[str, Any] | None:
+    mode = str(governance.get("company_mode") or "")
+    if not mode:
+        return None
+    if mode == "RECOVERY":
+        return {
+            "key": "master_orchestrator|recovery",
+            "kind": "constitutional_recovery",
+            "title": "Master Orchestrator: recuperar salud antes de operar",
+            "reason": str(governance.get("reason") or "Prioridad constitucional de recuperación"),
+            "impact": 100.0,
+            "urgency": 100.0,
+            "confidence": 0.99,
+            "effort": 1.0,
+            "risk": "high",
+            "autonomous": True,
+            "object_type": "company",
+            "object_id": "LUMEN",
+            "payload": {"company_mode": mode, "kill_switches": governance.get("kill_switches", {})},
+            "priority_score": 100.0,
+            "created_at": utcnow(),
+        }
+    return None
+
+
 def financial_priority_tick(state: Dict[str, Any]) -> Dict[str, Any]:
-    # Revenue Factory runs here after strategy/market engines and before the final financially-prioritized queue.
-    # This keeps revenue production measurable without bypassing any safety or approval gate.
+    # Revenue Factory measures the funnel; the Master Orchestrator then resolves CFO/strategy/growth/revenue conflicts
+    # under the Operating Constitution before the final action queue is published.
     revenue_factory = revenue_factory_tick(state)
+    preflight = state.get("operational_guard", {}) or {}
+    db_status = {"connected": bool(preflight.get("persistence_connected", True))}
+    master_governance = master_orchestrator_tick(state, db_status, preflight=preflight)
 
     existing = list(state.get("operating_action_queue", []) or [])
     war_items = list(state.get("war_room", {}).get("top_money_opportunities", []) or [])
     finance_tasks = [_financial_task(x) for x in war_items[:8]]
     revenue_task = _revenue_task(revenue_factory)
     revenue_tasks = [revenue_task] if revenue_task else []
+    governance_task = _governance_task(master_governance)
+    governance_tasks = [governance_task] if governance_task else []
 
     by_key: Dict[str, Dict[str, Any]] = {}
-    for task in [*existing, *finance_tasks, *revenue_tasks]:
+    for task in [*existing, *finance_tasks, *revenue_tasks, *governance_tasks]:
         key = str(task.get("key") or f"anon|{len(by_key)}")
         current = by_key.get(key)
         if current is None or _f(task.get("priority_score")) > _f(current.get("priority_score")):
@@ -137,11 +168,13 @@ def financial_priority_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     chief["money_priority_actions"] = len(finance_tasks)
     chief["revenue_factory_actions"] = len(revenue_tasks)
     chief["revenue_factory_directive"] = (revenue_factory.get("directive") or {}).get("code")
+    chief["master_company_mode"] = master_governance.get("company_mode")
+    chief["master_conflicts_resolved"] = len(master_governance.get("conflicts_resolved", []) or [])
     chief["autonomous_actions"] = sum(1 for x in merged if x.get("autonomous"))
     chief["human_decisions_required"] = sum(1 for x in merged if not x.get("autonomous"))
     chief["operating_rule"] = (
-        "priorizar beneficio esperado ajustado por riesgo y cerrar brechas medibles del Revenue Factory; "
-        "automatizar lo reversible y escalar cualquier compromiso contractual o financiero"
+        "obedecer Operating Constitution + Master Orchestrator; luego priorizar beneficio esperado ajustado por riesgo "
+        "y cerrar brechas medibles del Revenue Factory; compromisos vinculantes siguen siendo humanos"
     )
 
     top = merged[0] if merged else None
@@ -166,6 +199,7 @@ def financial_priority_tick(state: Dict[str, Any]) -> Dict[str, Any]:
         "money_priority_actions": len(finance_tasks),
         "revenue_factory_actions": len(revenue_tasks),
         "revenue_factory": revenue_factory,
+        "master_governance": master_governance,
         "top_action": top,
         "autonomous_actions": chief.get("autonomous_actions", 0),
         "human_decisions_required": chief.get("human_decisions_required", 0),
