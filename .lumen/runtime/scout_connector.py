@@ -14,10 +14,16 @@ MARKET = os.getenv("LUMEN_SCOUT_MARKET", "Argentina").strip() or "Argentina"
 COUNTRY_CODE = os.getenv("LUMEN_SCOUT_GL", "ar").strip().lower() or "ar"
 LANGUAGE = os.getenv("LUMEN_SCOUT_HL", "es").strip().lower() or "es"
 MAX_QUERIES_PER_TICK = max(1, min(5, int(os.getenv("LUMEN_SCOUT_MAX_QUERIES", "2"))))
+DAILY_QUERY_BUDGET = max(2, min(500, int(os.getenv("LUMEN_SCOUT_DAILY_BUDGET", "24"))))
+MAX_NEW_LEADS_PER_QUERY = max(1, min(8, int(os.getenv("LUMEN_SCOUT_MAX_NEW_LEADS", "4"))))
 
 
 def utcnow() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
+def utcdate() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
 def status() -> Dict[str, Any]:
@@ -28,6 +34,8 @@ def status() -> Dict[str, Any]:
         "country_code": COUNTRY_CODE,
         "language": LANGUAGE,
         "max_queries_per_tick": MAX_QUERIES_PER_TICK,
+        "daily_query_budget": DAILY_QUERY_BUDGET,
+        "max_new_leads_per_query": MAX_NEW_LEADS_PER_QUERY,
     }
 
 
@@ -101,6 +109,8 @@ def _store_results(state: Dict[str, Any], query: str, lead_type: str, category: 
     known = _known_urls(state)
     created = 0
     for item in results:
+        if created >= MAX_NEW_LEADS_PER_QUERY:
+            break
         url = (item.get("url") or "").strip()
         title = (item.get("title") or "").strip()
         if not url or url in known:
@@ -146,14 +156,37 @@ def _buyer_queries(state: Dict[str, Any]) -> List[tuple[str, str, str]]:
     return [(f'empresa industria mantenimiento compras "{cat}" {MARKET}', "buyer", cat) for cat in cats[:2]]
 
 
+def _budget(state: Dict[str, Any]) -> Dict[str, Any]:
+    today = utcdate()
+    budget = state.setdefault("scout_budget", {"date": today, "queries_used": 0, "daily_budget": DAILY_QUERY_BUDGET})
+    if budget.get("date") != today:
+        budget.clear(); budget.update({"date": today, "queries_used": 0, "daily_budget": DAILY_QUERY_BUDGET})
+    budget["daily_budget"] = DAILY_QUERY_BUDGET
+    budget["queries_used"] = int(budget.get("queries_used", 0))
+    budget["queries_remaining"] = max(0, DAILY_QUERY_BUDGET - budget["queries_used"])
+    return budget
+
+
 def scout_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     state.setdefault("research_leads", [])
-    stats = {"configured": bool(PROVIDER and API_KEY), "queries": 0, "new_leads": 0, "errors": 0}
+    budget = _budget(state)
+    stats = {
+        "configured": bool(PROVIDER and API_KEY), "queries": 0, "new_leads": 0, "errors": 0,
+        "budget_used_today": budget["queries_used"], "budget_remaining": budget["queries_remaining"], "budget_exhausted": False,
+    }
     if not stats["configured"]:
         return stats
+    if budget["queries_remaining"] <= 0:
+        stats["budget_exhausted"] = True
+        _log(state, "Scout pausó búsquedas: presupuesto diario agotado; prioriza calificación y seguimiento de evidencia existente.")
+        return stats
+
     queue = _supplier_queries(state) + _buyer_queries(state)
-    for query, lead_type, category in queue[:MAX_QUERIES_PER_TICK]:
+    allowed = min(MAX_QUERIES_PER_TICK, budget["queries_remaining"])
+    for query, lead_type, category in queue[:allowed]:
         try:
+            # Count each external request against the budget whether or not it yields a useful lead.
+            budget["queries_used"] += 1
             results = search(query)
             created = _store_results(state, query, lead_type, category, results)
             stats["queries"] += 1
@@ -162,4 +195,10 @@ def scout_tick(state: Dict[str, Any]) -> Dict[str, Any]:
         except Exception as exc:
             stats["errors"] += 1
             _log(state, f"Scout falló al investigar {category}: {str(exc)[:140]}")
+
+    budget["queries_remaining"] = max(0, DAILY_QUERY_BUDGET - budget["queries_used"])
+    budget["updated_at"] = utcnow()
+    stats["budget_used_today"] = budget["queries_used"]
+    stats["budget_remaining"] = budget["queries_remaining"]
+    stats["budget_exhausted"] = budget["queries_remaining"] <= 0
     return stats
