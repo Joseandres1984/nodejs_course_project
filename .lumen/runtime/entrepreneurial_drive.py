@@ -22,6 +22,10 @@ def _f(value: Any, default: float = 0.0) -> float:
         return default
 
 
+def _norm(value: Any) -> str:
+    return " ".join(str(value or "").lower().strip().split())
+
+
 def _ensure_state(state: Dict[str, Any]) -> Dict[str, Any]:
     memory = state.setdefault("entrepreneurial_memory", {})
     memory.setdefault("deal_progress", {})
@@ -35,14 +39,12 @@ def _ensure_state(state: Dict[str, Any]) -> Dict[str, Any]:
 
 def _progress_memory(state: Dict[str, Any], memory: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     progress = memory["deal_progress"]
-    live_ids = set()
     tick = int(state.get("ticks") or 0)
 
     for deal in state.get("deals", []):
         deal_id = str(deal.get("id") or "")
         if not deal_id:
             continue
-        live_ids.add(deal_id)
         stage = str(deal.get("stage") or "descubrimiento")
         expected_value = _f(deal.get("expected_value"))
         company_profit = _f(deal.get("company_profit"))
@@ -63,12 +65,21 @@ def _progress_memory(state: Dict[str, Any], memory: Dict[str, Any]) -> Dict[str,
         rec["best_company_profit"] = max(_f(rec.get("best_company_profit")), company_profit)
         rec["updated_at"] = utcnow()
 
-    # Keep a bounded amount of historical memory without losing recently disappeared deals.
     if len(progress) > 500:
         ordered = sorted(progress.items(), key=lambda kv: int(kv[1].get("last_progress_tick") or 0), reverse=True)
         memory["deal_progress"] = dict(ordered[:500])
         progress = memory["deal_progress"]
     return progress
+
+
+def _learning_profiles(state: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    learning = state.get("profit_learning", {}) or {}
+    profiles: Dict[str, Dict[str, Any]] = {}
+    for item in learning.get("category_rankings", []) or []:
+        key = _norm(item.get("category"))
+        if key:
+            profiles[key] = item
+    return profiles
 
 
 def _primary_from_executive(state: Dict[str, Any]) -> Dict[str, Any]:
@@ -87,20 +98,41 @@ def _primary_from_executive(state: Dict[str, Any]) -> Dict[str, Any]:
         "expand_market": ("expand_market", "balanced", "Abrir nuevas categorías y cuentas con potencial económico"),
     }
     action, research_side, fallback_objective = mapping.get(code, mapping["expand_market"])
+
+    learning = state.get("profit_learning", {}) or {}
+    focus = (learning.get("focus_categories") or [{}])[0] if learning.get("focus_categories") else {}
+    focus_category = focus.get("category") or learning.get("primary_category")
+    focus_score = _f(focus.get("learned_score"), 50.0) if focus_category else None
+    focus_confidence = _f(focus.get("confidence"), 0.0) if focus_category else None
+
+    objective = str(primary.get("objective") or fallback_objective)
+    reason = str(primary.get("reason") or "No hay un cuello de botella crítico; expandir con disciplina.")
+    if focus_category and code in {"supplier_gap", "supplier_for_demand", "buyer_gap", "demand_gap", "expand_market"}:
+        objective = f"{objective} — foco aprendido: {focus_category}"
+        reason += f" Self-Learning Profit Engine prioriza {focus_category} (score {focus_score:.1f}, confianza {focus_confidence:.0%})."
+
     return {
         "id": f"MISSION-{code.upper()}",
         "code": code,
         "action": action,
         "research_side": research_side,
-        "objective": str(primary.get("objective") or fallback_objective),
-        "reason": str(primary.get("reason") or "No hay un cuello de botella crítico; expandir con disciplina."),
+        "focus_category": focus_category,
+        "focus_category_score": round(focus_score, 2) if focus_score is not None else None,
+        "focus_category_confidence": round(focus_confidence, 2) if focus_confidence is not None else None,
+        "objective": objective,
+        "reason": reason,
         "priority": int(primary.get("priority") or 70),
         "autonomous": bool(primary.get("autonomous", True)),
-        "source": "executive_plan",
+        "source": "executive_plan+profit_learning" if focus_category else "executive_plan",
     }
 
 
-def _deal_priority(deal: Dict[str, Any], progress: Dict[str, Dict[str, Any]], target_share: float) -> float:
+def _deal_priority(
+    deal: Dict[str, Any],
+    progress: Dict[str, Dict[str, Any]],
+    target_share: float,
+    profiles: Dict[str, Dict[str, Any]],
+) -> tuple[float, float, float]:
     deal_id = str(deal.get("id") or "")
     expected = max(0.0, _f(deal.get("expected_value")))
     close_prob = max(0.0, min(1.0, _f(deal.get("close_prob"))))
@@ -125,11 +157,20 @@ def _deal_priority(deal: Dict[str, Any], progress: Dict[str, Dict[str, Any]], ta
         "listo para cerrar": 30,
         "autorizado para cierre": 32,
     }.get(stage, 0)
-    return round(max(0.0, value_bonus + probability_bonus + economics_bonus + margin_bonus + stage_bonus - stale_penalty), 2)
+
+    category = _norm(deal.get("need") or deal.get("category"))
+    profile = profiles.get(category, {})
+    learned_score = _f(profile.get("learned_score"), 50.0)
+    learned_confidence = _f(profile.get("confidence"), 0.0)
+    learning_bonus = (learned_score - 50.0) * 0.40 * learned_confidence
+
+    score = max(0.0, value_bonus + probability_bonus + economics_bonus + margin_bonus + stage_bonus + learning_bonus - stale_penalty)
+    return round(score, 2), round(learned_score, 2), round(learned_confidence, 2)
 
 
 def _deal_missions(state: Dict[str, Any], progress: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
     target_share = _f(state.get("policies", {}).get("target_company_share_pct"), 12.0)
+    profiles = _learning_profiles(state)
     missions: List[Dict[str, Any]] = []
     for deal in state.get("deals", []):
         if deal.get("stage") in {"cerrado", "cerrado (simulación)", "descartado", "cancelado"}:
@@ -139,7 +180,7 @@ def _deal_missions(state: Dict[str, Any], progress: Dict[str, Dict[str, Any]]) -
             continue
         stage = str(deal.get("stage") or "descubrimiento")
         stagnant = int(progress.get(deal_id, {}).get("stagnant_cycles") or 0)
-        score = _deal_priority(deal, progress, target_share)
+        score, learned_score, learned_confidence = _deal_priority(deal, progress, target_share, profiles)
         next_action = str(deal.get("next_action") or "Avanzar la oportunidad comercial")
         mission = {
             "id": f"MISSION-{deal_id}",
@@ -147,6 +188,9 @@ def _deal_missions(state: Dict[str, Any], progress: Dict[str, Dict[str, Any]]) -
             "deal_id": deal_id,
             "action": "advance_deal",
             "research_side": "balanced",
+            "category": deal.get("need") or deal.get("category"),
+            "category_learning_score": learned_score,
+            "category_learning_confidence": learned_confidence,
             "objective": f"Avanzar {deal_id}: {deal.get('buyer','comprador')} ↔ {deal.get('supplier','proveedor')}",
             "reason": next_action,
             "priority": score,
@@ -156,14 +200,14 @@ def _deal_missions(state: Dict[str, Any], progress: Dict[str, Dict[str, Any]]) -
             "stagnant_cycles": stagnant,
             "kill_candidate": stagnant >= KILL_CANDIDATE_CYCLES and stage not in {"listo para cerrar", "autorizado para cierre"},
             "autonomous": stage not in {"listo para cerrar", "autorizado para cierre"},
-            "source": "deal_portfolio",
+            "source": "deal_portfolio+profit_learning",
         }
         missions.append(mission)
     return sorted(missions, key=lambda x: _f(x.get("priority")), reverse=True)
 
 
 def _mission_history(memory: Dict[str, Any], primary: Dict[str, Any], tick: int) -> None:
-    code = primary.get("code")
+    code = f"{primary.get('code')}|{primary.get('focus_category') or ''}"
     if memory.get("last_primary") == code:
         memory["primary_streak"] = int(memory.get("primary_streak") or 0) + 1
     else:
@@ -173,7 +217,8 @@ def _mission_history(memory: Dict[str, Any], primary: Dict[str, Any], tick: int)
         history.append({
             "ts": utcnow(),
             "tick": tick,
-            "code": code,
+            "code": primary.get("code"),
+            "focus_category": primary.get("focus_category"),
             "objective": primary.get("objective"),
             "reason": primary.get("reason"),
         })
@@ -189,7 +234,6 @@ def drive_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     primary = _primary_from_executive(state)
     deal_missions = _deal_missions(state, progress)
 
-    # 70/30 operating doctrine: exploit the best current deals while preserving a market-building mission.
     missions: List[Dict[str, Any]] = [primary]
     for mission in deal_missions:
         if len(missions) >= MAX_ACTIVE_MISSIONS:
@@ -201,6 +245,10 @@ def drive_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     total_profit = sum(_f(x.get("company_profit_usd")) for x in missions)
     stale_deals = sum(1 for x in deal_missions if int(x.get("stagnant_cycles") or 0) >= STALE_PENALTY_START)
     kill_candidates = sum(1 for x in deal_missions if x.get("kill_candidate"))
+
+    learning = state.get("profit_learning", {}) or {}
+    exploit_pct = int(learning.get("exploit_pct") or 70)
+    explore_pct = int(learning.get("explore_pct") or (100 - exploit_pct))
 
     _mission_history(memory, primary, tick)
     state["autonomous_missions"] = missions
@@ -216,9 +264,9 @@ def drive_tick(state: Dict[str, Any]) -> Dict[str, Any]:
         "kill_candidates": kill_candidates,
         "primary_streak_cycles": int(memory.get("primary_streak") or 0),
         "operating_doctrine": {
-            "exploit_pct": 70,
-            "explore_pct": 30,
-            "rule": "perseguir valor esperado y margen sin sacrificar evidencia, reputación ni control humano de compromisos vinculantes",
+            "exploit_pct": exploit_pct,
+            "explore_pct": explore_pct,
+            "rule": "concentrar esfuerzo donde el aprendizaje demuestra mejor señal económica, sin sacrificar evidencia, reputación ni control humano de compromisos vinculantes",
             "stale_penalty_start_cycles": STALE_PENALTY_START,
             "kill_candidate_cycles": KILL_CANDIDATE_CYCLES,
         },
@@ -233,7 +281,7 @@ def drive_tick(state: Dict[str, Any]) -> Dict[str, Any]:
         decision=str(primary.get("action")),
         reason=str(primary.get("reason")),
         action="score_opportunity",
-        confidence=0.92,
+        confidence=max(0.5, _f(primary.get("focus_category_confidence"), 0.5)),
         evidence_refs=[],
     )
     return report
