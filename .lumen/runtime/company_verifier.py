@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from html import unescape
 from typing import Any, Dict, List
 
+from autonomy_governor import record_decision, register_incident
+
 MAX_PER_TICK = max(1, min(4, int(os.getenv("LUMEN_VERIFY_MAX_ACCOUNTS", "2"))))
 MAX_BYTES = 350_000
 USER_AGENT = "LUMEN-B2B/1.0 business-research"
@@ -218,15 +220,38 @@ def verification_tick(state: Dict[str, Any]) -> Dict[str, int]:
             if result.get("verified"):
                 account["status"] = "verified_company"
                 stats["verified"] += 1
+                record_decision(
+                    state, engine="Company Verification", object_type="candidate_account", object_id=str(account.get("id")),
+                    decision="verified_company", reason="; ".join(str(x) for x in account.get("verification_reasons", [])[:5]),
+                    action="verify_company", confidence=float(account.get("verification_score") or 0) / 100.0,
+                    evidence_refs=[str(account.get("official_url") or "")],
+                )
             elif result.get("retry"):
                 account["status"] = "verification_required"
                 stats["retry"] += 1
+                record_decision(
+                    state, engine="Company Verification", object_type="candidate_account", object_id=str(account.get("id")),
+                    decision="retry_required", reason=str(account.get("verification_error") or "No se pudo validar el sitio"),
+                    action="verify_company", confidence=float(account.get("confidence") or 0), evidence_refs=[str(account.get("source_url") or "")], allowed=False,
+                )
             else:
                 account["status"] = "evidence_insufficient"
                 stats["insufficient"] += 1
+                record_decision(
+                    state, engine="Company Verification", object_type="candidate_account", object_id=str(account.get("id")),
+                    decision="evidence_insufficient", reason="; ".join(str(x) for x in account.get("verification_reasons", [])[:5]),
+                    action="verify_company", confidence=float(account.get("verification_score") or 0) / 100.0,
+                    evidence_refs=[str(account.get("official_url") or account.get("source_url") or "")], allowed=False,
+                )
         except Exception as exc:
             account.update({"verification_status": "retry_required", "verification_error": str(exc)[:160], "verified_at": utcnow()})
             stats["errors"] += 1
+            register_incident(state, "Company Verification", "verification_exception", str(exc))
+            record_decision(
+                state, engine="Company Verification", object_type="candidate_account", object_id=str(account.get("id")),
+                decision="exception_retry", reason=str(exc), action="verify_company", confidence=float(account.get("confidence") or 0),
+                evidence_refs=[str(account.get("source_url") or "")], allowed=False,
+            )
 
     state["company_verification_stats"] = {**stats, "updated_at": utcnow(), "verified_accounts_total": sum(1 for x in accounts if x.get("verified_company"))}
     if stats["attempted"]:
