@@ -43,6 +43,7 @@ def plan_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     pending_approvals = sum(1 for x in state.get("approvals", []) if x.get("status") == "pending")
     strategic = state.get("strategic_directive", {}) or {}
     growth = state.get("growth_directive", {}) or {}
+    trade = state.get("trade_directive", {}) or {}
 
     priorities: List[Dict[str, Any]] = []
 
@@ -107,6 +108,39 @@ def plan_tick(state: Dict[str, Any]) -> Dict[str, Any]:
             source="growth_expansion",
         )
 
+    # Trade & Logistics can elevate a sourcing decision only when there is actual trade evidence. Missing landed-cost
+    # inputs create a data-completion priority; a normalized route comparison can become an executive optimization.
+    trade_mode = str(trade.get("mode") or "")
+    if trade_mode == "route_optimization":
+        savings = float(trade.get("landed_savings_pct") or 0)
+        add(
+            "trade_route_optimization",
+            90,
+            "Optimizar abastecimiento local vs. internacional usando landed cost completo y riesgo no-precio",
+            f"Trade Brain dispone de una comparación normalizada; diferencia de landed cost {savings:.1f}%.",
+            autonomous=True,
+            source="trade_logistics",
+        )
+    elif trade_mode == "complete_trade_data":
+        missing = ", ".join(str(x) for x in (trade.get("missing") or [])[:5])
+        add(
+            "trade_data_gap",
+            82,
+            "Completar datos de importación antes de comparar o negociar una ruta internacional",
+            f"Oferta internacional real incompleta. Faltan: {missing or 'datos logísticos/comerciales críticos'}.",
+            autonomous=True,
+            source="trade_logistics",
+        )
+    elif trade_mode == "international_supplier_quote":
+        add(
+            "trade_supplier_quote",
+            74,
+            "Obtener cotización formal de proveedor internacional con Incoterm, origen y términos logísticos",
+            str(trade.get("reason") or "Existe un proveedor internacional verificado que todavía no puede evaluarse económicamente."),
+            autonomous=True,
+            source="trade_logistics",
+        )
+
     if not priorities:
         add("expand_market", 70, "Expandir cuentas y categorías de mayor valor", "No hay un cuello de botella crítico; conviene ampliar mercado con disciplina de evidencia.")
 
@@ -115,7 +149,7 @@ def plan_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     plan = {
         "updated_at": utcnow(),
         "primary": primary,
-        "priorities": priorities[:7],
+        "priorities": priorities[:8],
         "snapshot": {
             "verified_suppliers": verified_suppliers,
             "verified_buyers": verified_buyers,
@@ -128,8 +162,11 @@ def plan_tick(state: Dict[str, Any]) -> Dict[str, Any]:
             "growth_readiness_score": growth.get("readiness_score"),
             "growth_primary_market": growth.get("primary_market"),
             "growth_primary_category": growth.get("primary_category"),
+            "trade_mode": trade_mode or None,
+            "trade_deal_id": trade.get("deal_id"),
+            "trade_landed_savings_pct": trade.get("landed_savings_pct"),
         },
-        "decision_rule": "resolver primero gaps críticos; luego maximizar valor económico sostenible alineado con estrategia corporativa, expansión evidenciada, riesgo, velocidad y calidad de relación",
+        "decision_rule": "resolver primero gaps críticos; luego maximizar valor económico sostenible alineado con estrategia, expansión y landed cost verificables, riesgo, velocidad y calidad de relación",
     }
     state["executive_plan"] = plan
     record_decision(
