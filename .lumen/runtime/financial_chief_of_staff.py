@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict
 
 from autonomy_governor import record_decision
+from deal_safeguards import deal_safeguards_tick
 from revenue_factory import revenue_factory_tick
 from master_orchestrator import master_orchestrator_tick
 from strategy_simulator import strategy_simulator_tick
@@ -77,6 +78,31 @@ def _revenue_task(factory: Dict[str, Any]) -> Dict[str, Any] | None:
     }
 
 
+def _safeguard_task(safeguards: Dict[str, Any]) -> Dict[str, Any] | None:
+    directive = safeguards.get("primary_directive", {}) or {}
+    deal_id = directive.get("deal_id")
+    if not deal_id:
+        return None
+    structure = directive.get("recommended_structure", {}) or {}
+    gaps = list(directive.get("critical_gaps") or [])
+    human = bool(directive.get("mandatory_legal_review")) or not bool(structure.get("autonomous", True))
+    exposure = max(0.0, min(100.0, _f(directive.get("exposure_score"))))
+    safe = max(0.0, min(100.0, _f(directive.get("safe_close_score"))))
+    return {
+        "key": f"deal_safeguards|{deal_id}|{structure.get('code') or 'review'}",
+        "kind": "deal_safeguards",
+        "title": f"Safe Close {deal_id}: {structure.get('title') or 'revisar exposición'}",
+        "reason": f"Safe-close score {safe:.0f}/100; exposición {exposure:.0f}/100; gaps: {', '.join(gaps[:6]) or 'ninguno'}.",
+        "impact": 100.0 if human else min(98.0, 84.0 + exposure * 0.14),
+        "urgency": 100.0 if human else min(98.0, 78.0 + exposure * 0.18),
+        "confidence": 0.96, "effort": 1.0, "risk": "high" if human else "medium",
+        "autonomous": not human, "object_type": "deal", "object_id": str(deal_id),
+        "payload": {"safe_close_score": safe, "exposure_score": exposure, "gaps": gaps, "recommended_structure": structure, "open_incidents": safeguards.get("open_incidents")},
+        "priority_score": 99.0 if human else round(min(97.0, 82.0 + exposure * 0.12), 2),
+        "created_at": utcnow(),
+    }
+
+
 def _governance_task(governance: Dict[str, Any]) -> Dict[str, Any] | None:
     mode = str(governance.get("company_mode") or "")
     if mode != "RECOVERY":
@@ -94,12 +120,7 @@ def _apply_simulator_overlay(state: Dict[str, Any], governance: Dict[str, Any], 
     experiment = simulator.get("active_experiment") or {}
     switches = governance.get("kill_switches", {}) or {}
     mode = str(governance.get("company_mode") or "")
-    result = {
-        "applied": False,
-        "experiment_id": experiment.get("id"),
-        "scenario_id": experiment.get("scenario_id"),
-        "reason": "no_active_experiment",
-    }
+    result = {"applied": False, "experiment_id": experiment.get("id"), "scenario_id": experiment.get("scenario_id"), "reason": "no_active_experiment"}
     if not experiment or experiment.get("status") != "running":
         state["strategy_experiment_overlay"] = result
         return result
@@ -121,29 +142,21 @@ def _apply_simulator_overlay(state: Dict[str, Any], governance: Dict[str, Any], 
     adjustments = experiment.get("adjustments", {}) or {}
     for key in RESOURCE_KEYS:
         adjusted[key] = max(0.0, min(100.0, _f(base.get(key)) + _f(adjustments.get(key))))
-
     if switches.get("expansion_pause"):
         adjusted["expansion_pct"] = 0.0
-
     total = sum(_f(adjusted.get(key)) for key in RESOURCE_KEYS)
     if total > 0:
         for key in RESOURCE_KEYS:
             adjusted[key] = round(_f(adjusted.get(key)) / total * 100.0, 1)
-
-    # The Digital Twin cannot widen query/outbound caps or touch any spending authority.
     for key in ("outbound_cap", "mission_queries_cap", "expansion_queries_cap", "daily_queries_remaining", "resource_type", "authorizes_spending"):
         if key in base:
             adjusted[key] = base[key]
     adjusted["digital_twin_experiment_id"] = experiment.get("id")
     adjusted["digital_twin_scenario_id"] = experiment.get("scenario_id")
-
     governance["resource_plan"] = adjusted
     governance["digital_twin_overlay"] = {
-        "experiment_id": experiment.get("id"),
-        "scenario_id": experiment.get("scenario_id"),
-        "adjustments": adjustments,
-        "evidence_strength": experiment.get("evidence_strength"),
-        "hold_until_cycle": experiment.get("hold_until_cycle"),
+        "experiment_id": experiment.get("id"), "scenario_id": experiment.get("scenario_id"), "adjustments": adjustments,
+        "evidence_strength": experiment.get("evidence_strength"), "hold_until_cycle": experiment.get("hold_until_cycle"),
         "rule": "Constitutional caps remain authoritative; only reversible attention allocation is adjusted.",
     }
     state["master_governance"] = governance
@@ -171,6 +184,9 @@ def _apply_runtime_caps(state: Dict[str, Any], governance: Dict[str, Any]) -> Di
 
 
 def financial_priority_tick(state: Dict[str, Any]) -> Dict[str, Any]:
+    # Safeguards runs after Trade + RevOps + Professional OS and before Communication/Quality.
+    # It may prepare one evidence-seeking clarification, refresh Pre-Close, and hard-block unsafe close paths.
+    deal_safeguards = deal_safeguards_tick(state)
     revenue_factory = revenue_factory_tick(state)
     preflight = state.get("operational_guard", {}) or {}
     db_status = {"connected": bool(preflight.get("persistence_connected", True))}
@@ -182,10 +198,11 @@ def financial_priority_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     existing = list(state.get("operating_action_queue", []) or [])
     finance_tasks = [_financial_task(x) for x in list(state.get("war_room", {}).get("top_money_opportunities", []) or [])[:8]]
     revenue_task = _revenue_task(revenue_factory); revenue_tasks = [revenue_task] if revenue_task else []
+    safeguard_task = _safeguard_task(deal_safeguards); safeguard_tasks = [safeguard_task] if safeguard_task else []
     governance_task = _governance_task(master_governance); governance_tasks = [governance_task] if governance_task else []
 
     by_key: Dict[str, Dict[str, Any]] = {}
-    for task in [*existing, *finance_tasks, *revenue_tasks, *governance_tasks]:
+    for task in [*existing, *finance_tasks, *revenue_tasks, *safeguard_tasks, *governance_tasks]:
         key = str(task.get("key") or f"anon|{len(by_key)}")
         current = by_key.get(key)
         if current is None or _f(task.get("priority_score")) > _f(current.get("priority_score")):
@@ -197,12 +214,14 @@ def financial_priority_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     chief.update({
         "top_actions": merged[:MAX_TOP_ACTIONS], "financially_prioritized_at": utcnow(), "money_priority_actions": len(finance_tasks),
         "revenue_factory_actions": len(revenue_tasks), "revenue_factory_directive": (revenue_factory.get("directive") or {}).get("code"),
+        "deal_safeguards_actions": len(safeguard_tasks), "deal_safeguards_blocked": deal_safeguards.get("blocked"),
+        "deal_safeguards_open_incidents": deal_safeguards.get("open_incidents"),
         "master_company_mode": master_governance.get("company_mode"), "master_conflicts_resolved": len(master_governance.get("conflicts_resolved", []) or []),
         "digital_twin_recommended": (strategy_simulator.get("recommended_scenario") or {}).get("id"),
         "digital_twin_active_experiment": (strategy_simulator.get("active_experiment") or {}).get("id"),
         "digital_twin_overlay_applied": bool(simulator_overlay.get("applied")),
         "autonomous_actions": sum(1 for x in merged if x.get("autonomous")), "human_decisions_required": sum(1 for x in merged if not x.get("autonomous")),
-        "operating_rule": "obedecer Operating Constitution + Master Orchestrator; usar Digital Twin solo para experimentos reversibles; luego priorizar beneficio esperado ajustado por riesgo y Revenue Factory; compromisos vinculantes siguen siendo humanos",
+        "operating_rule": "Deal Safeguards precede outbound quality; obey Operating Constitution + Master Orchestrator; optimize safe risk-adjusted close probability; binding commitments remain human-controlled",
     })
 
     top = merged[0] if merged else None
@@ -212,6 +231,7 @@ def financial_priority_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     report = {
         "updated_at": utcnow(), "queue_size": len(merged), "money_priority_actions": len(finance_tasks),
         "revenue_factory_actions": len(revenue_tasks), "revenue_factory": revenue_factory,
+        "deal_safeguards": deal_safeguards,
         "master_governance": master_governance, "strategy_simulator": strategy_simulator,
         "strategy_experiment_overlay": simulator_overlay, "runtime_caps": runtime_caps,
         "top_action": top, "autonomous_actions": chief.get("autonomous_actions", 0), "human_decisions_required": chief.get("human_decisions_required", 0),
