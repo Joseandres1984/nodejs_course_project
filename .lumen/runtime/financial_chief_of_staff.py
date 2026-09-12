@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 from autonomy_governor import record_decision
+from revenue_factory import revenue_factory_tick
 
 
 MAX_QUEUE = 80
@@ -30,8 +31,7 @@ def _financial_task(item: Dict[str, Any]) -> Dict[str, Any]:
     risk_profit = max(0.0, _f(item.get("risk_adjusted_expected_profit_usd")))
     impact = min(100.0, 55.0 + money_score * 0.45)
     urgency = min(100.0, 62.0 + money_score * 0.34)
-    confidence = item.get("close_probability")
-    confidence = max(0.45, min(0.98, _f(confidence, 0.72)))
+    confidence = max(0.45, min(0.98, _f(item.get("close_probability"), 0.72)))
     priority = impact * 0.46 + urgency * 0.29 + confidence * 25.0
     if risk == "high":
         priority -= 18.0
@@ -64,13 +64,65 @@ def _financial_task(item: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _revenue_task(factory: Dict[str, Any]) -> Dict[str, Any] | None:
+    directive = factory.get("directive", {}) or {}
+    if not directive:
+        return None
+    autonomous = bool(directive.get("autonomous", True))
+    raw_priority = max(0.0, min(100.0, _f(directive.get("priority"), 75.0)))
+    plan = factory.get("reverse_plan", {}) or {}
+    target = factory.get("target", {}) or {}
+    gap = plan.get("profit_gap_usd")
+    target_value = target.get("monthly_profit_target_usd")
+    coverage = factory.get("target_coverage_pct")
+    reason_parts = [str(directive.get("title") or "Cerrar brecha del Revenue Factory")]
+    if gap is not None:
+        reason_parts.append(f"brecha económica USD {_f(gap):,.2f}")
+    if target_value is not None:
+        reason_parts.append(f"objetivo mensual USD {_f(target_value):,.2f}")
+    if coverage is not None:
+        reason_parts.append(f"cobertura {coverage}%")
+    reason_parts.append(f"modelo {plan.get('status') or 'sin reverse plan completo'}")
+    return {
+        "key": f"revenue_factory|{directive.get('code') or 'maintain'}|{directive.get('stage') or 'company'}",
+        "kind": "revenue_factory",
+        "title": f"Revenue Factory: {directive.get('title') or directive.get('code')}",
+        "reason": "; ".join(reason_parts),
+        "impact": min(100.0, 72.0 + raw_priority * 0.28),
+        "urgency": min(100.0, 65.0 + raw_priority * 0.30),
+        "confidence": 0.9 if plan.get("status") == "reverse_plan_ready" else 0.68,
+        "effort": 1.0,
+        "risk": "high" if not autonomous else "low",
+        "autonomous": autonomous,
+        "object_type": "company",
+        "object_id": "LUMEN",
+        "payload": {
+            "factory_code": directive.get("code"),
+            "stage": directive.get("stage"),
+            "gap": directive.get("gap"),
+            "profit_gap_usd": gap,
+            "target_usd": target_value,
+            "coverage_pct": coverage,
+            "target_source": target.get("source"),
+        },
+        "priority_score": round(raw_priority * (0.92 if autonomous else 0.74), 2),
+        "created_at": utcnow(),
+    }
+
+
 def financial_priority_tick(state: Dict[str, Any]) -> Dict[str, Any]:
+    # Revenue Factory runs here after strategy/market engines and before the final financially-prioritized queue.
+    # This keeps revenue production measurable without bypassing any safety or approval gate.
+    revenue_factory = revenue_factory_tick(state)
+
     existing = list(state.get("operating_action_queue", []) or [])
     war_items = list(state.get("war_room", {}).get("top_money_opportunities", []) or [])
     finance_tasks = [_financial_task(x) for x in war_items[:8]]
+    revenue_task = _revenue_task(revenue_factory)
+    revenue_tasks = [revenue_task] if revenue_task else []
 
     by_key: Dict[str, Dict[str, Any]] = {}
-    for task in [*existing, *finance_tasks]:
+    for task in [*existing, *finance_tasks, *revenue_tasks]:
         key = str(task.get("key") or f"anon|{len(by_key)}")
         current = by_key.get(key)
         if current is None or _f(task.get("priority_score")) > _f(current.get("priority_score")):
@@ -83,10 +135,12 @@ def financial_priority_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     chief["top_actions"] = merged[:MAX_TOP_ACTIONS]
     chief["financially_prioritized_at"] = utcnow()
     chief["money_priority_actions"] = len(finance_tasks)
+    chief["revenue_factory_actions"] = len(revenue_tasks)
+    chief["revenue_factory_directive"] = (revenue_factory.get("directive") or {}).get("code")
     chief["autonomous_actions"] = sum(1 for x in merged if x.get("autonomous"))
     chief["human_decisions_required"] = sum(1 for x in merged if not x.get("autonomous"))
     chief["operating_rule"] = (
-        "priorizar acciones por beneficio esperado ajustado por riesgo + urgencia operativa; "
+        "priorizar beneficio esperado ajustado por riesgo y cerrar brechas medibles del Revenue Factory; "
         "automatizar lo reversible y escalar cualquier compromiso contractual o financiero"
     )
 
@@ -110,6 +164,8 @@ def financial_priority_tick(state: Dict[str, Any]) -> Dict[str, Any]:
         "updated_at": utcnow(),
         "queue_size": len(merged),
         "money_priority_actions": len(finance_tasks),
+        "revenue_factory_actions": len(revenue_tasks),
+        "revenue_factory": revenue_factory,
         "top_action": top,
         "autonomous_actions": chief.get("autonomous_actions", 0),
         "human_decisions_required": chief.get("human_decisions_required", 0),
