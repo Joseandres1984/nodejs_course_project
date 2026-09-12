@@ -6,10 +6,12 @@ from typing import Any, Dict
 from autonomy_governor import record_decision
 from revenue_factory import revenue_factory_tick
 from master_orchestrator import master_orchestrator_tick
+from strategy_simulator import strategy_simulator_tick
 
 
 MAX_QUEUE = 80
 MAX_TOP_ACTIONS = 12
+RESOURCE_KEYS = ("core_research_pct", "deep_dive_pct", "expansion_pct", "exploration_pct")
 
 
 def utcnow() -> str:
@@ -88,6 +90,69 @@ def _governance_task(governance: Dict[str, Any]) -> Dict[str, Any] | None:
     }
 
 
+def _apply_simulator_overlay(state: Dict[str, Any], governance: Dict[str, Any], simulator: Dict[str, Any]) -> Dict[str, Any]:
+    experiment = simulator.get("active_experiment") or {}
+    switches = governance.get("kill_switches", {}) or {}
+    mode = str(governance.get("company_mode") or "")
+    result = {
+        "applied": False,
+        "experiment_id": experiment.get("id"),
+        "scenario_id": experiment.get("scenario_id"),
+        "reason": "no_active_experiment",
+    }
+    if not experiment or experiment.get("status") != "running":
+        state["strategy_experiment_overlay"] = result
+        return result
+    if mode in {"RECOVERY", "PROTECT_CASH"} or switches.get("global_pause"):
+        result["reason"] = f"constitutional_mode_blocks_experiment:{mode}"
+        state["strategy_experiment_overlay"] = result
+        return result
+    if not experiment.get("reversible") or experiment.get("binding"):
+        result["reason"] = "experiment_not_reversible_or_binding"
+        state["strategy_experiment_overlay"] = result
+        return result
+    if _f(experiment.get("evidence_strength")) < 0.55:
+        result["reason"] = "insufficient_experiment_evidence"
+        state["strategy_experiment_overlay"] = result
+        return result
+
+    base = dict(governance.get("resource_plan", {}) or {})
+    adjusted = dict(base)
+    adjustments = experiment.get("adjustments", {}) or {}
+    for key in RESOURCE_KEYS:
+        adjusted[key] = max(0.0, min(100.0, _f(base.get(key)) + _f(adjustments.get(key))))
+
+    if switches.get("expansion_pause"):
+        adjusted["expansion_pct"] = 0.0
+
+    total = sum(_f(adjusted.get(key)) for key in RESOURCE_KEYS)
+    if total > 0:
+        for key in RESOURCE_KEYS:
+            adjusted[key] = round(_f(adjusted.get(key)) / total * 100.0, 1)
+
+    # The Digital Twin cannot widen query/outbound caps or touch any spending authority.
+    for key in ("outbound_cap", "mission_queries_cap", "expansion_queries_cap", "daily_queries_remaining", "resource_type", "authorizes_spending"):
+        if key in base:
+            adjusted[key] = base[key]
+    adjusted["digital_twin_experiment_id"] = experiment.get("id")
+    adjusted["digital_twin_scenario_id"] = experiment.get("scenario_id")
+
+    governance["resource_plan"] = adjusted
+    governance["digital_twin_overlay"] = {
+        "experiment_id": experiment.get("id"),
+        "scenario_id": experiment.get("scenario_id"),
+        "adjustments": adjustments,
+        "evidence_strength": experiment.get("evidence_strength"),
+        "hold_until_cycle": experiment.get("hold_until_cycle"),
+        "rule": "Constitutional caps remain authoritative; only reversible attention allocation is adjusted.",
+    }
+    state["master_governance"] = governance
+    state["master_resource_plan"] = adjusted
+    result.update({"applied": True, "reason": "bounded_reversible_experiment", "adjusted_resource_plan": adjusted})
+    state["strategy_experiment_overlay"] = result
+    return result
+
+
 def _apply_runtime_caps(state: Dict[str, Any], governance: Dict[str, Any]) -> Dict[str, Any]:
     policies = state.setdefault("policies", {})
     baseline = state.setdefault("master_policy_baseline", {})
@@ -96,7 +161,6 @@ def _apply_runtime_caps(state: Dict[str, Any], governance: Dict[str, Any]) -> Di
     configured_cap = max(1, int(baseline["max_outbound_per_tick"]))
     orchestrated_cap = max(0, int((governance.get("resource_plan", {}) or {}).get("outbound_cap", configured_cap) or 0))
     effective = min(configured_cap, orchestrated_cap) if orchestrated_cap > 0 else 1
-    # In RECOVERY outbound is independently fail-closed by COO; effective=1 avoids legacy max(1, ...) widening a zero value.
     policies["max_outbound_per_tick"] = effective
     state["constitutional_runtime_caps"] = {
         "updated_at": utcnow(), "configured_outbound_cap": configured_cap,
@@ -111,6 +175,8 @@ def financial_priority_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     preflight = state.get("operational_guard", {}) or {}
     db_status = {"connected": bool(preflight.get("persistence_connected", True))}
     master_governance = master_orchestrator_tick(state, db_status, preflight=preflight)
+    strategy_simulator = strategy_simulator_tick(state)
+    simulator_overlay = _apply_simulator_overlay(state, master_governance, strategy_simulator)
     runtime_caps = _apply_runtime_caps(state, master_governance)
 
     existing = list(state.get("operating_action_queue", []) or [])
@@ -132,8 +198,11 @@ def financial_priority_tick(state: Dict[str, Any]) -> Dict[str, Any]:
         "top_actions": merged[:MAX_TOP_ACTIONS], "financially_prioritized_at": utcnow(), "money_priority_actions": len(finance_tasks),
         "revenue_factory_actions": len(revenue_tasks), "revenue_factory_directive": (revenue_factory.get("directive") or {}).get("code"),
         "master_company_mode": master_governance.get("company_mode"), "master_conflicts_resolved": len(master_governance.get("conflicts_resolved", []) or []),
+        "digital_twin_recommended": (strategy_simulator.get("recommended_scenario") or {}).get("id"),
+        "digital_twin_active_experiment": (strategy_simulator.get("active_experiment") or {}).get("id"),
+        "digital_twin_overlay_applied": bool(simulator_overlay.get("applied")),
         "autonomous_actions": sum(1 for x in merged if x.get("autonomous")), "human_decisions_required": sum(1 for x in merged if not x.get("autonomous")),
-        "operating_rule": "obedecer Operating Constitution + Master Orchestrator; luego priorizar beneficio esperado ajustado por riesgo y Revenue Factory; compromisos vinculantes siguen siendo humanos",
+        "operating_rule": "obedecer Operating Constitution + Master Orchestrator; usar Digital Twin solo para experimentos reversibles; luego priorizar beneficio esperado ajustado por riesgo y Revenue Factory; compromisos vinculantes siguen siendo humanos",
     })
 
     top = merged[0] if merged else None
@@ -143,7 +212,8 @@ def financial_priority_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     report = {
         "updated_at": utcnow(), "queue_size": len(merged), "money_priority_actions": len(finance_tasks),
         "revenue_factory_actions": len(revenue_tasks), "revenue_factory": revenue_factory,
-        "master_governance": master_governance, "runtime_caps": runtime_caps,
+        "master_governance": master_governance, "strategy_simulator": strategy_simulator,
+        "strategy_experiment_overlay": simulator_overlay, "runtime_caps": runtime_caps,
         "top_action": top, "autonomous_actions": chief.get("autonomous_actions", 0), "human_decisions_required": chief.get("human_decisions_required", 0),
     }
     state["financial_chief_of_staff"] = report
