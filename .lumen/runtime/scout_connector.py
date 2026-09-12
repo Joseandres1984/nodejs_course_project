@@ -144,24 +144,73 @@ def _store_results(state: Dict[str, Any], query: str, lead_type: str, category: 
     return created
 
 
-def _unique_values(items: List[Dict[str, Any]], field: str) -> List[str]:
-    ordered = sorted(items, key=lambda x: x.get("source") == "demo")
-    values: List[str] = []
-    for item in ordered:
-        value = (item.get(field) or "").strip()
-        if value and value not in values:
-            values.append(value)
-    return values
+def _unique_strings(values: List[Any]) -> List[str]:
+    out: List[str] = []
+    for value in values:
+        text = " ".join(str(value or "").strip().split())
+        if text and text not in out:
+            out.append(text)
+    return out
+
+
+def _verified_accounts(state: Dict[str, Any], account_type: str) -> List[Dict[str, Any]]:
+    return [x for x in state.get("candidate_accounts", []) if x.get("type") == account_type and x.get("verified_company")]
+
+
+def _supplier_categories(state: Dict[str, Any]) -> List[str]:
+    real = [x.get("category") for x in _verified_accounts(state, "supplier")]
+    fallback = [x.get("category") for x in sorted(state.get("suppliers", []), key=lambda x: x.get("source") == "demo")]
+    return _unique_strings(real + fallback)
+
+
+def _buyer_need_categories(state: Dict[str, Any]) -> List[str]:
+    real = [x.get("category") for x in _verified_accounts(state, "buyer")]
+    human = [x.get("need") for x in sorted(state.get("buyers", []), key=lambda x: x.get("source") == "demo")]
+    return _unique_strings(real + human)
 
 
 def _supplier_queries(state: Dict[str, Any]) -> List[tuple[str, str, str]]:
-    needs = _unique_values(state.get("buyers", []), "need")
-    return [(f'"{need}" fabricante distribuidor proveedor {MARKET}', "supplier", need) for need in needs[:2]]
+    needs = _buyer_need_categories(state)
+    return [(f'"{need}" fabricante distribuidor proveedor {MARKET}', "supplier", need) for need in needs[:4]]
 
 
 def _buyer_queries(state: Dict[str, Any]) -> List[tuple[str, str, str]]:
-    cats = _unique_values(state.get("suppliers", []), "category")
-    return [(f'empresa industria mantenimiento compras "{cat}" {MARKET}', "buyer", cat) for cat in cats[:2]]
+    cats = _supplier_categories(state)
+    return [(f'empresa industria planta mantenimiento "{cat}" {MARKET} -proveedor -distribuidor', "buyer", cat) for cat in cats[:4]]
+
+
+def _interleave(a: List[tuple[str, str, str]], b: List[tuple[str, str, str]]) -> List[tuple[str, str, str]]:
+    out: List[tuple[str, str, str]] = []
+    for i in range(max(len(a), len(b))):
+        if i < len(a): out.append(a[i])
+        if i < len(b): out.append(b[i])
+    return out
+
+
+def _generic_search_plan(state: Dict[str, Any]) -> tuple[str, List[tuple[str, str, str]]]:
+    verified_suppliers = _verified_accounts(state, "supplier")
+    verified_buyers = _verified_accounts(state, "buyer")
+    supplier_q = _supplier_queries(state)
+    buyer_q = _buyer_queries(state)
+
+    if verified_suppliers and not verified_buyers:
+        return "buyer_gap", buyer_q + supplier_q
+    if verified_buyers and not verified_suppliers:
+        return "supplier_gap", supplier_q + buyer_q
+
+    buyer_categories = {_norm_category(x.get("category")) for x in verified_buyers if x.get("category")}
+    supplier_categories = {_norm_category(x.get("category")) for x in verified_suppliers if x.get("category")}
+    missing_buyers = bool(supplier_categories - buyer_categories)
+    missing_suppliers = bool(buyer_categories - supplier_categories)
+    if missing_buyers and not missing_suppliers:
+        return "buyer_category_gap", buyer_q + supplier_q
+    if missing_suppliers and not missing_buyers:
+        return "supplier_category_gap", supplier_q + buyer_q
+    return "balanced", _interleave(buyer_q, supplier_q)
+
+
+def _norm_category(value: Any) -> str:
+    return " ".join(str(value or "").lower().strip().split())
 
 
 def _budget(state: Dict[str, Any]) -> Dict[str, Any]:
@@ -262,9 +311,12 @@ def _store_demand_signal(state: Dict[str, Any], account: Dict[str, Any], query: 
 def scout_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     state.setdefault("research_leads", [])
     budget = _budget(state)
+    strategy, generic_queue = _generic_search_plan(state)
     stats = {
         "configured": bool(PROVIDER and API_KEY), "queries": 0, "new_leads": 0, "errors": 0,
         "demand_queries": 0, "demand_signals_verified": 0,
+        "buyer_discovery_queries": 0, "supplier_discovery_queries": 0,
+        "strategy": strategy,
         "budget_used_today": budget["queries_used"], "budget_remaining": budget["queries_remaining"], "budget_exhausted": False,
     }
     if not stats["configured"]:
@@ -277,7 +329,6 @@ def scout_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     allowed = min(MAX_QUERIES_PER_TICK, budget["queries_remaining"])
     used_this_tick = 0
 
-    # Highest-value research first: prove actual demand for already verified buyer accounts.
     for account in _demand_candidates(state):
         if used_this_tick >= allowed:
             break
@@ -294,23 +345,24 @@ def scout_tick(state: Dict[str, Any]) -> Dict[str, Any]:
             stats["errors"] += 1
             _log(state, f"Demand Signal falló para {account.get('id')}: {str(exc)[:140]}")
 
-    # Use remaining budget to discover new supplier/buyer candidates.
-    generic_queue = _supplier_queries(state) + _buyer_queries(state)
     for query, lead_type, category in generic_queue:
         if used_this_tick >= allowed:
             break
         try:
             budget["queries_used"] += 1; used_this_tick += 1; stats["queries"] += 1
+            if lead_type == "buyer": stats["buyer_discovery_queries"] += 1
+            else: stats["supplier_discovery_queries"] += 1
             results = search(query)
             created = _store_results(state, query, lead_type, category, results)
             stats["new_leads"] += created
-            _log(state, f"Scout investigó {lead_type} para {category}: {created} leads nuevos con evidencia web.")
+            _log(state, f"Scout [{strategy}] investigó {lead_type} para {category}: {created} leads nuevos con evidencia web.")
         except Exception as exc:
             stats["errors"] += 1
             _log(state, f"Scout falló al investigar {category}: {str(exc)[:140]}")
 
     budget["queries_remaining"] = max(0, DAILY_QUERY_BUDGET - budget["queries_used"])
     budget["updated_at"] = utcnow()
+    budget["last_strategy"] = strategy
     stats["budget_used_today"] = budget["queries_used"]
     stats["budget_remaining"] = budget["queries_remaining"]
     stats["budget_exhausted"] = budget["queries_remaining"] <= 0
