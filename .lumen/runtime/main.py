@@ -13,6 +13,7 @@ from strategy_simulator_panel import inject_strategy_simulator
 from executive_management_panel import inject_executive_management
 from business_control_panel import inject_business_control
 from negotiation_intelligence_panel import inject_negotiation_intelligence
+from closing_orchestrator_panel import inject_closing_orchestrator
 from order_to_cash_panel import inject_order_to_cash
 from payment_rails_panel import inject_payment_rails
 from risk_red_team_panel import inject_risk_red_team
@@ -56,6 +57,10 @@ def _risk_for_account(account_id: str):
     return (STATE.get("counterparty_risk_index", {}) or {}).get(str(account_id or ""), {}) or {}
 
 
+def _close_pack(deal_id: str):
+    return (STATE.get("closing_pack_index", {}) or {}).get(str(deal_id or ""), {}) or {}
+
+
 @app.get("/command")
 def command_redirect(_=Depends(auth)):
     return RedirectResponse("/command-center", status_code=307)
@@ -74,6 +79,7 @@ def command_center(_=Depends(auth)):
     html = inject_executive_management(html, STATE)
     html = inject_business_control(html, STATE)
     html = inject_negotiation_intelligence(html, STATE)
+    html = inject_closing_orchestrator(html, STATE)
     html = inject_order_to_cash(html, STATE)
     html = inject_payment_rails(html, STATE)
     html = inject_treasury(html, STATE)
@@ -118,6 +124,7 @@ def api_deal_room(deal_id: str, _=Depends(auth)):
         "management": management,
         "capital_intelligence": capital,
         "negotiation_intelligence": negotiation,
+        "closing_pack": _close_pack(deal_id),
         "post_sale": post_sale,
         "payment_route": (STATE.get("payment_route_index", {}) or {}).get(str(deal_id), {}),
         "payment_rails": STATE.get("payment_rails", {}),
@@ -168,6 +175,8 @@ def api_control_tower(_=Depends(auth)):
         "negotiation_intelligence": STATE.get("negotiation_intelligence", {}),
         "counterparty_behavior_profiles": STATE.get("counterparty_behavior_profiles", []),
         "negotiation_plans": list((STATE.get("negotiation_plan_index", {}) or {}).values()),
+        "closing_orchestrator": STATE.get("closing_orchestrator", {}),
+        "closing_packs": STATE.get("closing_packs", []),
         "order_to_cash": STATE.get("order_to_cash", {}),
         "order_to_cash_cases": STATE.get("order_to_cash_cases", []),
         "payment_rails": STATE.get("payment_rails", {}),
@@ -258,6 +267,19 @@ def executive_decision(
                 },
             )
 
+        pack = _close_pack(str(deal.get("id") or ""))
+        if not pack or pack.get("status") != "READY_FOR_HUMAN_APPROVAL":
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "status": "approval_blocked_by_closing_orchestrator",
+                    "deal_id": deal.get("id"),
+                    "close_pack_status": pack.get("status") if pack else None,
+                    "missing": (pack.get("missing") or []) if pack else ["closing_pack_missing"],
+                    "message": "El paquete de cierre ya no está completamente listo. LUMEN exige comisión/modelo de ingresos, medio de cobro, economía y riesgo validados antes de aprobar.",
+                },
+            )
+
         missing = list(deal.get("preclose_missing") or [])
         if missing:
             raise HTTPException(
@@ -269,13 +291,21 @@ def executive_decision(
                     "message": "El estado cambió o faltan controles. LUMEN no permite aprobar todavía.",
                 },
             )
+
+        # This explicit user action is the human authority event. It does not itself move money or sign an external contract.
+        deal["human_close_approval"] = True
+        deal["close_approval_status"] = "approved"
+        deal["human_close_approved_at"] = approval.get("approved_at") or None
         try:
             txn = approve_and_close(STATE, approval_id)
         except ValueError as exc:
+            deal["human_close_approval"] = False
+            deal["close_approval_status"] = "approval_failed"
             raise HTTPException(status_code=409, detail=str(exc))
+        deal["human_close_approved_at"] = txn.get("created_at")
         STATE.setdefault("activity", []).insert(0, {
             "ts": txn.get("created_at"),
-            "msg": f"Panel de Aprobaciones: José aprobó internamente {approval_id} para {approval.get('deal_id')}. No se ejecutó compromiso financiero real.",
+            "msg": f"Panel de Aprobaciones: José aprobó el paquete de cierre {approval_id} para {approval.get('deal_id')}. La autorización quedó registrada; cualquier ejecución financiera/contractual externa sigue limitada a los rieles habilitados.",
         })
     elif action == "reject":
         try:
