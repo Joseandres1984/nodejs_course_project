@@ -44,6 +44,7 @@ def plan_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     strategic = state.get("strategic_directive", {}) or {}
     growth = state.get("growth_directive", {}) or {}
     trade = state.get("trade_directive", {}) or {}
+    revops = state.get("commercial_execution_directive", {}) or {}
     operations = state.get("operations_directive", {}) or {}
     coo_report = state.get("autonomous_coo", {}) or {}
 
@@ -89,6 +90,29 @@ def plan_tick(state: Dict[str, Any]) -> Dict[str, Any]:
         add("margin_gap", 95, "Mejorar economía y proteger margen", f"Hay {margin_gaps} negocios por debajo del margen objetivo.")
     if pending_approvals:
         add("approval_gap", 85, "Presentar decisiones de alto impacto para aprobación", f"Hay {pending_approvals} compromisos que requieren autorización humana.", autonomous=False)
+
+    # RevOps promotes the current real commercial bottleneck into the executive agenda.
+    revops_status = str(revops.get("primary_status") or "")
+    revops_next = str(revops.get("primary_next_action") or "")
+    revops_priority = {
+        "nonbinding_negotiation": 96,
+        "quote_clarification": 93,
+        "commercial_comparison_ready": 92,
+        "rfq_execution": 90,
+        "requirement_discovery": 89,
+        "single_quote_ready": 86,
+        "awaiting_supplier_response": 76,
+        "buyer_question_answered": 72,
+    }.get(revops_status)
+    if revops_priority:
+        add(
+            f"revops_{revops_status}",
+            revops_priority,
+            f"Ejecutar siguiente mejor acción comercial: {revops_next or revops_status}",
+            f"Commercial Execution Brain mantiene {revops.get('active_cases', 0)} caso(s) activos; caso principal {revops.get('primary_case_id')} en estado {revops_status}.",
+            autonomous=True,
+            source="commercial_execution",
+        )
 
     if strategic.get("mode"):
         mode = str(strategic.get("mode"))
@@ -159,7 +183,7 @@ def plan_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     plan = {
         "updated_at": utcnow(),
         "primary": primary,
-        "priorities": priorities[:9],
+        "priorities": priorities[:10],
         "snapshot": {
             "verified_suppliers": verified_suppliers,
             "verified_buyers": verified_buyers,
@@ -168,6 +192,10 @@ def plan_tick(state: Dict[str, Any]) -> Dict[str, Any]:
             "pending_approvals": pending_approvals,
             "operations_status": ops_status or None,
             "operations_health_score": coo_report.get("health_score"),
+            "revops_primary_case": revops.get("primary_case_id"),
+            "revops_primary_status": revops_status or None,
+            "revops_next_action": revops_next or None,
+            "revops_active_cases": revops.get("active_cases"),
             "corporate_strategy_mode": strategic.get("mode"),
             "corporate_strategy_epoch": strategic.get("strategy_epoch"),
             "growth_ready": bool(growth.get("ready")),
@@ -178,7 +206,7 @@ def plan_tick(state: Dict[str, Any]) -> Dict[str, Any]:
             "trade_deal_id": trade.get("deal_id"),
             "trade_landed_savings_pct": trade.get("landed_savings_pct"),
         },
-        "decision_rule": "salud operativa y controles críticos primero; luego maximizar valor económico sostenible alineado con estrategia, expansión y landed cost verificables",
+        "decision_rule": "salud operativa y controles críticos primero; luego destrabar conversaciones comerciales reales y maximizar valor económico sostenible",
     }
     state["executive_plan"] = plan
     record_decision(
