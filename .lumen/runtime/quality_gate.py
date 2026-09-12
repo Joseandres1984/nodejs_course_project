@@ -87,6 +87,10 @@ def _deal(state: Dict[str, Any], deal_id: Any) -> Dict[str, Any] | None:
     return next((x for x in state.get("deals", []) if x.get("id") == deal_id), None)
 
 
+def _counterparty_risk(state: Dict[str, Any], account_id: Any) -> Dict[str, Any]:
+    return dict((state.get("counterparty_risk_index", {}) or {}).get(str(account_id or ""), {}) or {})
+
+
 def _review(state: Dict[str, Any], item: Dict[str, Any]) -> tuple[bool, List[str]]:
     reasons: List[str] = []
     target = str(item.get("contact") or "").strip().lower()
@@ -121,7 +125,13 @@ def _review(state: Dict[str, Any], item: Dict[str, Any]) -> tuple[bool, List[str
         if relation.get("relationship_state") == "cooldown":
             reasons.append("La relación está en período de cooldown")
 
+    risk = _counterparty_risk(state, item.get("counterparty_account_id"))
+    if risk.get("risk_tier") == "BLOCKED" or risk.get("can_outreach") is False:
+        reasons.append("Counterparty Risk bloquea esta contraparte")
+
     deal = _deal(state, item.get("deal_id"))
+    if deal and deal.get("red_team_hold"):
+        reasons.append("El Auditor Interno mantiene el deal en hold")
     if deal and deal.get("incident_hold") and item.get("kind") not in {"terms_clarification"}:
         reasons.append("El deal tiene un incidente/reclamo abierto; se congelan comunicaciones comerciales que puedan ampliar exposición")
 
@@ -177,7 +187,7 @@ def quality_tick(state: Dict[str, Any]) -> Dict[str, int]:
                 object_type="message",
                 object_id=str(item.get("id") or ""),
                 decision="outbound_quality_passed",
-                reason="Contacto, tono, relación, contenido, trazabilidad, Deal Safeguards y autoridad cumplen las reglas de salida.",
+                reason="Contacto, tono, relación, Counterparty Risk, Red Team, trazabilidad, Deal Safeguards y autoridad cumplen las reglas de salida.",
                 action="authorize_message_for_mail_connector",
                 confidence=0.99,
                 evidence_refs=[],
