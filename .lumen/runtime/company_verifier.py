@@ -13,7 +13,8 @@ from typing import Any, Dict, List
 from autonomy_governor import record_decision, register_incident
 
 MAX_PER_TICK = max(1, min(4, int(os.getenv("LUMEN_VERIFY_MAX_ACCOUNTS", "2"))))
-MAX_BYTES = 350_000
+MAX_BYTES_PER_PAGE = 260_000
+MAX_PAGES_PER_ACCOUNT = 4
 USER_AGENT = "LUMEN-B2B/1.0 business-research"
 BUSINESS_TERMS = (
     "empresa", "compañía", "compania", "industria", "industrial", "productos", "servicios",
@@ -22,10 +23,12 @@ BUSINESS_TERMS = (
 )
 SUPPLIER_TERMS = ("fabricante", "distribuidor", "distribuidora", "proveedor", "representante", "productos", "stock", "catalogo", "catálogo")
 BUYER_CONTEXT_TERMS = ("planta", "producción", "produccion", "mantenimiento", "operaciones", "ingeniería", "ingenieria", "industria", "servicios")
+DISCOVERY_HINTS = ("producto", "product", "servicio", "service", "solucion", "solution", "empresa", "nosotros", "about", "catalogo", "catalog")
 STOPWORDS = {"para", "con", "una", "uno", "del", "las", "los", "por", "que", "and", "the", "argentina", "empresa"}
 TAG_RE = re.compile(r"<[^>]+>")
 WS_RE = re.compile(r"\s+")
 TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.I | re.S)
+HREF_RE = re.compile(r"href=[\"']([^\"']+)[\"']", re.I)
 META_DESC_RE = re.compile(r"<meta[^>]+(?:name=[\"']description[\"'][^>]+content=[\"']([^\"']+)|content=[\"']([^\"']+)[\"'][^>]+name=[\"']description[\"'])", re.I | re.S)
 
 
@@ -44,6 +47,26 @@ def _tokens(text: str) -> List[str]:
 
 def _clean_text(html: str) -> str:
     return WS_RE.sub(" ", unescape(TAG_RE.sub(" ", html))).strip()
+
+
+def _host(url: str) -> str:
+    try:
+        return (urllib.parse.urlparse(url).hostname or "").lower().removeprefix("www.")
+    except Exception:
+        return ""
+
+
+def _canonical_domain(host: str) -> str:
+    parts = [p for p in (host or "").split(".") if p]
+    if len(parts) <= 2:
+        return host
+    if len(parts) >= 3 and parts[-2:] == ["com", "ar"]:
+        return ".".join(parts[-3:])
+    return ".".join(parts[-2:])
+
+
+def _same_domain(url: str, domain: str) -> bool:
+    return bool(_host(url) and _canonical_domain(_host(url)) == _canonical_domain(domain))
 
 
 def _assert_safe_url(url: str) -> None:
@@ -96,14 +119,14 @@ _SAFE_OPENER = urllib.request.build_opener(SafeRedirectHandler())
 def _fetch(url: str) -> tuple[str, str, int]:
     _assert_safe_url(url)
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "text/html,application/xhtml+xml"})
-    with _SAFE_OPENER.open(req, timeout=18) as resp:
+    with _SAFE_OPENER.open(req, timeout=14) as resp:
         final_url = resp.geturl()
         _assert_safe_url(final_url)
         status = int(getattr(resp, "status", 200) or 200)
         ctype = (resp.headers.get("Content-Type") or "").lower()
         if "text/html" not in ctype and "application/xhtml+xml" not in ctype:
             return "", final_url, status
-        raw = resp.read(MAX_BYTES)
+        raw = resp.read(MAX_BYTES_PER_PAGE)
         return raw.decode("utf-8", errors="replace"), final_url, status
 
 
@@ -111,10 +134,10 @@ def _homepage(account: Dict[str, Any]) -> List[str]:
     domain = str(account.get("domain") or "").strip()
     source = str(account.get("source_url") or "").strip()
     urls: List[str] = []
-    if domain:
-        urls.extend([f"https://{domain}/", f"http://{domain}/"])
     if source.startswith(("http://", "https://")):
         urls.append(source)
+    if domain:
+        urls.extend([f"https://{domain}/", f"http://{domain}/"])
     return list(dict.fromkeys(urls))[:3]
 
 
@@ -145,17 +168,54 @@ def _category_match(category: str, text: str) -> tuple[int, List[str]]:
     return round(35 * len(hits) / len(words)), hits
 
 
-def verify_account(account: Dict[str, Any]) -> Dict[str, Any]:
-    html = ""; final_url = ""; http_status = 0; error = ""
-    for url in _homepage(account):
+def _discover_internal_links(html: str, base_url: str, domain: str, category: str) -> List[str]:
+    category_tokens = _tokens(category)
+    scored: List[tuple[int, str]] = []
+    seen = set()
+    for href in HREF_RE.findall(html or ""):
+        url = urllib.parse.urljoin(base_url, href).split("#", 1)[0]
+        if not url.startswith(("http://", "https://")) or not _same_domain(url, domain) or url in seen:
+            continue
+        seen.add(url)
+        low = url.lower()
+        score = sum(3 for hint in DISCOVERY_HINTS if hint in low)
+        score += sum(5 for token in category_tokens if token in low)
+        if score > 0:
+            scored.append((score, url))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [url for _, url in scored[:4]]
+
+
+def _collect_evidence(account: Dict[str, Any]) -> tuple[List[Dict[str, Any]], str]:
+    domain = str(account.get("domain") or "").strip()
+    category = str(account.get("category") or "")
+    pages: List[Dict[str, Any]] = []
+    error = ""
+    queued = _homepage(account)
+    seen = set()
+
+    while queued and len(pages) < MAX_PAGES_PER_ACCOUNT:
+        url = queued.pop(0)
+        if url in seen:
+            continue
+        seen.add(url)
         try:
-            html, final_url, http_status = _fetch(url)
-            if html:
-                break
+            html, final_url, status = _fetch(url)
         except Exception as exc:
             error = str(exc)[:160]
+            continue
+        if not html or (domain and not _same_domain(final_url, domain)):
+            continue
+        pages.append({"url": final_url, "status": status, "html": html})
+        for discovered in _discover_internal_links(html, final_url, domain or _host(final_url), category):
+            if discovered not in seen and discovered not in queued:
+                queued.append(discovered)
+    return pages, error
 
-    if not html:
+
+def verify_account(account: Dict[str, Any]) -> Dict[str, Any]:
+    pages, error = _collect_evidence(account)
+    if not pages:
         account.update({
             "verification_status": "retry_required",
             "verification_error": error or "No se obtuvo HTML corporativo",
@@ -164,23 +224,34 @@ def verify_account(account: Dict[str, Any]) -> Dict[str, Any]:
         })
         return {"verified": False, "retry": True}
 
-    title = _title(html)
-    description = _description(html)
-    text = _clean_text(html)[:100_000]
-    combined = f"{title} {description} {text}"
+    combined_parts: List[str] = []
+    evidence_urls: List[str] = []
+    title = ""; description = ""; http_status = 0
+    for idx, page in enumerate(pages):
+        html = page["html"]
+        if idx == 0:
+            title = _title(html); description = _description(html); http_status = int(page.get("status") or 0)
+        evidence_urls.append(str(page.get("url") or ""))
+        combined_parts.append(_clean_text(html)[:75_000])
+    combined = f"{title} {description} " + " ".join(combined_parts)
+
     category_score, hits = _category_match(str(account.get("category") or ""), combined)
     business_hits = _contains(combined, BUSINESS_TERMS)
     role_terms = SUPPLIER_TERMS if account.get("type") == "supplier" else BUYER_CONTEXT_TERMS
     role_hits = _contains(combined, role_terms)
 
-    score = 25
+    score = 22
     score += min(20, business_hits * 4)
     score += category_score
     score += min(15, role_hits * 3)
+    if len(pages) >= 2:
+        score += 5
+    if len(pages) >= 3:
+        score += 3
     score = max(0, min(100, score))
     verified = score >= 70 and business_hits >= 2 and (category_score >= 12 or role_hits >= 2)
 
-    reasons: List[str] = ["Sitio web público accesible y asociado al dominio candidato"]
+    reasons: List[str] = [f"{len(pages)} página(s) pública(s) del mismo dominio revisadas"]
     if business_hits >= 2: reasons.append("Contenido corporativo suficiente")
     if hits: reasons.append("Coincidencia de categoría: " + ", ".join(hits[:5]))
     if role_hits >= 2: reasons.append("Contexto compatible con rol comercial esperado")
@@ -191,7 +262,9 @@ def verify_account(account: Dict[str, Any]) -> Dict[str, Any]:
         "verification_score": score,
         "verified_company": verified,
         "verified_contact": False,
-        "official_url": final_url,
+        "official_url": evidence_urls[0] if evidence_urls else None,
+        "evidence_urls": evidence_urls[:MAX_PAGES_PER_ACCOUNT],
+        "pages_reviewed": len(pages),
         "http_status": http_status,
         "site_title": title,
         "site_description": description,
@@ -224,7 +297,7 @@ def verification_tick(state: Dict[str, Any]) -> Dict[str, int]:
                     state, engine="Company Verification", object_type="candidate_account", object_id=str(account.get("id")),
                     decision="verified_company", reason="; ".join(str(x) for x in account.get("verification_reasons", [])[:5]),
                     action="verify_company", confidence=float(account.get("verification_score") or 0) / 100.0,
-                    evidence_refs=[str(account.get("official_url") or "")],
+                    evidence_refs=[str(x) for x in account.get("evidence_urls", [])[:4]],
                 )
             elif result.get("retry"):
                 account["status"] = "verification_required"
@@ -241,7 +314,7 @@ def verification_tick(state: Dict[str, Any]) -> Dict[str, int]:
                     state, engine="Company Verification", object_type="candidate_account", object_id=str(account.get("id")),
                     decision="evidence_insufficient", reason="; ".join(str(x) for x in account.get("verification_reasons", [])[:5]),
                     action="verify_company", confidence=float(account.get("verification_score") or 0) / 100.0,
-                    evidence_refs=[str(account.get("official_url") or account.get("source_url") or "")], allowed=False,
+                    evidence_refs=[str(x) for x in account.get("evidence_urls", [])[:4]], allowed=False,
                 )
         except Exception as exc:
             account.update({"verification_status": "retry_required", "verification_error": str(exc)[:160], "verified_at": utcnow()})
