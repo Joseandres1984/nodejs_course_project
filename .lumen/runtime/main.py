@@ -4,6 +4,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from app import app, auth, load_state, save_state, DB_STATUS, STATE, ensure_commerce_state
 from commerce import approve_and_close
 from control_tower import build_control_tower, render_control_tower
+from dashboard_spanish import spanishize_dashboard
 from executive_alerts import executive_alert_tick, mark_alerts_seen, reject_approval
 from approval_cockpit import build_cockpit, inject_cockpit
 from revenue_factory_panel import inject_revenue_factory
@@ -12,6 +13,7 @@ from strategy_simulator_panel import inject_strategy_simulator
 from executive_management_panel import inject_executive_management
 from business_control_panel import inject_business_control
 from negotiation_intelligence_panel import inject_negotiation_intelligence
+from order_to_cash_panel import inject_order_to_cash
 from venture_builder_panel import inject_venture_builder
 from deal_room import build_deal_room
 from deal_room_panel import inject_deal_room_index, render_deal_room
@@ -65,11 +67,13 @@ def command_center(_=Depends(auth)):
     html = inject_executive_management(html, STATE)
     html = inject_business_control(html, STATE)
     html = inject_negotiation_intelligence(html, STATE)
+    html = inject_order_to_cash(html, STATE)
     html = inject_venture_builder(html, STATE)
     html = inject_strategy_simulator(html, STATE)
     html = inject_deal_room_index(html, STATE)
     html = inject_supplier_network(html, STATE)
     html = inject_safeguards(html, STATE)
+    html = spanishize_dashboard(html)
     mark_alerts_seen(STATE)
     save_state()
     return HTMLResponse(html)
@@ -83,6 +87,7 @@ def deal_room_view(deal_id: str, _=Depends(auth)):
     html = render_deal_room(room, STATE)
     html = inject_supplier_squad_detail(html, STATE, deal_id)
     html = inject_deal_safeguards(html, STATE, deal_id)
+    html = spanishize_dashboard(html)
     return HTMLResponse(html)
 
 
@@ -95,11 +100,13 @@ def api_deal_room(deal_id: str, _=Depends(auth)):
     venture = _venture_for_id(str(deal.get("venture_id") or ""))
     capital = (STATE.get("capital_priority_index", {}) or {}).get(str(deal_id), {})
     negotiation = (STATE.get("negotiation_plan_index", {}) or {}).get(str(deal_id), {})
+    post_sale = [x for x in STATE.get("order_to_cash_cases", []) if str(x.get("deal_id") or "") == str(deal_id)]
     return {
         "deal_room": room,
         "management": management,
         "capital_intelligence": capital,
         "negotiation_intelligence": negotiation,
+        "post_sale": post_sale,
         "venture": venture,
         "venture_id": deal.get("venture_id"),
         "supplier_squad": (STATE.get("supplier_squad_index", {}) or {}).get(str(deal_id), {}),
@@ -140,6 +147,8 @@ def api_control_tower(_=Depends(auth)):
         "negotiation_intelligence": STATE.get("negotiation_intelligence", {}),
         "counterparty_behavior_profiles": STATE.get("counterparty_behavior_profiles", []),
         "negotiation_plans": list((STATE.get("negotiation_plan_index", {}) or {}).values()),
+        "order_to_cash": STATE.get("order_to_cash", {}),
+        "order_to_cash_cases": STATE.get("order_to_cash_cases", []),
         "venture_builder": STATE.get("venture_builder", {}),
         "venture_builder_directive": STATE.get("venture_builder_directive", {}),
         "venture_attribution_stats": STATE.get("venture_attribution_stats", {}),
