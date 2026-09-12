@@ -14,6 +14,7 @@ from executive_management_panel import inject_executive_management
 from business_control_panel import inject_business_control
 from negotiation_intelligence_panel import inject_negotiation_intelligence
 from order_to_cash_panel import inject_order_to_cash
+from risk_red_team_panel import inject_risk_red_team
 from venture_builder_panel import inject_venture_builder
 from deal_room import build_deal_room
 from deal_room_panel import inject_deal_room_index, render_deal_room
@@ -49,6 +50,10 @@ def _venture_for_id(venture_id: str):
     return next((x for x in (STATE.get("venture_builder", {}) or {}).get("ventures", []) if str(x.get("id")) == str(venture_id)), {})
 
 
+def _risk_for_account(account_id: str):
+    return (STATE.get("counterparty_risk_index", {}) or {}).get(str(account_id or ""), {}) or {}
+
+
 @app.get("/command")
 def command_redirect(_=Depends(auth)):
     return RedirectResponse("/command-center", status_code=307)
@@ -68,6 +73,7 @@ def command_center(_=Depends(auth)):
     html = inject_business_control(html, STATE)
     html = inject_negotiation_intelligence(html, STATE)
     html = inject_order_to_cash(html, STATE)
+    html = inject_risk_red_team(html, STATE)
     html = inject_venture_builder(html, STATE)
     html = inject_strategy_simulator(html, STATE)
     html = inject_deal_room_index(html, STATE)
@@ -101,12 +107,18 @@ def api_deal_room(deal_id: str, _=Depends(auth)):
     capital = (STATE.get("capital_priority_index", {}) or {}).get(str(deal_id), {})
     negotiation = (STATE.get("negotiation_plan_index", {}) or {}).get(str(deal_id), {})
     post_sale = [x for x in STATE.get("order_to_cash_cases", []) if str(x.get("deal_id") or "") == str(deal_id)]
+    red_team_findings = [x for x in STATE.get("red_team_findings", []) if str(x.get("object_id") or "") == str(deal_id)]
     return {
         "deal_room": room,
         "management": management,
         "capital_intelligence": capital,
         "negotiation_intelligence": negotiation,
         "post_sale": post_sale,
+        "counterparty_risk": {
+            "buyer": _risk_for_account(str(deal.get("buyer_account_id") or "")),
+            "supplier": _risk_for_account(str(deal.get("supplier_account_id") or "")),
+        },
+        "red_team": {"hold": bool(deal.get("red_team_hold")), "findings": red_team_findings},
         "venture": venture,
         "venture_id": deal.get("venture_id"),
         "supplier_squad": (STATE.get("supplier_squad_index", {}) or {}).get(str(deal_id), {}),
@@ -149,6 +161,10 @@ def api_control_tower(_=Depends(auth)):
         "negotiation_plans": list((STATE.get("negotiation_plan_index", {}) or {}).values()),
         "order_to_cash": STATE.get("order_to_cash", {}),
         "order_to_cash_cases": STATE.get("order_to_cash_cases", []),
+        "counterparty_risk": STATE.get("counterparty_risk", {}),
+        "counterparty_risk_profiles": STATE.get("counterparty_risk_profiles", []),
+        "red_team_audit": STATE.get("red_team_audit", {}),
+        "red_team_findings": STATE.get("red_team_findings", []),
         "venture_builder": STATE.get("venture_builder", {}),
         "venture_builder_directive": STATE.get("venture_builder_directive", {}),
         "venture_attribution_stats": STATE.get("venture_attribution_stats", {}),
@@ -212,6 +228,21 @@ def executive_decision(
                 },
             )
 
+        buyer_risk = _risk_for_account(str(deal.get("buyer_account_id") or ""))
+        supplier_risk = _risk_for_account(str(deal.get("supplier_account_id") or ""))
+        blocked_risks = [x for x in (buyer_risk, supplier_risk) if x.get("risk_tier") == "BLOCKED"]
+        if deal.get("red_team_hold") or blocked_risks:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "status": "approval_blocked_by_risk_or_red_team",
+                    "deal_id": deal.get("id"),
+                    "red_team_hold": bool(deal.get("red_team_hold")),
+                    "blocked_counterparties": [x.get("account_id") for x in blocked_risks],
+                    "message": "Riesgo de Contrapartes o Auditor Interno mantiene un bloqueo. Resolverlo antes de aprobar el cierre.",
+                },
+            )
+
         missing = list(deal.get("preclose_missing") or [])
         if missing:
             raise HTTPException(
@@ -229,7 +260,7 @@ def executive_decision(
             raise HTTPException(status_code=409, detail=str(exc))
         STATE.setdefault("activity", []).insert(0, {
             "ts": txn.get("created_at"),
-            "msg": f"Approval Cockpit: José aprobó internamente {approval_id} para {approval.get('deal_id')}. No se ejecutó compromiso financiero real.",
+            "msg": f"Panel de Aprobaciones: José aprobó internamente {approval_id} para {approval.get('deal_id')}. No se ejecutó compromiso financiero real.",
         })
     elif action == "reject":
         try:
@@ -238,7 +269,7 @@ def executive_decision(
             raise HTTPException(status_code=409, detail=str(exc))
         STATE.setdefault("activity", []).insert(0, {
             "ts": approval.get("rejected_at"),
-            "msg": f"Approval Cockpit: José rechazó {approval_id}; el caso vuelve a revisión ejecutiva.",
+            "msg": f"Panel de Aprobaciones: José rechazó {approval_id}; el caso vuelve a revisión ejecutiva.",
         })
     else:
         raise HTTPException(status_code=400, detail="Decisión inválida; usar approve o reject")
