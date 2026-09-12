@@ -19,7 +19,15 @@ RISKY_COMMITMENT_PHRASES = (
     "garantizamos stock",
     "garantizamos la entrega",
     "comprometemos el pago",
+    "aceptamos sus condiciones",
+    "queda adjudicado",
 )
+
+REVOPS_MULTITURN_KINDS = {
+    "quote_clarification",
+    "supplier_negotiation",
+    "buyer_information_response",
+}
 
 
 def _log(state: Dict[str, Any], message: str) -> None:
@@ -39,15 +47,25 @@ def _relationship_for(state: Dict[str, Any], contact: str, counterparty: str) ->
 
 
 def _duplicate_sent(state: Dict[str, Any], item: Dict[str, Any]) -> bool:
+    kind = str(item.get("kind") or "")
+    execution_key = str(item.get("execution_key") or "")
     for other in state.get("outbox", []):
         if other is item or other.get("status") != "sent":
             continue
-        if (
+        same_conversation_slot = (
             other.get("deal_id") == item.get("deal_id")
             and other.get("kind") == item.get("kind")
             and str(other.get("contact") or "").lower() == str(item.get("contact") or "").lower()
-        ):
-            return True
+        )
+        if not same_conversation_slot:
+            continue
+        # RevOps may legitimately ask a second clarification or negotiate again only when new evidence created
+        # a distinct idempotent execution key. Reusing the same key remains blocked.
+        if kind in REVOPS_MULTITURN_KINDS and item.get("revops_case_id") and execution_key:
+            other_key = str(other.get("execution_key") or "")
+            if other_key and other_key != execution_key:
+                continue
+        return True
     return False
 
 
@@ -95,8 +113,13 @@ def _review(state: Dict[str, Any], item: Dict[str, Any]) -> tuple[bool, List[str
             reasons.append("La propuesta no tiene economía calculada")
         elif not bool(deal.get("economics", {}).get("viable")):
             reasons.append("La economía del negocio no cumple el margen mínimo")
-    if item.get("kind") == "supplier_rfq" and deal and not deal.get("need"):
-        reasons.append("RFQ sin necesidad/requerimiento identificable")
+    if item.get("kind") == "supplier_rfq":
+        if deal and not deal.get("need"):
+            reasons.append("RFQ sin necesidad/requerimiento identificable")
+        if not deal and not item.get("interlocution_case_id"):
+            reasons.append("RFQ sin deal ni caso de requerimiento trazable")
+    if item.get("kind") in REVOPS_MULTITURN_KINDS and not item.get("execution_key"):
+        reasons.append("Turno RevOps sin clave idempotente")
 
     return len(reasons) == 0, reasons
 
@@ -131,7 +154,7 @@ def quality_tick(state: Dict[str, Any]) -> Dict[str, int]:
                 object_type="message",
                 object_id=str(item.get("id") or ""),
                 decision="outbound_quality_passed",
-                reason="Contacto, tono, relación, contenido y autoridad cumplen las reglas de salida.",
+                reason="Contacto, tono, relación, contenido, trazabilidad y autoridad cumplen las reglas de salida.",
                 action="authorize_message_for_mail_connector",
                 confidence=0.99,
                 evidence_refs=[],
