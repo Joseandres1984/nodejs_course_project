@@ -15,6 +15,7 @@ from relationship_memory import relationship_tick
 from counterparty_scorecards import scorecards_tick
 from executive_director import plan_tick
 from entrepreneurial_drive import drive_tick
+from mission_scout import mission_scout_tick
 from communication_director import review_outbox
 from quality_gate import quality_tick
 from business_kpis import kpi_tick
@@ -30,8 +31,6 @@ if __name__ == "__main__":
         seed_demo()
 
     # 1) Observe the market and convert raw public signals into verified evidence.
-    # Scout consumes the entrepreneurial mission selected on the previous cycle,
-    # creating a closed planning -> action -> evidence -> planning loop.
     scout = scout_tick(STATE)
     intelligence = qualify_tick(STATE)
     verification = verification_tick(STATE)
@@ -56,11 +55,15 @@ if __name__ == "__main__":
     scorecards = scorecards_tick(STATE)
 
     # 6) Executive layer chooses the highest-value bottleneck; Entrepreneurial Drive turns it into
-    # a persistent mission portfolio, tracks stagnation and allocates attention for the next cycle.
+    # a persistent mission portfolio, tracks stagnation and allocates attention.
     executive_plan = plan_tick(STATE)
     entrepreneurial_drive = drive_tick(STATE)
 
-    # 7) Every outbound message must pass relationship-oriented communication review AND quality authorization.
+    # 7) Mission Scout immediately spends any remaining research budget in the direction chosen by the company.
+    # New leads enter the normal verification pipeline on the next cycle; no trust gate is bypassed.
+    mission_scout = mission_scout_tick(STATE)
+
+    # 8) Every outbound message must pass relationship-oriented communication review AND quality authorization.
     communication = review_outbox(STATE)
     quality = quality_tick(STATE)
     outbound = send_pending(STATE, LIVE_OUTBOUND)
@@ -69,6 +72,7 @@ if __name__ == "__main__":
         "updated_at": utcnow(),
         "scout": scout,
         "scout_status": scout_status(),
+        "mission_scout": mission_scout,
         "lead_intelligence": intelligence,
         "company_verification": verification,
         "demand_intelligence": demand_intelligence,
@@ -91,7 +95,7 @@ if __name__ == "__main__":
         "live_outbound": bool(LIVE_OUTBOUND),
     }
 
-    # 8) KPIs are computed after telemetry so health and funnel metrics reflect this exact cycle.
+    # 9) KPIs are computed after telemetry so health and funnel metrics reflect this exact cycle.
     business_kpis = kpi_tick(STATE)
     STATE["connector_telemetry"]["business_kpis"] = business_kpis
 
@@ -108,6 +112,7 @@ if __name__ == "__main__":
         "result": result,
         "scout": scout,
         "scout_status": scout_status(),
+        "mission_scout": mission_scout,
         "lead_intelligence": intelligence,
         "company_verification": verification,
         "demand_intelligence": demand_intelligence,
