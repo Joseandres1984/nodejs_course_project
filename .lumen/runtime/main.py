@@ -9,6 +9,8 @@ from approval_cockpit import build_cockpit, inject_cockpit
 from revenue_factory_panel import inject_revenue_factory
 from master_command_panel import inject_master_panel
 from strategy_simulator_panel import inject_strategy_simulator
+from deal_room import build_deal_room
+from deal_room_panel import inject_deal_room_index, render_deal_room
 
 
 @app.get("/health/persistence")
@@ -24,6 +26,13 @@ def _load_control_state() -> None:
     if not loaded and DB_STATUS.get("configured") and not DB_STATUS.get("connected"):
         raise HTTPException(status_code=503, detail={"status": "control_tower_unavailable", "postgres": DB_STATUS})
     ensure_commerce_state(STATE)
+
+
+def _real_deal(deal_id: str):
+    deal = next((x for x in STATE.get("deals", []) if str(x.get("id")) == str(deal_id)), None)
+    if not deal or deal.get("source") == "demo" or str(deal.get("stage") or "") in {"cerrado (simulación)", "closed_simulated"}:
+        raise HTTPException(status_code=404, detail="Deal Room inexistente o no corresponde a un deal real")
+    return deal
 
 
 @app.get("/command")
@@ -42,9 +51,33 @@ def command_center(_=Depends(auth)):
     html = inject_revenue_factory(html, STATE)
     html = inject_master_panel(html, STATE)
     html = inject_strategy_simulator(html, STATE)
+    html = inject_deal_room_index(html, STATE)
     mark_alerts_seen(STATE)
     save_state()
     return HTMLResponse(html)
+
+
+@app.get("/deal-room/{deal_id}", response_class=HTMLResponse)
+def deal_room_view(deal_id: str, _=Depends(auth)):
+    _load_control_state()
+    deal = _real_deal(deal_id)
+    room = build_deal_room(STATE, deal)
+    return HTMLResponse(render_deal_room(room, STATE))
+
+
+@app.get("/api/deal-room/{deal_id}")
+def api_deal_room(deal_id: str, _=Depends(auth)):
+    _load_control_state()
+    deal = _real_deal(deal_id)
+    room = build_deal_room(STATE, deal)
+    return {
+        "deal_room": room,
+        "company_mode": (STATE.get("master_governance", {}) or {}).get("company_mode"),
+        "master_governance": STATE.get("master_governance", {}),
+        "strategy_simulator": STATE.get("strategy_simulator", {}),
+        "strategy_experiment_overlay": STATE.get("strategy_experiment_overlay", {}),
+        "postgres": DB_STATUS,
+    }
 
 
 @app.get("/api/control-tower")
@@ -64,6 +97,8 @@ def api_control_tower(_=Depends(auth)):
         "constitutional_runtime_caps": STATE.get("constitutional_runtime_caps", {}),
         "strategy_simulator": STATE.get("strategy_simulator", {}),
         "strategy_experiment_overlay": STATE.get("strategy_experiment_overlay", {}),
+        "deal_room": STATE.get("deal_room", {}),
+        "deal_rooms": STATE.get("deal_rooms", []),
         "postgres": DB_STATUS,
     }
 
