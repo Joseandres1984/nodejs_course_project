@@ -1,0 +1,118 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from typing import Any, Dict, List
+
+from autonomy_governor import record_decision
+
+
+MAX_QUEUE = 80
+MAX_TOP_ACTIONS = 12
+
+
+def utcnow() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
+def _f(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _financial_task(item: Dict[str, Any]) -> Dict[str, Any]:
+    constraint = str(item.get("constraint") or "advance_pipeline")
+    human_constraints = {"preclose_controls", "contract", "payment", "financial_commitment"}
+    autonomous = constraint not in human_constraints
+    risk = "high" if not autonomous else "low"
+    money_score = max(0.0, min(100.0, _f(item.get("money_score"))))
+    risk_profit = max(0.0, _f(item.get("risk_adjusted_expected_profit_usd")))
+    impact = min(100.0, 55.0 + money_score * 0.45)
+    urgency = min(100.0, 62.0 + money_score * 0.34)
+    confidence = item.get("close_probability")
+    confidence = max(0.45, min(0.98, _f(confidence, 0.72)))
+    priority = impact * 0.46 + urgency * 0.29 + confidence * 25.0
+    if risk == "high":
+        priority -= 18.0
+
+    return {
+        "key": f"warroom|{item.get('rank_key') or item.get('deal_id') or item.get('deep_dive_case_id')}",
+        "kind": "money_priority",
+        "title": f"Prioridad económica #{item.get('rank')}: {item.get('category') or item.get('buyer') or 'oportunidad'}",
+        "reason": (
+            f"Money score {money_score:.1f}; beneficio esperado ajustado por riesgo USD {risk_profit:,.2f}; "
+            f"restricción: {constraint}."
+        ),
+        "impact": round(impact, 2),
+        "urgency": round(urgency, 2),
+        "confidence": round(confidence, 2),
+        "effort": 1.5,
+        "risk": risk,
+        "autonomous": autonomous,
+        "object_type": "deal" if item.get("deal_id") else "deep_dive_case",
+        "object_id": str(item.get("deal_id") or item.get("deep_dive_case_id") or ""),
+        "payload": {
+            "money_score": money_score,
+            "risk_adjusted_expected_profit_usd": risk_profit,
+            "constraint": constraint,
+            "recommended_action": item.get("next_action"),
+            "scenario_count": len(item.get("scenarios") or []),
+        },
+        "priority_score": round(max(0.0, priority / 1.12), 2),
+        "created_at": utcnow(),
+    }
+
+
+def financial_priority_tick(state: Dict[str, Any]) -> Dict[str, Any]:
+    existing = list(state.get("operating_action_queue", []) or [])
+    war_items = list(state.get("war_room", {}).get("top_money_opportunities", []) or [])
+    finance_tasks = [_financial_task(x) for x in war_items[:8]]
+
+    by_key: Dict[str, Dict[str, Any]] = {}
+    for task in [*existing, *finance_tasks]:
+        key = str(task.get("key") or f"anon|{len(by_key)}")
+        current = by_key.get(key)
+        if current is None or _f(task.get("priority_score")) > _f(current.get("priority_score")):
+            by_key[key] = task
+
+    merged = sorted(by_key.values(), key=lambda x: _f(x.get("priority_score")), reverse=True)[:MAX_QUEUE]
+    state["operating_action_queue"] = merged
+
+    chief = state.setdefault("chief_of_staff", {})
+    chief["top_actions"] = merged[:MAX_TOP_ACTIONS]
+    chief["financially_prioritized_at"] = utcnow()
+    chief["money_priority_actions"] = len(finance_tasks)
+    chief["autonomous_actions"] = sum(1 for x in merged if x.get("autonomous"))
+    chief["human_decisions_required"] = sum(1 for x in merged if not x.get("autonomous"))
+    chief["operating_rule"] = (
+        "priorizar acciones por beneficio esperado ajustado por riesgo + urgencia operativa; "
+        "automatizar lo reversible y escalar cualquier compromiso contractual o financiero"
+    )
+
+    top = merged[0] if merged else None
+    if top:
+        record_decision(
+            state,
+            engine="Financial Chief of Staff",
+            object_type=str(top.get("object_type") or "company"),
+            object_id=str(top.get("object_id") or "LUMEN"),
+            decision="financially_prioritized_action",
+            reason=str(top.get("reason") or top.get("title") or "Prioridad financiera-operativa"),
+            action="score_opportunity" if top.get("autonomous") else "prepare_draft",
+            confidence=max(0.5, min(0.99, _f(top.get("confidence"), 0.8))),
+            evidence_refs=[],
+            allowed=True,
+            requires_approval=not bool(top.get("autonomous")),
+        )
+
+    report = {
+        "updated_at": utcnow(),
+        "queue_size": len(merged),
+        "money_priority_actions": len(finance_tasks),
+        "top_action": top,
+        "autonomous_actions": chief.get("autonomous_actions", 0),
+        "human_decisions_required": chief.get("human_decisions_required", 0),
+    }
+    state["financial_chief_of_staff"] = report
+    return report
