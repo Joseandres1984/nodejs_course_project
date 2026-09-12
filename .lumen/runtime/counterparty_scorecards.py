@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Dict
 
+from procurement_orchestrator import procurement_tick
+
 
 def utcnow() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -54,9 +56,9 @@ def _risk_flags(account: Dict[str, Any], relation: Dict[str, Any]) -> list[str]:
     return flags
 
 
-def scorecards_tick(state: Dict[str, Any]) -> Dict[str, int]:
+def scorecards_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     accounts = state.setdefault("candidate_accounts", [])
-    stats = {"scored": 0, "high_quality": 0, "watchlist": 0, "blocked": 0}
+    stats: Dict[str, Any] = {"scored": 0, "high_quality": 0, "watchlist": 0, "blocked": 0}
 
     for account in accounts:
         relation = _relationship(state, str(account.get("id") or ""))
@@ -94,5 +96,17 @@ def scorecards_tick(state: Dict[str, Any]) -> Dict[str, int]:
         }
         stats["scored"] += 1
 
+    # Procurement runs here, after relationship + generic counterparty scoring and before CFO/RevOps.
+    # This lets the same cycle use evidence-ranked supplier squads without changing source quality metrics.
+    procurement = procurement_tick(state)
+    stats["supplier_network"] = {
+        "supplier_profiles": procurement.get("supplier_profiles"),
+        "tier_a": procurement.get("tier_a"),
+        "deal_squads": procurement.get("deal_squads"),
+        "squads_ready": procurement.get("squads_ready"),
+        "network_gaps": procurement.get("network_gaps"),
+        "revops_overlays_applied": procurement.get("revops_overlays_applied"),
+        "primary_directive": procurement.get("primary_directive"),
+    }
     state["counterparty_scorecard_stats"] = {**stats, "updated_at": utcnow()}
     return stats
