@@ -10,6 +10,8 @@ from email.header import decode_header
 from email.message import EmailMessage
 from typing import Any, Dict, List
 
+from document_intelligence import ingest_email_attachments
+
 
 def utcnow() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -157,7 +159,7 @@ def send_pending(state: Dict[str, Any], live_outbound: bool) -> Dict[str, int]:
 
 def fetch_unseen(state: Dict[str, Any], max_messages: int = 10) -> Dict[str, int]:
     state.setdefault("inbox", []); state.setdefault("opt_out", [])
-    stats = {"received": 0, "classified": 0, "offers_detected": 0}
+    stats = {"received": 0, "classified": 0, "offers_detected": 0, "documents_ingested": 0}
     status = connector_status()
     if not status["imap_configured"]:
         return stats
@@ -180,21 +182,31 @@ def fetch_unseen(state: Dict[str, Any], max_messages: int = 10) -> Dict[str, int
             subject = _decode_header(msg.get("Subject"))
             body = _plain_body(msg)
             classification = classify_reply(subject, body)
+            record_id = f"IN-{len(state['inbox'])+1:04d}"
+            document_ingest_ids = ingest_email_attachments(
+                state,
+                msg,
+                source_message_id=record_id,
+                sender=sender,
+                subject=subject,
+            )
             record = {
-                "id": f"IN-{len(state['inbox'])+1:04d}",
+                "id": record_id,
                 "from": sender,
                 "subject": subject,
                 "body": body,
                 "classification": classification,
+                "document_ingest_ids": document_ingest_ids,
                 "received_at": utcnow(),
             }
             state["inbox"].append(record)
             stats["received"] += 1; stats["classified"] += 1
+            stats["documents_ingested"] += len(document_ingest_ids)
             if classification["kind"] == "opt_out" and sender:
                 if sender not in state["opt_out"]: state["opt_out"].append(sender)
             if classification["kind"] == "commercial_offer" and classification.get("amount"):
                 stats["offers_detected"] += 1
-            _log(state, f"Inbox recibió respuesta de {sender or 'remitente desconocido'}: {classification['kind']}.")
+            _log(state, f"Inbox recibió respuesta de {sender or 'remitente desconocido'}: {classification['kind']} ({len(document_ingest_ids)} adjuntos comerciales ingeridos).")
         return stats
     except Exception as exc:
         _log(state, f"Mail Connector no pudo leer el inbox: {str(exc)[:140]}")
