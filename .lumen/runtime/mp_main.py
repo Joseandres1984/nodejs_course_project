@@ -44,7 +44,10 @@ def _probe_page(probe=None, error: str = "") -> HTMLResponse:
         <p><b>Referencia:</b> {html.escape(str(probe.get('external_reference') or ''))}</p>
         <p><b>Preference ID:</b> {html.escape(str(probe.get('preference_id') or ''))}</p>
         <p><a class='btn secondary' href='{html.escape(str(probe.get('init_point') or ''))}' target='_blank' rel='noopener'>Abrir Checkout Pro (NO PAGAR)</a></p>
-        <p class='warn'><b>No pagues este link.</b> Esta preferencia existe sólo para validar que LUMEN puede crear Checkout Pro con la cuenta productiva. No representa una venta ni una comisión.</p>
+        <form method='post' action='/mercadopago/probe/new'>
+          <button class='btn' type='submit'>Crear nueva prueba para verificar LUMEN</button>
+        </form>
+        <p class='warn'><b>No pagues ningún link de prueba.</b> Las preferencias de prueba están excluidas de ventas, deals, comisiones e ingresos.</p>
         """
     else:
         error_html = f"<div class='err'>{html.escape(error)}</div>" if error else ""
@@ -63,15 +66,33 @@ def _probe_page(probe=None, error: str = "") -> HTMLResponse:
 <style>
 body{{font-family:Arial,sans-serif;max-width:760px;margin:48px auto;padding:0 20px;background:#f5f7fb;color:#172033}}
 .card{{background:white;padding:28px;border-radius:16px;box-shadow:0 8px 28px #00000012}}
-.btn{{display:inline-block;background:#172033;color:white;border:0;border-radius:10px;padding:13px 18px;text-decoration:none;font-weight:700;cursor:pointer}}
+.btn{{display:inline-block;background:#172033;color:white;border:0;border-radius:10px;padding:13px 18px;text-decoration:none;font-weight:700;cursor:pointer;margin:6px 0}}
 .secondary{{background:#009ee3}} .ok{{padding:12px;background:#eaf8ef;border-radius:10px;font-weight:700;color:#176b39}}
 .warn{{padding:12px;background:#fff7df;border-radius:10px}} .err{{padding:12px;background:#ffe9e9;border-radius:10px;color:#9b1c1c}}
 small{{color:#667085}}
 </style></head><body><div class='card'>
 <h1>Mercado Pago · prueba controlada</h1>
 {body}
-<hr><small>LUMEN no expone credenciales ni reconoce esta preferencia como ingreso.</small>
+<hr><small>LUMEN no expone credenciales ni reconoce estas preferencias como ingreso.</small>
 </div></body></html>""")
+
+
+def _persist_probe(probe):
+    current = STATE.get("mercadopago_probe") or {}
+    if current.get("preference_id"):
+        history = STATE.setdefault("mercadopago_probe_history", [])
+        if not any(str(x.get("preference_id") or "") == str(current.get("preference_id") or "") for x in history):
+            history.append(current)
+            STATE["mercadopago_probe_history"] = history[-20:]
+    STATE["mercadopago_probe"] = {
+        **probe,
+        "status": "CREATED_NOT_PAID",
+        "human_payment_not_requested": True,
+        "excluded_from_revenue": True,
+    }
+    if not save_state():
+        raise HTTPException(status_code=503, detail="probe_created_but_persistence_unavailable")
+    return STATE["mercadopago_probe"]
 
 
 @app.get("/mercadopago/probe", response_class=HTMLResponse)
@@ -90,15 +111,17 @@ def mercadopago_probe_create(_=Depends(auth)):
         probe = create_checkout_probe(100.0)
     except Exception as exc:
         return _probe_page(error=f"No se pudo crear la preferencia: {type(exc).__name__}")
-    STATE["mercadopago_probe"] = {
-        **probe,
-        "status": "CREATED_NOT_PAID",
-        "human_payment_not_requested": True,
-        "excluded_from_revenue": True,
-    }
-    if not save_state():
-        raise HTTPException(status_code=503, detail="probe_created_but_persistence_unavailable")
-    return _probe_page(STATE["mercadopago_probe"])
+    return _probe_page(_persist_probe(probe))
+
+
+@app.post("/mercadopago/probe/new", response_class=HTMLResponse)
+def mercadopago_probe_create_new(_=Depends(auth)):
+    load_state()
+    try:
+        probe = create_checkout_probe(100.0)
+    except Exception as exc:
+        return _probe_page(STATE.get("mercadopago_probe") or {}, error=f"No se pudo crear la nueva preferencia: {type(exc).__name__}")
+    return _probe_page(_persist_probe(probe))
 
 
 @app.post("/webhooks/mercadopago")
@@ -125,8 +148,6 @@ async def mercadopago_webhook(request: Request):
     if any(str(x.get("event_key") or "") == event_key for x in STATE["mercadopago_webhook_events"]):
         return {"ok": True, "duplicate": True}
 
-    # Mercado Pago's webhook simulator sends a signed non-live event with an arbitrary Data ID.
-    # Validate and acknowledge it without inventing a payment or querying a non-existent resource.
     if payload.get("live_mode") is False:
         STATE["mercadopago_webhook_events"].append({
             "event_key": event_key,
