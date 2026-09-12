@@ -8,6 +8,7 @@ from business_controller import business_controller_tick
 from capital_margin_intelligence import capital_margin_tick
 from deal_room import deal_room_tick
 from negotiation_intelligence import negotiation_intelligence_tick
+from order_to_cash import order_to_cash_tick
 from venture_attribution import propagate_venture_attribution
 from venture_builder import venture_builder_tick
 
@@ -102,12 +103,18 @@ def kpi_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     capital_margin = capital_margin_tick(state)
     business_controller = business_controller_tick(state)
 
-    # Negotiation Intelligence learns counterparty behavior only from persisted evidence and produces the
-    # nonbinding strategy that RevOps/Communication can consume on the next operational cycle.
+    # Negotiation Intelligence learns only from persisted evidence and can prepare at most one bounded,
+    # nonbinding proactive supplier negotiation for the next controlled outbound cycle.
     negotiation_intelligence = negotiation_intelligence_tick(state)
+
+    # Order-to-Cash closes the economic loop after a REAL transaction: delivery, acceptance, invoicing,
+    # payment follow-up and customer success. Simulation transactions are explicitly excluded.
+    order_to_cash = order_to_cash_tick(state)
 
     venture_attribution = propagate_venture_attribution(state)
     venture_builder = venture_builder_tick(state)
+
+    # Deal Room is last so dossiers capture management, capital, negotiation and post-sale context.
     deal_room = deal_room_tick(state)
 
     report = {
@@ -120,6 +127,7 @@ def kpi_tick(state: Dict[str, Any]) -> Dict[str, Any]:
         "capital_margin_intelligence": capital_margin,
         "business_controller": business_controller,
         "negotiation_intelligence": negotiation_intelligence,
+        "order_to_cash": order_to_cash,
         "venture_attribution": venture_attribution,
         "venture_builder": venture_builder,
         "deal_room": deal_room,
