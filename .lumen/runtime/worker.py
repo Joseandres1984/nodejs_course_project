@@ -5,6 +5,7 @@ from mail_connector import fetch_unseen, apply_inbox_to_deals, send_pending, con
 from scout_connector import scout_tick, status as scout_status
 from lead_intelligence import qualify_tick
 from company_verifier import verification_tick
+from demand_intelligence import demand_intelligence_tick
 from contact_intelligence import contact_tick
 from market_pipeline import build_market_pipeline
 from interlocutor_engine import interlocutor_tick
@@ -31,6 +32,7 @@ if __name__ == "__main__":
     scout = scout_tick(STATE)
     intelligence = qualify_tick(STATE)
     verification = verification_tick(STATE)
+    demand_intelligence = demand_intelligence_tick(STATE)
     contacts = contact_tick(STATE)
 
     # 2) Build only evidence-backed opportunities and manage LUMEN's role as B2B interlocutor.
@@ -64,6 +66,7 @@ if __name__ == "__main__":
         "scout_status": scout_status(),
         "lead_intelligence": intelligence,
         "company_verification": verification,
+        "demand_intelligence": demand_intelligence,
         "contact_intelligence": contacts,
         "market_pipeline": market_pipeline,
         "interlocutor": interlocutor,
@@ -101,6 +104,7 @@ if __name__ == "__main__":
         "scout_status": scout_status(),
         "lead_intelligence": intelligence,
         "company_verification": verification,
+        "demand_intelligence": demand_intelligence,
         "contact_intelligence": contacts,
         "market_pipeline": market_pipeline,
         "interlocutor": interlocutor,
