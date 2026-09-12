@@ -14,6 +14,7 @@ from deal_room import deal_room_tick
 from decision_calibration import decision_calibration_tick
 from growth_treasury import growth_treasury_tick
 from negotiation_intelligence import negotiation_intelligence_tick
+from notification_router import notification_router_tick
 from order_to_cash import order_to_cash_tick
 from portfolio_optimizer_v2 import portfolio_optimizer_v2_tick
 from self_improvement_lab import self_improvement_tick
@@ -126,6 +127,10 @@ def kpi_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     # Deal Room is last so each dossier captures final truth, calibration, goal and portfolio decisions.
     deal_room = deal_room_tick(state)
 
+    # Executive Notification Router runs after the business state is fully refreshed so important milestones
+    # can be deduplicated and, when WhatsApp is configured, delivered with a direct Command Center link.
+    notifications = notification_router_tick(state)
+
     report = {
         "updated_at": utcnow(), "funnel": funnel, "conversion": conversion, "health": health, "bottlenecks": bottlenecks,
         "data_truth_engine": data_truth, "data_truth_close_guard": truth_close_guard,
@@ -137,7 +142,7 @@ def kpi_tick(state: Dict[str, Any]) -> Dict[str, Any]:
         "commission_settlement": commission_settlement, "growth_treasury": growth_treasury,
         "venture_attribution": venture_attribution, "venture_builder": venture_builder,
         "autonomous_goal_planner": goal_planner, "portfolio_optimizer": portfolio_optimizer,
-        "deal_room": deal_room,
+        "deal_room": deal_room, "notification_router": notifications,
     }
     state["business_kpis"] = report
     return report
