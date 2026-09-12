@@ -18,6 +18,7 @@ from cfo_engine import cfo_tick
 from profit_learning import learning_tick
 from war_room import war_room_tick
 from corporate_brain import corporate_brain_tick
+from growth_expansion import growth_expansion_tick
 from executive_director import plan_tick
 from entrepreneurial_drive import drive_tick
 from mission_scout import mission_scout_tick
@@ -78,20 +79,24 @@ if __name__ == "__main__":
     # objectives, controlled experiments and a stable long-horizon strategy. It can steer reversible allocation only.
     corporate_brain = corporate_brain_tick(STATE)
 
-    # 11) Executive Director receives that long-horizon directive but still resolves hard operational gaps first.
+    # 11) Growth & Expansion Brain tests lookalike buyers, adjacent markets and international supplier depth.
+    # It spends only a bounded shared research budget and every discovered lead still goes through normal trust gates.
+    growth_expansion = growth_expansion_tick(STATE)
+
+    # 12) Executive Director receives long-horizon strategy + evidence-gated growth options while resolving hard gaps first.
     executive_plan = plan_tick(STATE)
     entrepreneurial_drive = drive_tick(STATE)
 
-    # 12) Mission Scout executes current research using Corporate Brain allocation + Entrepreneurial Drive.
+    # 13) Mission Scout executes current research using Corporate Brain allocation + Entrepreneurial Drive.
     mission_scout = mission_scout_tick(STATE)
 
-    # 13) Professional OS turns current signals into a ranked action queue and operational artifacts.
+    # 14) Professional OS turns current signals into a ranked action queue and operational artifacts.
     professional_os = professional_os_tick(STATE)
 
-    # 14) Financial Chief of Staff merges War Room priorities into the operating queue.
+    # 15) Financial Chief of Staff merges War Room priorities into the operating queue.
     financial_chief = financial_priority_tick(STATE)
 
-    # 15) Every outbound message must pass relationship-oriented communication review AND quality authorization.
+    # 16) Every outbound message must pass relationship-oriented communication review AND quality authorization.
     communication = review_outbox(STATE)
     quality = quality_tick(STATE)
     outbound = send_pending(STATE, LIVE_OUTBOUND)
@@ -116,6 +121,7 @@ if __name__ == "__main__":
         "profit_learning": profit_learning,
         "war_room": war_room,
         "corporate_brain": corporate_brain,
+        "growth_expansion": growth_expansion,
         "executive_plan": executive_plan,
         "entrepreneurial_drive": entrepreneurial_drive,
         "professional_os": professional_os,
@@ -130,7 +136,7 @@ if __name__ == "__main__":
         "live_outbound": bool(LIVE_OUTBOUND),
     }
 
-    # 16) KPIs are computed after telemetry so health and funnel metrics reflect this exact cycle.
+    # 17) KPIs are computed after telemetry so health and funnel metrics reflect this exact cycle.
     business_kpis = kpi_tick(STATE)
     business_kpis["finance"] = cfo.get("financial_snapshot", {})
     business_kpis["finance_warnings"] = cfo.get("warnings", [])
@@ -146,6 +152,14 @@ if __name__ == "__main__":
         "monthly_objectives": corporate_brain.get("objectives", {}).get("monthly", []),
         "quarterly_objectives": corporate_brain.get("objectives", {}).get("quarterly", []),
         "active_experiments": corporate_brain.get("active_experiments", []),
+    }
+    business_kpis["growth_expansion"] = {
+        "ready": growth_expansion.get("readiness", {}).get("ready"),
+        "readiness_score": growth_expansion.get("readiness", {}).get("score"),
+        "primary_expansion": growth_expansion.get("primary_expansion"),
+        "research": growth_expansion.get("research"),
+        "cross_sell_candidates": len(growth_expansion.get("cross_sell_investigations", [])),
+        "sourcing_spread_candidates": len(growth_expansion.get("sourcing_spread_candidates", [])),
     }
     STATE["business_kpis"] = business_kpis
     STATE["connector_telemetry"]["business_kpis"] = business_kpis
@@ -165,6 +179,7 @@ if __name__ == "__main__":
     primary_money = war_room.get("primary_money_move") or {}
     strategy = corporate_brain.get("strategy", {}) or {}
     objectives = corporate_brain.get("objectives", {}) or {}
+    growth_primary = growth_expansion.get("primary_expansion") or {}
     print({
         "result": result,
         "scout": scout,
@@ -197,6 +212,15 @@ if __name__ == "__main__":
         "corporate_monthly_objectives": len(objectives.get("monthly", [])),
         "corporate_quarterly_objectives": len(objectives.get("quarterly", [])),
         "corporate_active_experiments": len(corporate_brain.get("active_experiments", [])),
+        "growth_ready": growth_expansion.get("readiness", {}).get("ready"),
+        "growth_readiness_score": growth_expansion.get("readiness", {}).get("score"),
+        "growth_primary_kind": growth_primary.get("kind"),
+        "growth_primary_market": growth_primary.get("market"),
+        "growth_primary_category": growth_primary.get("category"),
+        "growth_primary_score": growth_primary.get("score"),
+        "growth_research": growth_expansion.get("research", {}),
+        "growth_cross_sell_candidates": len(growth_expansion.get("cross_sell_investigations", [])),
+        "growth_sourcing_spreads": len(growth_expansion.get("sourcing_spread_candidates", [])),
         "executive_primary": executive_plan.get("primary", {}).get("code"),
         "entrepreneurial_primary": entrepreneurial_drive.get("primary", {}).get("action"),
         "active_missions": entrepreneurial_drive.get("active_missions", 0),
