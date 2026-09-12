@@ -41,16 +41,18 @@ def plan_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     )
     margin_gaps = _deal_economics_gap(state)
     pending_approvals = sum(1 for x in state.get("approvals", []) if x.get("status") == "pending")
+    strategic = state.get("strategic_directive", {}) or {}
 
     priorities: List[Dict[str, Any]] = []
 
-    def add(code: str, priority: int, objective: str, reason: str, autonomous: bool = True) -> None:
+    def add(code: str, priority: int, objective: str, reason: str, autonomous: bool = True, source: str = "executive") -> None:
         priorities.append({
             "code": code,
             "priority": priority,
             "objective": objective,
             "reason": reason,
             "autonomous": autonomous,
+            "source": source,
         })
 
     if verified_suppliers == 0:
@@ -69,6 +71,25 @@ def plan_tick(state: Dict[str, Any]) -> Dict[str, Any]:
         add("margin_gap", 95, "Mejorar economía y proteger margen", f"Hay {margin_gaps} negocios por debajo del margen objetivo.")
     if pending_approvals:
         add("approval_gap", 85, "Presentar decisiones de alto impacto para aprobación", f"Hay {pending_approvals} compromisos que requieren autorización humana.", autonomous=False)
+
+    # Corporate Brain supplies a long-horizon priority. It can steer research and resource allocation,
+    # but it intentionally remains below hard operational gaps scored at 100.
+    if strategic.get("mode"):
+        mode = str(strategic.get("mode"))
+        priority = max(70, min(99, int(strategic.get("priority") or 88)))
+        focus = ", ".join(str(x) for x in (strategic.get("focus_categories") or [])[:2])
+        objective = str(strategic.get("thesis") or "Ejecutar la estrategia corporativa vigente")
+        if focus:
+            objective += f" Foco: {focus}."
+        add(
+            f"strategic_{mode}",
+            priority,
+            objective,
+            str(strategic.get("reason") or "Corporate Brain definió una prioridad estratégica respaldada por evidencia persistida."),
+            autonomous=True,
+            source="corporate_brain",
+        )
+
     if not priorities:
         add("expand_market", 70, "Expandir cuentas y categorías de mayor valor", "No hay un cuello de botella crítico; conviene ampliar mercado con disciplina de evidencia.")
 
@@ -77,15 +98,17 @@ def plan_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     plan = {
         "updated_at": utcnow(),
         "primary": primary,
-        "priorities": priorities[:5],
+        "priorities": priorities[:6],
         "snapshot": {
             "verified_suppliers": verified_suppliers,
             "verified_buyers": verified_buyers,
             "buyers_with_demand": demand_buyers,
             "market_opportunities": len(opportunities),
             "pending_approvals": pending_approvals,
+            "corporate_strategy_mode": strategic.get("mode"),
+            "corporate_strategy_epoch": strategic.get("strategy_epoch"),
         },
-        "decision_rule": "maximizar valor económico sostenible ajustado por evidencia, riesgo, velocidad y calidad de relación",
+        "decision_rule": "resolver primero gaps críticos; luego maximizar valor económico sostenible alineado con la estrategia corporativa, evidencia, riesgo, velocidad y calidad de relación",
     }
     state["executive_plan"] = plan
     record_decision(
