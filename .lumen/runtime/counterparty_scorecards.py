@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Dict
 
+from counterparty_risk import counterparty_risk_tick
 from procurement_orchestrator import procurement_tick
 
 
@@ -96,8 +97,19 @@ def scorecards_tick(state: Dict[str, Any]) -> Dict[str, Any]:
         }
         stats["scored"] += 1
 
-    # Procurement runs here, after relationship + generic counterparty scoring and before CFO/RevOps.
-    # This lets the same cycle use evidence-ranked supplier squads without changing source quality metrics.
+    # Risk/compliance runs before Procurement/CFO/RevOps so the same cycle can de-prioritize or block
+    # counterparties with identity, incident or screening concerns. A no-hit public search is never legal clearance.
+    risk = counterparty_risk_tick(state)
+    stats["counterparty_risk"] = {
+        "profiles_total": risk.get("profiles_total"),
+        "blocked": risk.get("blocked"),
+        "enhanced_review": risk.get("enhanced_review"),
+        "standard": risk.get("standard"),
+        "watch": risk.get("watch"),
+        "primary_directive": risk.get("primary_directive"),
+    }
+
+    # Procurement runs after generic scoring + risk screening, before CFO/RevOps.
     procurement = procurement_tick(state)
     stats["supplier_network"] = {
         "supplier_profiles": procurement.get("supplier_profiles"),
