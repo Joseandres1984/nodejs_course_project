@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List
 
 PROVIDER = os.getenv("LUMEN_SCOUT_PROVIDER", "").strip().lower()
@@ -16,6 +17,13 @@ LANGUAGE = os.getenv("LUMEN_SCOUT_HL", "es").strip().lower() or "es"
 MAX_QUERIES_PER_TICK = max(1, min(5, int(os.getenv("LUMEN_SCOUT_MAX_QUERIES", "2"))))
 DAILY_QUERY_BUDGET = max(2, min(500, int(os.getenv("LUMEN_SCOUT_DAILY_BUDGET", "24"))))
 MAX_NEW_LEADS_PER_QUERY = max(1, min(8, int(os.getenv("LUMEN_SCOUT_MAX_NEW_LEADS", "4"))))
+
+STRONG_DEMAND_TERMS = (
+    "licitación", "licitacion", "cotización", "cotizacion", "convocatoria", "compras",
+    "proveedores", "pliego", "abastecimiento", "concurso de precios", "solicitud de oferta",
+    "rfq", "tender", "procurement",
+)
+STOPWORDS = {"para", "con", "una", "uno", "del", "las", "los", "por", "que", "and", "the", "argentina", "empresa"}
 
 
 def utcnow() -> str:
@@ -167,11 +175,96 @@ def _budget(state: Dict[str, Any]) -> Dict[str, Any]:
     return budget
 
 
+def _tokens(text: str) -> List[str]:
+    return [x.lower() for x in re.findall(r"[A-Za-zÁÉÍÓÚáéíóúÑñ0-9]+", text or "") if len(x) >= 4 and x.lower() not in STOPWORDS]
+
+
+def _domain(url: str) -> str:
+    try:
+        return (urllib.parse.urlparse(url).hostname or "").lower().removeprefix("www.")
+    except Exception:
+        return ""
+
+
+def _demand_candidates(state: Dict[str, Any]) -> List[Dict[str, Any]]:
+    today = utcdate()
+    out = []
+    for account in state.get("candidate_accounts", []):
+        if account.get("type") != "buyer" or not account.get("verified_company"):
+            continue
+        if account.get("demand_signal"):
+            continue
+        next_check = str(account.get("demand_next_check") or "")
+        if next_check and next_check > today:
+            continue
+        if account.get("domain") and account.get("category"):
+            out.append(account)
+    return sorted(out, key=lambda x: float(x.get("verification_score") or 0), reverse=True)
+
+
+def _demand_query(account: Dict[str, Any]) -> str:
+    domain = str(account.get("domain") or "")
+    category = str(account.get("category") or "")
+    return f'site:{domain} "{category}" (compras OR licitación OR licitacion OR cotización OR cotizacion OR proveedores OR pliego OR abastecimiento)'
+
+
+def _score_demand(account: Dict[str, Any], item: Dict[str, str]) -> int:
+    text = f"{item.get('title','')} {item.get('snippet','')} {item.get('url','')}".lower()
+    url_domain = _domain(item.get("url", ""))
+    account_domain = str(account.get("domain") or "").lower()
+    official = bool(url_domain and (url_domain == account_domain or url_domain.endswith("." + account_domain)))
+    strong_hits = sum(1 for term in STRONG_DEMAND_TERMS if term in text)
+    cat_tokens = list(dict.fromkeys(_tokens(str(account.get("category") or ""))))
+    cat_hits = sum(1 for token in cat_tokens if token in text)
+    cat_score = round(30 * cat_hits / max(1, len(cat_tokens))) if cat_tokens else 0
+    return max(0, min(100, (35 if official else 0) + min(35, strong_hits * 18) + cat_score))
+
+
+def _store_demand_signal(state: Dict[str, Any], account: Dict[str, Any], query: str, results: List[Dict[str, str]]) -> bool:
+    signals = state.setdefault("demand_signals", [])
+    known = {x.get("url") for x in signals if x.get("url")}
+    scored = []
+    for item in results:
+        score = _score_demand(account, item)
+        if score <= 0:
+            continue
+        scored.append((score, item))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    best_score = scored[0][0] if scored else 0
+    evidence_urls: List[str] = []
+    for score, item in scored[:3]:
+        url = str(item.get("url") or "")
+        evidence_urls.append(url)
+        if url and url not in known:
+            signals.append({
+                "id": f"SIG-{len(signals)+1:05d}", "account_id": account.get("id"), "category": account.get("category"),
+                "url": url, "title": str(item.get("title") or "")[:300], "snippet": str(item.get("snippet") or "")[:700],
+                "score": score, "source": "public_search", "created_at": utcnow(),
+            })
+            known.add(url)
+
+    verified = best_score >= 75
+    account["demand_score"] = best_score
+    account["demand_last_checked"] = utcnow()
+    account["demand_evidence_urls"] = evidence_urls[:3]
+    account["demand_signal"] = verified
+    if verified:
+        account["demand_status"] = "public_signal_verified"
+        account["status"] = "demand_verified"
+        account["next_action"] = "Construir tesis de oportunidad y validar requerimiento/contacto comercial"
+    else:
+        account["demand_status"] = "no_strong_public_signal"
+        account["demand_next_check"] = (datetime.now(timezone.utc) + timedelta(days=7)).strftime("%Y-%m-%d")
+        account["next_action"] = "Revisar nuevamente señal de demanda más adelante; no contactar por ahora"
+    return verified
+
+
 def scout_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     state.setdefault("research_leads", [])
     budget = _budget(state)
     stats = {
         "configured": bool(PROVIDER and API_KEY), "queries": 0, "new_leads": 0, "errors": 0,
+        "demand_queries": 0, "demand_signals_verified": 0,
         "budget_used_today": budget["queries_used"], "budget_remaining": budget["queries_remaining"], "budget_exhausted": False,
     }
     if not stats["configured"]:
@@ -181,15 +274,35 @@ def scout_tick(state: Dict[str, Any]) -> Dict[str, Any]:
         _log(state, "Scout pausó búsquedas: presupuesto diario agotado; prioriza calificación y seguimiento de evidencia existente.")
         return stats
 
-    queue = _supplier_queries(state) + _buyer_queries(state)
     allowed = min(MAX_QUERIES_PER_TICK, budget["queries_remaining"])
-    for query, lead_type, category in queue[:allowed]:
+    used_this_tick = 0
+
+    # Highest-value research first: prove actual demand for already verified buyer accounts.
+    for account in _demand_candidates(state):
+        if used_this_tick >= allowed:
+            break
+        query = _demand_query(account)
         try:
-            # Count each external request against the budget whether or not it yields a useful lead.
-            budget["queries_used"] += 1
+            budget["queries_used"] += 1; used_this_tick += 1; stats["queries"] += 1; stats["demand_queries"] += 1
+            results = search(query)
+            if _store_demand_signal(state, account, query, results):
+                stats["demand_signals_verified"] += 1
+                _log(state, f"Demand Signal verificó evidencia pública de intención para {account.get('id')} ({account.get('category')}).")
+            else:
+                _log(state, f"Demand Signal no encontró señal pública fuerte para {account.get('id')}; no se habilita contacto.")
+        except Exception as exc:
+            stats["errors"] += 1
+            _log(state, f"Demand Signal falló para {account.get('id')}: {str(exc)[:140]}")
+
+    # Use remaining budget to discover new supplier/buyer candidates.
+    generic_queue = _supplier_queries(state) + _buyer_queries(state)
+    for query, lead_type, category in generic_queue:
+        if used_this_tick >= allowed:
+            break
+        try:
+            budget["queries_used"] += 1; used_this_tick += 1; stats["queries"] += 1
             results = search(query)
             created = _store_results(state, query, lead_type, category, results)
-            stats["queries"] += 1
             stats["new_leads"] += created
             _log(state, f"Scout investigó {lead_type} para {category}: {created} leads nuevos con evidencia web.")
         except Exception as exc:
