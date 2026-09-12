@@ -12,6 +12,7 @@ API_BASE = "https://api.mercadopago.com"
 IDENTITY_API = "https://api.mercadolibre.com/users/me"
 ACCESS_TOKEN = os.getenv("LUMEN_MP_ACCESS_TOKEN", "").strip()
 WEBHOOK_SECRET = os.getenv("LUMEN_MP_WEBHOOK_SECRET", "").strip()
+BRAND_NAME = "LUMEN"
 
 
 def utcnow() -> str:
@@ -21,6 +22,7 @@ def utcnow() -> str:
 def public_status() -> Dict[str, Any]:
     return {
         "provider": "mercadopago",
+        "brand": BRAND_NAME,
         "access_token_configured": bool(ACCESS_TOKEN),
         "webhook_secret_configured": bool(WEBHOOK_SECRET),
         "webhook_ready": bool(ACCESS_TOKEN and WEBHOOK_SECRET),
@@ -84,11 +86,13 @@ def create_checkout_probe(amount_ars: float = 100.0) -> Dict[str, Any]:
                 "unit_price": amount,
             }
         ],
+        "statement_descriptor": BRAND_NAME,
         "external_reference": reference,
         "metadata": {
             "lumen_probe": True,
             "non_revenue": True,
             "purpose": "checkout_connectivity_validation",
+            "brand": BRAND_NAME,
         },
     }
     req = urllib.request.Request(
@@ -110,6 +114,7 @@ def create_checkout_probe(amount_ars: float = 100.0) -> Dict[str, Any]:
         raise RuntimeError("mercadopago_probe_preference_invalid_response")
     return {
         "provider": "mercadopago",
+        "brand": BRAND_NAME,
         "probe": True,
         "non_revenue": True,
         "payment_requested": False,
@@ -204,8 +209,6 @@ def reconcile_payment(state: Dict[str, Any], payment: Dict[str, Any]) -> Dict[st
             matched_transaction["commission_payment_verified_at"] = utcnow()
             if status == "approved":
                 matched_transaction["commission_payment_approved_at"] = payment.get("date_approved") or utcnow()
-                # Only feed the legacy USD settlement amount when Mercado Pago itself confirms USD.
-                # ARS receipts remain fully reconciled in original currency until an explicit FX/accounting rule converts them.
                 if currency == "USD":
                     matched_transaction["commission_received_amount"] = round(amount, 2)
                     matched_transaction["commission_received_at"] = payment.get("date_approved") or utcnow()
