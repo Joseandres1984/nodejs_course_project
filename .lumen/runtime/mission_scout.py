@@ -24,6 +24,10 @@ def _log(state: Dict[str, Any], msg: str) -> None:
     state["activity"] = state["activity"][:100]
 
 
+def _norm(value: Any) -> str:
+    return " ".join(str(value or "").lower().strip().split())
+
+
 def _interleave(a: List[Tuple[str, str, str]], b: List[Tuple[str, str, str]]) -> List[Tuple[str, str, str]]:
     out: List[Tuple[str, str, str]] = []
     for i in range(max(len(a), len(b))):
@@ -45,13 +49,37 @@ def _unique_queue(items: List[Tuple[str, str, str]]) -> List[Tuple[str, str, str
     return out
 
 
+def _venture_validation(state: Dict[str, Any]) -> Dict[str, Any]:
+    directive = state.get("venture_builder_directive", {}) or {}
+    builder = state.get("venture_builder", {}) or {}
+    governance = state.get("master_governance", {}) or {}
+    resource_plan = governance.get("resource_plan", {}) or state.get("master_resource_plan", {}) or {}
+    cycle = int(builder.get("cycle") or 0)
+    due = bool(
+        directive.get("research_validation_allowed")
+        and directive.get("venture_id")
+        and directive.get("category")
+        and not directive.get("paused_by_constitution")
+        and float(resource_plan.get("exploration_pct") or 0) >= 10
+        and cycle % 4 == 0
+    )
+    return {**directive, "due": due}
+
+
 def _focus_categories(state: Dict[str, Any]) -> List[str]:
     strategic = state.get("strategic_directive", {}) or {}
     drive = state.get("entrepreneurial_drive", {}) or {}
     primary = drive.get("primary", {}) or {}
     learning = state.get("profit_learning", {}) or {}
+    venture = _venture_validation(state)
     deprioritized = {str(x).strip().lower() for x in strategic.get("deprioritized_categories", []) or []}
     values: List[str] = []
+
+    # Venture validation gets the first slot only on its bounded cadence; otherwise the core strategy remains first.
+    if venture.get("due"):
+        cat = str(venture.get("category") or "").strip()
+        if cat and cat.lower() not in deprioritized:
+            values.append(cat)
 
     for category in strategic.get("focus_categories", []) or []:
         cat = str(category or "").strip()
@@ -63,6 +91,11 @@ def _focus_categories(state: Dict[str, Any]) -> List[str]:
             values.append(cat)
     for item in learning.get("focus_categories", []) or []:
         cat = str(item.get("category") or "").strip()
+        if cat and cat.lower() not in deprioritized and cat not in values:
+            values.append(cat)
+
+    if not venture.get("due") and venture.get("research_validation_allowed"):
+        cat = str(venture.get("category") or "").strip()
         if cat and cat.lower() not in deprioritized and cat not in values:
             values.append(cat)
     return values[:3]
@@ -90,6 +123,24 @@ def _exploration_cycle(state: Dict[str, Any], exploit_pct: int) -> bool:
     return cycle % 10 >= exploit_slots
 
 
+def _tag_new_venture_leads(state: Dict[str, Any], before_ids: set[str], venture: Dict[str, Any], category: str) -> int:
+    if not venture.get("due") or _norm(category) != _norm(venture.get("category")):
+        return 0
+    tagged = 0
+    for lead in state.get("research_leads", []) or []:
+        lead_id = str(lead.get("id") or "")
+        if not lead_id or lead_id in before_ids or lead.get("venture_id"):
+            continue
+        if _norm(lead.get("category")) != _norm(category):
+            continue
+        lead["venture_id"] = venture.get("venture_id")
+        lead["venture_type"] = venture.get("type")
+        lead["venture_market"] = venture.get("market")
+        lead["venture_validation"] = True
+        tagged += 1
+    return tagged
+
+
 def mission_scout_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     strategic = state.get("strategic_directive", {}) or {}
     drive = state.get("entrepreneurial_drive", {}) or {}
@@ -99,6 +150,7 @@ def mission_scout_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     switches = governance.get("kill_switches", {}) or {}
     resource_plan = governance.get("resource_plan", {}) or state.get("master_resource_plan", {}) or {}
     resource_cap = max(0, int(resource_plan.get("mission_queries_cap", MAX_MISSION_QUERIES) or 0))
+    venture = _venture_validation(state)
 
     side = str(strategic.get("research_side") or primary.get("research_side") or "balanced")
     action = str(primary.get("action") or "expand_market")
@@ -120,6 +172,9 @@ def mission_scout_tick(state: Dict[str, Any]) -> Dict[str, Any]:
         "focus_categories": _focus_categories(state),
         "exploit_pct": exploit_pct,
         "explore_pct": 100 - exploit_pct,
+        "venture_validation_due": bool(venture.get("due")),
+        "venture_id": venture.get("venture_id") if venture.get("due") else None,
+        "venture_leads_tagged": 0,
         "queries": 0,
         "new_leads": 0,
         "errors": 0,
@@ -155,14 +210,18 @@ def mission_scout_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     allowed = min(MAX_MISSION_QUERIES, resource_cap, int(budget.get("queries_remaining") or 0))
     for query, lead_type, category in queue[:allowed]:
         try:
+            before_ids = {str(x.get("id") or "") for x in state.get("research_leads", []) or []}
             budget["queries_used"] = int(budget.get("queries_used") or 0) + 1
             stats["queries"] += 1
             results = search(query)
             created = _store_results(state, query, lead_type, category, results)
             stats["new_leads"] += created
+            tagged = _tag_new_venture_leads(state, before_ids, venture, category)
+            stats["venture_leads_tagged"] += tagged
+            suffix = f"; venture {venture.get('venture_id')} validada con {tagged} leads nuevos" if tagged else ""
             _log(
                 state,
-                f"Mission Scout [{stats['mode']}/{strategic.get('mode') or 'operativo'}/{governance.get('company_mode') or 'sin-orquestar'}] ejecutó {action}: {lead_type}/{category}; {created} leads nuevos con evidencia pública.",
+                f"Mission Scout [{stats['mode']}/{strategic.get('mode') or 'operativo'}/{governance.get('company_mode') or 'sin-orquestar'}] ejecutó {action}: {lead_type}/{category}; {created} leads nuevos con evidencia pública{suffix}.",
             )
         except Exception as exc:
             stats["errors"] += 1
@@ -175,5 +234,6 @@ def mission_scout_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     budget["last_focus_categories"] = stats["focus_categories"]
     budget["last_corporate_strategy"] = strategic.get("mode")
     budget["last_master_company_mode"] = governance.get("company_mode")
+    budget["last_venture_validation_id"] = stats.get("venture_id")
     stats["budget_exhausted"] = int(budget.get("queries_remaining") or 0) <= 0
     return stats
