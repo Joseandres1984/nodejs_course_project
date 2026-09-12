@@ -11,6 +11,8 @@ PROVIDER = os.getenv("LUMEN_SCOUT_PROVIDER", "").strip().lower()
 API_KEY = os.getenv("LUMEN_SCOUT_API_KEY", "").strip()
 CUSTOM_ENDPOINT = os.getenv("LUMEN_SCOUT_ENDPOINT", "").strip()
 MARKET = os.getenv("LUMEN_SCOUT_MARKET", "Argentina").strip() or "Argentina"
+COUNTRY_CODE = os.getenv("LUMEN_SCOUT_GL", "ar").strip().lower() or "ar"
+LANGUAGE = os.getenv("LUMEN_SCOUT_HL", "es").strip().lower() or "es"
 MAX_QUERIES_PER_TICK = max(1, min(5, int(os.getenv("LUMEN_SCOUT_MAX_QUERIES", "2"))))
 
 
@@ -23,6 +25,8 @@ def status() -> Dict[str, Any]:
         "provider": PROVIDER or None,
         "configured": bool(PROVIDER and API_KEY),
         "market": MARKET,
+        "country_code": COUNTRY_CODE,
+        "language": LANGUAGE,
         "max_queries_per_tick": MAX_QUERIES_PER_TICK,
     }
 
@@ -38,7 +42,7 @@ def _http_json(req: urllib.request.Request) -> Dict[str, Any]:
 
 
 def _search_serper(query: str) -> List[Dict[str, str]]:
-    body = json.dumps({"q": query, "num": 8}).encode("utf-8")
+    body = json.dumps({"q": query, "num": 8, "gl": COUNTRY_CODE, "hl": LANGUAGE}).encode("utf-8")
     req = urllib.request.Request(
         "https://google.serper.dev/search",
         data=body,
@@ -50,7 +54,7 @@ def _search_serper(query: str) -> List[Dict[str, str]]:
 
 
 def _search_brave(query: str) -> List[Dict[str, str]]:
-    url = "https://api.search.brave.com/res/v1/web/search?" + urllib.parse.urlencode({"q": query, "count": 8})
+    url = "https://api.search.brave.com/res/v1/web/search?" + urllib.parse.urlencode({"q": query, "count": 8, "country": COUNTRY_CODE, "search_lang": LANGUAGE})
     req = urllib.request.Request(url, headers={"Accept": "application/json", "X-Subscription-Token": API_KEY})
     data = _http_json(req)
     return [{"title": x.get("title", ""), "url": x.get("url", ""), "snippet": x.get("description", "")} for x in data.get("web", {}).get("results", [])[:8]]
@@ -117,32 +121,29 @@ def _store_results(state: Dict[str, Any], query: str, lead_type: str, category: 
             "created_at": utcnow(),
         }
         state["research_leads"].append(lead)
-        known.add(url); created += 1
+        known.add(url)
+        created += 1
     return created
 
 
+def _unique_values(items: List[Dict[str, Any]], field: str) -> List[str]:
+    ordered = sorted(items, key=lambda x: x.get("source") == "demo")
+    values: List[str] = []
+    for item in ordered:
+        value = (item.get(field) or "").strip()
+        if value and value not in values:
+            values.append(value)
+    return values
+
+
 def _supplier_queries(state: Dict[str, Any]) -> List[tuple[str, str, str]]:
-    queries = []
-    needs = []
-    for b in state.get("buyers", []):
-        need = (b.get("need") or "").strip()
-        if need and need not in needs:
-            needs.append(need)
-    for need in needs[:2]:
-        queries.append((f'"{need}" fabricante distribuidor proveedor {MARKET}', "supplier", need))
-    return queries
+    needs = _unique_values(state.get("buyers", []), "need")
+    return [(f'"{need}" fabricante distribuidor proveedor {MARKET}', "supplier", need) for need in needs[:2]]
 
 
 def _buyer_queries(state: Dict[str, Any]) -> List[tuple[str, str, str]]:
-    queries = []
-    cats = []
-    for s in state.get("suppliers", []):
-        cat = (s.get("category") or "").strip()
-        if cat and cat not in cats:
-            cats.append(cat)
-    for cat in cats[:2]:
-        queries.append((f'empresa industria mantenimiento compras "{cat}" {MARKET}', "buyer", cat))
-    return queries
+    cats = _unique_values(state.get("suppliers", []), "category")
+    return [(f'empresa industria mantenimiento compras "{cat}" {MARKET}', "buyer", cat) for cat in cats[:2]]
 
 
 def scout_tick(state: Dict[str, Any]) -> Dict[str, Any]:
@@ -151,12 +152,12 @@ def scout_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     if not stats["configured"]:
         return stats
     queue = _supplier_queries(state) + _buyer_queries(state)
-    # Alternate buyer/supplier research and cap cost every tick.
     for query, lead_type, category in queue[:MAX_QUERIES_PER_TICK]:
         try:
             results = search(query)
             created = _store_results(state, query, lead_type, category, results)
-            stats["queries"] += 1; stats["new_leads"] += created
+            stats["queries"] += 1
+            stats["new_leads"] += created
             _log(state, f"Scout investigó {lead_type} para {category}: {created} leads nuevos con evidencia web.")
         except Exception as exc:
             stats["errors"] += 1
