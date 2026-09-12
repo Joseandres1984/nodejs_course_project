@@ -11,6 +11,7 @@ from deal_room import deal_room_tick
 from growth_treasury import growth_treasury_tick
 from negotiation_intelligence import negotiation_intelligence_tick
 from order_to_cash import order_to_cash_tick
+from payment_rails import payment_rails_tick
 from venture_attribution import propagate_venture_attribution
 from venture_builder import venture_builder_tick
 
@@ -49,23 +50,12 @@ def kpi_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     close_ready = [x for x in deals if x.get("stage") in {"listo para cerrar", "autorizado para cierre", "listo para cierre aprobado"}]
 
     funnel = {
-        "research_leads": len(leads),
-        "candidate_accounts": len(accounts),
-        "verified_companies": len(verified),
-        "verified_buyers": len(buyers),
-        "verified_suppliers": len(suppliers),
-        "buyers_with_public_demand": len(demand_buyers),
-        "verified_commercial_channels": len(contactable),
-        "verified_corporate_emails": len(email_verified),
-        "evidence_backed_opportunities": len(opportunities),
-        "interlocution_cases": len(cases),
-        "requirements_ready_for_rfq": len(requirement_ready),
-        "outbound_sent": len(sent),
-        "inbound_received": len(inbox),
-        "real_offers": len(real_offers),
-        "proposals": len(proposals),
-        "viable_deals": len(viable_deals),
-        "close_ready": len(close_ready),
+        "research_leads": len(leads), "candidate_accounts": len(accounts), "verified_companies": len(verified),
+        "verified_buyers": len(buyers), "verified_suppliers": len(suppliers), "buyers_with_public_demand": len(demand_buyers),
+        "verified_commercial_channels": len(contactable), "verified_corporate_emails": len(email_verified),
+        "evidence_backed_opportunities": len(opportunities), "interlocution_cases": len(cases),
+        "requirements_ready_for_rfq": len(requirement_ready), "outbound_sent": len(sent), "inbound_received": len(inbox),
+        "real_offers": len(real_offers), "proposals": len(proposals), "viable_deals": len(viable_deals), "close_ready": len(close_ready),
     }
 
     conversion = {
@@ -90,58 +80,36 @@ def kpi_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     }
 
     bottlenecks = []
-    if len(suppliers) and not len(buyers):
-        bottlenecks.append("buyer_gap")
-    if len(buyers) and not len(demand_buyers):
-        bottlenecks.append("demand_gap")
-    if len(verified) and not len(contactable):
-        bottlenecks.append("contact_gap")
-    if len(opportunities) and not len(requirement_ready):
-        bottlenecks.append("requirement_gap")
-    if len(real_offers) and not len(proposals):
-        bottlenecks.append("proposal_gap")
+    if len(suppliers) and not len(buyers): bottlenecks.append("buyer_gap")
+    if len(buyers) and not len(demand_buyers): bottlenecks.append("demand_gap")
+    if len(verified) and not len(contactable): bottlenecks.append("contact_gap")
+    if len(opportunities) and not len(requirement_ready): bottlenecks.append("requirement_gap")
+    if len(real_offers) and not len(proposals): bottlenecks.append("proposal_gap")
 
     executive_management = executive_management_cycle(state)
     capital_margin = capital_margin_tick(state)
     business_controller = business_controller_tick(state)
-
-    # Negotiation Intelligence learns only from persisted evidence and can prepare at most one bounded,
-    # nonbinding proactive supplier negotiation for the next controlled outbound cycle.
     negotiation_intelligence = negotiation_intelligence_tick(state)
-
-    # Order-to-Cash handles delivery, acceptance, invoicing and ordinary payment follow-up on REAL transactions.
     order_to_cash = order_to_cash_tick(state)
 
-    # Commission Settlement is deliberately separate from customer payment status: a sale does not become
-    # LUMEN cash until the commission receipt amount/status is explicitly evidenced.
+    # Select the safest configured collection rail before commission settlement.
+    # Argentina: local bank/MP preference. International: Payoneer USD first, Wise fallback.
+    payment_rails = payment_rails_tick(state)
     commission_settlement = commission_settlement_tick(state)
 
-    # Growth Treasury can only plan reinvestment from commissions already recognized as received.
-    # It never executes a subscription, purchase or transfer without human financial approval.
+    # Growth planning uses only commission cash actually received.
     growth_treasury = growth_treasury_tick(state)
-
     venture_attribution = propagate_venture_attribution(state)
     venture_builder = venture_builder_tick(state)
-
-    # Deal Room is last so dossiers capture management, capital, negotiation, post-sale and treasury context.
     deal_room = deal_room_tick(state)
 
     report = {
-        "updated_at": utcnow(),
-        "funnel": funnel,
-        "conversion": conversion,
-        "health": health,
-        "bottlenecks": bottlenecks,
-        "executive_management": executive_management,
-        "capital_margin_intelligence": capital_margin,
-        "business_controller": business_controller,
-        "negotiation_intelligence": negotiation_intelligence,
-        "order_to_cash": order_to_cash,
-        "commission_settlement": commission_settlement,
-        "growth_treasury": growth_treasury,
-        "venture_attribution": venture_attribution,
-        "venture_builder": venture_builder,
-        "deal_room": deal_room,
+        "updated_at": utcnow(), "funnel": funnel, "conversion": conversion, "health": health, "bottlenecks": bottlenecks,
+        "executive_management": executive_management, "capital_margin_intelligence": capital_margin,
+        "business_controller": business_controller, "negotiation_intelligence": negotiation_intelligence,
+        "order_to_cash": order_to_cash, "payment_rails": payment_rails,
+        "commission_settlement": commission_settlement, "growth_treasury": growth_treasury,
+        "venture_attribution": venture_attribution, "venture_builder": venture_builder, "deal_room": deal_room,
     }
     state["business_kpis"] = report
     return report
