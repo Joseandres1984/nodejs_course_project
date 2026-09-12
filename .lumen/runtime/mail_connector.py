@@ -72,21 +72,26 @@ def _plain_body(msg) -> str:
 def classify_reply(subject: str, body: str) -> Dict[str, Any]:
     text = f"{subject}\n{body}".lower()
     kind = "general"
-    if any(k in text for k in ["cotiz", "oferta", "precio", "usd", "u$s", "dólar", "dolar"]):
-        kind = "commercial_offer"
-    elif any(k in text for k in ["interesa", "interesado", "avancemos", "enviame", "envíame", "propuesta"]):
-        kind = "buyer_interest"
-    elif any(k in text for k in ["caro", "precio alto", "descuento", "mejorar precio", "fuera de presupuesto"]):
-        kind = "price_objection"
-    elif any(k in text for k in ["no me interesa", "no contactar", "baja", "unsubscribe", "remover"]):
+
+    # Intent order matters: an objection often contains the word "precio", but it is not a supplier offer.
+    if any(k in text for k in ["no me interesa", "no contactar", "no contacten", "baja", "unsubscribe", "remover", "quitarme"]):
         kind = "opt_out"
-    elif any(k in text for k in ["plazo", "entrega", "lead time"]):
+    elif any(k in text for k in ["caro", "precio alto", "muy alto", "descuento", "mejorar precio", "mejor precio", "fuera de presupuesto", "no nos cierra el precio", "no me cierra el precio"]):
+        kind = "price_objection"
+    elif any(k in text for k in ["plazo", "entrega", "lead time", "cuándo entreg", "cuando entreg", "fecha de entrega"]):
         kind = "delivery_question"
+    elif any(k in text for k in ["interesa", "interesado", "avancemos", "enviame", "envíame", "propuesta", "podemos avanzar", "sigamos"]):
+        kind = "buyer_interest"
+    elif any(k in text for k in ["cotiz", "oferta", "usd", "u$s", "us$", "dólar", "dolar", "precio unitario", "precio total", "adjunto cotización", "adjunto cotizacion"]):
+        kind = "commercial_offer"
+
     amount = None
     currency = None
     patterns = [
         (r"(?:usd|u\$s|us\$|dolares|dólares)\s*[:$]?\s*([0-9][0-9.,]*)", "USD"),
+        (r"(?:ars)\s*[:$]?\s*([0-9][0-9.,]*)", "ARS"),
         (r"\$\s*([0-9][0-9.,]*)", "ARS"),
+        (r"(?:eur)\s*[:€]?\s*([0-9][0-9.,]*)", "EUR"),
     ]
     for pattern, curr in patterns:
         match = re.search(pattern, text, flags=re.I)
