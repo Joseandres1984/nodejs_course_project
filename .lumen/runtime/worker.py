@@ -5,6 +5,7 @@ from mail_connector import fetch_unseen, apply_inbox_to_deals, send_pending, con
 from scout_connector import scout_tick, status as scout_status
 from lead_intelligence import qualify_tick
 from company_verifier import verification_tick
+from market_pipeline import build_market_pipeline
 
 
 def utcnow() -> str:
@@ -19,19 +20,19 @@ if __name__ == "__main__":
     scout = scout_tick(STATE)
     intelligence = qualify_tick(STATE)
     verification = verification_tick(STATE)
+    market_pipeline = build_market_pipeline(STATE)
     inbox = fetch_unseen(STATE)
     applied = apply_inbox_to_deals(STATE)
     result = autopilot_tick("worker autónomo")
     outbound = send_pending(STATE, LIVE_OUTBOUND)
 
-    # Persist operational telemetry so the command center can inspect the
-    # autonomous worker even when Railway's short-lived cron logs are gone.
     STATE["connector_telemetry"] = {
         "updated_at": utcnow(),
         "scout": scout,
         "scout_status": scout_status(),
         "lead_intelligence": intelligence,
         "company_verification": verification,
+        "market_pipeline": market_pipeline,
         "inbox": inbox,
         "applied": applied,
         "outbound": outbound,
@@ -42,6 +43,8 @@ if __name__ == "__main__":
     STATE["research_lead_count"] = len(STATE.get("research_leads", []))
     STATE["candidate_account_count"] = len(STATE.get("candidate_accounts", []))
     STATE["verified_company_count"] = sum(1 for x in STATE.get("candidate_accounts", []) if x.get("verified_company"))
+    STATE["market_opportunity_count"] = len(STATE.get("market_opportunities", []))
+    STATE["decision_ledger_count"] = len(STATE.get("decision_ledger", []))
     persisted_after_connectors = save_state()
 
     print({
@@ -50,6 +53,7 @@ if __name__ == "__main__":
         "scout_status": scout_status(),
         "lead_intelligence": intelligence,
         "company_verification": verification,
+        "market_pipeline": market_pipeline,
         "inbox": inbox,
         "applied": applied,
         "outbound": outbound,
@@ -59,6 +63,8 @@ if __name__ == "__main__":
         "research_lead_count": STATE.get("research_lead_count", 0),
         "candidate_account_count": STATE.get("candidate_account_count", 0),
         "verified_company_count": STATE.get("verified_company_count", 0),
+        "market_opportunity_count": STATE.get("market_opportunity_count", 0),
+        "decision_ledger_count": STATE.get("decision_ledger_count", 0),
     }, flush=True)
 
     if not result.get("persisted") or not persisted_after_connectors:
