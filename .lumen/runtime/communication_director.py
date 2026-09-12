@@ -137,6 +137,11 @@ def _friendly_body(kind: str, original: str, counterparty: str, ctx: Dict[str, A
 
 
 def review_outbox(state: Dict[str, Any]) -> Dict[str, int]:
+    # Response Intelligence runs immediately before communication review so newly created safe replies
+    # can be personalized and pass through the same Quality Gate in the current worker cycle.
+    from response_intelligence import response_intelligence_tick
+    response_report = response_intelligence_tick(state)
+
     outbox = state.setdefault("outbox", [])
     opt_out = {str(x).lower() for x in state.setdefault("opt_out", [])}
     stats = {"reviewed": 0, "polished": 0, "personalized": 0, "blocked_opt_out": 0}
@@ -179,5 +184,10 @@ def review_outbox(state: Dict[str, Any]) -> Dict[str, int]:
         )
 
     state["communication_policy"] = {**PROFILE, "updated_at": utcnow()}
-    state["communication_stats"] = {**stats, "updated_at": utcnow()}
+    state["communication_stats"] = {
+        **stats,
+        "response_intelligence": response_report.get("stats", {}),
+        "open_response_escalations": response_report.get("open_escalations", 0),
+        "updated_at": utcnow(),
+    }
     return stats
