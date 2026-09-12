@@ -5,9 +5,15 @@ from mail_connector import fetch_unseen, apply_inbox_to_deals, send_pending, con
 from scout_connector import scout_tick, status as scout_status
 from lead_intelligence import qualify_tick
 from company_verifier import verification_tick
+from contact_intelligence import contact_tick
 from market_pipeline import build_market_pipeline
+from interlocutor_engine import interlocutor_tick
+from relationship_memory import relationship_tick
+from counterparty_scorecards import scorecards_tick
 from executive_director import plan_tick
 from communication_director import review_outbox
+from quality_gate import quality_tick
+from business_kpis import kpi_tick
 
 
 def utcnow() -> str:
@@ -19,22 +25,31 @@ if __name__ == "__main__":
     if not loaded or not STATE.get("buyers"):
         seed_demo()
 
+    # 1) Observe the market and convert raw public signals into verified evidence.
     scout = scout_tick(STATE)
     intelligence = qualify_tick(STATE)
     verification = verification_tick(STATE)
+    contacts = contact_tick(STATE)
+
+    # 2) Build only evidence-backed opportunities and manage LUMEN's role as B2B interlocutor.
     market_pipeline = build_market_pipeline(STATE)
+    interlocutor = interlocutor_tick(STATE)
+
+    # 3) Receive counterpart responses before taking the next commercial step.
     inbox = fetch_unseen(STATE)
     applied = apply_inbox_to_deals(STATE)
     result = autopilot_tick("worker autónomo")
 
-    # The executive layer chooses the company's next bottleneck after all new
-    # evidence and inbox events from this cycle have been incorporated.
+    # 4) Maintain observable commercial memory and objective counterparty scorecards.
+    relationships = relationship_tick(STATE)
+    scorecards = scorecards_tick(STATE)
+
+    # 5) Executive layer chooses the company's highest-value bottleneck from current evidence.
     executive_plan = plan_tick(STATE)
 
-    # Every outbound item is relationship-reviewed before the mail connector
-    # can consider sending it. This does not bypass contact verification,
-    # opt-outs, live-outbound controls, or approval gates.
+    # 6) Every outbound message must pass relationship-oriented communication review AND quality authorization.
     communication = review_outbox(STATE)
+    quality = quality_tick(STATE)
     outbound = send_pending(STATE, LIVE_OUTBOUND)
 
     STATE["connector_telemetry"] = {
@@ -43,9 +58,14 @@ if __name__ == "__main__":
         "scout_status": scout_status(),
         "lead_intelligence": intelligence,
         "company_verification": verification,
+        "contact_intelligence": contacts,
         "market_pipeline": market_pipeline,
+        "interlocutor": interlocutor,
+        "relationships": relationships,
+        "scorecards": scorecards,
         "executive_plan": executive_plan,
         "communication": communication,
+        "quality_gate": quality,
         "inbox": inbox,
         "applied": applied,
         "outbound": outbound,
@@ -53,10 +73,17 @@ if __name__ == "__main__":
         "postgres": dict(DB_STATUS),
         "live_outbound": bool(LIVE_OUTBOUND),
     }
+
+    # 7) KPIs are computed after telemetry so health and funnel metrics reflect this exact cycle.
+    business_kpis = kpi_tick(STATE)
+    STATE["connector_telemetry"]["business_kpis"] = business_kpis
+
     STATE["research_lead_count"] = len(STATE.get("research_leads", []))
     STATE["candidate_account_count"] = len(STATE.get("candidate_accounts", []))
     STATE["verified_company_count"] = sum(1 for x in STATE.get("candidate_accounts", []) if x.get("verified_company"))
+    STATE["verified_corporate_contact_count"] = sum(1 for x in STATE.get("candidate_accounts", []) if x.get("commercial_channel_verified"))
     STATE["market_opportunity_count"] = len(STATE.get("market_opportunities", []))
+    STATE["interlocution_case_count"] = len(STATE.get("interlocution_cases", []))
     STATE["decision_ledger_count"] = len(STATE.get("decision_ledger", []))
     persisted_after_connectors = save_state()
 
@@ -66,19 +93,28 @@ if __name__ == "__main__":
         "scout_status": scout_status(),
         "lead_intelligence": intelligence,
         "company_verification": verification,
+        "contact_intelligence": contacts,
         "market_pipeline": market_pipeline,
+        "interlocutor": interlocutor,
+        "relationships": relationships,
+        "scorecards": scorecards,
         "executive_primary": executive_plan.get("primary", {}).get("code"),
         "communication": communication,
+        "quality_gate": quality,
         "inbox": inbox,
         "applied": applied,
         "outbound": outbound,
         "mail": mail_status(),
         "postgres": DB_STATUS,
+        "business_funnel": business_kpis.get("funnel", {}),
+        "business_bottlenecks": business_kpis.get("bottlenecks", []),
         "persisted_after_connectors": persisted_after_connectors,
         "research_lead_count": STATE.get("research_lead_count", 0),
         "candidate_account_count": STATE.get("candidate_account_count", 0),
         "verified_company_count": STATE.get("verified_company_count", 0),
+        "verified_corporate_contact_count": STATE.get("verified_corporate_contact_count", 0),
         "market_opportunity_count": STATE.get("market_opportunity_count", 0),
+        "interlocution_case_count": STATE.get("interlocution_case_count", 0),
         "decision_ledger_count": STATE.get("decision_ledger_count", 0),
     }, flush=True)
 
