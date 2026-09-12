@@ -15,6 +15,7 @@ from business_control_panel import inject_business_control
 from negotiation_intelligence_panel import inject_negotiation_intelligence
 from order_to_cash_panel import inject_order_to_cash
 from risk_red_team_panel import inject_risk_red_team
+from treasury_panel import inject_treasury
 from venture_builder_panel import inject_venture_builder
 from deal_room import build_deal_room
 from deal_room_panel import inject_deal_room_index, render_deal_room
@@ -73,6 +74,7 @@ def command_center(_=Depends(auth)):
     html = inject_business_control(html, STATE)
     html = inject_negotiation_intelligence(html, STATE)
     html = inject_order_to_cash(html, STATE)
+    html = inject_treasury(html, STATE)
     html = inject_risk_red_team(html, STATE)
     html = inject_venture_builder(html, STATE)
     html = inject_strategy_simulator(html, STATE)
@@ -107,6 +109,7 @@ def api_deal_room(deal_id: str, _=Depends(auth)):
     capital = (STATE.get("capital_priority_index", {}) or {}).get(str(deal_id), {})
     negotiation = (STATE.get("negotiation_plan_index", {}) or {}).get(str(deal_id), {})
     post_sale = [x for x in STATE.get("order_to_cash_cases", []) if str(x.get("deal_id") or "") == str(deal_id)]
+    settlement = [x for x in STATE.get("commission_settlement_cases", []) if str(x.get("deal_id") or "") == str(deal_id)]
     red_team_findings = [x for x in STATE.get("red_team_findings", []) if str(x.get("object_id") or "") == str(deal_id)]
     return {
         "deal_room": room,
@@ -114,6 +117,8 @@ def api_deal_room(deal_id: str, _=Depends(auth)):
         "capital_intelligence": capital,
         "negotiation_intelligence": negotiation,
         "post_sale": post_sale,
+        "commission_settlement": settlement,
+        "growth_treasury": STATE.get("growth_treasury", {}),
         "counterparty_risk": {
             "buyer": _risk_for_account(str(deal.get("buyer_account_id") or "")),
             "supplier": _risk_for_account(str(deal.get("supplier_account_id") or "")),
@@ -161,6 +166,10 @@ def api_control_tower(_=Depends(auth)):
         "negotiation_plans": list((STATE.get("negotiation_plan_index", {}) or {}).values()),
         "order_to_cash": STATE.get("order_to_cash", {}),
         "order_to_cash_cases": STATE.get("order_to_cash_cases", []),
+        "commission_settlement": STATE.get("commission_settlement", {}),
+        "commission_settlement_cases": STATE.get("commission_settlement_cases", []),
+        "growth_treasury": STATE.get("growth_treasury", {}),
+        "growth_investment_candidates": STATE.get("growth_investment_candidates", []),
         "counterparty_risk": STATE.get("counterparty_risk", {}),
         "counterparty_risk_profiles": STATE.get("counterparty_risk_profiles", []),
         "red_team_audit": STATE.get("red_team_audit", {}),
