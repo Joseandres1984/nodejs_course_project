@@ -3,14 +3,55 @@ from __future__ import annotations
 import html
 from typing import Any, Dict
 
+LABELS = {
+    "RECOVER_OPERATIONS": "RECUPERAR OPERACIÓN",
+    "PROTECT_EXISTING_VALUE": "PROTEGER VALOR EXISTENTE",
+    "COLLECT_REALIZED_VALUE": "COBRAR VALOR YA GANADO",
+    "CLOSE_READY_VALUE": "CERRAR VALOR LISTO",
+    "ACCELERATE_BEST_DEALS": "ACELERAR MEJORES NEGOCIOS",
+    "DEFEND_MARGIN": "DEFENDER MARGEN",
+    "BUILD_REVENUE_ENGINE": "CONSTRUIR MOTOR DE INGRESOS",
+    "BUILD_EVIDENCE_AND_PIPELINE": "CONSTRUIR EVIDENCIA Y PIPELINE",
+    "COLLECT_CASH": "COBRAR COMISIÓN",
+    "REQUEST_CLOSE_APPROVAL": "PEDIR APROBACIÓN DE CIERRE",
+    "COMPLETE_CLOSE_PACK": "COMPLETAR PAQUETE DE CIERRE",
+    "REPAIR_CLOSE_RISK": "REPARAR RIESGO DE CIERRE",
+    "ACCELERATE_DEAL": "ACELERAR NEGOCIO",
+    "IMPROVE_MARGIN": "MEJORAR MARGEN",
+    "IMPROVE_CONVERSION": "MEJORAR CONVERSIÓN",
+    "REPAIR_TERMS": "CORREGIR TÉRMINOS",
+    "COMPLETE_ECONOMICS": "COMPLETAR ECONOMÍA",
+    "REPAIR_OR_PARK_RISK": "REPARAR O PAUSAR POR RIESGO",
+    "PARK_DEAL": "ARCHIVAR NEGOCIO",
+    "BUILD_PIPELINE": "CONSTRUIR PIPELINE",
+    "VALIDATE_VENTURE": "VALIDAR NUEVA LÍNEA",
+    "PURSUE_NOW": "HACER AHORA",
+    "NEXT": "SIGUIENTE",
+    "HOLD": "PAUSAR",
+    "PARK": "ARCHIVAR",
+    "documented_receivable": "cuenta por cobrar documentada",
+    "risk_adjusted_expected_profit": "beneficio esperado ajustado por riesgo",
+    "known_company_profit": "beneficio conocido",
+    "venture_realized_profit_history": "beneficio histórico de la venture",
+    "unknown_not_invented": "valor futuro no estimado",
+    "profit_gap_context_not_expected_value": "contexto de brecha; no valor esperado",
+}
+
 
 def _esc(value: Any) -> str:
     return html.escape(str(value if value is not None else ""), quote=True)
 
 
+def _label(value: Any) -> str:
+    raw = str(value or "")
+    return LABELS.get(raw, raw.replace("_", " ").lower() if raw else "")
+
+
 def _money(value: Any) -> str:
+    if value in (None, ""):
+        return "—"
     try:
-        return f"USD {float(value or 0):,.2f}"
+        return f"USD {float(value):,.2f}"
     except (TypeError, ValueError):
         return "—"
 
@@ -26,14 +67,14 @@ def render_goal_portfolio(state: Dict[str, Any]) -> str:
 
     rows = "".join(
         f'<div class="pg-row"><div class="pg-rank">#{_esc(x.get("rank"))}</div><div class="pg-main"><b>{_esc(x.get("title"))}</b>'
-        f'<small>{_esc(x.get("kind"))} · {_esc(x.get("portfolio_decision"))}</small></div>'
-        f'<div class="pg-money">{_money(x.get("economic_value_usd"))}<small>{_esc(x.get("value_type"))}</small></div>'
+        f'<small>{_esc(_label(x.get("kind")))} · {_esc(_label(x.get("portfolio_decision")))}</small></div>'
+        f'<div class="pg-money">{_money(x.get("economic_value_usd"))}<small>{_esc(_label(x.get("value_type")))}</small></div>'
         f'<div class="pg-score">{_esc(x.get("portfolio_priority_score"))}<small>prioridad</small></div></div>'
         for x in selected[:8]
     ) or '<div class="pg-empty">Todavía no hay acciones económicas comparables.</div>'
 
     milestones = "".join(
-        f'<span class="pg-chip">{_esc(x.get("code"))}: {_esc(x.get("current_gap") if x.get("current_gap") is not None else x.get("current"))}</span>'
+        f'<span class="pg-chip">{_esc(_label(x.get("code")))}: {_esc(x.get("current_gap") if x.get("current_gap") is not None else x.get("current"))}</span>'
         for x in (goal.get("milestones", []) or [])[:8]
     ) or '<span class="pg-chip">Sin hitos pendientes</span>'
 
@@ -41,8 +82,8 @@ def render_goal_portfolio(state: Dict[str, Any]) -> str:
     <section class="pg-wrap">
       <div class="pg-head">
         <div><div class="pg-eye">CEREBRO ECONÓMICO SUPERIOR</div><h2>Meta Autónoma + Optimizador de Cartera</h2>
-        <p>LUMEN compara caja, cierres, margen, riesgo, pipeline y ventures para decidir dónde vale más la pena usar su capacidad.</p></div>
-        <div class="pg-status"><b>{_esc(active.get('code') or 'SIN META')}</b><small>{_esc(active.get('reason') or '')}</small></div>
+        <p>LUMEN compara caja, cierres, margen, riesgo, pipeline y nuevas líneas para decidir dónde vale más la pena usar su capacidad.</p></div>
+        <div class="pg-status"><b>{_esc(_label(active.get('code') or 'SIN META'))}</b><small>{_esc(active.get('reason') or '')}</small></div>
       </div>
       <div class="pg-kpis">
         <div><small>Objetivo</small><b>{_money(target.get('amount_usd'))}</b></div>
@@ -54,12 +95,12 @@ def render_goal_portfolio(state: Dict[str, Any]) -> str:
       <div class="pg-grid">
         <div class="pg-box"><h3>Orden económica actual</h3>
           <div class="pg-primary"><b>{_esc(primary.get('title') or 'Sin prioridad todavía')}</b><small>{_esc(primary.get('reason') or '')}</small>
-          <div><span>{_esc(primary.get('kind') or '')}</span><strong>{_esc(primary.get('portfolio_priority_score') or '—')}/100</strong></div></div>
+          <div><span>{_esc(_label(primary.get('kind') or ''))}</span><strong>{_esc(primary.get('portfolio_priority_score') or '—')}/100</strong></div></div>
           <div class="pg-milestones">{milestones}</div>
         </div>
         <div class="pg-box"><h3>Cartera priorizada</h3>{rows}</div>
       </div>
-      <div class="pg-foot">El puntaje es un ranking heurístico de costo de oportunidad; no es una probabilidad de éxito ni un ROI garantizado. La Constitución, Safe Close, Red Team y las aprobaciones vinculantes siguen teniendo prioridad.</div>
+      <div class="pg-foot">El puntaje es un ranking heurístico de costo de oportunidad; no es una probabilidad de éxito ni un ROI garantizado. La Constitución, Cierre Seguro, Auditor Interno y las aprobaciones vinculantes siguen teniendo prioridad.</div>
     </section>
     """
 
