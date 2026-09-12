@@ -3,6 +3,8 @@ from __future__ import annotations
 import html
 from typing import Any, Dict
 
+from portfolio_goal_panel import render_goal_portfolio, css as goal_portfolio_css
+
 
 def _esc(value: Any) -> str:
     return html.escape(str(value if value is not None else ""), quote=True)
@@ -67,7 +69,7 @@ def css() -> str:
 
 
 def inject_business_control(page: str, state: Dict[str, Any]) -> str:
-    block = css() + render_business_control(state)
+    block = goal_portfolio_css() + render_goal_portfolio(state) + css() + render_business_control(state)
     marker = "</main>"
     if marker in page:
         return page.replace(marker, block + marker, 1)
