@@ -28,6 +28,7 @@ from entrepreneurial_drive import drive_tick
 from mission_scout import mission_scout_tick
 from professional_os import professional_os_tick
 from financial_chief_of_staff import financial_priority_tick
+from closer_orchestrator import closer_tick
 from communication_director import review_outbox
 from quality_gate import quality_tick
 from business_kpis import kpi_tick
@@ -122,11 +123,15 @@ if __name__ == "__main__":
     professional_os = guarded("Professional OS", lambda: professional_os_tick(STATE))
     financial_chief = guarded("Financial Chief of Staff", lambda: financial_priority_tick(STATE))
 
-    # 14) Outbound safety engines are critical. If either fails, Autonomous COO keeps outbound closed.
+    # 14) Closer Orchestrator owns prioritization across the sales journey. In CANARY it permits only one
+    # active commercial lane, manages bounded follow-up and escalates only the final binding close to a human.
+    closer = guarded("Closer Orchestrator", lambda: closer_tick(STATE), critical=True)
+
+    # 15) Outbound safety engines are critical. If either fails, Autonomous COO keeps outbound closed.
     communication = guarded("Communication Director", lambda: review_outbox(STATE), critical=True)
     quality = guarded("Quality Gate", lambda: quality_tick(STATE), critical=True)
 
-    # 15) Autonomous COO evaluates system health, data integrity, persistence and engine failures.
+    # 16) Autonomous COO evaluates system health, data integrity, persistence and engine failures.
     coo = operations_control_tick(
         STATE,
         DB_STATUS,
@@ -135,7 +140,7 @@ if __name__ == "__main__":
     )
     safe_live_outbound = bool(LIVE_OUTBOUND and coo.get("operational_guard", {}).get("outbound_allowed"))
 
-    # 16) Mail is fail-closed: production outbound only runs after COO + communication + quality authorization.
+    # 17) Mail is fail-closed: production outbound only runs after Closer + COO + communication + quality authorization.
     outbound = guarded(
         "Mail Outbound",
         lambda: send_pending(STATE, safe_live_outbound),
@@ -173,6 +178,7 @@ if __name__ == "__main__":
         "entrepreneurial_drive": entrepreneurial_drive,
         "professional_os": professional_os,
         "financial_chief_of_staff": financial_chief,
+        "closer_orchestrator": closer,
         "communication": communication,
         "quality_gate": quality,
         "inbox": inbox,
@@ -184,7 +190,7 @@ if __name__ == "__main__":
         "live_outbound_allowed": safe_live_outbound,
     }
 
-    # 17) KPIs are informational and cannot stop core operations if their renderer fails.
+    # 18) KPIs are informational and cannot stop core operations if their renderer fails.
     business_kpis = guarded("Business KPIs", lambda: kpi_tick(STATE))
     business_kpis["finance"] = cfo.get("financial_snapshot", {})
     business_kpis["finance_warnings"] = cfo.get("warnings", [])
@@ -243,6 +249,17 @@ if __name__ == "__main__":
         "primary_status": commercial_execution.get("directive", {}).get("primary_status"),
         "primary_next_action": commercial_execution.get("directive", {}).get("primary_next_action"),
     }
+    business_kpis["closer_orchestrator"] = {
+        "status": closer.get("status"),
+        "go_live_stage": closer.get("go_live_stage"),
+        "lane_cap": closer.get("lane_cap"),
+        "eligible_lanes": closer.get("eligible_lanes"),
+        "primary_lane": closer.get("primary_lane"),
+        "primary_next_action": closer.get("primary_next_action"),
+        "human_action_required": closer.get("human_action_required"),
+        "followup_created": closer.get("followup_created"),
+        "outbound_gate": closer.get("outbound_gate", {}),
+    }
     business_kpis["operations"] = {
         "status": coo.get("status"),
         "health_score": coo.get("health_score"),
@@ -278,6 +295,7 @@ if __name__ == "__main__":
     revops_directive = commercial_execution.get("directive", {}) or {}
     document_directive = document_intelligence.get("directive", {}) or {}
     knowledge_directive = enterprise_knowledge.get("directive", {}) or {}
+    closer_primary = closer.get("primary_lane") or {}
     print({
         "result": result,
         "autonomous_coo_status": coo.get("status"),
@@ -334,6 +352,16 @@ if __name__ == "__main__":
         "revops_active_cases": revops_directive.get("active_cases"),
         "revops_messages_created": commercial_execution.get("messages_created"),
         "revops_inbound": commercial_execution.get("inbound", {}),
+        "closer_status": closer.get("status"),
+        "closer_go_live_stage": closer.get("go_live_stage"),
+        "closer_lane_cap": closer.get("lane_cap"),
+        "closer_eligible_lanes": closer.get("eligible_lanes"),
+        "closer_primary_opportunity": closer_primary.get("opportunity_id"),
+        "closer_primary_deal": closer_primary.get("deal_id"),
+        "closer_primary_stage": closer_primary.get("stage"),
+        "closer_primary_next_action": closer.get("primary_next_action"),
+        "closer_human_action_required": closer.get("human_action_required"),
+        "closer_outbound_gate": closer.get("outbound_gate", {}),
         "executive_primary": executive_plan.get("primary", {}).get("code"),
         "entrepreneurial_primary": entrepreneurial_drive.get("primary", {}).get("action"),
         "professional_os_top_action": (financial_chief.get("top_action") or {}).get("title"),
