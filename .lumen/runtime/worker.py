@@ -10,6 +10,7 @@ from contact_intelligence import contact_tick
 from market_pipeline import build_market_pipeline
 from interlocutor_engine import interlocutor_tick
 from opportunity_deep_dive import deep_dive_tick
+from document_intelligence import document_intelligence_tick
 from quote_engine import quote_tick
 from preclose_gate import preclose_tick
 from relationship_memory import relationship_tick
@@ -21,6 +22,7 @@ from corporate_brain import corporate_brain_tick
 from growth_expansion import growth_expansion_tick
 from trade_logistics import trade_logistics_tick
 from commercial_execution import commercial_execution_tick
+from enterprise_knowledge import enterprise_knowledge_tick
 from executive_director import plan_tick
 from entrepreneurial_drive import drive_tick
 from mission_scout import mission_scout_tick
@@ -43,7 +45,6 @@ def guarded(name, fn, *, critical=False, default=None):
 if __name__ == "__main__":
     loaded = load_state()
 
-    # Safe boot: a transient database outage must never cause the worker to seed demo data over an unknown real state.
     if not loaded and DB_STATUS.get("configured") and not DB_STATUS.get("connected"):
         print({
             "status": "safe_boot_abort",
@@ -72,10 +73,16 @@ if __name__ == "__main__":
     # 3) Pursue strongest real opportunities with bounded Deep Dive research.
     deep_dive = guarded("Opportunity Deep Dive", lambda: deep_dive_tick(STATE))
 
-    # 4) Receive responses, normalize quotes and advance commercial autopilot.
+    # 4) Receive responses and attach each email to its commercial case/deal before document parsing.
     inbox = guarded("Mail Inbox", lambda: fetch_unseen(STATE))
     applied = guarded("Inbox Deal Linker", lambda: apply_inbox_to_deals(STATE))
+
+    # 5) Document Intelligence extracts PDF/XLS/XLSX/CSV/TXT evidence, materializes formal quotes only when
+    # sender + deal are traceable, and never fabricates values from scanned/ambiguous documents.
+    document_intelligence = guarded("Document Intelligence", lambda: document_intelligence_tick(STATE))
     quotes = guarded("Quote Engine", lambda: quote_tick(STATE))
+
+    # 6) Legacy commercial autopilot remains isolated and persistence-aware.
     result = guarded(
         "Commercial Autopilot",
         lambda: autopilot_tick("worker autónomo"),
@@ -83,14 +90,14 @@ if __name__ == "__main__":
         default={"persisted": False, "status": "autopilot_failed"},
     )
 
-    # 5) Keep binding-risk controls independent from commercial execution.
+    # 7) Keep binding-risk controls independent from commercial execution.
     preclose = guarded("Preclose Gate", lambda: preclose_tick(STATE), critical=True)
 
-    # 6) Commercial memory and counterparty scorecards.
+    # 8) Commercial memory and counterparty scorecards.
     relationships = guarded("Relationship Memory", lambda: relationship_tick(STATE))
     scorecards = guarded("Counterparty Scorecards", lambda: scorecards_tick(STATE))
 
-    # 7) Finance, learning and strategy.
+    # 9) Finance, learning and strategy.
     cfo = guarded("CFO", lambda: cfo_tick(STATE))
     profit_learning = guarded("Self-Learning Profit Engine", lambda: learning_tick(STATE))
     war_room = guarded("War Room", lambda: war_room_tick(STATE))
@@ -98,24 +105,28 @@ if __name__ == "__main__":
     growth_expansion = guarded("Growth & Expansion Brain", lambda: growth_expansion_tick(STATE))
     trade_logistics = guarded("International Trade & Logistics Brain", lambda: trade_logistics_tick(STATE))
 
-    # 8) RevOps owns the commercial conversation loop: requirement -> RFQ -> quote clarification ->
+    # 10) RevOps owns the commercial conversation loop: requirement -> RFQ -> quote clarification ->
     # nonbinding negotiation -> next best action. It only materializes messages to verified corporate emails.
     commercial_execution = guarded("Commercial Execution Brain / RevOps", lambda: commercial_execution_tick(STATE))
 
-    # 9) Executive allocation and autonomous market execution.
+    # 11) Enterprise Knowledge Graph turns documents, companies, quotes, opportunities, deals and outcomes into
+    # persistent connected memory. Historical prices remain evidence only; they are never treated as current terms.
+    enterprise_knowledge = guarded("Enterprise Knowledge Graph", lambda: enterprise_knowledge_tick(STATE))
+
+    # 12) Executive allocation and autonomous market execution.
     executive_plan = guarded("Executive Director", lambda: plan_tick(STATE))
     entrepreneurial_drive = guarded("Entrepreneurial Drive", lambda: drive_tick(STATE))
     mission_scout = guarded("Mission Scout", lambda: mission_scout_tick(STATE))
 
-    # 10) Operating system and money-prioritized action queue.
+    # 13) Operating system and money-prioritized action queue.
     professional_os = guarded("Professional OS", lambda: professional_os_tick(STATE))
     financial_chief = guarded("Financial Chief of Staff", lambda: financial_priority_tick(STATE))
 
-    # 11) Outbound safety engines are critical. If either fails, Autonomous COO keeps outbound closed.
+    # 14) Outbound safety engines are critical. If either fails, Autonomous COO keeps outbound closed.
     communication = guarded("Communication Director", lambda: review_outbox(STATE), critical=True)
     quality = guarded("Quality Gate", lambda: quality_tick(STATE), critical=True)
 
-    # 12) Autonomous COO evaluates system health, data integrity, persistence and engine failures.
+    # 15) Autonomous COO evaluates system health, data integrity, persistence and engine failures.
     coo = operations_control_tick(
         STATE,
         DB_STATUS,
@@ -124,7 +135,7 @@ if __name__ == "__main__":
     )
     safe_live_outbound = bool(LIVE_OUTBOUND and coo.get("operational_guard", {}).get("outbound_allowed"))
 
-    # 13) Mail is fail-closed: production outbound only runs after COO + communication + quality authorization.
+    # 16) Mail is fail-closed: production outbound only runs after COO + communication + quality authorization.
     outbound = guarded(
         "Mail Outbound",
         lambda: send_pending(STATE, safe_live_outbound),
@@ -145,6 +156,7 @@ if __name__ == "__main__":
         "market_pipeline": market_pipeline,
         "interlocutor": interlocutor,
         "opportunity_deep_dive": deep_dive,
+        "document_intelligence": document_intelligence,
         "quote_engine": quotes,
         "preclose_gate": preclose,
         "relationships": relationships,
@@ -156,6 +168,7 @@ if __name__ == "__main__":
         "growth_expansion": growth_expansion,
         "trade_logistics": trade_logistics,
         "commercial_execution": commercial_execution,
+        "enterprise_knowledge": enterprise_knowledge,
         "executive_plan": executive_plan,
         "entrepreneurial_drive": entrepreneurial_drive,
         "professional_os": professional_os,
@@ -171,7 +184,7 @@ if __name__ == "__main__":
         "live_outbound_allowed": safe_live_outbound,
     }
 
-    # 14) KPIs are informational and cannot stop core operations if their renderer fails.
+    # 17) KPIs are informational and cannot stop core operations if their renderer fails.
     business_kpis = guarded("Business KPIs", lambda: kpi_tick(STATE))
     business_kpis["finance"] = cfo.get("financial_snapshot", {})
     business_kpis["finance_warnings"] = cfo.get("warnings", [])
@@ -204,6 +217,23 @@ if __name__ == "__main__":
         "international_suppliers_without_quotes": trade_logistics.get("international_suppliers_without_quotes"),
         "primary_directive": trade_logistics.get("primary_directive"),
     }
+    business_kpis["documents"] = {
+        "documents": document_intelligence.get("documents"),
+        "extracted": document_intelligence.get("extracted"),
+        "ocr_required": document_intelligence.get("ocr_required"),
+        "quotes_detected": document_intelligence.get("quotes_detected"),
+        "offers_materialized": document_intelligence.get("offers_materialized"),
+        "directive": document_intelligence.get("directive", {}),
+    }
+    business_kpis["enterprise_knowledge"] = {
+        "nodes": enterprise_knowledge.get("nodes"),
+        "edges": enterprise_knowledge.get("edges"),
+        "historical_prices": enterprise_knowledge.get("historical_prices"),
+        "categories": enterprise_knowledge.get("categories"),
+        "company_profiles": enterprise_knowledge.get("company_profiles"),
+        "reuse_candidates": enterprise_knowledge.get("reuse_candidates"),
+        "directive": enterprise_knowledge.get("directive", {}),
+    }
     business_kpis["commercial_execution"] = {
         "active_cases": commercial_execution.get("active_cases"),
         "status_counts": commercial_execution.get("status_counts", {}),
@@ -231,10 +261,12 @@ if __name__ == "__main__":
     STATE["market_opportunity_count"] = len(STATE.get("market_opportunities", []))
     STATE["interlocution_case_count"] = len(STATE.get("interlocution_cases", []))
     STATE["deep_dive_case_count"] = len(STATE.get("deep_dive_cases", []))
+    STATE["document_count"] = len(STATE.get("document_registry", []))
+    STATE["knowledge_node_count"] = len(STATE.get("enterprise_knowledge_graph", {}).get("nodes", []))
+    STATE["knowledge_edge_count"] = len(STATE.get("enterprise_knowledge_graph", {}).get("edges", []))
     STATE["operating_action_count"] = len(STATE.get("operating_action_queue", []))
     STATE["decision_ledger_count"] = len(STATE.get("decision_ledger", []))
 
-    # Final persistence remains an explicit hard condition. If it fails, Railway receives a non-zero exit.
     persisted_after_connectors = save_state()
 
     finance_snapshot = cfo.get("financial_snapshot", {})
@@ -244,6 +276,8 @@ if __name__ == "__main__":
     growth_primary = growth_expansion.get("primary_expansion") or {}
     trade_primary = trade_logistics.get("primary_directive") or {}
     revops_directive = commercial_execution.get("directive", {}) or {}
+    document_directive = document_intelligence.get("directive", {}) or {}
+    knowledge_directive = enterprise_knowledge.get("directive", {}) or {}
     print({
         "result": result,
         "autonomous_coo_status": coo.get("status"),
@@ -268,7 +302,15 @@ if __name__ == "__main__":
         "deep_dive_primary_case": deep_dive.get("primary_case_id"),
         "deep_dive_primary_win_score": deep_dive.get("primary_win_score"),
         "deep_dive_primary_next_action": deep_dive.get("primary_next_action"),
+        "document_count": document_intelligence.get("documents"),
+        "document_ocr_required": document_directive.get("ocr_required"),
+        "document_quotes_detected": document_intelligence.get("quotes_detected"),
+        "document_offers_materialized": document_intelligence.get("offers_materialized"),
         "quote_engine": quotes,
+        "knowledge_nodes": enterprise_knowledge.get("nodes"),
+        "knowledge_edges": enterprise_knowledge.get("edges"),
+        "knowledge_historical_prices": enterprise_knowledge.get("historical_prices"),
+        "knowledge_reuse_candidates": knowledge_directive.get("reuse_candidates"),
         "preclose_gate": preclose,
         "cfo_risk_adjusted_expected_profit_usd": finance_snapshot.get("risk_adjusted_expected_profit_usd"),
         "cfo_realized_profit_usd": finance_snapshot.get("realized_profit_usd"),
