@@ -19,6 +19,7 @@ from profit_learning import learning_tick
 from war_room import war_room_tick
 from corporate_brain import corporate_brain_tick
 from growth_expansion import growth_expansion_tick
+from trade_logistics import trade_logistics_tick
 from executive_director import plan_tick
 from entrepreneurial_drive import drive_tick
 from mission_scout import mission_scout_tick
@@ -83,20 +84,24 @@ if __name__ == "__main__":
     # It spends only a bounded shared research budget and every discovered lead still goes through normal trust gates.
     growth_expansion = growth_expansion_tick(STATE)
 
-    # 12) Executive Director receives long-horizon strategy + evidence-gated growth options while resolving hard gaps first.
+    # 12) International Trade & Logistics models landed cost only from explicit, traceable trade inputs and compares
+    # local vs. cross-border sourcing only when currency, technical equivalence and cost coverage are sufficient.
+    trade_logistics = trade_logistics_tick(STATE)
+
+    # 13) Executive Director receives strategy + growth + trade options while resolving hard operational gaps first.
     executive_plan = plan_tick(STATE)
     entrepreneurial_drive = drive_tick(STATE)
 
-    # 13) Mission Scout executes current research using Corporate Brain allocation + Entrepreneurial Drive.
+    # 14) Mission Scout executes current research using Corporate Brain allocation + Entrepreneurial Drive.
     mission_scout = mission_scout_tick(STATE)
 
-    # 14) Professional OS turns current signals into a ranked action queue and operational artifacts.
+    # 15) Professional OS turns current signals into a ranked action queue and operational artifacts.
     professional_os = professional_os_tick(STATE)
 
-    # 15) Financial Chief of Staff merges War Room priorities into the operating queue.
+    # 16) Financial Chief of Staff merges War Room priorities into the operating queue.
     financial_chief = financial_priority_tick(STATE)
 
-    # 16) Every outbound message must pass relationship-oriented communication review AND quality authorization.
+    # 17) Every outbound message must pass relationship-oriented communication review AND quality authorization.
     communication = review_outbox(STATE)
     quality = quality_tick(STATE)
     outbound = send_pending(STATE, LIVE_OUTBOUND)
@@ -122,6 +127,7 @@ if __name__ == "__main__":
         "war_room": war_room,
         "corporate_brain": corporate_brain,
         "growth_expansion": growth_expansion,
+        "trade_logistics": trade_logistics,
         "executive_plan": executive_plan,
         "entrepreneurial_drive": entrepreneurial_drive,
         "professional_os": professional_os,
@@ -136,7 +142,7 @@ if __name__ == "__main__":
         "live_outbound": bool(LIVE_OUTBOUND),
     }
 
-    # 17) KPIs are computed after telemetry so health and funnel metrics reflect this exact cycle.
+    # 18) KPIs are computed after telemetry so health and funnel metrics reflect this exact cycle.
     business_kpis = kpi_tick(STATE)
     business_kpis["finance"] = cfo.get("financial_snapshot", {})
     business_kpis["finance_warnings"] = cfo.get("warnings", [])
@@ -161,6 +167,14 @@ if __name__ == "__main__":
         "cross_sell_candidates": len(growth_expansion.get("cross_sell_investigations", [])),
         "sourcing_spread_candidates": len(growth_expansion.get("sourcing_spread_candidates", [])),
     }
+    business_kpis["trade_logistics"] = {
+        "cross_border_cases": trade_logistics.get("cross_border_cases"),
+        "landed_cost_ready": trade_logistics.get("landed_cost_ready"),
+        "trade_data_incomplete": trade_logistics.get("trade_data_incomplete"),
+        "route_comparisons_ready": trade_logistics.get("route_comparisons_ready"),
+        "international_suppliers_without_quotes": trade_logistics.get("international_suppliers_without_quotes"),
+        "primary_directive": trade_logistics.get("primary_directive"),
+    }
     STATE["business_kpis"] = business_kpis
     STATE["connector_telemetry"]["business_kpis"] = business_kpis
 
@@ -180,6 +194,7 @@ if __name__ == "__main__":
     strategy = corporate_brain.get("strategy", {}) or {}
     objectives = corporate_brain.get("objectives", {}) or {}
     growth_primary = growth_expansion.get("primary_expansion") or {}
+    trade_primary = trade_logistics.get("primary_directive") or {}
     print({
         "result": result,
         "scout": scout,
@@ -221,6 +236,12 @@ if __name__ == "__main__":
         "growth_research": growth_expansion.get("research", {}),
         "growth_cross_sell_candidates": len(growth_expansion.get("cross_sell_investigations", [])),
         "growth_sourcing_spreads": len(growth_expansion.get("sourcing_spread_candidates", [])),
+        "trade_mode": trade_primary.get("mode"),
+        "trade_deal_id": trade_primary.get("deal_id"),
+        "trade_landed_savings_pct": trade_primary.get("landed_savings_pct"),
+        "trade_cross_border_cases": trade_logistics.get("cross_border_cases"),
+        "trade_landed_cost_ready": trade_logistics.get("landed_cost_ready"),
+        "trade_route_comparisons_ready": trade_logistics.get("route_comparisons_ready"),
         "executive_primary": executive_plan.get("primary", {}).get("code"),
         "entrepreneurial_primary": entrepreneurial_drive.get("primary", {}).get("action"),
         "active_missions": entrepreneurial_drive.get("active_missions", 0),
