@@ -14,6 +14,7 @@ from executive_management_panel import inject_executive_management
 from business_control_panel import inject_business_control
 from negotiation_intelligence_panel import inject_negotiation_intelligence
 from order_to_cash_panel import inject_order_to_cash
+from payment_rails_panel import inject_payment_rails
 from risk_red_team_panel import inject_risk_red_team
 from treasury_panel import inject_treasury
 from venture_builder_panel import inject_venture_builder
@@ -74,6 +75,7 @@ def command_center(_=Depends(auth)):
     html = inject_business_control(html, STATE)
     html = inject_negotiation_intelligence(html, STATE)
     html = inject_order_to_cash(html, STATE)
+    html = inject_payment_rails(html, STATE)
     html = inject_treasury(html, STATE)
     html = inject_risk_red_team(html, STATE)
     html = inject_venture_builder(html, STATE)
@@ -117,6 +119,8 @@ def api_deal_room(deal_id: str, _=Depends(auth)):
         "capital_intelligence": capital,
         "negotiation_intelligence": negotiation,
         "post_sale": post_sale,
+        "payment_route": (STATE.get("payment_route_index", {}) or {}).get(str(deal_id), {}),
+        "payment_rails": STATE.get("payment_rails", {}),
         "commission_settlement": settlement,
         "growth_treasury": STATE.get("growth_treasury", {}),
         "counterparty_risk": {
@@ -166,6 +170,8 @@ def api_control_tower(_=Depends(auth)):
         "negotiation_plans": list((STATE.get("negotiation_plan_index", {}) or {}).values()),
         "order_to_cash": STATE.get("order_to_cash", {}),
         "order_to_cash_cases": STATE.get("order_to_cash_cases", []),
+        "payment_rails": STATE.get("payment_rails", {}),
+        "payment_routes": list((STATE.get("payment_route_index", {}) or {}).values()),
         "commission_settlement": STATE.get("commission_settlement", {}),
         "commission_settlement_cases": STATE.get("commission_settlement_cases", []),
         "growth_treasury": STATE.get("growth_treasury", {}),
