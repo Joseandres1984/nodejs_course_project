@@ -18,6 +18,7 @@ from profit_learning import learning_tick
 from executive_director import plan_tick
 from entrepreneurial_drive import drive_tick
 from mission_scout import mission_scout_tick
+from professional_os import professional_os_tick
 from communication_director import review_outbox
 from quality_gate import quality_tick
 from business_kpis import kpi_tick
@@ -73,7 +74,11 @@ if __name__ == "__main__":
     # New leads still pass through the normal verification pipeline; no trust gate is bypassed.
     mission_scout = mission_scout_tick(STATE)
 
-    # 10) Every outbound message must pass relationship-oriented communication review AND quality authorization.
+    # 10) Professional OS converts all current signals into one ranked operating queue, prepares follow-ups,
+    # supplier competition boards, approval briefs, postmortems and real post-sale expansion plans.
+    professional_os = professional_os_tick(STATE)
+
+    # 11) Every outbound message, including follow-ups materialized by Professional OS, must pass both reviews.
     communication = review_outbox(STATE)
     quality = quality_tick(STATE)
     outbound = send_pending(STATE, LIVE_OUTBOUND)
@@ -97,6 +102,7 @@ if __name__ == "__main__":
         "profit_learning": profit_learning,
         "executive_plan": executive_plan,
         "entrepreneurial_drive": entrepreneurial_drive,
+        "professional_os": professional_os,
         "communication": communication,
         "quality_gate": quality,
         "inbox": inbox,
@@ -107,7 +113,7 @@ if __name__ == "__main__":
         "live_outbound": bool(LIVE_OUTBOUND),
     }
 
-    # 11) KPIs are computed after telemetry so health and funnel metrics reflect this exact cycle.
+    # 12) KPIs are computed after telemetry so health and funnel metrics reflect this exact cycle.
     business_kpis = kpi_tick(STATE)
     STATE["connector_telemetry"]["business_kpis"] = business_kpis
 
@@ -118,6 +124,7 @@ if __name__ == "__main__":
     STATE["market_opportunity_count"] = len(STATE.get("market_opportunities", []))
     STATE["interlocution_case_count"] = len(STATE.get("interlocution_cases", []))
     STATE["deep_dive_case_count"] = len(STATE.get("deep_dive_cases", []))
+    STATE["operating_action_count"] = len(STATE.get("operating_action_queue", []))
     STATE["decision_ledger_count"] = len(STATE.get("decision_ledger", []))
     persisted_after_connectors = save_state()
 
@@ -148,6 +155,13 @@ if __name__ == "__main__":
         "active_missions": entrepreneurial_drive.get("active_missions", 0),
         "stale_deals": entrepreneurial_drive.get("stale_deals", 0),
         "kill_candidates": entrepreneurial_drive.get("kill_candidates", 0),
+        "professional_os_top_action": (professional_os.get("top_action") or {}).get("title"),
+        "professional_os_queue_size": professional_os.get("queue_size", 0),
+        "professional_os_autonomous": professional_os.get("autonomous_actions", 0),
+        "professional_os_human": professional_os.get("human_decisions_required", 0),
+        "followups_materialized": professional_os.get("followups_materialized", 0),
+        "supplier_competitions": professional_os.get("supplier_competitions", 0),
+        "approval_briefs": professional_os.get("approval_briefs", 0),
         "communication": communication,
         "quality_gate": quality,
         "inbox": inbox,
@@ -165,6 +179,7 @@ if __name__ == "__main__":
         "market_opportunity_count": STATE.get("market_opportunity_count", 0),
         "interlocution_case_count": STATE.get("interlocution_case_count", 0),
         "deep_dive_case_count": STATE.get("deep_dive_case_count", 0),
+        "operating_action_count": STATE.get("operating_action_count", 0),
         "decision_ledger_count": STATE.get("decision_ledger_count", 0),
     }, flush=True)
 
