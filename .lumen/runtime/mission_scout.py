@@ -75,7 +75,6 @@ def _focus_categories(state: Dict[str, Any]) -> List[str]:
     deprioritized = {str(x).strip().lower() for x in strategic.get("deprioritized_categories", []) or []}
     values: List[str] = []
 
-    # Venture validation gets the first slot only on its bounded cadence; otherwise the core strategy remains first.
     if venture.get("due"):
         cat = str(venture.get("category") or "").strip()
         if cat and cat.lower() not in deprioritized:
@@ -103,11 +102,22 @@ def _focus_categories(state: Dict[str, Any]) -> List[str]:
 
 def _focused_queries(state: Dict[str, Any], side: str) -> List[Tuple[str, str, str]]:
     categories = _focus_categories(state)
+    venture = _venture_validation(state)
     buyer: List[Tuple[str, str, str]] = []
     supplier: List[Tuple[str, str, str]] = []
     for category in categories:
-        buyer.append((f'empresa industria planta mantenimiento "{category}" {MARKET} -proveedor -distribuidor', "buyer", category))
-        supplier.append((f'"{category}" fabricante distribuidor proveedor {MARKET}', "supplier", category))
+        is_venture = bool(venture.get("due") and _norm(category) == _norm(venture.get("category")))
+        target_market = str(venture.get("market") or "").strip() if is_venture else MARKET
+        if not target_market or _norm(target_market) == "home":
+            target_market = MARKET
+        if _norm(target_market) in {"brasil", "brazil"}:
+            buyer_query = f'empresa indústria planta manutenção compras "{category}" Brasil -fornecedor -distribuidor'
+            supplier_query = f'"{category}" fabricante distribuidor fornecedor Brasil industrial'
+        else:
+            buyer_query = f'empresa industria planta mantenimiento "{category}" {target_market} -proveedor -distribuidor'
+            supplier_query = f'"{category}" fabricante distribuidor proveedor {target_market}'
+        buyer.append((buyer_query, "buyer", category))
+        supplier.append((supplier_query, "supplier", category))
     if side == "supplier":
         return supplier + buyer
     if side == "buyer":
@@ -174,6 +184,7 @@ def mission_scout_tick(state: Dict[str, Any]) -> Dict[str, Any]:
         "explore_pct": 100 - exploit_pct,
         "venture_validation_due": bool(venture.get("due")),
         "venture_id": venture.get("venture_id") if venture.get("due") else None,
+        "venture_market": venture.get("market") if venture.get("due") else None,
         "venture_leads_tagged": 0,
         "queries": 0,
         "new_leads": 0,
