@@ -3,6 +3,9 @@ from __future__ import annotations
 import html
 from typing import Any, Dict
 
+# Register the public LUMEN landing page when the web application starts.
+import landing_public  # noqa: F401
+
 
 def _esc(value: Any) -> str:
     return html.escape(str(value if value is not None else ""), quote=True)
