@@ -3,16 +3,20 @@ from __future__ import annotations
 from fastapi import HTTPException, Request
 
 from main import app, STATE, load_state, save_state
-from mercadopago_gateway import fetch_payment, public_status, reconcile_payment, validate_webhook_signature
+from mercadopago_gateway import fetch_payment, public_status, reconcile_payment, validate_webhook_signature, verify_access_token
 
 
 @app.get("/health/mercadopago")
 def mercadopago_health():
     status = public_status()
+    auth = verify_access_token()
     return {
-        "ok": bool(status.get("access_token_configured") and status.get("webhook_secret_configured")),
+        "ok": bool(status.get("access_token_configured") and status.get("webhook_secret_configured") and auth.get("authenticated")),
         "provider": "mercadopago",
         "access_token_configured": bool(status.get("access_token_configured")),
+        "access_token_authenticated": bool(auth.get("authenticated")),
+        "site_id": auth.get("site_id"),
+        "test_user": auth.get("test_user"),
         "webhook_secret_configured": bool(status.get("webhook_secret_configured")),
         "webhook_ready": bool(status.get("webhook_ready")),
         "webhook_path": status.get("webhook_path"),
