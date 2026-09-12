@@ -6,6 +6,20 @@ from main import app, STATE, load_state, save_state
 from mercadopago_gateway import fetch_payment, public_status, reconcile_payment, validate_webhook_signature
 
 
+@app.get("/health/mercadopago")
+def mercadopago_health():
+    status = public_status()
+    return {
+        "ok": bool(status.get("access_token_configured") and status.get("webhook_secret_configured")),
+        "provider": "mercadopago",
+        "access_token_configured": bool(status.get("access_token_configured")),
+        "webhook_secret_configured": bool(status.get("webhook_secret_configured")),
+        "webhook_ready": bool(status.get("webhook_ready")),
+        "webhook_path": status.get("webhook_path"),
+        "secrets_exposed": False,
+    }
+
+
 @app.post("/webhooks/mercadopago")
 async def mercadopago_webhook(request: Request):
     config = public_status()
