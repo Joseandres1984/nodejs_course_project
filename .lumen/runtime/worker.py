@@ -8,6 +8,8 @@ from company_verifier import verification_tick
 from contact_intelligence import contact_tick
 from market_pipeline import build_market_pipeline
 from interlocutor_engine import interlocutor_tick
+from quote_engine import quote_tick
+from preclose_gate import preclose_tick
 from relationship_memory import relationship_tick
 from counterparty_scorecards import scorecards_tick
 from executive_director import plan_tick
@@ -35,19 +37,23 @@ if __name__ == "__main__":
     market_pipeline = build_market_pipeline(STATE)
     interlocutor = interlocutor_tick(STATE)
 
-    # 3) Receive counterpart responses before taking the next commercial step.
+    # 3) Receive counterpart responses, normalize quotes and only then let commercial autopilot advance.
     inbox = fetch_unseen(STATE)
     applied = apply_inbox_to_deals(STATE)
+    quotes = quote_tick(STATE)
     result = autopilot_tick("worker autónomo")
 
-    # 4) Maintain observable commercial memory and objective counterparty scorecards.
+    # 4) No real deal may remain close-ready without identity, terms, tax/payment and human approval controls.
+    preclose = preclose_tick(STATE)
+
+    # 5) Maintain observable commercial memory and objective counterparty scorecards.
     relationships = relationship_tick(STATE)
     scorecards = scorecards_tick(STATE)
 
-    # 5) Executive layer chooses the company's highest-value bottleneck from current evidence.
+    # 6) Executive layer chooses the company's highest-value bottleneck from current evidence.
     executive_plan = plan_tick(STATE)
 
-    # 6) Every outbound message must pass relationship-oriented communication review AND quality authorization.
+    # 7) Every outbound message must pass relationship-oriented communication review AND quality authorization.
     communication = review_outbox(STATE)
     quality = quality_tick(STATE)
     outbound = send_pending(STATE, LIVE_OUTBOUND)
@@ -61,6 +67,8 @@ if __name__ == "__main__":
         "contact_intelligence": contacts,
         "market_pipeline": market_pipeline,
         "interlocutor": interlocutor,
+        "quote_engine": quotes,
+        "preclose_gate": preclose,
         "relationships": relationships,
         "scorecards": scorecards,
         "executive_plan": executive_plan,
@@ -74,7 +82,7 @@ if __name__ == "__main__":
         "live_outbound": bool(LIVE_OUTBOUND),
     }
 
-    # 7) KPIs are computed after telemetry so health and funnel metrics reflect this exact cycle.
+    # 8) KPIs are computed after telemetry so health and funnel metrics reflect this exact cycle.
     business_kpis = kpi_tick(STATE)
     STATE["connector_telemetry"]["business_kpis"] = business_kpis
 
@@ -96,6 +104,8 @@ if __name__ == "__main__":
         "contact_intelligence": contacts,
         "market_pipeline": market_pipeline,
         "interlocutor": interlocutor,
+        "quote_engine": quotes,
+        "preclose_gate": preclose,
         "relationships": relationships,
         "scorecards": scorecards,
         "executive_primary": executive_plan.get("primary", {}).get("code"),
