@@ -105,7 +105,10 @@ def score_lead(lead: Dict[str, Any]) -> Dict[str, Any]:
     business_score = 15 if _contains_any(combined, BUSINESS_TERMS) else 5
     role_terms = SUPPLIER_TERMS if lead_type == "supplier" else BUYER_TERMS
     role_score = 15 if _contains_any(combined, role_terms) else 6
-    local_score = 10 if _contains_any(combined, ARGENTINA_HINTS) else 4
+    # Expansion leads should not be penalized merely for being outside Argentina. Locality is a small confidence
+    # signal only; the Growth/Trade layers decide market attractiveness separately from company identity quality.
+    lead_market = str(lead.get("growth_market") or lead.get("market") or "").strip().lower()
+    local_score = 10 if _contains_any(combined, ARGENTINA_HINTS) or lead_market == "argentina" else 7 if lead_market else 4
     specificity = 5 if title and len(title.strip()) >= 8 else 1
 
     penalties = 0
@@ -118,6 +121,8 @@ def score_lead(lead: Dict[str, Any]) -> Dict[str, Any]:
         reasons.append("Señal empresarial/B2B presente")
     if role_score >= 15:
         reasons.append("Señal compatible con rol " + ("proveedor" if lead_type == "supplier" else "comprador"))
+    if lead_market and lead_market != "argentina":
+        reasons.append(f"Lead de expansión identificado en mercado {lead.get('growth_market') or lead.get('market')}")
     if source_score == 0:
         penalties += 18
     if not snippet.strip():
@@ -206,6 +211,11 @@ def qualify_tick(state: Dict[str, Any]) -> Dict[str, int]:
                 "source_lead_id": lead.get("id"),
                 "lead_score": lead.get("lead_score"),
                 "confidence": lead.get("confidence"),
+                "market": lead.get("growth_market") or lead.get("market"),
+                "growth_market": lead.get("growth_market"),
+                "growth_kind": lead.get("growth_kind"),
+                "growth_hypothesis_key": lead.get("growth_hypothesis_key"),
+                "growth_research_only": bool(lead.get("growth_research_only")),
                 "status": "verification_required",
                 "verified_company": False,
                 "verified_contact": False,
