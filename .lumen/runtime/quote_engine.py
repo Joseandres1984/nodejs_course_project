@@ -13,6 +13,10 @@ def utcnow() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
 
+def _norm(value: Any) -> str:
+    return " ".join(str(value or "").lower().strip().split())
+
+
 def _missing(offer: Dict[str, Any]) -> List[str]:
     return [x for x in REQUIRED_FIELDS + IMPORTANT_FIELDS if offer.get(x) in (None, "", "por validar", "unknown")]
 
@@ -21,6 +25,53 @@ def _completeness(offer: Dict[str, Any]) -> int:
     req = sum(1 for x in REQUIRED_FIELDS if offer.get(x) not in (None, "", "por validar", "unknown"))
     imp = sum(1 for x in IMPORTANT_FIELDS if offer.get(x) not in (None, "", "por validar", "unknown"))
     return round((req / len(REQUIRED_FIELDS)) * 75 + (imp / len(IMPORTANT_FIELDS)) * 25)
+
+
+def _offer_key(offer: Dict[str, Any]) -> tuple[str, str, str]:
+    return (
+        str(offer.get("deal_id") or ""),
+        str(offer.get("source_message_id") or ""),
+        str(offer.get("supplier_account_id") or _norm(offer.get("supplier"))),
+    )
+
+
+def _reconcile_document_duplicates(state: Dict[str, Any]) -> int:
+    offers = state.setdefault("offers", [])
+    grouped: Dict[tuple[str, str, str], List[Dict[str, Any]]] = {}
+    for offer in offers:
+        key = _offer_key(offer)
+        if key[0] and key[1] and key[2] and offer.get("source") != "demo/simulación":
+            grouped.setdefault(key, []).append(offer)
+
+    removed_ids = set()
+    merged = 0
+    merge_fields = [
+        "amount", "currency", "lead_days", "payment_terms", "validity_days", "warranty",
+        "freight_terms", "tax_terms", "technical_compliance", "incoterm", "origin_statement",
+        "quote_number", "document_id", "supplier_account_id", "supplier",
+    ]
+    for rows in grouped.values():
+        if len(rows) < 2:
+            continue
+        formal = next((x for x in rows if x.get("source") == "formal quote"), None)
+        email_offer = next((x for x in rows if x.get("source") == "email real"), None)
+        if not formal or not email_offer:
+            continue
+        # Keep one record, preferring the formal attachment as the stronger commercial source.
+        for field in merge_fields:
+            value = formal.get(field)
+            if value not in (None, "", "por validar", "unknown"):
+                email_offer[field] = value
+        email_offer["source"] = "formal quote"
+        email_offer["source_traceable"] = True
+        email_offer["reconciled_from_offer_id"] = formal.get("id")
+        email_offer["reconciled_at"] = utcnow()
+        removed_ids.add(str(formal.get("id")))
+        merged += 1
+
+    if removed_ids:
+        state["offers"] = [x for x in offers if str(x.get("id")) not in removed_ids]
+    return merged
 
 
 def _normalize_offer(offer: Dict[str, Any]) -> None:
@@ -91,9 +142,10 @@ def _comparison_for(deal_id: str, offers: List[Dict[str, Any]]) -> Dict[str, Any
 
 
 def quote_tick(state: Dict[str, Any]) -> Dict[str, int]:
+    reconciled = _reconcile_document_duplicates(state)
     offers = state.setdefault("offers", [])
     real_offers = [x for x in offers if x.get("source") != "demo/simulación"]
-    stats = {"normalized": 0, "comparable": 0, "clarification_required": 0, "comparisons_ready": 0}
+    stats = {"normalized": 0, "comparable": 0, "clarification_required": 0, "comparisons_ready": 0, "document_duplicates_reconciled": reconciled}
 
     for offer in real_offers:
         _normalize_offer(offer)
