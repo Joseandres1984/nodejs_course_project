@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Dict
 
+from autonomous_management_runtime import executive_management_cycle
 from deal_room import deal_room_tick
 
 
@@ -92,8 +93,12 @@ def kpi_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     if len(real_offers) and not len(proposals):
         bottlenecks.append("proposal_gap")
 
-    # The Deal Room is generated at the end of the cycle so each dossier captures the freshest
-    # finance, RevOps, documents, Trade, governance and approval state without reordering execution.
+    # Executive Management reviews the whole company after every operational cycle. It can only
+    # reallocate reversible attention for the next cycle and cannot widen constitutional caps.
+    executive_management = executive_management_cycle(state)
+
+    # The Deal Room is generated after management so each dossier also captures the current
+    # management disposition (PURSUE / IMPROVE / REPAIR_RISK / PARK / HOLD_RISK).
     deal_room = deal_room_tick(state)
 
     report = {
@@ -102,6 +107,7 @@ def kpi_tick(state: Dict[str, Any]) -> Dict[str, Any]:
         "conversion": conversion,
         "health": health,
         "bottlenecks": bottlenecks,
+        "executive_management": executive_management,
         "deal_room": deal_room,
     }
     state["business_kpis"] = report
