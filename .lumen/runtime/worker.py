@@ -4,6 +4,7 @@ from app import load_state, seed_demo, autopilot_tick, STATE, DB_STATUS, save_st
 from mail_connector import fetch_unseen, apply_inbox_to_deals, send_pending, connector_status as mail_status
 from scout_connector import scout_tick, status as scout_status
 from lead_intelligence import qualify_tick
+from company_verifier import verification_tick
 
 
 def utcnow() -> str:
@@ -17,6 +18,7 @@ if __name__ == "__main__":
 
     scout = scout_tick(STATE)
     intelligence = qualify_tick(STATE)
+    verification = verification_tick(STATE)
     inbox = fetch_unseen(STATE)
     applied = apply_inbox_to_deals(STATE)
     result = autopilot_tick("worker autónomo")
@@ -29,6 +31,7 @@ if __name__ == "__main__":
         "scout": scout,
         "scout_status": scout_status(),
         "lead_intelligence": intelligence,
+        "company_verification": verification,
         "inbox": inbox,
         "applied": applied,
         "outbound": outbound,
@@ -38,6 +41,7 @@ if __name__ == "__main__":
     }
     STATE["research_lead_count"] = len(STATE.get("research_leads", []))
     STATE["candidate_account_count"] = len(STATE.get("candidate_accounts", []))
+    STATE["verified_company_count"] = sum(1 for x in STATE.get("candidate_accounts", []) if x.get("verified_company"))
     persisted_after_connectors = save_state()
 
     print({
@@ -45,6 +49,7 @@ if __name__ == "__main__":
         "scout": scout,
         "scout_status": scout_status(),
         "lead_intelligence": intelligence,
+        "company_verification": verification,
         "inbox": inbox,
         "applied": applied,
         "outbound": outbound,
@@ -53,6 +58,7 @@ if __name__ == "__main__":
         "persisted_after_connectors": persisted_after_connectors,
         "research_lead_count": STATE.get("research_lead_count", 0),
         "candidate_account_count": STATE.get("candidate_account_count", 0),
+        "verified_company_count": STATE.get("verified_company_count", 0),
     }, flush=True)
 
     if not result.get("persisted") or not persisted_after_connectors:
