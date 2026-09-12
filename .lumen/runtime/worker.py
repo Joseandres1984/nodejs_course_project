@@ -14,11 +14,14 @@ from quote_engine import quote_tick
 from preclose_gate import preclose_tick
 from relationship_memory import relationship_tick
 from counterparty_scorecards import scorecards_tick
+from cfo_engine import cfo_tick
 from profit_learning import learning_tick
 from executive_director import plan_tick
 from entrepreneurial_drive import drive_tick
 from mission_scout import mission_scout_tick
 from professional_os import professional_os_tick
+from war_room import war_room_tick
+from financial_chief_of_staff import financial_priority_tick
 from communication_director import review_outbox
 from quality_gate import quality_tick
 from business_kpis import kpi_tick
@@ -61,24 +64,35 @@ if __name__ == "__main__":
     relationships = relationship_tick(STATE)
     scorecards = scorecards_tick(STATE)
 
-    # 7) Learn which categories and search strategies repeatedly produce real commercial progress.
+    # 7) CFO separates pipeline, probability-weighted profit, risk-adjusted profit, committed economics,
+    # realized economics, collection exposure and concentration. It never invents a cash balance or runway.
+    cfo = cfo_tick(STATE)
+
+    # 8) Learn which categories and search strategies repeatedly produce real commercial progress.
     # Sparse evidence is shrunk toward neutral so LUMEN does not overfit one lucky result.
     profit_learning = learning_tick(STATE)
 
-    # 8) Executive layer chooses the highest-value bottleneck; Entrepreneurial Drive combines it with
+    # 9) Executive layer chooses the highest-value bottleneck; Entrepreneurial Drive combines it with
     # learned profit signals and turns it into a persistent mission portfolio.
     executive_plan = plan_tick(STATE)
     entrepreneurial_drive = drive_tick(STATE)
 
-    # 9) Mission Scout spends remaining research budget according to the learned exploit/explore policy.
+    # 10) Mission Scout spends remaining research budget according to the learned exploit/explore policy.
     # New leads still pass through the normal verification pipeline; no trust gate is bypassed.
     mission_scout = mission_scout_tick(STATE)
 
-    # 10) Professional OS converts all current signals into one ranked operating queue, prepares follow-ups,
+    # 11) Professional OS converts all current signals into one ranked operating queue, prepares follow-ups,
     # supplier competition boards, approval briefs, postmortems and real post-sale expansion plans.
     professional_os = professional_os_tick(STATE)
 
-    # 11) Every outbound message, including follow-ups materialized by Professional OS, must pass both reviews.
+    # 12) War Room ranks where money is most likely to be created and models non-binding negotiation scenarios.
+    war_room = war_room_tick(STATE)
+
+    # 13) Financial Chief of Staff merges the War Room into the Professional OS queue so financial priority
+    # actually changes what LUMEN works on next, without bypassing contractual or financial approval gates.
+    financial_chief = financial_priority_tick(STATE)
+
+    # 14) Every outbound message, including follow-ups materialized by Professional OS, must pass both reviews.
     communication = review_outbox(STATE)
     quality = quality_tick(STATE)
     outbound = send_pending(STATE, LIVE_OUTBOUND)
@@ -99,10 +113,13 @@ if __name__ == "__main__":
         "preclose_gate": preclose,
         "relationships": relationships,
         "scorecards": scorecards,
+        "cfo": cfo,
         "profit_learning": profit_learning,
         "executive_plan": executive_plan,
         "entrepreneurial_drive": entrepreneurial_drive,
         "professional_os": professional_os,
+        "war_room": war_room,
+        "financial_chief_of_staff": financial_chief,
         "communication": communication,
         "quality_gate": quality,
         "inbox": inbox,
@@ -113,8 +130,16 @@ if __name__ == "__main__":
         "live_outbound": bool(LIVE_OUTBOUND),
     }
 
-    # 12) KPIs are computed after telemetry so health and funnel metrics reflect this exact cycle.
+    # 15) KPIs are computed after telemetry so health and funnel metrics reflect this exact cycle.
     business_kpis = kpi_tick(STATE)
+    business_kpis["finance"] = cfo.get("financial_snapshot", {})
+    business_kpis["finance_warnings"] = cfo.get("warnings", [])
+    business_kpis["war_room"] = {
+        "primary_money_move": war_room.get("primary_money_move"),
+        "alerts": war_room.get("alerts", []),
+        "top_opportunities": len(war_room.get("top_money_opportunities", [])),
+    }
+    STATE["business_kpis"] = business_kpis
     STATE["connector_telemetry"]["business_kpis"] = business_kpis
 
     STATE["research_lead_count"] = len(STATE.get("research_leads", []))
@@ -128,6 +153,8 @@ if __name__ == "__main__":
     STATE["decision_ledger_count"] = len(STATE.get("decision_ledger", []))
     persisted_after_connectors = save_state()
 
+    finance_snapshot = cfo.get("financial_snapshot", {})
+    primary_money = war_room.get("primary_money_move") or {}
     print({
         "result": result,
         "scout": scout,
@@ -147,6 +174,10 @@ if __name__ == "__main__":
         "preclose_gate": preclose,
         "relationships": relationships,
         "scorecards": scorecards,
+        "cfo_risk_adjusted_expected_profit_usd": finance_snapshot.get("risk_adjusted_expected_profit_usd"),
+        "cfo_realized_profit_usd": finance_snapshot.get("realized_profit_usd"),
+        "cfo_collection_exposure_usd": finance_snapshot.get("gross_unsettled_receivable_usd"),
+        "cfo_warnings": cfo.get("warnings", []),
         "profit_learning_primary_category": profit_learning.get("primary_category"),
         "profit_learning_exploit_pct": profit_learning.get("exploit_pct"),
         "profit_learning_explore_pct": profit_learning.get("explore_pct"),
@@ -155,10 +186,14 @@ if __name__ == "__main__":
         "active_missions": entrepreneurial_drive.get("active_missions", 0),
         "stale_deals": entrepreneurial_drive.get("stale_deals", 0),
         "kill_candidates": entrepreneurial_drive.get("kill_candidates", 0),
-        "professional_os_top_action": (professional_os.get("top_action") or {}).get("title"),
-        "professional_os_queue_size": professional_os.get("queue_size", 0),
-        "professional_os_autonomous": professional_os.get("autonomous_actions", 0),
-        "professional_os_human": professional_os.get("human_decisions_required", 0),
+        "war_room_primary_deal": primary_money.get("deal_id") or primary_money.get("deep_dive_case_id"),
+        "war_room_primary_category": primary_money.get("category"),
+        "war_room_money_score": primary_money.get("money_score"),
+        "war_room_constraint": primary_money.get("constraint"),
+        "professional_os_top_action": (financial_chief.get("top_action") or {}).get("title"),
+        "professional_os_queue_size": financial_chief.get("queue_size", 0),
+        "professional_os_autonomous": financial_chief.get("autonomous_actions", 0),
+        "professional_os_human": financial_chief.get("human_decisions_required", 0),
         "followups_materialized": professional_os.get("followups_materialized", 0),
         "supplier_competitions": professional_os.get("supplier_competitions", 0),
         "approval_briefs": professional_os.get("approval_briefs", 0),
