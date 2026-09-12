@@ -14,6 +14,7 @@ from preclose_gate import preclose_tick
 from relationship_memory import relationship_tick
 from counterparty_scorecards import scorecards_tick
 from executive_director import plan_tick
+from entrepreneurial_drive import drive_tick
 from communication_director import review_outbox
 from quality_gate import quality_tick
 from business_kpis import kpi_tick
@@ -29,6 +30,8 @@ if __name__ == "__main__":
         seed_demo()
 
     # 1) Observe the market and convert raw public signals into verified evidence.
+    # Scout consumes the entrepreneurial mission selected on the previous cycle,
+    # creating a closed planning -> action -> evidence -> planning loop.
     scout = scout_tick(STATE)
     intelligence = qualify_tick(STATE)
     verification = verification_tick(STATE)
@@ -52,8 +55,10 @@ if __name__ == "__main__":
     relationships = relationship_tick(STATE)
     scorecards = scorecards_tick(STATE)
 
-    # 6) Executive layer chooses the company's highest-value bottleneck from current evidence.
+    # 6) Executive layer chooses the highest-value bottleneck; Entrepreneurial Drive turns it into
+    # a persistent mission portfolio, tracks stagnation and allocates attention for the next cycle.
     executive_plan = plan_tick(STATE)
+    entrepreneurial_drive = drive_tick(STATE)
 
     # 7) Every outbound message must pass relationship-oriented communication review AND quality authorization.
     communication = review_outbox(STATE)
@@ -75,6 +80,7 @@ if __name__ == "__main__":
         "relationships": relationships,
         "scorecards": scorecards,
         "executive_plan": executive_plan,
+        "entrepreneurial_drive": entrepreneurial_drive,
         "communication": communication,
         "quality_gate": quality,
         "inbox": inbox,
@@ -113,6 +119,10 @@ if __name__ == "__main__":
         "relationships": relationships,
         "scorecards": scorecards,
         "executive_primary": executive_plan.get("primary", {}).get("code"),
+        "entrepreneurial_primary": entrepreneurial_drive.get("primary", {}).get("action"),
+        "active_missions": entrepreneurial_drive.get("active_missions", 0),
+        "stale_deals": entrepreneurial_drive.get("stale_deals", 0),
+        "kill_candidates": entrepreneurial_drive.get("kill_candidates", 0),
         "communication": communication,
         "quality_gate": quality,
         "inbox": inbox,
