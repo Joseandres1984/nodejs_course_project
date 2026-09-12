@@ -10,6 +10,7 @@ from revenue_factory_panel import inject_revenue_factory
 from master_command_panel import inject_master_panel
 from strategy_simulator_panel import inject_strategy_simulator
 from executive_management_panel import inject_executive_management
+from venture_builder_panel import inject_venture_builder
 from deal_room import build_deal_room
 from deal_room_panel import inject_deal_room_index, render_deal_room
 from supplier_network_panel import inject_supplier_network, inject_supplier_squad_detail
@@ -38,6 +39,12 @@ def _real_deal(deal_id: str):
     return deal
 
 
+def _venture_for_id(venture_id: str):
+    if not venture_id:
+        return {}
+    return next((x for x in (STATE.get("venture_builder", {}) or {}).get("ventures", []) if str(x.get("id")) == str(venture_id)), {})
+
+
 @app.get("/command")
 def command_redirect(_=Depends(auth)):
     return RedirectResponse("/command-center", status_code=307)
@@ -54,6 +61,7 @@ def command_center(_=Depends(auth)):
     html = inject_revenue_factory(html, STATE)
     html = inject_master_panel(html, STATE)
     html = inject_executive_management(html, STATE)
+    html = inject_venture_builder(html, STATE)
     html = inject_strategy_simulator(html, STATE)
     html = inject_deal_room_index(html, STATE)
     html = inject_supplier_network(html, STATE)
@@ -80,9 +88,12 @@ def api_deal_room(deal_id: str, _=Depends(auth)):
     deal = _real_deal(deal_id)
     room = build_deal_room(STATE, deal)
     management = next((x for x in (STATE.get("autonomous_management", {}) or {}).get("deal_portfolio", []) if str(x.get("deal_id")) == str(deal_id)), {})
+    venture = _venture_for_id(str(deal.get("venture_id") or ""))
     return {
         "deal_room": room,
         "management": management,
+        "venture": venture,
+        "venture_id": deal.get("venture_id"),
         "supplier_squad": (STATE.get("supplier_squad_index", {}) or {}).get(str(deal_id), {}),
         "deal_safeguards": (STATE.get("deal_safeguard_index", {}) or {}).get(str(deal_id), {}),
         "commercial_incidents": [x for x in STATE.get("commercial_incidents", []) if str(x.get("deal_id")) == str(deal_id)],
@@ -114,6 +125,9 @@ def api_control_tower(_=Depends(auth)):
         "autonomous_management": STATE.get("autonomous_management", {}),
         "executive_management_overlay": STATE.get("executive_management_overlay", {}),
         "management_category_directives": STATE.get("management_category_directives", []),
+        "venture_builder": STATE.get("venture_builder", {}),
+        "venture_builder_directive": STATE.get("venture_builder_directive", {}),
+        "venture_attribution_stats": STATE.get("venture_attribution_stats", {}),
         "supplier_network": STATE.get("supplier_network", {}),
         "supplier_network_profiles": STATE.get("supplier_network_profiles", []),
         "supplier_squads": STATE.get("supplier_squads", []),
