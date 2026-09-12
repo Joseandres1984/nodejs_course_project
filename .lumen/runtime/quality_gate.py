@@ -50,6 +50,7 @@ RED_TEAM_SENSITIVE_KINDS = {
     "supplier_negotiation",
     "buyer_information_response",
     "payment_status_reminder",
+    "commission_payment_request",
     "customer_success_checkin",
 }
 
@@ -97,6 +98,10 @@ def _deal(state: Dict[str, Any], deal_id: Any) -> Dict[str, Any] | None:
 
 def _counterparty_risk(state: Dict[str, Any], account_id: Any) -> Dict[str, Any]:
     return dict((state.get("counterparty_risk_index", {}) or {}).get(str(account_id or ""), {}) or {})
+
+
+def _settlement_case(state: Dict[str, Any], transaction_id: Any) -> Dict[str, Any]:
+    return next((x for x in state.get("commission_settlement_cases", []) or [] if str(x.get("transaction_id") or "") == str(transaction_id or "")), {})
 
 
 def _review(state: Dict[str, Any], item: Dict[str, Any]) -> tuple[bool, List[str]]:
@@ -160,6 +165,18 @@ def _review(state: Dict[str, Any], item: Dict[str, Any]) -> tuple[bool, List[str
             reasons.append("RFQ sin necesidad/requerimiento identificable")
         if not deal and not item.get("interlocution_case_id"):
             reasons.append("RFQ sin deal ni caso de requerimiento trazable")
+
+    if kind == "commission_payment_request":
+        setup = (state.get("commission_settlement", {}) or {}).get("settlement_setup", {}) or {}
+        case = _settlement_case(state, item.get("transaction_id"))
+        if not setup.get("instructions_verified"):
+            reasons.append("Los datos de cobro de LUMEN no están marcados como verificados")
+        if item.get("financial_instruction_source") != "verified_runtime_configuration":
+            reasons.append("El mensaje de cobro no proviene de la configuración financiera verificada")
+        if not case:
+            reasons.append("No existe caso de liquidación de comisión trazable")
+        elif case.get("status") not in {"AWAITING_PAYMENT", "OVERDUE"}:
+            reasons.append("El estado de la comisión no autoriza solicitar liquidación")
 
     if item.get("kind") in REVOPS_MULTITURN_KINDS and not item.get("execution_key"):
         reasons.append("Turno comercial multivuelta sin clave idempotente")
