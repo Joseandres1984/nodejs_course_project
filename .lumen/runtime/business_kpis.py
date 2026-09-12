@@ -1,0 +1,101 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from typing import Any, Dict
+
+
+def utcnow() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
+def _rate(numerator: int, denominator: int) -> float:
+    if denominator <= 0:
+        return 0.0
+    return round(numerator / denominator * 100.0, 1)
+
+
+def kpi_tick(state: Dict[str, Any]) -> Dict[str, Any]:
+    leads = state.get("research_leads", [])
+    accounts = state.get("candidate_accounts", [])
+    opportunities = state.get("market_opportunities", [])
+    cases = state.get("interlocution_cases", [])
+    outbox = state.get("outbox", [])
+    inbox = state.get("inbox", [])
+    offers = state.get("offers", [])
+    proposals = state.get("proposals", [])
+    deals = state.get("deals", [])
+
+    verified = [x for x in accounts if x.get("verified_company")]
+    buyers = [x for x in verified if x.get("type") == "buyer"]
+    suppliers = [x for x in verified if x.get("type") == "supplier"]
+    demand_buyers = [x for x in buyers if x.get("demand_signal")]
+    contactable = [x for x in verified if x.get("commercial_channel_verified")]
+    email_verified = [x for x in verified if x.get("verified_contact")]
+    requirement_ready = [x for x in cases if x.get("supplier_rfq_ready")]
+    sent = [x for x in outbox if x.get("status") == "sent"]
+    real_offers = [x for x in offers if x.get("source") != "demo/simulación"]
+    viable_deals = [x for x in deals if x.get("economics", {}).get("viable")]
+    close_ready = [x for x in deals if x.get("stage") in {"listo para cerrar", "autorizado para cierre"}]
+
+    funnel = {
+        "research_leads": len(leads),
+        "candidate_accounts": len(accounts),
+        "verified_companies": len(verified),
+        "verified_buyers": len(buyers),
+        "verified_suppliers": len(suppliers),
+        "buyers_with_public_demand": len(demand_buyers),
+        "verified_commercial_channels": len(contactable),
+        "verified_corporate_emails": len(email_verified),
+        "evidence_backed_opportunities": len(opportunities),
+        "interlocution_cases": len(cases),
+        "requirements_ready_for_rfq": len(requirement_ready),
+        "outbound_sent": len(sent),
+        "inbound_received": len(inbox),
+        "real_offers": len(real_offers),
+        "proposals": len(proposals),
+        "viable_deals": len(viable_deals),
+        "close_ready": len(close_ready),
+    }
+
+    conversion = {
+        "lead_to_candidate_pct": _rate(len(accounts), len(leads)),
+        "candidate_to_verified_pct": _rate(len(verified), len(accounts)),
+        "verified_buyer_to_demand_pct": _rate(len(demand_buyers), len(buyers)),
+        "verified_to_contactable_pct": _rate(len(contactable), len(verified)),
+        "opportunity_to_requirement_ready_pct": _rate(len(requirement_ready), len(opportunities)),
+        "sent_to_response_pct": _rate(len(inbox), len(sent)),
+        "real_offer_to_proposal_pct": _rate(len(proposals), len(real_offers)),
+    }
+
+    telemetry = state.get("connector_telemetry", {})
+    health = {
+        "postgres_connected": bool(telemetry.get("postgres", {}).get("connected")),
+        "smtp_configured": bool(telemetry.get("mail", {}).get("smtp_configured")),
+        "imap_configured": bool(telemetry.get("mail", {}).get("imap_configured")),
+        "live_outbound": bool(telemetry.get("live_outbound")),
+        "scout_errors_last_tick": int(telemetry.get("scout", {}).get("errors") or 0),
+        "verification_errors_last_tick": int(telemetry.get("company_verification", {}).get("errors") or 0),
+        "contact_errors_last_tick": int(telemetry.get("contact_intelligence", {}).get("errors") or 0),
+    }
+
+    bottlenecks = []
+    if len(suppliers) and not len(buyers):
+        bottlenecks.append("buyer_gap")
+    if len(buyers) and not len(demand_buyers):
+        bottlenecks.append("demand_gap")
+    if len(verified) and not len(contactable):
+        bottlenecks.append("contact_gap")
+    if len(opportunities) and not len(requirement_ready):
+        bottlenecks.append("requirement_gap")
+    if len(real_offers) and not len(proposals):
+        bottlenecks.append("proposal_gap")
+
+    report = {
+        "updated_at": utcnow(),
+        "funnel": funnel,
+        "conversion": conversion,
+        "health": health,
+        "bottlenecks": bottlenecks,
+    }
+    state["business_kpis"] = report
+    return report
