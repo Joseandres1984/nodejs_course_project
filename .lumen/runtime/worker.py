@@ -9,6 +9,7 @@ from demand_intelligence import demand_intelligence_tick
 from contact_intelligence import contact_tick
 from market_pipeline import build_market_pipeline
 from interlocutor_engine import interlocutor_tick
+from opportunity_deep_dive import deep_dive_tick
 from quote_engine import quote_tick
 from preclose_gate import preclose_tick
 from relationship_memory import relationship_tick
@@ -38,37 +39,41 @@ if __name__ == "__main__":
     demand_intelligence = demand_intelligence_tick(STATE)
     contacts = contact_tick(STATE)
 
-    # 2) Build only evidence-backed opportunities and manage LUMEN's role as B2B interlocutor.
+    # 2) Build only evidence-backed opportunities and formalize the buyer requirement.
     market_pipeline = build_market_pipeline(STATE)
     interlocutor = interlocutor_tick(STATE)
 
-    # 3) Receive counterpart responses, normalize quotes and only then let commercial autopilot advance.
+    # 3) Treat the strongest real opportunities as dedicated attack dossiers. Deep Dive can spend a small
+    # bounded research budget to deepen buyer evidence and build supplier competition, but never lowers trust gates.
+    deep_dive = deep_dive_tick(STATE)
+
+    # 4) Receive counterpart responses, normalize quotes and only then let commercial autopilot advance.
     inbox = fetch_unseen(STATE)
     applied = apply_inbox_to_deals(STATE)
     quotes = quote_tick(STATE)
     result = autopilot_tick("worker autónomo")
 
-    # 4) No real deal may remain close-ready without identity, terms, tax/payment and human approval controls.
+    # 5) No real deal may remain close-ready without identity, terms, tax/payment and human approval controls.
     preclose = preclose_tick(STATE)
 
-    # 5) Maintain observable commercial memory and objective counterparty scorecards.
+    # 6) Maintain observable commercial memory and objective counterparty scorecards.
     relationships = relationship_tick(STATE)
     scorecards = scorecards_tick(STATE)
 
-    # 6) Learn which categories and search strategies repeatedly produce real commercial progress.
+    # 7) Learn which categories and search strategies repeatedly produce real commercial progress.
     # Sparse evidence is shrunk toward neutral so LUMEN does not overfit one lucky result.
     profit_learning = learning_tick(STATE)
 
-    # 7) Executive layer chooses the highest-value bottleneck; Entrepreneurial Drive combines it with
+    # 8) Executive layer chooses the highest-value bottleneck; Entrepreneurial Drive combines it with
     # learned profit signals and turns it into a persistent mission portfolio.
     executive_plan = plan_tick(STATE)
     entrepreneurial_drive = drive_tick(STATE)
 
-    # 8) Mission Scout spends remaining research budget according to the learned exploit/explore policy.
+    # 9) Mission Scout spends remaining research budget according to the learned exploit/explore policy.
     # New leads still pass through the normal verification pipeline; no trust gate is bypassed.
     mission_scout = mission_scout_tick(STATE)
 
-    # 9) Every outbound message must pass relationship-oriented communication review AND quality authorization.
+    # 10) Every outbound message must pass relationship-oriented communication review AND quality authorization.
     communication = review_outbox(STATE)
     quality = quality_tick(STATE)
     outbound = send_pending(STATE, LIVE_OUTBOUND)
@@ -84,6 +89,7 @@ if __name__ == "__main__":
         "contact_intelligence": contacts,
         "market_pipeline": market_pipeline,
         "interlocutor": interlocutor,
+        "opportunity_deep_dive": deep_dive,
         "quote_engine": quotes,
         "preclose_gate": preclose,
         "relationships": relationships,
@@ -101,7 +107,7 @@ if __name__ == "__main__":
         "live_outbound": bool(LIVE_OUTBOUND),
     }
 
-    # 10) KPIs are computed after telemetry so health and funnel metrics reflect this exact cycle.
+    # 11) KPIs are computed after telemetry so health and funnel metrics reflect this exact cycle.
     business_kpis = kpi_tick(STATE)
     STATE["connector_telemetry"]["business_kpis"] = business_kpis
 
@@ -111,6 +117,7 @@ if __name__ == "__main__":
     STATE["verified_corporate_contact_count"] = sum(1 for x in STATE.get("candidate_accounts", []) if x.get("commercial_channel_verified"))
     STATE["market_opportunity_count"] = len(STATE.get("market_opportunities", []))
     STATE["interlocution_case_count"] = len(STATE.get("interlocution_cases", []))
+    STATE["deep_dive_case_count"] = len(STATE.get("deep_dive_cases", []))
     STATE["decision_ledger_count"] = len(STATE.get("decision_ledger", []))
     persisted_after_connectors = save_state()
 
@@ -125,6 +132,10 @@ if __name__ == "__main__":
         "contact_intelligence": contacts,
         "market_pipeline": market_pipeline,
         "interlocutor": interlocutor,
+        "deep_dive_primary_case": deep_dive.get("primary_case_id"),
+        "deep_dive_primary_win_score": deep_dive.get("primary_win_score"),
+        "deep_dive_primary_next_action": deep_dive.get("primary_next_action"),
+        "deep_dive_research": deep_dive.get("research", {}),
         "quote_engine": quotes,
         "preclose_gate": preclose,
         "relationships": relationships,
@@ -153,6 +164,7 @@ if __name__ == "__main__":
         "verified_corporate_contact_count": STATE.get("verified_corporate_contact_count", 0),
         "market_opportunity_count": STATE.get("market_opportunity_count", 0),
         "interlocution_case_count": STATE.get("interlocution_case_count", 0),
+        "deep_dive_case_count": STATE.get("deep_dive_case_count", 0),
         "decision_ledger_count": STATE.get("decision_ledger_count", 0),
     }, flush=True)
 
