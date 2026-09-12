@@ -9,11 +9,14 @@ from business_controller import business_controller_tick
 from capital_margin_intelligence import capital_margin_tick
 from closing_orchestrator import closing_orchestrator_tick
 from commission_settlement import commission_settlement_tick
+from data_truth_engine import data_truth_tick, enforce_truth_on_closing
 from deal_room import deal_room_tick
+from decision_calibration import decision_calibration_tick
 from growth_treasury import growth_treasury_tick
 from negotiation_intelligence import negotiation_intelligence_tick
 from order_to_cash import order_to_cash_tick
-from portfolio_optimizer import portfolio_optimizer_tick
+from portfolio_optimizer_v2 import portfolio_optimizer_v2_tick
+from self_improvement_lab import self_improvement_tick
 from venture_attribution import propagate_venture_attribution
 from venture_builder import venture_builder_tick
 
@@ -88,14 +91,18 @@ def kpi_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     if len(opportunities) and not len(requirement_ready): bottlenecks.append("requirement_gap")
     if len(real_offers) and not len(proposals): bottlenecks.append("proposal_gap")
 
+    # Truth first: stale/unknown facts are explicitly downgraded before economic prioritization.
+    data_truth = data_truth_tick(state)
+
     executive_management = executive_management_cycle(state)
     capital_margin = capital_margin_tick(state)
     business_controller = business_controller_tick(state)
     negotiation_intelligence = negotiation_intelligence_tick(state)
 
-    # Closing Orchestrator refreshes payment routing, protects LUMEN's revenue entitlement and
-    # separates "ready for human approval" from "already approved" before any real commitment.
+    # Closing Orchestrator refreshes payment routing and protects LUMEN's economic entitlement.
     closing_orchestrator = closing_orchestrator_tick(state)
+    truth_close_guard = enforce_truth_on_closing(state)
+    closing_orchestrator = state.get("closing_orchestrator", {}) or closing_orchestrator
     payment_rails = state.get("payment_rails", {}) or {}
 
     order_to_cash = order_to_cash_tick(state)
@@ -106,17 +113,23 @@ def kpi_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     venture_attribution = propagate_venture_attribution(state)
     venture_builder = venture_builder_tick(state)
 
-    # Superior economic layer: define the active profit goal, then make every mature cash/deal/venture
-    # compete for scarce attention on a single opportunity-cost ranking. The resulting overlay is for
-    # the NEXT operating cycle and cannot widen constitutional caps or financial authority.
+    # Superior economic layer: define the active profit goal, calibrate confidence from observed outcomes,
+    # then rank opportunities with truth/freshness + calibration penalties before allocating attention.
     goal_planner = autonomous_goal_planner_tick(state)
-    portfolio_optimizer = portfolio_optimizer_tick(state, goal_planner)
+    decision_calibration = decision_calibration_tick(state)
+    portfolio_optimizer = portfolio_optimizer_v2_tick(state, goal_planner)
 
-    # Deal Room is last so each dossier captures the final goal and portfolio decision.
+    # Self-improvement diagnoses systematic failures and proposes bounded tests/change-sets.
+    # It may autonomously schedule reversible low-authority tests, but never deploys code by itself.
+    self_improvement = self_improvement_tick(state)
+
+    # Deal Room is last so each dossier captures final truth, calibration, goal and portfolio decisions.
     deal_room = deal_room_tick(state)
 
     report = {
         "updated_at": utcnow(), "funnel": funnel, "conversion": conversion, "health": health, "bottlenecks": bottlenecks,
+        "data_truth_engine": data_truth, "data_truth_close_guard": truth_close_guard,
+        "decision_calibration": decision_calibration, "self_improvement_lab": self_improvement,
         "executive_management": executive_management, "capital_margin_intelligence": capital_margin,
         "business_controller": business_controller, "negotiation_intelligence": negotiation_intelligence,
         "closing_orchestrator": closing_orchestrator,
