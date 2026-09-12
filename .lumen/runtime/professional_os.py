@@ -214,7 +214,6 @@ def _build_expansion_plans(state: Dict[str, Any]) -> List[Dict[str, Any]]:
     deals = _deal_map(state)
     plans: List[Dict[str, Any]] = []
     for txn in state.get("transactions", []):
-        # Simulated closes are useful for testing but must never trigger a claim of real account expansion.
         if str(txn.get("status") or "") in {"closed_simulated", "simulated"}:
             continue
         if str(txn.get("status") or "") not in {"closed", "settled", "paid", "completed"}:
@@ -259,6 +258,35 @@ def _collect_tasks(state: Dict[str, Any], competitions: List[Dict[str, Any]], br
             autonomous=bool(primary.get("autonomous", True)),
             object_type="deep_dive_case",
             object_id=str(case.get("id") or ""),
+        ))
+
+    revops = state.get("commercial_execution_directive", {}) or {}
+    if revops.get("primary_case_id") and revops.get("primary_status"):
+        status = str(revops.get("primary_status"))
+        urgency = {
+            "nonbinding_negotiation": 98,
+            "quote_clarification": 94,
+            "commercial_comparison_ready": 92,
+            "rfq_execution": 90,
+            "requirement_discovery": 88,
+            "single_quote_ready": 84,
+            "awaiting_supplier_response": 68,
+            "buyer_question_answered": 62,
+        }.get(status, 70)
+        tasks.append(_task(
+            f"revops|{revops.get('primary_case_id')}|{status}",
+            "commercial_execution",
+            f"RevOps: {revops.get('primary_next_action') or status}",
+            f"Caso {revops.get('primary_case_id')} en estado {status}; {revops.get('active_cases', 0)} caso(s) comerciales activos.",
+            impact=95 if status in {"nonbinding_negotiation", "commercial_comparison_ready"} else 88,
+            urgency=urgency,
+            confidence=0.95,
+            effort=1.0,
+            risk="medium" if status in {"nonbinding_negotiation", "rfq_execution", "quote_clarification"} else "low",
+            autonomous=True,
+            object_type="commercial_case",
+            object_id=str(revops.get("primary_case_id")),
+            payload={"next_action": revops.get("primary_next_action")},
         ))
 
     for action in state.get("relationship_actions", []) or []:
@@ -315,7 +343,6 @@ def _collect_tasks(state: Dict[str, Any], competitions: List[Dict[str, Any]], br
                 object_type="message", object_id=str(message.get("id") or ""),
             ))
 
-    # Operational health belongs in the same queue so commercial execution cannot silently outrun infrastructure.
     telemetry = state.get("connector_telemetry", {}) or {}
     if telemetry and not telemetry.get("postgres", {}).get("connected", False):
         tasks.append(_task(
@@ -325,7 +352,6 @@ def _collect_tasks(state: Dict[str, Any], competitions: List[Dict[str, Any]], br
             object_type="system", object_id="postgres",
         ))
 
-    # Deduplicate by key and keep the highest scoring incarnation.
     by_key: Dict[str, Dict[str, Any]] = {}
     for task in tasks:
         key = str(task["key"])
