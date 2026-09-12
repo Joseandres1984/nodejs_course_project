@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import ipaddress
 import os
 import re
+import socket
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
@@ -42,15 +44,65 @@ def _clean_text(html: str) -> str:
     return WS_RE.sub(" ", unescape(TAG_RE.sub(" ", html))).strip()
 
 
+def _assert_safe_url(url: str) -> None:
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError("unsupported_scheme")
+    if parsed.username or parsed.password:
+        raise ValueError("embedded_credentials_not_allowed")
+    host = (parsed.hostname or "").strip().lower()
+    if not host or host == "localhost" or host.endswith(".local") or host.endswith(".internal"):
+        raise ValueError("unsafe_host")
+    if parsed.port not in {None, 80, 443}:
+        raise ValueError("unsafe_port")
+
+    try:
+        literal = ipaddress.ip_address(host)
+        if not literal.is_global:
+            raise ValueError("non_public_ip")
+        return
+    except ValueError as exc:
+        if str(exc) == "non_public_ip":
+            raise
+
+    try:
+        infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
+    except socket.gaierror as exc:
+        raise ValueError("dns_resolution_failed") from exc
+    addresses = {item[4][0] for item in infos if item and item[4]}
+    if not addresses:
+        raise ValueError("dns_resolution_failed")
+    for address in addresses:
+        try:
+            ip = ipaddress.ip_address(address)
+        except ValueError as exc:
+            raise ValueError("invalid_resolved_ip") from exc
+        if not ip.is_global:
+            raise ValueError("resolved_to_non_public_ip")
+
+
+class SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        target = urllib.parse.urljoin(req.full_url, newurl)
+        _assert_safe_url(target)
+        return super().redirect_request(req, fp, code, msg, headers, target)
+
+
+_SAFE_OPENER = urllib.request.build_opener(SafeRedirectHandler())
+
+
 def _fetch(url: str) -> tuple[str, str, int]:
+    _assert_safe_url(url)
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "text/html,application/xhtml+xml"})
-    with urllib.request.urlopen(req, timeout=18) as resp:
+    with _SAFE_OPENER.open(req, timeout=18) as resp:
+        final_url = resp.geturl()
+        _assert_safe_url(final_url)
         status = int(getattr(resp, "status", 200) or 200)
         ctype = (resp.headers.get("Content-Type") or "").lower()
         if "text/html" not in ctype and "application/xhtml+xml" not in ctype:
-            return "", resp.geturl(), status
+            return "", final_url, status
         raw = resp.read(MAX_BYTES)
-        return raw.decode("utf-8", errors="replace"), resp.geturl(), status
+        return raw.decode("utf-8", errors="replace"), final_url, status
 
 
 def _homepage(account: Dict[str, Any]) -> List[str]:
@@ -119,14 +171,14 @@ def verify_account(account: Dict[str, Any]) -> Dict[str, Any]:
     role_terms = SUPPLIER_TERMS if account.get("type") == "supplier" else BUYER_CONTEXT_TERMS
     role_hits = _contains(combined, role_terms)
 
-    score = 25  # reachable first-party domain
+    score = 25
     score += min(20, business_hits * 4)
     score += category_score
     score += min(15, role_hits * 3)
     score = max(0, min(100, score))
     verified = score >= 70 and business_hits >= 2 and (category_score >= 12 or role_hits >= 2)
 
-    reasons: List[str] = ["Sitio web accesible y asociado al dominio candidato"]
+    reasons: List[str] = ["Sitio web público accesible y asociado al dominio candidato"]
     if business_hits >= 2: reasons.append("Contenido corporativo suficiente")
     if hits: reasons.append("Coincidencia de categoría: " + ", ".join(hits[:5]))
     if role_hits >= 2: reasons.append("Contexto compatible con rol comercial esperado")
