@@ -32,6 +32,35 @@ def _score(buyer: Dict[str, Any], supplier: Dict[str, Any]) -> int:
     return max(0, min(100, round(score)))
 
 
+def _learning_profile(state: Dict[str, Any], category: Any) -> Dict[str, float]:
+    target = _category(category)
+    for item in state.get("profit_learning", {}).get("category_rankings", []) or []:
+        if _category(item.get("category")) == target:
+            return {
+                "score": float(item.get("learned_score") or 50.0),
+                "confidence": float(item.get("confidence") or 0.0),
+            }
+    return {"score": 50.0, "confidence": 0.0}
+
+
+def _portfolio_priority(state: Dict[str, Any], buyer: Dict[str, Any], supplier: Dict[str, Any]) -> float:
+    evidence = float(_score(buyer, supplier))
+    profile = _learning_profile(state, buyer.get("category"))
+    adjustment = (profile["score"] - 50.0) * 0.30 * profile["confidence"]
+    return round(max(0.0, min(110.0, evidence + adjustment)), 2)
+
+
+def _buyer_priority(state: Dict[str, Any], buyer: Dict[str, Any]) -> float:
+    profile = _learning_profile(state, buyer.get("category"))
+    evidence = (
+        float(buyer.get("demand_score") or 0) * 0.45
+        + float(buyer.get("verification_score") or 0) * 0.35
+        + float(buyer.get("lead_score") or 0) * 0.20
+    )
+    adjustment = (profile["score"] - 50.0) * 0.25 * profile["confidence"]
+    return evidence + adjustment
+
+
 def _key(buyer: Dict[str, Any], supplier: Dict[str, Any], category: str) -> str:
     return f"{buyer.get('id')}|{supplier.get('id')}|{category}"
 
@@ -62,9 +91,13 @@ def _evidence(buyer: Dict[str, Any], supplier: Dict[str, Any]) -> List[str]:
     ]))[:8]
 
 
-def _refresh_existing(opportunity: Dict[str, Any], buyer: Dict[str, Any], supplier: Dict[str, Any]) -> None:
+def _refresh_existing(state: Dict[str, Any], opportunity: Dict[str, Any], buyer: Dict[str, Any], supplier: Dict[str, Any]) -> None:
     requirement_confirmed = bool(opportunity.get("requirement_confirmed"))
     opportunity["score"] = _score(buyer, supplier)
+    profile = _learning_profile(state, opportunity.get("category"))
+    opportunity["learned_category_score"] = round(profile["score"], 2)
+    opportunity["learned_category_confidence"] = round(profile["confidence"], 2)
+    opportunity["portfolio_priority_score"] = _portfolio_priority(state, buyer, supplier)
     opportunity["buyer_company_verified"] = bool(buyer.get("verified_company"))
     opportunity["buyer_demand_verified"] = bool(buyer.get("demand_signal"))
     opportunity["supplier_company_verified"] = bool(supplier.get("verified_company"))
@@ -92,14 +125,15 @@ def build_market_pipeline(state: Dict[str, Any]) -> Dict[str, int]:
     known = {str(x.get("opportunity_key")) for x in opportunities if x.get("opportunity_key")}
     buyers = [x for x in accounts if x.get("type") == "buyer" and x.get("verified_company") and x.get("demand_signal")]
     suppliers = [x for x in accounts if x.get("type") == "supplier" and x.get("verified_company")]
+    buyers.sort(key=lambda x: _buyer_priority(state, x), reverse=True)
     stats = {"buyer_accounts": len(buyers), "supplier_accounts": len(suppliers), "pairs_evaluated": 0, "created": 0, "refreshed": 0, "below_threshold": 0}
 
-    # Reconcile old opportunities first so no case keeps stale contact or verification flags.
+    # Reconcile old opportunities first so no case keeps stale contact, verification or learned-priority flags.
     for opportunity in opportunities:
         buyer = account_by_id.get(str(opportunity.get("buyer_account_id") or ""))
         supplier = account_by_id.get(str(opportunity.get("supplier_account_id") or ""))
         if buyer and supplier:
-            _refresh_existing(opportunity, buyer, supplier)
+            _refresh_existing(state, opportunity, buyer, supplier)
             stats["refreshed"] += 1
 
     for buyer in buyers:
@@ -107,7 +141,7 @@ def build_market_pipeline(state: Dict[str, Any]) -> Dict[str, int]:
         if not category:
             continue
         matches = [s for s in suppliers if _category(s.get("category")) == category]
-        matches.sort(key=lambda x: float(x.get("verification_score") or 0), reverse=True)
+        matches.sort(key=lambda x: _portfolio_priority(state, buyer, x), reverse=True)
         for supplier in matches[:3]:
             if stats["created"] >= MAX_NEW_PER_TICK:
                 break
@@ -120,6 +154,7 @@ def build_market_pipeline(state: Dict[str, Any]) -> Dict[str, int]:
                 stats["below_threshold"] += 1
                 continue
             flags = _risk_flags(buyer, supplier, requirement_confirmed=False)
+            profile = _learning_profile(state, buyer.get("category"))
             opp = {
                 "id": f"MKT-{len(opportunities)+1:05d}",
                 "opportunity_key": key,
@@ -127,6 +162,9 @@ def build_market_pipeline(state: Dict[str, Any]) -> Dict[str, int]:
                 "supplier_account_id": supplier.get("id"),
                 "category": buyer.get("category"),
                 "score": score,
+                "learned_category_score": round(profile["score"], 2),
+                "learned_category_confidence": round(profile["confidence"], 2),
+                "portfolio_priority_score": _portfolio_priority(state, buyer, supplier),
                 "status": "evidence_backed",
                 "source": "public_evidence",
                 "buyer_company_verified": True,
@@ -154,11 +192,16 @@ def build_market_pipeline(state: Dict[str, Any]) -> Dict[str, int]:
             record_decision(
                 state, engine="Market Opportunity Builder", object_type="market_opportunity", object_id=opp["id"],
                 decision="evidence_backed_opportunity_created",
-                reason="Comprador verificado + señal pública de demanda + proveedor verificado en misma categoría; valor económico aún desconocido",
+                reason=(
+                    "Comprador verificado + señal pública de demanda + proveedor verificado en misma categoría; "
+                    f"prioridad de portfolio {opp['portfolio_priority_score']:.1f}; valor económico aún desconocido"
+                ),
                 action="score_opportunity", confidence=score / 100.0, evidence_refs=opp["evidence_refs"],
             )
 
+    # Keep the portfolio naturally ordered for downstream engines and dashboard consumers.
+    opportunities.sort(key=lambda x: float(x.get("portfolio_priority_score") or x.get("score") or 0), reverse=True)
     state["market_pipeline_stats"] = {**stats, "updated_at": utcnow(), "total": len(opportunities)}
     if stats["created"]:
-        _log(state, f"Market Opportunity Builder creó {stats['created']} oportunidades respaldadas por evidencia, sin inventar valores económicos.")
+        _log(state, f"Market Opportunity Builder creó {stats['created']} oportunidades priorizadas por evidencia + aprendizaje económico, sin bajar el umbral de verificación.")
     return stats
