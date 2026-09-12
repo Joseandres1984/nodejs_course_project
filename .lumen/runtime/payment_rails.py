@@ -116,7 +116,12 @@ def payment_rails_tick(state: Dict[str, Any]) -> Dict[str, Any]:
             continue
         route = choose_payment_route(state, deal); routes.append(route)
         if deal.get("id"):
-            route_index[str(deal.get("id"))] = route; deal["payment_route"] = route
+            route_index[str(deal.get("id"))] = route
+            deal["payment_route"] = route
+            # Pre-Close consumes this boolean; it becomes true only when the chosen runtime rail is verified.
+            deal["payment_route_ready"] = route.get("status") == "READY"
+            deal["payment_instructions_verified"] = route.get("status") == "READY"
+            deal["payment_rail_code"] = ((route.get("selected_rail") or {}).get("code"))
 
     report = {
         "updated_at": utcnow(), "mode": "autonomous_payment_rail_routing",
