@@ -12,6 +12,7 @@ from strategy_simulator_panel import inject_strategy_simulator
 from deal_room import build_deal_room
 from deal_room_panel import inject_deal_room_index, render_deal_room
 from supplier_network_panel import inject_supplier_network, inject_supplier_squad_detail
+from deal_safeguards_panel import inject_safeguards, inject_deal_safeguards
 
 
 @app.get("/health/persistence")
@@ -54,6 +55,7 @@ def command_center(_=Depends(auth)):
     html = inject_strategy_simulator(html, STATE)
     html = inject_deal_room_index(html, STATE)
     html = inject_supplier_network(html, STATE)
+    html = inject_safeguards(html, STATE)
     mark_alerts_seen(STATE)
     save_state()
     return HTMLResponse(html)
@@ -66,6 +68,7 @@ def deal_room_view(deal_id: str, _=Depends(auth)):
     room = build_deal_room(STATE, deal)
     html = render_deal_room(room, STATE)
     html = inject_supplier_squad_detail(html, STATE, deal_id)
+    html = inject_deal_safeguards(html, STATE, deal_id)
     return HTMLResponse(html)
 
 
@@ -77,6 +80,8 @@ def api_deal_room(deal_id: str, _=Depends(auth)):
     return {
         "deal_room": room,
         "supplier_squad": (STATE.get("supplier_squad_index", {}) or {}).get(str(deal_id), {}),
+        "deal_safeguards": (STATE.get("deal_safeguard_index", {}) or {}).get(str(deal_id), {}),
+        "commercial_incidents": [x for x in STATE.get("commercial_incidents", []) if str(x.get("deal_id")) == str(deal_id)],
         "company_mode": (STATE.get("master_governance", {}) or {}).get("company_mode"),
         "master_governance": STATE.get("master_governance", {}),
         "strategy_simulator": STATE.get("strategy_simulator", {}),
@@ -106,6 +111,9 @@ def api_control_tower(_=Depends(auth)):
         "supplier_network_profiles": STATE.get("supplier_network_profiles", []),
         "supplier_squads": STATE.get("supplier_squads", []),
         "procurement_orchestrator": STATE.get("procurement_orchestrator", {}),
+        "deal_safeguards": STATE.get("deal_safeguards_report", {}),
+        "deal_safeguard_cases": STATE.get("deal_safeguard_cases", []),
+        "commercial_incidents": STATE.get("commercial_incidents", []),
         "deal_room": STATE.get("deal_room", {}),
         "deal_rooms": STATE.get("deal_rooms", []),
         "postgres": DB_STATUS,
@@ -143,6 +151,22 @@ def executive_decision(
             raise HTTPException(status_code=400, detail="Este tipo de aprobación no admite cierre desde el Cockpit")
         if not deal:
             raise HTTPException(status_code=409, detail="El deal asociado ya no existe")
+
+        safeguards = deal.get("deal_safeguards", {}) or {}
+        if not deal.get("deal_safeguards_cleared") or deal.get("legal_review_required") or deal.get("incident_hold"):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "status": "approval_blocked_by_deal_safeguards",
+                    "deal_id": deal.get("id"),
+                    "safe_close_score": safeguards.get("safe_close_score"),
+                    "critical_gaps": safeguards.get("critical_gaps", []),
+                    "legal_review_required": bool(deal.get("legal_review_required")),
+                    "incident_hold": bool(deal.get("incident_hold")),
+                    "message": "Deal Safeguards detecta exposición pendiente. No se permite aprobar el cierre hasta resolverla.",
+                },
+            )
+
         missing = list(deal.get("preclose_missing") or [])
         if missing:
             raise HTTPException(
