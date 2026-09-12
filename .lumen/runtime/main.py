@@ -11,6 +11,7 @@ from master_command_panel import inject_master_panel
 from strategy_simulator_panel import inject_strategy_simulator
 from executive_management_panel import inject_executive_management
 from business_control_panel import inject_business_control
+from negotiation_intelligence_panel import inject_negotiation_intelligence
 from venture_builder_panel import inject_venture_builder
 from deal_room import build_deal_room
 from deal_room_panel import inject_deal_room_index, render_deal_room
@@ -63,6 +64,7 @@ def command_center(_=Depends(auth)):
     html = inject_master_panel(html, STATE)
     html = inject_executive_management(html, STATE)
     html = inject_business_control(html, STATE)
+    html = inject_negotiation_intelligence(html, STATE)
     html = inject_venture_builder(html, STATE)
     html = inject_strategy_simulator(html, STATE)
     html = inject_deal_room_index(html, STATE)
@@ -92,10 +94,12 @@ def api_deal_room(deal_id: str, _=Depends(auth)):
     management = next((x for x in (STATE.get("autonomous_management", {}) or {}).get("deal_portfolio", []) if str(x.get("deal_id")) == str(deal_id)), {})
     venture = _venture_for_id(str(deal.get("venture_id") or ""))
     capital = (STATE.get("capital_priority_index", {}) or {}).get(str(deal_id), {})
+    negotiation = (STATE.get("negotiation_plan_index", {}) or {}).get(str(deal_id), {})
     return {
         "deal_room": room,
         "management": management,
         "capital_intelligence": capital,
+        "negotiation_intelligence": negotiation,
         "venture": venture,
         "venture_id": deal.get("venture_id"),
         "supplier_squad": (STATE.get("supplier_squad_index", {}) or {}).get(str(deal_id), {}),
@@ -133,6 +137,9 @@ def api_control_tower(_=Depends(auth)):
         "capital_margin_intelligence": STATE.get("capital_margin_intelligence", {}),
         "business_controller": STATE.get("business_controller", {}),
         "business_controller_overlay": STATE.get("business_controller_overlay", {}),
+        "negotiation_intelligence": STATE.get("negotiation_intelligence", {}),
+        "counterparty_behavior_profiles": STATE.get("counterparty_behavior_profiles", []),
+        "negotiation_plans": list((STATE.get("negotiation_plan_index", {}) or {}).values()),
         "venture_builder": STATE.get("venture_builder", {}),
         "venture_builder_directive": STATE.get("venture_builder_directive", {}),
         "venture_attribution_stats": STATE.get("venture_attribution_stats", {}),
