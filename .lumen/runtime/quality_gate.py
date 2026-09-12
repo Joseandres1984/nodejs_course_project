@@ -21,12 +21,28 @@ RISKY_COMMITMENT_PHRASES = (
     "comprometemos el pago",
     "aceptamos sus condiciones",
     "queda adjudicado",
+    "aceptamos la devolución",
+    "aceptamos devolución",
+    "reembolso garantizado",
+    "reintegro garantizado",
+    "asumimos responsabilidad",
+    "nos hacemos responsables",
+    "indemnizaremos",
+    "aceptamos penalidad",
+    "aceptamos la penalidad",
+    "responsabilidad ilimitada",
+    "aceptamos jurisdicción",
+    "aceptamos jurisdiccion",
+    "aceptamos la ley aplicable",
+    "aceptamos cancelación sin cargo",
+    "aceptamos cancelacion sin cargo",
 )
 
 REVOPS_MULTITURN_KINDS = {
     "quote_clarification",
     "supplier_negotiation",
     "buyer_information_response",
+    "terms_clarification",
 }
 
 
@@ -59,9 +75,7 @@ def _duplicate_sent(state: Dict[str, Any], item: Dict[str, Any]) -> bool:
         )
         if not same_conversation_slot:
             continue
-        # RevOps may legitimately ask a second clarification or negotiate again only when new evidence created
-        # a distinct idempotent execution key. Reusing the same key remains blocked.
-        if kind in REVOPS_MULTITURN_KINDS and item.get("revops_case_id") and execution_key:
+        if kind in REVOPS_MULTITURN_KINDS and execution_key:
             other_key = str(other.get("execution_key") or "")
             if other_key and other_key != execution_key:
                 continue
@@ -96,7 +110,7 @@ def _review(state: Dict[str, Any], item: Dict[str, Any]) -> tuple[bool, List[str
 
     low = body.lower()
     if any(phrase in low for phrase in RISKY_COMMITMENT_PHRASES):
-        reasons.append("El texto contiene un compromiso financiero/contractual no permitido")
+        reasons.append("El texto contiene un compromiso financiero/contractual/de responsabilidad no permitido")
 
     relation = _relationship_for(state, target, str(item.get("counterparty") or ""))
     if relation:
@@ -108,18 +122,28 @@ def _review(state: Dict[str, Any], item: Dict[str, Any]) -> tuple[bool, List[str
             reasons.append("La relación está en período de cooldown")
 
     deal = _deal(state, item.get("deal_id"))
+    if deal and deal.get("incident_hold") and item.get("kind") not in {"terms_clarification"}:
+        reasons.append("El deal tiene un incidente/reclamo abierto; se congelan comunicaciones comerciales que puedan ampliar exposición")
+
     if item.get("kind") == "buyer_proposal":
         if not deal or not deal.get("economics"):
             reasons.append("La propuesta no tiene economía calculada")
         elif not bool(deal.get("economics", {}).get("viable")):
             reasons.append("La economía del negocio no cumple el margen mínimo")
+        safeguards = (deal or {}).get("deal_safeguards", {}) or {}
+        if deal and safeguards and not safeguards.get("proposal_allowed", False):
+            reasons.append("Deal Safeguards no autoriza todavía presentar esta propuesta")
+        if deal and deal.get("legal_review_required"):
+            reasons.append("El deal requiere revisión legal humana antes de presentar términos comerciales")
+
     if item.get("kind") == "supplier_rfq":
         if deal and not deal.get("need"):
             reasons.append("RFQ sin necesidad/requerimiento identificable")
         if not deal and not item.get("interlocution_case_id"):
             reasons.append("RFQ sin deal ni caso de requerimiento trazable")
+
     if item.get("kind") in REVOPS_MULTITURN_KINDS and not item.get("execution_key"):
-        reasons.append("Turno RevOps sin clave idempotente")
+        reasons.append("Turno comercial multivuelta sin clave idempotente")
 
     return len(reasons) == 0, reasons
 
@@ -133,7 +157,6 @@ def quality_tick(state: Dict[str, Any]) -> Dict[str, int]:
             continue
         stats["reviewed"] += 1
 
-        # Items without a verified contact remain pending rather than being treated as a defect.
         if item.get("status") == "needs_verified_contact":
             item["quality_gate"] = "pending_contact"
             item["quality_reviewed"] = True
@@ -154,7 +177,7 @@ def quality_tick(state: Dict[str, Any]) -> Dict[str, int]:
                 object_type="message",
                 object_id=str(item.get("id") or ""),
                 decision="outbound_quality_passed",
-                reason="Contacto, tono, relación, contenido, trazabilidad y autoridad cumplen las reglas de salida.",
+                reason="Contacto, tono, relación, contenido, trazabilidad, Deal Safeguards y autoridad cumplen las reglas de salida.",
                 action="authorize_message_for_mail_connector",
                 confidence=0.99,
                 evidence_refs=[],
