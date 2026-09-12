@@ -6,9 +6,10 @@ import urllib.parse
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List
 
-from scout_connector import DAILY_QUERY_BUDGET, search, utcnow
+from scout_connector import DAILY_QUERY_BUDGET, MARKET, search, utcnow
 
 MAX_QUERIES_PER_TICK = max(0, min(2, int(os.getenv("LUMEN_DEMAND_MAX_QUERIES", "1"))))
+COLLECTION_FOCUS = os.getenv("LUMEN_COLLECTION_FOCUS", "").strip().lower()
 
 STRONG_DEMAND_TERMS = (
     "licitación", "licitacion", "cotización", "cotizacion", "convocatoria", "compras",
@@ -55,6 +56,20 @@ def _identity_tokens(account: Dict[str, Any]) -> List[str]:
     return out[:6]
 
 
+def _is_argentina(account: Dict[str, Any]) -> bool:
+    values = [account.get("country"), account.get("market"), account.get("growth_market")]
+    text = " ".join(str(x or "").strip().lower() for x in values if str(x or "").strip())
+    if not text:
+        return str(MARKET or "").strip().lower() == "argentina"
+    return "argentina" in text or text in {"ar", "arg", "republica argentina", "república argentina"}
+
+
+def _collection_eligible(account: Dict[str, Any]) -> bool:
+    if COLLECTION_FOCUS != "mercadopago_ars":
+        return True
+    return _is_argentina(account)
+
+
 def _query(account: Dict[str, Any]) -> str:
     domain = str(account.get("domain") or "")
     category = str(account.get("category") or "")
@@ -65,8 +80,9 @@ def _query(account: Dict[str, Any]) -> str:
         anchor = f"({official_expr} OR {identity_expr})"
     else:
         anchor = official_expr or identity_expr or f'"{domain}"'
+    market_hint = " Argentina" if COLLECTION_FOCUS == "mercadopago_ars" else ""
     return (
-        f'{anchor} "{category}" '
+        f'{anchor} "{category}"{market_hint} '
         "(compras OR licitación OR licitacion OR cotización OR cotizacion OR "
         "proveedores OR pliego OR abastecimiento OR RFQ OR procurement)"
     )
@@ -95,11 +111,8 @@ def _score(account: Dict[str, Any], item: Dict[str, str]) -> Dict[str, Any]:
 
     score = (35 if official else 0) + min(35, strong_hits * 18) + category_score + identity_score
 
-    # A product page is not a buying signal. Demand language must be present.
     if strong_hits == 0:
         score = min(score, 60)
-
-    # External portals are accepted only when the buyer identity is actually present.
     if not official and identity_score < 15:
         score = min(score, 65)
 
@@ -133,6 +146,8 @@ def _candidates(state: Dict[str, Any]) -> List[Dict[str, Any]]:
     for account in state.get("candidate_accounts", []):
         if account.get("type") != "buyer" or not account.get("verified_company"):
             continue
+        if not _collection_eligible(account):
+            continue
         if account.get("demand_signal"):
             continue
         next_check = str(account.get("demand_next_check") or "")
@@ -152,11 +167,14 @@ def _candidates(state: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 def demand_intelligence_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     budget = _budget(state)
+    candidates = _candidates(state)
     stats: Dict[str, Any] = {
         "queries": 0,
         "verified": 0,
         "no_signal": 0,
         "errors": 0,
+        "eligible_candidates": len(candidates),
+        "collection_focus": COLLECTION_FOCUS or "standard",
         "budget_remaining": budget["queries_remaining"],
     }
     if MAX_QUERIES_PER_TICK <= 0 or budget["queries_remaining"] <= 0:
@@ -165,7 +183,7 @@ def demand_intelligence_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     signals = state.setdefault("demand_signals", [])
     known_urls = {str(x.get("url") or "") for x in signals if x.get("url")}
 
-    for account in _candidates(state)[:MAX_QUERIES_PER_TICK]:
+    for account in candidates[:MAX_QUERIES_PER_TICK]:
         if budget["queries_remaining"] <= 0:
             break
 
@@ -203,6 +221,7 @@ def demand_intelligence_tick(state: Dict[str, Any]) -> Dict[str, Any]:
                         "identity_score": scoring["identity_score"],
                         "category_score": scoring["category_score"],
                         "strong_demand_hits": scoring["strong_hits"],
+                        "collection_focus": COLLECTION_FOCUS or "standard",
                         "created_at": utcnow(),
                     }
                 )
@@ -229,9 +248,7 @@ def demand_intelligence_tick(state: Dict[str, Any]) -> Dict[str, Any]:
                 account["demand_next_check"] = (
                     datetime.now(timezone.utc) + timedelta(days=7)
                 ).strftime("%Y-%m-%d")
-                account["next_action"] = (
-                    "Revisar nuevamente señal de demanda más adelante; no contactar por ahora"
-                )
+                account["next_action"] = "Revisar nuevamente señal de demanda más adelante; no contactar por ahora"
                 stats["no_signal"] += 1
                 _log(
                     state,
