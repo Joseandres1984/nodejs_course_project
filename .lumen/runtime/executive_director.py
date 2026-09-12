@@ -42,6 +42,7 @@ def plan_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     margin_gaps = _deal_economics_gap(state)
     pending_approvals = sum(1 for x in state.get("approvals", []) if x.get("status") == "pending")
     strategic = state.get("strategic_directive", {}) or {}
+    growth = state.get("growth_directive", {}) or {}
 
     priorities: List[Dict[str, Any]] = []
 
@@ -90,6 +91,22 @@ def plan_tick(state: Dict[str, Any]) -> Dict[str, Any]:
             source="corporate_brain",
         )
 
+    # Growth & Expansion is allowed to compete for executive attention only after the base business passes
+    # readiness gates. It remains public-research first and cannot authorize cross-border commitments.
+    if growth.get("ready") and growth.get("primary_category"):
+        readiness = float(growth.get("readiness_score") or 0)
+        growth_priority = max(78, min(93, int(78 + readiness * 0.15)))
+        market = str(growth.get("primary_market") or "mercado objetivo")
+        category = str(growth.get("primary_category") or "categoría prioritaria")
+        add(
+            "growth_expansion",
+            growth_priority,
+            f"Validar expansión de {category} en {market} con evidencia pública antes de escalar comercialmente",
+            f"Growth Brain readiness {readiness:.1f}; score de expansión {growth.get('primary_score')}; tipo {growth.get('primary_kind')}.",
+            autonomous=True,
+            source="growth_expansion",
+        )
+
     if not priorities:
         add("expand_market", 70, "Expandir cuentas y categorías de mayor valor", "No hay un cuello de botella crítico; conviene ampliar mercado con disciplina de evidencia.")
 
@@ -98,7 +115,7 @@ def plan_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     plan = {
         "updated_at": utcnow(),
         "primary": primary,
-        "priorities": priorities[:6],
+        "priorities": priorities[:7],
         "snapshot": {
             "verified_suppliers": verified_suppliers,
             "verified_buyers": verified_buyers,
@@ -107,8 +124,12 @@ def plan_tick(state: Dict[str, Any]) -> Dict[str, Any]:
             "pending_approvals": pending_approvals,
             "corporate_strategy_mode": strategic.get("mode"),
             "corporate_strategy_epoch": strategic.get("strategy_epoch"),
+            "growth_ready": bool(growth.get("ready")),
+            "growth_readiness_score": growth.get("readiness_score"),
+            "growth_primary_market": growth.get("primary_market"),
+            "growth_primary_category": growth.get("primary_category"),
         },
-        "decision_rule": "resolver primero gaps críticos; luego maximizar valor económico sostenible alineado con la estrategia corporativa, evidencia, riesgo, velocidad y calidad de relación",
+        "decision_rule": "resolver primero gaps críticos; luego maximizar valor económico sostenible alineado con estrategia corporativa, expansión evidenciada, riesgo, velocidad y calidad de relación",
     }
     state["executive_plan"] = plan
     record_decision(
