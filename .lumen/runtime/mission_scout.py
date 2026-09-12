@@ -46,15 +46,25 @@ def _unique_queue(items: List[Tuple[str, str, str]]) -> List[Tuple[str, str, str
 
 
 def _focus_categories(state: Dict[str, Any]) -> List[str]:
+    strategic = state.get("strategic_directive", {}) or {}
     drive = state.get("entrepreneurial_drive", {}) or {}
     primary = drive.get("primary", {}) or {}
     learning = state.get("profit_learning", {}) or {}
+    deprioritized = {str(x).strip().lower() for x in strategic.get("deprioritized_categories", []) or []}
     values: List[str] = []
+
+    # Long-horizon strategy has first say, then the current entrepreneurial mission and learning engine fill gaps.
+    for category in strategic.get("focus_categories", []) or []:
+        cat = str(category or "").strip()
+        if cat and cat.lower() not in deprioritized and cat not in values:
+            values.append(cat)
     if primary.get("focus_category"):
-        values.append(str(primary["focus_category"]))
+        cat = str(primary["focus_category"]).strip()
+        if cat and cat.lower() not in deprioritized and cat not in values:
+            values.append(cat)
     for item in learning.get("focus_categories", []) or []:
         cat = str(item.get("category") or "").strip()
-        if cat and cat not in values:
+        if cat and cat.lower() not in deprioritized and cat not in values:
             values.append(cat)
     return values[:3]
 
@@ -74,20 +84,23 @@ def _focused_queries(state: Dict[str, Any], side: str) -> List[Tuple[str, str, s
 
 
 def _exploration_cycle(state: Dict[str, Any], exploit_pct: int) -> bool:
+    brain = state.get("corporate_brain", {}) or {}
     learning = state.get("profit_learning", {}) or {}
-    cycle = int(learning.get("cycles") or state.get("ticks") or 0)
+    cycle = int(brain.get("cycle") or learning.get("cycles") or state.get("ticks") or 0)
     exploit_slots = max(1, min(9, round(exploit_pct / 10)))
     return cycle % 10 >= exploit_slots
 
 
 def mission_scout_tick(state: Dict[str, Any]) -> Dict[str, Any]:
+    strategic = state.get("strategic_directive", {}) or {}
     drive = state.get("entrepreneurial_drive", {}) or {}
     primary = drive.get("primary", {}) or {}
     learning = state.get("profit_learning", {}) or {}
-    side = str(primary.get("research_side") or "balanced")
+    side = str(strategic.get("research_side") or primary.get("research_side") or "balanced")
     action = str(primary.get("action") or "expand_market")
-    objective = str(primary.get("objective") or "Expandir mercado")
-    exploit_pct = int(learning.get("exploit_pct") or 70)
+    objective = str(primary.get("objective") or strategic.get("thesis") or "Expandir mercado")
+    exploit_pct = int(strategic.get("exploit_pct") or learning.get("exploit_pct") or 70)
+    exploit_pct = max(50, min(88, exploit_pct))
     explore = _exploration_cycle(state, exploit_pct)
 
     stats = {
@@ -95,9 +108,12 @@ def mission_scout_tick(state: Dict[str, Any]) -> Dict[str, Any]:
         "mission_action": action,
         "research_side": side,
         "objective": objective,
+        "corporate_strategy_mode": strategic.get("mode"),
+        "corporate_strategy_epoch": strategic.get("strategy_epoch"),
         "mode": "explore" if explore else "exploit",
         "focus_categories": _focus_categories(state),
         "exploit_pct": exploit_pct,
+        "explore_pct": 100 - exploit_pct,
         "queries": 0,
         "new_leads": 0,
         "errors": 0,
@@ -136,7 +152,7 @@ def mission_scout_tick(state: Dict[str, Any]) -> Dict[str, Any]:
             stats["new_leads"] += created
             _log(
                 state,
-                f"Mission Scout [{stats['mode']}] ejecutó {action}: {lead_type}/{category}; {created} leads nuevos con evidencia pública.",
+                f"Mission Scout [{stats['mode']}/{strategic.get('mode') or 'operativo'}] ejecutó {action}: {lead_type}/{category}; {created} leads nuevos con evidencia pública.",
             )
         except Exception as exc:
             stats["errors"] += 1
@@ -147,5 +163,6 @@ def mission_scout_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     budget["last_mission_action"] = action
     budget["last_mission_mode"] = stats["mode"]
     budget["last_focus_categories"] = stats["focus_categories"]
+    budget["last_corporate_strategy"] = strategic.get("mode")
     stats["budget_exhausted"] = int(budget.get("queries_remaining") or 0) <= 0
     return stats
