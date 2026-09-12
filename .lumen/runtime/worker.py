@@ -16,11 +16,12 @@ from relationship_memory import relationship_tick
 from counterparty_scorecards import scorecards_tick
 from cfo_engine import cfo_tick
 from profit_learning import learning_tick
+from war_room import war_room_tick
+from corporate_brain import corporate_brain_tick
 from executive_director import plan_tick
 from entrepreneurial_drive import drive_tick
 from mission_scout import mission_scout_tick
 from professional_os import professional_os_tick
-from war_room import war_room_tick
 from financial_chief_of_staff import financial_priority_tick
 from communication_director import review_outbox
 from quality_gate import quality_tick
@@ -47,8 +48,7 @@ if __name__ == "__main__":
     market_pipeline = build_market_pipeline(STATE)
     interlocutor = interlocutor_tick(STATE)
 
-    # 3) Treat the strongest real opportunities as dedicated attack dossiers. Deep Dive can spend a small
-    # bounded research budget to deepen buyer evidence and build supplier competition, but never lowers trust gates.
+    # 3) Treat the strongest real opportunities as dedicated attack dossiers.
     deep_dive = deep_dive_tick(STATE)
 
     # 4) Receive counterpart responses, normalize quotes and only then let commercial autopilot advance.
@@ -69,30 +69,29 @@ if __name__ == "__main__":
     cfo = cfo_tick(STATE)
 
     # 8) Learn which categories and search strategies repeatedly produce real commercial progress.
-    # Sparse evidence is shrunk toward neutral so LUMEN does not overfit one lucky result.
     profit_learning = learning_tick(STATE)
 
-    # 9) Executive layer chooses the highest-value bottleneck; Entrepreneurial Drive combines it with
-    # learned profit signals and turns it into a persistent mission portfolio.
+    # 9) War Room ranks where money is most likely to be created before strategy is chosen.
+    war_room = war_room_tick(STATE)
+
+    # 10) Corporate Brain converts current economics + learning + funnel state into persistent monthly/quarterly
+    # objectives, controlled experiments and a stable long-horizon strategy. It can steer reversible allocation only.
+    corporate_brain = corporate_brain_tick(STATE)
+
+    # 11) Executive Director receives that long-horizon directive but still resolves hard operational gaps first.
     executive_plan = plan_tick(STATE)
     entrepreneurial_drive = drive_tick(STATE)
 
-    # 10) Mission Scout spends remaining research budget according to the learned exploit/explore policy.
-    # New leads still pass through the normal verification pipeline; no trust gate is bypassed.
+    # 12) Mission Scout executes current research using Corporate Brain allocation + Entrepreneurial Drive.
     mission_scout = mission_scout_tick(STATE)
 
-    # 11) Professional OS converts all current signals into one ranked operating queue, prepares follow-ups,
-    # supplier competition boards, approval briefs, postmortems and real post-sale expansion plans.
+    # 13) Professional OS turns current signals into a ranked action queue and operational artifacts.
     professional_os = professional_os_tick(STATE)
 
-    # 12) War Room ranks where money is most likely to be created and models non-binding negotiation scenarios.
-    war_room = war_room_tick(STATE)
-
-    # 13) Financial Chief of Staff merges the War Room into the Professional OS queue so financial priority
-    # actually changes what LUMEN works on next, without bypassing contractual or financial approval gates.
+    # 14) Financial Chief of Staff merges War Room priorities into the operating queue.
     financial_chief = financial_priority_tick(STATE)
 
-    # 14) Every outbound message, including follow-ups materialized by Professional OS, must pass both reviews.
+    # 15) Every outbound message must pass relationship-oriented communication review AND quality authorization.
     communication = review_outbox(STATE)
     quality = quality_tick(STATE)
     outbound = send_pending(STATE, LIVE_OUTBOUND)
@@ -115,10 +114,11 @@ if __name__ == "__main__":
         "scorecards": scorecards,
         "cfo": cfo,
         "profit_learning": profit_learning,
+        "war_room": war_room,
+        "corporate_brain": corporate_brain,
         "executive_plan": executive_plan,
         "entrepreneurial_drive": entrepreneurial_drive,
         "professional_os": professional_os,
-        "war_room": war_room,
         "financial_chief_of_staff": financial_chief,
         "communication": communication,
         "quality_gate": quality,
@@ -130,7 +130,7 @@ if __name__ == "__main__":
         "live_outbound": bool(LIVE_OUTBOUND),
     }
 
-    # 15) KPIs are computed after telemetry so health and funnel metrics reflect this exact cycle.
+    # 16) KPIs are computed after telemetry so health and funnel metrics reflect this exact cycle.
     business_kpis = kpi_tick(STATE)
     business_kpis["finance"] = cfo.get("financial_snapshot", {})
     business_kpis["finance_warnings"] = cfo.get("warnings", [])
@@ -138,6 +138,14 @@ if __name__ == "__main__":
         "primary_money_move": war_room.get("primary_money_move"),
         "alerts": war_room.get("alerts", []),
         "top_opportunities": len(war_room.get("top_money_opportunities", [])),
+    }
+    business_kpis["corporate_brain"] = {
+        "strategy_mode": corporate_brain.get("strategy", {}).get("mode"),
+        "strategy_epoch": corporate_brain.get("strategy", {}).get("epoch"),
+        "strategy_streak_cycles": corporate_brain.get("strategy", {}).get("streak_cycles"),
+        "monthly_objectives": corporate_brain.get("objectives", {}).get("monthly", []),
+        "quarterly_objectives": corporate_brain.get("objectives", {}).get("quarterly", []),
+        "active_experiments": corporate_brain.get("active_experiments", []),
     }
     STATE["business_kpis"] = business_kpis
     STATE["connector_telemetry"]["business_kpis"] = business_kpis
@@ -155,6 +163,8 @@ if __name__ == "__main__":
 
     finance_snapshot = cfo.get("financial_snapshot", {})
     primary_money = war_room.get("primary_money_move") or {}
+    strategy = corporate_brain.get("strategy", {}) or {}
+    objectives = corporate_brain.get("objectives", {}) or {}
     print({
         "result": result,
         "scout": scout,
@@ -179,17 +189,17 @@ if __name__ == "__main__":
         "cfo_collection_exposure_usd": finance_snapshot.get("gross_unsettled_receivable_usd"),
         "cfo_warnings": cfo.get("warnings", []),
         "profit_learning_primary_category": profit_learning.get("primary_category"),
-        "profit_learning_exploit_pct": profit_learning.get("exploit_pct"),
-        "profit_learning_explore_pct": profit_learning.get("explore_pct"),
+        "war_room_primary_deal": primary_money.get("deal_id") or primary_money.get("deep_dive_case_id"),
+        "war_room_money_score": primary_money.get("money_score"),
+        "corporate_strategy_mode": strategy.get("mode"),
+        "corporate_strategy_epoch": strategy.get("epoch"),
+        "corporate_strategy_streak": strategy.get("streak_cycles"),
+        "corporate_monthly_objectives": len(objectives.get("monthly", [])),
+        "corporate_quarterly_objectives": len(objectives.get("quarterly", [])),
+        "corporate_active_experiments": len(corporate_brain.get("active_experiments", [])),
         "executive_primary": executive_plan.get("primary", {}).get("code"),
         "entrepreneurial_primary": entrepreneurial_drive.get("primary", {}).get("action"),
         "active_missions": entrepreneurial_drive.get("active_missions", 0),
-        "stale_deals": entrepreneurial_drive.get("stale_deals", 0),
-        "kill_candidates": entrepreneurial_drive.get("kill_candidates", 0),
-        "war_room_primary_deal": primary_money.get("deal_id") or primary_money.get("deep_dive_case_id"),
-        "war_room_primary_category": primary_money.get("category"),
-        "war_room_money_score": primary_money.get("money_score"),
-        "war_room_constraint": primary_money.get("constraint"),
         "professional_os_top_action": (financial_chief.get("top_action") or {}).get("title"),
         "professional_os_queue_size": financial_chief.get("queue_size", 0),
         "professional_os_autonomous": financial_chief.get("autonomous_actions", 0),
