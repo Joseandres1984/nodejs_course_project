@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import re
 from collections import defaultdict
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List
 
 from autonomy_governor import record_decision
+from preclose_gate import preclose_tick
 
 MAX_CASES = 100
 MAX_INCIDENTS = 100
@@ -110,7 +110,7 @@ def _scan_text(text: str) -> Dict[str, Any]:
     return {"high_risk": high, "signals": signals}
 
 
-def _document_clause_context(state: Dict[str, Any], deal_id: str, docs: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _document_clause_context(state: Dict[str, Any], docs: List[Dict[str, Any]]) -> Dict[str, Any]:
     out = {"buyer": {"high_risk": [], "signals": [], "documents": []}, "supplier": {"high_risk": [], "signals": [], "documents": []}, "unknown": {"high_risk": [], "signals": [], "documents": []}}
     for doc in docs:
         text = str(doc.get("text_excerpt") or "")
@@ -137,24 +137,18 @@ def _offer_terms(offers: List[Dict[str, Any]]) -> Dict[str, Any]:
     delivery = [x.get("freight_terms") or x.get("delivery_terms") for x in offers if _known(x.get("freight_terms") or x.get("delivery_terms"))]
     compliance = [x.get("technical_compliance") for x in offers if _known(x.get("technical_compliance"))]
     return {
-        "warranty_known": bool(warranty),
-        "returns_known": bool(returns),
-        "cancellation_known": bool(cancellation),
-        "payment_known": bool(payment),
-        "delivery_known": bool(delivery),
-        "technical_compliance_known": bool(compliance),
-        "warranty_samples": warranty[:4],
-        "return_samples": returns[:4],
-        "cancellation_samples": cancellation[:4],
+        "warranty_known": bool(warranty), "returns_known": bool(returns), "cancellation_known": bool(cancellation),
+        "payment_known": bool(payment), "delivery_known": bool(delivery), "technical_compliance_known": bool(compliance),
+        "warranty_samples": warranty[:4], "return_samples": returns[:4], "cancellation_samples": cancellation[:4],
     }
 
 
 def _buyer_expectations(deal: Dict[str, Any], clauses: Dict[str, Any]) -> Dict[str, bool]:
     requirement = deal.get("requirement", {}) or {}
     text = _norm(" ".join(str(x) for x in [
-        deal.get("buyer_terms"), deal.get("commercial_terms"), deal.get("acceptance_terms"),
-        deal.get("return_terms"), deal.get("warranty_terms"), requirement.get("commercial_terms"),
-        requirement.get("warranty_requirement"), requirement.get("acceptance_criteria"), requirement.get("return_requirements"),
+        deal.get("buyer_terms"), deal.get("commercial_terms"), deal.get("acceptance_terms"), deal.get("return_terms"),
+        deal.get("warranty_terms"), requirement.get("commercial_terms"), requirement.get("warranty_requirement"),
+        requirement.get("acceptance_criteria"), requirement.get("return_requirements"),
     ] if x))
     return {
         "returns_expected": "returns" in clauses.get("buyer", {}).get("signals", []) or any(x in text for x in ("devol", "return", "rma")),
@@ -173,9 +167,8 @@ def _payment_exposure(deal: Dict[str, Any], offers: List[Dict[str, Any]]) -> Dic
 
 
 def _structure(case: Dict[str, Any]) -> Dict[str, Any]:
-    severe = bool(case.get("mandatory_legal_review"))
     gaps = set(case.get("critical_gaps") or [])
-    if severe:
+    if case.get("mandatory_legal_review"):
         return {"code": "legal_review_before_commitment", "title": "Revisión legal antes de aceptar términos", "autonomous": False, "reason": "Se detectaron cláusulas de exposición elevada o amenaza legal que requieren criterio profesional humano."}
     if {"returns_mismatch", "cancellation_mismatch", "warranty_mismatch"} & gaps:
         return {"code": "back_to_back_terms_first", "title": "Alinear términos comprador↔proveedor antes de cerrar", "autonomous": True, "reason": "No conviene prometer al comprador una protección que el proveedor no respalda."}
@@ -191,7 +184,7 @@ def _structure(case: Dict[str, Any]) -> Dict[str, Any]:
 def _case_for(state: Dict[str, Any], deal: Dict[str, Any], docs: List[Dict[str, Any]]) -> Dict[str, Any]:
     deal_id = str(deal.get("id") or "")
     offers = [x for x in state.get("offers", []) if str(x.get("deal_id") or "") == deal_id and x.get("source") != "demo/simulación"]
-    clauses = _document_clause_context(state, deal_id, docs)
+    clauses = _document_clause_context(state, docs)
     supplier_terms = _offer_terms(offers)
     buyer = _buyer_expectations(deal, clauses)
     payment = _payment_exposure(deal, offers)
@@ -202,59 +195,36 @@ def _case_for(state: Dict[str, Any], deal: Dict[str, Any], docs: List[Dict[str, 
     high_risk = list(dict.fromkeys(clauses.get("buyer", {}).get("high_risk", []) + clauses.get("supplier", {}).get("high_risk", []) + clauses.get("unknown", {}).get("high_risk", [])))
     mandatory_legal_review = bool(high_risk)
 
-    if buyer["returns_expected"] and not supplier_terms["returns_known"]:
-        gaps.append("returns_mismatch")
-    if buyer["cancellation_expected"] and not supplier_terms["cancellation_known"]:
-        gaps.append("cancellation_mismatch")
-    if buyer["warranty_expected"] and not supplier_terms["warranty_known"]:
-        gaps.append("warranty_mismatch")
-    if buyer["acceptance_expected"] and not _known(deal.get("acceptance_criteria")):
-        gaps.append("acceptance_criteria_missing")
-    if not supplier_terms["technical_compliance_known"]:
-        gaps.append("technical_compliance_not_confirmed")
-    if not supplier_terms["warranty_known"]:
-        warnings.append("supplier_warranty_not_explicit")
-    if payment["cash_gap_risk"]:
-        gaps.append("cash_gap_risk")
-    if any(x.get("cross_border") is True and not x.get("decision_ready") for x in trade_cases):
-        gaps.append("cross_border_terms_incomplete")
-    if not deal.get("buyer_legal_identity_verified"):
-        gaps.append("buyer_legal_identity_unconfirmed")
-    if not deal.get("supplier_legal_identity_verified"):
-        gaps.append("supplier_legal_identity_unconfirmed")
-
-    severe_codes = {"unlimited_liability", "indemnity", "penalty", "consequential_damages", "exclusive_jurisdiction", "governing_law", "exclusivity", "auto_renewal"}
-    if any(x in severe_codes for x in high_risk):
-        mandatory_legal_review = True
+    if buyer["returns_expected"] and not supplier_terms["returns_known"]: gaps.append("returns_mismatch")
+    if buyer["cancellation_expected"] and not supplier_terms["cancellation_known"]: gaps.append("cancellation_mismatch")
+    if buyer["warranty_expected"] and not supplier_terms["warranty_known"]: gaps.append("warranty_mismatch")
+    if buyer["acceptance_expected"] and not _known(deal.get("acceptance_criteria")): gaps.append("acceptance_criteria_missing")
+    if not supplier_terms["technical_compliance_known"]: gaps.append("technical_compliance_not_confirmed")
+    if not supplier_terms["warranty_known"]: warnings.append("supplier_warranty_not_explicit")
+    if payment["cash_gap_risk"]: gaps.append("cash_gap_risk")
+    if any(x.get("cross_border") is True and not x.get("decision_ready") for x in trade_cases): gaps.append("cross_border_terms_incomplete")
+    if not deal.get("buyer_legal_identity_verified"): gaps.append("buyer_legal_identity_unconfirmed")
+    if not deal.get("supplier_legal_identity_verified"): gaps.append("supplier_legal_identity_unconfirmed")
 
     severity_weight = {
-        "returns_mismatch": 15, "cancellation_mismatch": 15, "warranty_mismatch": 13,
-        "acceptance_criteria_missing": 10, "technical_compliance_not_confirmed": 12,
-        "cash_gap_risk": 14, "cross_border_terms_incomplete": 12,
+        "returns_mismatch": 15, "cancellation_mismatch": 15, "warranty_mismatch": 13, "acceptance_criteria_missing": 10,
+        "technical_compliance_not_confirmed": 12, "cash_gap_risk": 14, "cross_border_terms_incomplete": 12,
         "buyer_legal_identity_unconfirmed": 16, "supplier_legal_identity_unconfirmed": 16,
     }
     exposure = min(100, sum(severity_weight.get(x, 8) for x in set(gaps)) + len(high_risk) * 20)
     safe_close_score = max(0, 100 - exposure)
-    cleared = not mandatory_legal_review and not any(x in set(gaps) for x in {
+    blocking_gaps = {
         "returns_mismatch", "cancellation_mismatch", "warranty_mismatch", "acceptance_criteria_missing",
         "technical_compliance_not_confirmed", "cash_gap_risk", "cross_border_terms_incomplete",
         "buyer_legal_identity_unconfirmed", "supplier_legal_identity_unconfirmed",
-    })
+    }
+    cleared = not mandatory_legal_review and not bool(set(gaps) & blocking_gaps)
 
     case = {
-        "deal_id": deal_id,
-        "updated_at": utcnow(),
-        "safe_close_score": safe_close_score,
-        "exposure_score": exposure,
-        "cleared": cleared,
-        "mandatory_legal_review": mandatory_legal_review,
-        "high_risk_clause_signals": high_risk,
-        "critical_gaps": list(dict.fromkeys(gaps)),
-        "warnings": list(dict.fromkeys(warnings)),
-        "buyer_expectations": buyer,
-        "supplier_terms": supplier_terms,
-        "payment_exposure": payment,
-        "document_clause_context": clauses,
+        "deal_id": deal_id, "updated_at": utcnow(), "safe_close_score": safe_close_score, "exposure_score": exposure,
+        "cleared": cleared, "mandatory_legal_review": mandatory_legal_review, "high_risk_clause_signals": high_risk,
+        "critical_gaps": list(dict.fromkeys(gaps)), "warnings": list(dict.fromkeys(warnings)), "buyer_expectations": buyer,
+        "supplier_terms": supplier_terms, "payment_exposure": payment, "document_clause_context": clauses,
         "recommended_structure": None,
         "proposal_allowed": not mandatory_legal_review and "technical_compliance_not_confirmed" not in gaps,
         "governance": {
@@ -299,23 +269,14 @@ def _prepare_clarification(state: Dict[str, Any], deal: Dict[str, Any], case: Di
     asks = "\n".join(f"- {ask_map[x]}" for x in target_supplier_gaps)
     body = (
         "Para cerrar el análisis comercial sin asumir condiciones que no hayan sido confirmadas, agradeceremos precisar:\n\n"
-        f"{asks}\n\n"
-        "La consulta es exploratoria y no implica aceptación de términos, orden de compra ni compromiso financiero."
+        f"{asks}\n\nLa consulta es exploratoria y no implica aceptación de términos, orden de compra ni compromiso financiero."
     )
     state.setdefault("outbox", []).append({
-        "id": f"MSG-{len(state.get('outbox', []))+1:04d}",
-        "deal_id": deal.get("id"),
-        "kind": "terms_clarification",
-        "purpose": "deal_safeguards",
-        "counterparty": supplier.get("company_name") or supplier.get("name_hint") or deal.get("supplier"),
-        "channel": "email",
-        "contact": contact,
-        "contact_verified": True,
-        "subject": f"Aclaración de condiciones — {deal.get('need') or 'operación B2B'}",
-        "body": body,
-        "status": "ready",
-        "execution_key": key,
-        "created_at": utcnow(),
+        "id": f"MSG-{len(state.get('outbox', []))+1:04d}", "deal_id": deal.get("id"), "kind": "terms_clarification",
+        "purpose": "deal_safeguards", "counterparty": supplier.get("company_name") or supplier.get("name_hint") or deal.get("supplier"),
+        "channel": "email", "contact": contact, "contact_verified": True,
+        "subject": f"Aclaración de condiciones — {deal.get('need') or 'operación B2B'}", "body": body,
+        "status": "ready", "execution_key": key, "created_at": utcnow(),
     })
     budget[0] -= 1
     return 1
@@ -341,31 +302,19 @@ def _incidents(state: Dict[str, Any]) -> List[Dict[str, Any]]:
             continue
         severity = "critical" if "legal_threat" in signals else "high" if any(x in signals for x in ("refund_request", "return_request", "cancellation_request", "defect_claim", "damage_claim")) else "medium"
         incident = {
-            "id": f"INC-{len(existing)+1:05d}",
-            "deal_id": deal_id,
-            "source_message_id": key,
-            "signals": signals,
-            "severity": severity,
-            "status": "evidence_review",
-            "liability_admission_allowed": False,
-            "refund_or_return_commitment_allowed": False,
-            "recommended_action": "preserve_evidence_and_compare_promised_vs_supplier_backing",
+            "id": f"INC-{len(existing)+1:05d}", "deal_id": deal_id, "source_message_id": key, "signals": signals,
+            "severity": severity, "status": "evidence_review", "liability_admission_allowed": False,
+            "refund_or_return_commitment_allowed": False, "recommended_action": "preserve_evidence_and_compare_promised_vs_supplier_backing",
             "created_at": utcnow(),
         }
         existing[key] = incident
         deals[deal_id]["commercial_incident_open"] = True
         deals[deal_id]["incident_hold"] = True
         record_decision(
-            state,
-            engine="Deal Safeguards / Dispute Prevention",
-            object_type="deal",
-            object_id=deal_id,
+            state, engine="Deal Safeguards / Dispute Prevention", object_type="deal", object_id=deal_id,
             decision="commercial_incident_opened",
             reason=f"Se detectaron señales de reclamo/incidente: {', '.join(signals)}. Se congela cualquier concesión o admisión automática hasta revisar evidencia.",
-            action="prepare_draft",
-            confidence=0.9,
-            evidence_refs=[key],
-            requires_approval=severity in {"high", "critical"},
+            action="prepare_draft", confidence=0.9, evidence_refs=[key], requires_approval=severity in {"high", "critical"},
         )
     state["commercial_incidents"] = list(existing.values())[-MAX_INCIDENTS:]
     return state["commercial_incidents"]
@@ -383,14 +332,9 @@ def deal_safeguards_tick(state: Dict[str, Any]) -> Dict[str, Any]:
         case = _case_for(state, deal, docs_by_deal.get(str(deal.get("id")), []))
         cases.append(case)
         deal["deal_safeguards"] = {
-            "safe_close_score": case["safe_close_score"],
-            "exposure_score": case["exposure_score"],
-            "cleared": case["cleared"],
-            "mandatory_legal_review": case["mandatory_legal_review"],
-            "critical_gaps": case["critical_gaps"],
-            "recommended_structure": case["recommended_structure"],
-            "proposal_allowed": case["proposal_allowed"],
-            "updated_at": case["updated_at"],
+            "safe_close_score": case["safe_close_score"], "exposure_score": case["exposure_score"], "cleared": case["cleared"],
+            "mandatory_legal_review": case["mandatory_legal_review"], "critical_gaps": case["critical_gaps"],
+            "recommended_structure": case["recommended_structure"], "proposal_allowed": case["proposal_allowed"], "updated_at": case["updated_at"],
         }
         deal["deal_safeguards_cleared"] = bool(case["cleared"])
         deal["legal_review_required"] = bool(case["mandatory_legal_review"])
@@ -405,29 +349,26 @@ def deal_safeguards_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     state["deal_safeguard_index"] = {str(x.get("deal_id")): x for x in cases}
 
     incidents = _incidents(state)
+    for deal in state.get("deals", []) or []:
+        if deal.get("incident_hold"):
+            deal["deal_safeguards_cleared"] = False
+    preclose_refresh = preclose_tick(state)
+
     open_incidents = [x for x in incidents if x.get("status") not in {"resolved", "closed"}]
     blocked = [x for x in cases if not x.get("cleared")]
     legal = [x for x in cases if x.get("mandatory_legal_review")]
     primary = cases[0] if cases else None
     directive = {
-        "deal_id": (primary or {}).get("deal_id"),
-        "safe_close_score": (primary or {}).get("safe_close_score"),
-        "exposure_score": (primary or {}).get("exposure_score"),
-        "recommended_structure": (primary or {}).get("recommended_structure"),
-        "critical_gaps": (primary or {}).get("critical_gaps", []),
-        "mandatory_legal_review": bool((primary or {}).get("mandatory_legal_review")),
+        "deal_id": (primary or {}).get("deal_id"), "safe_close_score": (primary or {}).get("safe_close_score"),
+        "exposure_score": (primary or {}).get("exposure_score"), "recommended_structure": (primary or {}).get("recommended_structure"),
+        "critical_gaps": (primary or {}).get("critical_gaps", []), "mandatory_legal_review": bool((primary or {}).get("mandatory_legal_review")),
     } if primary else {}
 
     report = {
-        "updated_at": utcnow(),
-        "mode": "deal_safeguards_and_dispute_prevention",
-        "deals_reviewed": len(cases),
-        "cleared": sum(1 for x in cases if x.get("cleared")),
-        "blocked": len(blocked),
-        "mandatory_legal_review": len(legal),
-        "clarification_messages_created": clarification_messages,
-        "open_incidents": len(open_incidents),
-        "primary_directive": directive,
+        "updated_at": utcnow(), "mode": "deal_safeguards_and_dispute_prevention", "deals_reviewed": len(cases),
+        "cleared": sum(1 for x in cases if x.get("cleared")), "blocked": len(blocked), "mandatory_legal_review": len(legal),
+        "clarification_messages_created": clarification_messages, "open_incidents": len(open_incidents),
+        "preclose_refresh": preclose_refresh, "primary_directive": directive,
         "governance": {
             "objective": "maximize safe risk-adjusted close probability, not raw closes",
             "legal_boundary": "high-risk legal clauses are detected and escalated; LUMEN does not provide jurisdiction-specific legal conclusions",
@@ -440,15 +381,9 @@ def deal_safeguards_tick(state: Dict[str, Any]) -> Dict[str, Any]:
 
     if primary:
         record_decision(
-            state,
-            engine="Deal Safeguards / Dispute Prevention",
-            object_type="deal",
-            object_id=str(primary.get("deal_id") or ""),
+            state, engine="Deal Safeguards / Dispute Prevention", object_type="deal", object_id=str(primary.get("deal_id") or ""),
             decision="safe_close_assessment",
             reason=f"Safe close {primary.get('safe_close_score')}%; exposure {primary.get('exposure_score')}%; gaps: {', '.join(primary.get('critical_gaps', [])[:6]) or 'none'}.",
-            action="prepare_draft",
-            confidence=0.94,
-            evidence_refs=[],
-            requires_approval=bool(primary.get("mandatory_legal_review")),
+            action="prepare_draft", confidence=0.94, evidence_refs=[], requires_approval=bool(primary.get("mandatory_legal_review")),
         )
     return report
