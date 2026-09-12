@@ -73,7 +73,7 @@ def _infra(state: Dict[str, Any], db_status: Dict[str, Any], live_requested: boo
     scout = scout_status()
     rails = _rails_summary()
     quality = state.get("quality_gate_stats", {}) or {}
-    ops = state.get("operations_control", {}) or (state.get("connector_telemetry", {}) or {}).get("autonomous_coo", {}) or {}
+    ops = state.get("autonomous_coo", {}) or state.get("operations_control", {}) or (state.get("connector_telemetry", {}) or {}).get("autonomous_coo", {}) or {}
     truth = state.get("data_truth_engine", {}) or {}
     blockers = []
     warnings = []
