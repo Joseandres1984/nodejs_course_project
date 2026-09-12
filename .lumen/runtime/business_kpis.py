@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Dict
 
+from deal_room import deal_room_tick
+
 
 def utcnow() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -35,7 +37,7 @@ def kpi_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     sent = [x for x in outbox if x.get("status") == "sent"]
     real_offers = [x for x in offers if x.get("source") != "demo/simulación"]
     viable_deals = [x for x in deals if x.get("economics", {}).get("viable")]
-    close_ready = [x for x in deals if x.get("stage") in {"listo para cerrar", "autorizado para cierre"}]
+    close_ready = [x for x in deals if x.get("stage") in {"listo para cerrar", "autorizado para cierre", "listo para cierre aprobado"}]
 
     funnel = {
         "research_leads": len(leads),
@@ -90,12 +92,17 @@ def kpi_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     if len(real_offers) and not len(proposals):
         bottlenecks.append("proposal_gap")
 
+    # The Deal Room is generated at the end of the cycle so each dossier captures the freshest
+    # finance, RevOps, documents, Trade, governance and approval state without reordering execution.
+    deal_room = deal_room_tick(state)
+
     report = {
         "updated_at": utcnow(),
         "funnel": funnel,
         "conversion": conversion,
         "health": health,
         "bottlenecks": bottlenecks,
+        "deal_room": deal_room,
     }
     state["business_kpis"] = report
     return report
