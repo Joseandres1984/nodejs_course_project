@@ -6,6 +6,7 @@ from commerce import approve_and_close
 from control_tower import build_control_tower, render_control_tower
 from executive_alerts import executive_alert_tick, mark_alerts_seen, reject_approval
 from approval_cockpit import build_cockpit, inject_cockpit
+from revenue_factory_panel import inject_revenue_factory
 
 
 @app.get("/health/persistence")
@@ -36,6 +37,7 @@ def command_center(_=Depends(auth)):
     cockpit = build_cockpit(STATE)
     base_html = render_control_tower(snapshot)
     html = inject_cockpit(base_html, cockpit)
+    html = inject_revenue_factory(html, STATE)
     # Opening the cockpit counts as human visibility. Browser-side localStorage separately prevents duplicate popups.
     mark_alerts_seen(STATE)
     save_state()
@@ -53,6 +55,7 @@ def api_control_tower(_=Depends(auth)):
         "control_tower": snapshot,
         "approval_cockpit": cockpit,
         "executive_alerts": alerts,
+        "revenue_factory": STATE.get("revenue_factory", {}),
         "postgres": DB_STATUS,
     }
 
