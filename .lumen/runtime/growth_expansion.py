@@ -269,6 +269,16 @@ def _select_candidate(candidates: List[Dict[str, Any]], memory: Dict[str, Any]) 
 
 def _run_research(state: Dict[str, Any], memory: Dict[str, Any], candidate: Dict[str, Any] | None) -> Dict[str, Any]:
     stats = {"executed": False, "query": None, "kind": None, "market": None, "category": None, "new_leads": 0, "errors": 0, "reason": None}
+    governance = state.get("master_governance", {}) or {}
+    switches = governance.get("kill_switches", {}) or {}
+    resources = governance.get("resource_plan", {}) or state.get("master_resource_plan", {}) or {}
+    expansion_cap = max(0, int(resources.get("expansion_queries_cap", 1) or 0))
+    stats["master_company_mode"] = governance.get("company_mode")
+    stats["constitutional_query_cap"] = expansion_cap
+
+    if switches.get("global_pause") or switches.get("research_pause") or switches.get("expansion_pause") or expansion_cap <= 0:
+        stats["reason"] = "master_orchestrator_expansion_pause"
+        return stats
     if not candidate:
         stats["reason"] = "no_eligible_expansion_candidate"
         return stats
@@ -309,6 +319,7 @@ def _run_research(state: Dict[str, Any], memory: Dict[str, Any], candidate: Dict
             "ts": utcnow(), "cycle": cycle, "key": candidate.get("key"), "query": query,
             "market": candidate.get("market"), "category": candidate.get("category"),
             "kind": candidate.get("kind"), "new_leads": created,
+            "master_company_mode": governance.get("company_mode"),
         }
         memory["research_history"].append(entry)
         if len(memory["research_history"]) > MAX_HISTORY:
@@ -396,19 +407,25 @@ def growth_expansion_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     research = _run_research(state, memory, selected)
     cross_sell = _cross_sell_investigations(state)
     sourcing_spreads = _sourcing_spreads(state)
+    governance = state.get("master_governance", {}) or {}
+    switches = governance.get("kill_switches", {}) or {}
 
     primary = selected or (candidates[0] if candidates else None)
+    expansion_allowed = not bool(switches.get("expansion_pause") or switches.get("global_pause"))
     directive = {
         "updated_at": utcnow(),
         "ready": readiness.get("ready"),
         "readiness_score": readiness.get("score"),
         "blockers": readiness.get("blockers", []),
+        "master_company_mode": governance.get("company_mode"),
+        "constitutionally_allowed": expansion_allowed,
         "primary_kind": primary.get("kind") if primary else None,
         "primary_market": primary.get("market") if primary else None,
         "primary_category": primary.get("category") if primary else None,
         "primary_score": primary.get("score") if primary else None,
         "recommended_action": (
-            "expand_with_public_evidence" if readiness.get("ready") and primary
+            "expand_with_public_evidence" if readiness.get("ready") and primary and expansion_allowed
+            else "hold_expansion_under_master_governance" if not expansion_allowed
             else "strengthen_home_market_before_cross_border_expansion"
         ),
     }
@@ -427,6 +444,11 @@ def growth_expansion_tick(state: Dict[str, Any]) -> Dict[str, Any]:
         "research": research,
         "cross_sell_investigations": cross_sell,
         "sourcing_spread_candidates": sourcing_spreads,
+        "master_governance": {
+            "company_mode": governance.get("company_mode"),
+            "expansion_pause": switches.get("expansion_pause"),
+            "resource_plan": governance.get("resource_plan", {}),
+        },
         "governance": {
             "query_cadence_cycles": QUERY_CADENCE_CYCLES,
             "budget_reserve_queries": MIN_BUDGET_RESERVE,
@@ -448,10 +470,11 @@ def growth_expansion_tick(state: Dict[str, Any]) -> Dict[str, Any]:
             decision=str(primary.get("kind") or "explore_growth"),
             reason=(
                 f"Mercado {primary.get('market')}, categoría {primary.get('category')}, score de expansión {primary.get('score')}; "
-                f"readiness {readiness.get('score')}."
+                f"readiness {readiness.get('score')}; master mode {governance.get('company_mode')}."
             ),
             action="research_public",
             confidence=max(0.45, min(0.95, _f(primary.get("confidence"), 0.55))),
             evidence_refs=[],
+            allowed=expansion_allowed,
         )
     return report
