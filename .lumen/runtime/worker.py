@@ -6,6 +6,8 @@ from scout_connector import scout_tick, status as scout_status
 from lead_intelligence import qualify_tick
 from company_verifier import verification_tick
 from market_pipeline import build_market_pipeline
+from executive_director import plan_tick
+from communication_director import review_outbox
 
 
 def utcnow() -> str:
@@ -24,6 +26,15 @@ if __name__ == "__main__":
     inbox = fetch_unseen(STATE)
     applied = apply_inbox_to_deals(STATE)
     result = autopilot_tick("worker autónomo")
+
+    # The executive layer chooses the company's next bottleneck after all new
+    # evidence and inbox events from this cycle have been incorporated.
+    executive_plan = plan_tick(STATE)
+
+    # Every outbound item is relationship-reviewed before the mail connector
+    # can consider sending it. This does not bypass contact verification,
+    # opt-outs, live-outbound controls, or approval gates.
+    communication = review_outbox(STATE)
     outbound = send_pending(STATE, LIVE_OUTBOUND)
 
     STATE["connector_telemetry"] = {
@@ -33,6 +44,8 @@ if __name__ == "__main__":
         "lead_intelligence": intelligence,
         "company_verification": verification,
         "market_pipeline": market_pipeline,
+        "executive_plan": executive_plan,
+        "communication": communication,
         "inbox": inbox,
         "applied": applied,
         "outbound": outbound,
@@ -54,6 +67,8 @@ if __name__ == "__main__":
         "lead_intelligence": intelligence,
         "company_verification": verification,
         "market_pipeline": market_pipeline,
+        "executive_primary": executive_plan.get("primary", {}).get("code"),
+        "communication": communication,
         "inbox": inbox,
         "applied": applied,
         "outbound": outbound,
