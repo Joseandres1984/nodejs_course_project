@@ -36,22 +36,71 @@ def _key(buyer: Dict[str, Any], supplier: Dict[str, Any], category: str) -> str:
     return f"{buyer.get('id')}|{supplier.get('id')}|{category}"
 
 
-def _risk_flags(buyer: Dict[str, Any], supplier: Dict[str, Any]) -> List[str]:
-    flags = ["requirement_not_confirmed", "commercial_terms_unknown", "deal_value_unknown"]
-    if not buyer.get("verified_contact"):
-        flags.append("buyer_contact_unverified")
-    if not supplier.get("verified_contact"):
-        flags.append("supplier_contact_unverified")
+def _risk_flags(buyer: Dict[str, Any], supplier: Dict[str, Any], requirement_confirmed: bool = False) -> List[str]:
+    flags: List[str] = []
+    if not requirement_confirmed:
+        flags.append("requirement_not_confirmed")
+    flags.extend(["commercial_terms_unknown", "deal_value_unknown"])
+    if not buyer.get("commercial_channel_verified"):
+        flags.append("buyer_channel_unverified")
+    elif not buyer.get("verified_contact"):
+        flags.append("buyer_email_unverified")
+    if not supplier.get("commercial_channel_verified"):
+        flags.append("supplier_channel_unverified")
+    elif not supplier.get("verified_contact"):
+        flags.append("supplier_email_unverified")
     return flags
+
+
+def _evidence(buyer: Dict[str, Any], supplier: Dict[str, Any]) -> List[str]:
+    return list(dict.fromkeys([
+        str(buyer.get("official_url") or ""),
+        *[str(x) for x in buyer.get("demand_evidence_urls", [])[:3]],
+        *[str(x) for x in buyer.get("commercial_contact_evidence", [])[:2]],
+        str(supplier.get("official_url") or ""),
+        *[str(x) for x in supplier.get("commercial_contact_evidence", [])[:2]],
+    ]))[:8]
+
+
+def _refresh_existing(opportunity: Dict[str, Any], buyer: Dict[str, Any], supplier: Dict[str, Any]) -> None:
+    requirement_confirmed = bool(opportunity.get("requirement_confirmed"))
+    opportunity["score"] = _score(buyer, supplier)
+    opportunity["buyer_company_verified"] = bool(buyer.get("verified_company"))
+    opportunity["buyer_demand_verified"] = bool(buyer.get("demand_signal"))
+    opportunity["supplier_company_verified"] = bool(supplier.get("verified_company"))
+    opportunity["buyer_contact_verified"] = bool(buyer.get("verified_contact"))
+    opportunity["supplier_contact_verified"] = bool(supplier.get("verified_contact"))
+    opportunity["buyer_channel_verified"] = bool(buyer.get("commercial_channel_verified"))
+    opportunity["supplier_channel_verified"] = bool(supplier.get("commercial_channel_verified"))
+    opportunity["buyer_contact_channel"] = buyer.get("contact_channel")
+    opportunity["supplier_contact_channel"] = supplier.get("contact_channel")
+    opportunity["risk_flags"] = _risk_flags(buyer, supplier, requirement_confirmed=requirement_confirmed)
+    opportunity["evidence_refs"] = _evidence(buyer, supplier)
+    opportunity["updated_at"] = utcnow()
+    if requirement_confirmed and opportunity["buyer_channel_verified"] and opportunity["supplier_channel_verified"]:
+        opportunity["next_action"] = "Solicitar/normalizar ofertas comparables y completar economía real"
+    elif not requirement_confirmed:
+        opportunity["next_action"] = "Confirmar el requerimiento concreto con el comprador"
+    else:
+        opportunity["next_action"] = "Validar los canales comerciales faltantes antes de outreach"
 
 
 def build_market_pipeline(state: Dict[str, Any]) -> Dict[str, int]:
     accounts = state.setdefault("candidate_accounts", [])
     opportunities = state.setdefault("market_opportunities", [])
+    account_by_id = {str(x.get("id")): x for x in accounts if x.get("id")}
     known = {str(x.get("opportunity_key")) for x in opportunities if x.get("opportunity_key")}
     buyers = [x for x in accounts if x.get("type") == "buyer" and x.get("verified_company") and x.get("demand_signal")]
     suppliers = [x for x in accounts if x.get("type") == "supplier" and x.get("verified_company")]
-    stats = {"buyer_accounts": len(buyers), "supplier_accounts": len(suppliers), "pairs_evaluated": 0, "created": 0, "below_threshold": 0}
+    stats = {"buyer_accounts": len(buyers), "supplier_accounts": len(suppliers), "pairs_evaluated": 0, "created": 0, "refreshed": 0, "below_threshold": 0}
+
+    # Reconcile old opportunities first so no case keeps stale contact or verification flags.
+    for opportunity in opportunities:
+        buyer = account_by_id.get(str(opportunity.get("buyer_account_id") or ""))
+        supplier = account_by_id.get(str(opportunity.get("supplier_account_id") or ""))
+        if buyer and supplier:
+            _refresh_existing(opportunity, buyer, supplier)
+            stats["refreshed"] += 1
 
     for buyer in buyers:
         category = _category(buyer.get("category"))
@@ -70,7 +119,7 @@ def build_market_pipeline(state: Dict[str, Any]) -> Dict[str, int]:
             if score < MIN_OPPORTUNITY_SCORE:
                 stats["below_threshold"] += 1
                 continue
-            flags = _risk_flags(buyer, supplier)
+            flags = _risk_flags(buyer, supplier, requirement_confirmed=False)
             opp = {
                 "id": f"MKT-{len(opportunities)+1:05d}",
                 "opportunity_key": key,
@@ -85,18 +134,19 @@ def build_market_pipeline(state: Dict[str, Any]) -> Dict[str, int]:
                 "supplier_company_verified": True,
                 "buyer_contact_verified": bool(buyer.get("verified_contact")),
                 "supplier_contact_verified": bool(supplier.get("verified_contact")),
+                "buyer_channel_verified": bool(buyer.get("commercial_channel_verified")),
+                "supplier_channel_verified": bool(supplier.get("commercial_channel_verified")),
+                "buyer_contact_channel": buyer.get("contact_channel"),
+                "supplier_contact_channel": supplier.get("contact_channel"),
                 "requirement_confirmed": False,
                 "economic_value": None,
                 "currency": None,
                 "risk_flags": flags,
-                "evidence_refs": list(dict.fromkeys([
-                    str(buyer.get("official_url") or ""),
-                    *[str(x) for x in buyer.get("demand_evidence_urls", [])[:3]],
-                    str(supplier.get("official_url") or ""),
-                ]))[:6],
+                "evidence_refs": _evidence(buyer, supplier),
                 "next_action": "Validar requerimiento concreto y canales comerciales antes de cualquier outreach",
                 "ready_for_deal": False,
                 "created_at": utcnow(),
+                "updated_at": utcnow(),
             }
             opportunities.append(opp)
             known.add(key)
