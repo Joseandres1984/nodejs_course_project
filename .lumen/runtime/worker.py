@@ -20,6 +20,7 @@ from war_room import war_room_tick
 from corporate_brain import corporate_brain_tick
 from growth_expansion import growth_expansion_tick
 from trade_logistics import trade_logistics_tick
+from commercial_execution import commercial_execution_tick
 from executive_director import plan_tick
 from entrepreneurial_drive import drive_tick
 from mission_scout import mission_scout_tick
@@ -97,20 +98,24 @@ if __name__ == "__main__":
     growth_expansion = guarded("Growth & Expansion Brain", lambda: growth_expansion_tick(STATE))
     trade_logistics = guarded("International Trade & Logistics Brain", lambda: trade_logistics_tick(STATE))
 
-    # 8) Executive allocation and autonomous market execution.
+    # 8) RevOps owns the commercial conversation loop: requirement -> RFQ -> quote clarification ->
+    # nonbinding negotiation -> next best action. It only materializes messages to verified corporate emails.
+    commercial_execution = guarded("Commercial Execution Brain / RevOps", lambda: commercial_execution_tick(STATE))
+
+    # 9) Executive allocation and autonomous market execution.
     executive_plan = guarded("Executive Director", lambda: plan_tick(STATE))
     entrepreneurial_drive = guarded("Entrepreneurial Drive", lambda: drive_tick(STATE))
     mission_scout = guarded("Mission Scout", lambda: mission_scout_tick(STATE))
 
-    # 9) Operating system and money-prioritized action queue.
+    # 10) Operating system and money-prioritized action queue.
     professional_os = guarded("Professional OS", lambda: professional_os_tick(STATE))
     financial_chief = guarded("Financial Chief of Staff", lambda: financial_priority_tick(STATE))
 
-    # 10) Outbound safety engines are critical. If either fails, Autonomous COO keeps outbound closed.
+    # 11) Outbound safety engines are critical. If either fails, Autonomous COO keeps outbound closed.
     communication = guarded("Communication Director", lambda: review_outbox(STATE), critical=True)
     quality = guarded("Quality Gate", lambda: quality_tick(STATE), critical=True)
 
-    # 11) Autonomous COO evaluates system health, data integrity, persistence and engine failures.
+    # 12) Autonomous COO evaluates system health, data integrity, persistence and engine failures.
     coo = operations_control_tick(
         STATE,
         DB_STATUS,
@@ -119,7 +124,7 @@ if __name__ == "__main__":
     )
     safe_live_outbound = bool(LIVE_OUTBOUND and coo.get("operational_guard", {}).get("outbound_allowed"))
 
-    # 12) Mail is fail-closed: production outbound only runs after COO + communication + quality authorization.
+    # 13) Mail is fail-closed: production outbound only runs after COO + communication + quality authorization.
     outbound = guarded(
         "Mail Outbound",
         lambda: send_pending(STATE, safe_live_outbound),
@@ -150,6 +155,7 @@ if __name__ == "__main__":
         "corporate_brain": corporate_brain,
         "growth_expansion": growth_expansion,
         "trade_logistics": trade_logistics,
+        "commercial_execution": commercial_execution,
         "executive_plan": executive_plan,
         "entrepreneurial_drive": entrepreneurial_drive,
         "professional_os": professional_os,
@@ -165,7 +171,7 @@ if __name__ == "__main__":
         "live_outbound_allowed": safe_live_outbound,
     }
 
-    # 13) KPIs are informational and cannot stop core operations if their renderer fails.
+    # 14) KPIs are informational and cannot stop core operations if their renderer fails.
     business_kpis = guarded("Business KPIs", lambda: kpi_tick(STATE))
     business_kpis["finance"] = cfo.get("financial_snapshot", {})
     business_kpis["finance_warnings"] = cfo.get("warnings", [])
@@ -198,6 +204,15 @@ if __name__ == "__main__":
         "international_suppliers_without_quotes": trade_logistics.get("international_suppliers_without_quotes"),
         "primary_directive": trade_logistics.get("primary_directive"),
     }
+    business_kpis["commercial_execution"] = {
+        "active_cases": commercial_execution.get("active_cases"),
+        "status_counts": commercial_execution.get("status_counts", {}),
+        "messages_created": commercial_execution.get("messages_created"),
+        "inbound": commercial_execution.get("inbound", {}),
+        "primary_case_id": commercial_execution.get("directive", {}).get("primary_case_id"),
+        "primary_status": commercial_execution.get("directive", {}).get("primary_status"),
+        "primary_next_action": commercial_execution.get("directive", {}).get("primary_next_action"),
+    }
     business_kpis["operations"] = {
         "status": coo.get("status"),
         "health_score": coo.get("health_score"),
@@ -228,6 +243,7 @@ if __name__ == "__main__":
     objectives = corporate_brain.get("objectives", {}) or {}
     growth_primary = growth_expansion.get("primary_expansion") or {}
     trade_primary = trade_logistics.get("primary_directive") or {}
+    revops_directive = commercial_execution.get("directive", {}) or {}
     print({
         "result": result,
         "autonomous_coo_status": coo.get("status"),
@@ -270,6 +286,12 @@ if __name__ == "__main__":
         "trade_mode": trade_primary.get("mode"),
         "trade_deal_id": trade_primary.get("deal_id"),
         "trade_landed_savings_pct": trade_primary.get("landed_savings_pct"),
+        "revops_primary_case": revops_directive.get("primary_case_id"),
+        "revops_primary_status": revops_directive.get("primary_status"),
+        "revops_primary_next_action": revops_directive.get("primary_next_action"),
+        "revops_active_cases": revops_directive.get("active_cases"),
+        "revops_messages_created": commercial_execution.get("messages_created"),
+        "revops_inbound": commercial_execution.get("inbound", {}),
         "executive_primary": executive_plan.get("primary", {}).get("code"),
         "entrepreneurial_primary": entrepreneurial_drive.get("primary", {}).get("action"),
         "professional_os_top_action": (financial_chief.get("top_action") or {}).get("title"),
