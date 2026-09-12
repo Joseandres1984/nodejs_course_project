@@ -5,6 +5,8 @@ from typing import Any, Dict
 
 from autonomous_management_runtime import executive_management_cycle
 from deal_room import deal_room_tick
+from venture_attribution import propagate_venture_attribution
+from venture_builder import venture_builder_tick
 
 
 def utcnow() -> str:
@@ -97,8 +99,15 @@ def kpi_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     # reallocate reversible attention for the next cycle and cannot widen constitutional caps.
     executive_management = executive_management_cycle(state)
 
-    # The Deal Room is generated after management so each dossier also captures the current
-    # management disposition (PURSUE / IMPROVE / REPAIR_RISK / PARK / HOLD_RISK).
+    # Attribution is deliberately retrospective and evidence-preserving: venture tags follow only explicit
+    # lead/account/opportunity/deal lineage. No transaction is credited to a venture by category guesswork alone.
+    venture_attribution = propagate_venture_attribution(state)
+
+    # Venture Builder runs after management so it sees the freshest company state and can create a bounded
+    # validation task for the next cycle without changing spending authority or bypassing the Constitution.
+    venture_builder = venture_builder_tick(state)
+
+    # The Deal Room is generated last so each dossier captures management + venture attribution/disposition.
     deal_room = deal_room_tick(state)
 
     report = {
@@ -108,6 +117,8 @@ def kpi_tick(state: Dict[str, Any]) -> Dict[str, Any]:
         "health": health,
         "bottlenecks": bottlenecks,
         "executive_management": executive_management,
+        "venture_attribution": venture_attribution,
+        "venture_builder": venture_builder,
         "deal_room": deal_room,
     }
     state["business_kpis"] = report
