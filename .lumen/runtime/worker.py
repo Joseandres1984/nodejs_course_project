@@ -13,6 +13,7 @@ from quote_engine import quote_tick
 from preclose_gate import preclose_tick
 from relationship_memory import relationship_tick
 from counterparty_scorecards import scorecards_tick
+from profit_learning import learning_tick
 from executive_director import plan_tick
 from entrepreneurial_drive import drive_tick
 from mission_scout import mission_scout_tick
@@ -54,16 +55,20 @@ if __name__ == "__main__":
     relationships = relationship_tick(STATE)
     scorecards = scorecards_tick(STATE)
 
-    # 6) Executive layer chooses the highest-value bottleneck; Entrepreneurial Drive turns it into
-    # a persistent mission portfolio, tracks stagnation and allocates attention.
+    # 6) Learn which categories and search strategies repeatedly produce real commercial progress.
+    # Sparse evidence is shrunk toward neutral so LUMEN does not overfit one lucky result.
+    profit_learning = learning_tick(STATE)
+
+    # 7) Executive layer chooses the highest-value bottleneck; Entrepreneurial Drive combines it with
+    # learned profit signals and turns it into a persistent mission portfolio.
     executive_plan = plan_tick(STATE)
     entrepreneurial_drive = drive_tick(STATE)
 
-    # 7) Mission Scout immediately spends any remaining research budget in the direction chosen by the company.
-    # New leads enter the normal verification pipeline on the next cycle; no trust gate is bypassed.
+    # 8) Mission Scout spends remaining research budget according to the learned exploit/explore policy.
+    # New leads still pass through the normal verification pipeline; no trust gate is bypassed.
     mission_scout = mission_scout_tick(STATE)
 
-    # 8) Every outbound message must pass relationship-oriented communication review AND quality authorization.
+    # 9) Every outbound message must pass relationship-oriented communication review AND quality authorization.
     communication = review_outbox(STATE)
     quality = quality_tick(STATE)
     outbound = send_pending(STATE, LIVE_OUTBOUND)
@@ -83,6 +88,7 @@ if __name__ == "__main__":
         "preclose_gate": preclose,
         "relationships": relationships,
         "scorecards": scorecards,
+        "profit_learning": profit_learning,
         "executive_plan": executive_plan,
         "entrepreneurial_drive": entrepreneurial_drive,
         "communication": communication,
@@ -95,7 +101,7 @@ if __name__ == "__main__":
         "live_outbound": bool(LIVE_OUTBOUND),
     }
 
-    # 9) KPIs are computed after telemetry so health and funnel metrics reflect this exact cycle.
+    # 10) KPIs are computed after telemetry so health and funnel metrics reflect this exact cycle.
     business_kpis = kpi_tick(STATE)
     STATE["connector_telemetry"]["business_kpis"] = business_kpis
 
@@ -123,6 +129,9 @@ if __name__ == "__main__":
         "preclose_gate": preclose,
         "relationships": relationships,
         "scorecards": scorecards,
+        "profit_learning_primary_category": profit_learning.get("primary_category"),
+        "profit_learning_exploit_pct": profit_learning.get("exploit_pct"),
+        "profit_learning_explore_pct": profit_learning.get("explore_pct"),
         "executive_primary": executive_plan.get("primary", {}).get("code"),
         "entrepreneurial_primary": entrepreneurial_drive.get("primary", {}).get("action"),
         "active_missions": entrepreneurial_drive.get("active_missions", 0),
