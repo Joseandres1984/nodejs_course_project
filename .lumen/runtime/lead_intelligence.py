@@ -5,6 +5,8 @@ import urllib.parse
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Tuple
 
+from autonomy_governor import record_decision
+
 MAX_PER_TICK = 24
 
 LOW_QUALITY_HOST_HINTS = {
@@ -157,7 +159,6 @@ def qualify_tick(state: Dict[str, Any]) -> Dict[str, int]:
     accounts = state.setdefault("candidate_accounts", [])
     stats = {"processed": 0, "tier_a": 0, "tier_b": 0, "rejected": 0, "duplicates": 0, "candidates_created": 0}
 
-    # First process unqualified/new leads; then revisit old ones if schema changed.
     queue = [x for x in leads if not x.get("qualified_at")][:MAX_PER_TICK]
     known_keys = {str(x.get("candidate_key")) for x in accounts if x.get("candidate_key")}
     seen_leads: set[str] = set()
@@ -169,17 +170,29 @@ def qualify_tick(state: Dict[str, Any]) -> Dict[str, int]:
         lead["qualified_at"] = utcnow()
         key = _candidate_key(lead)
 
-        # Same domain/category/type is one commercial account, not many separate opportunities.
         if key in seen_leads:
             lead["qualification_status"] = "duplicate"
             lead["next_research_action"] = "Consolidar evidencia con la cuenta principal"
             stats["duplicates"] += 1
+            record_decision(
+                state, engine="Lead Intelligence", object_type="research_lead", object_id=str(lead.get("id")),
+                decision="duplicate", reason="Mismo dominio/categoría/rol ya procesado en este ciclo",
+                action="classify_lead", confidence=float(lead.get("confidence") or 0), evidence_refs=[str(lead.get("url") or "")],
+            )
             continue
         seen_leads.add(key)
 
         if lead["tier"] == "A": stats["tier_a"] += 1
         elif lead["tier"] == "B": stats["tier_b"] += 1
         elif lead["tier"] == "D": stats["rejected"] += 1
+
+        record_decision(
+            state, engine="Lead Intelligence", object_type="research_lead", object_id=str(lead.get("id")),
+            decision=f"tier_{str(lead.get('tier')).lower()}",
+            reason="; ".join(str(x) for x in lead.get("qualification_reasons", [])[:5]),
+            action="classify_lead", confidence=float(lead.get("confidence") or 0), evidence_refs=[str(lead.get("url") or "")],
+            allowed=lead.get("tier") != "D",
+        )
 
         if lead["tier"] == "A" and key not in known_keys and lead.get("domain"):
             account = {
@@ -202,6 +215,11 @@ def qualify_tick(state: Dict[str, Any]) -> Dict[str, int]:
             accounts.append(account)
             known_keys.add(key)
             stats["candidates_created"] += 1
+            record_decision(
+                state, engine="Lead Intelligence", object_type="candidate_account", object_id=account["id"],
+                decision="created_for_verification", reason="Lead Tier A con dominio y encaje suficientes para verificación corporativa",
+                action="verify_company", confidence=float(account.get("confidence") or 0), evidence_refs=[str(account.get("source_url") or "")],
+            )
 
     if stats["processed"]:
         _log(state, f"Lead Intelligence calificó {stats['processed']} leads: {stats['tier_a']} A, {stats['tier_b']} B, {stats['rejected']} descartados y {stats['candidates_created']} cuentas candidatas nuevas.")
