@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import os
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict
 
 from autonomy_governor import record_decision
 
-MAX_LANES = 4
 MAX_FOLLOWUPS = 2
 FIRST_FOLLOWUP_HOURS = max(24, int(os.getenv("LUMEN_CLOSER_FIRST_FOLLOWUP_HOURS", "72")))
 SECOND_FOLLOWUP_HOURS = max(FIRST_FOLLOWUP_HOURS, int(os.getenv("LUMEN_CLOSER_SECOND_FOLLOWUP_HOURS", "120")))
+TIMING_COOLDOWN_HOURS = max(72, int(os.getenv("LUMEN_CLOSER_TIMING_COOLDOWN_HOURS", "168")))
 COLLECTION_FOCUS = os.getenv("LUMEN_COLLECTION_FOCUS", "").strip().lower()
 
 COMMERCIAL_KINDS = {
@@ -66,10 +66,6 @@ def _account_index(state: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     return {str(x.get("id")): x for x in state.get("candidate_accounts", []) or [] if x.get("id")}
 
 
-def _opp_index(state: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
-    return {str(x.get("id")): x for x in state.get("market_opportunities", []) or [] if x.get("id")}
-
-
 def _deal_index(state: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     return {str(x.get("id")): x for x in state.get("deals", []) or [] if x.get("id")}
 
@@ -92,7 +88,11 @@ def _is_closed(state: Dict[str, Any], deal: Dict[str, Any]) -> bool:
     if str(deal.get("stage") or "").lower() in {"closed", "cerrado", "settled", "completed", "cancelled", "lost"}:
         return True
     deal_id = str(deal.get("id") or "")
-    return any(str(x.get("deal_id") or "") == deal_id and str(x.get("status") or "").lower() in CLOSED_TXN_STATES for x in state.get("transactions", []) or [])
+    return any(
+        str(x.get("deal_id") or "") == deal_id
+        and str(x.get("status") or "").lower() in CLOSED_TXN_STATES
+        for x in state.get("transactions", []) or []
+    )
 
 
 def _latest_inbound(state: Dict[str, Any], *, deal_id: str = "", opportunity_id: str = "") -> Dict[str, Any]:
@@ -144,7 +144,10 @@ def _stage(state: Dict[str, Any], opp: Dict[str, Any], deal: Dict[str, Any], cas
         return "RISK_HOLD"
     if deal and deal.get("economics", {}).get("viable"):
         return "NEGOTIATION_OR_CLOSE"
-    real_offers = [x for x in state.get("offers", []) or [] if str(x.get("deal_id") or "") == str(deal.get("id") or "") and x.get("source") != "demo/simulación"]
+    real_offers = [
+        x for x in state.get("offers", []) or []
+        if str(x.get("deal_id") or "") == str(deal.get("id") or "") and x.get("source") != "demo/simulación"
+    ]
     if real_offers:
         return "QUOTE_NORMALIZATION"
     if case.get("supplier_rfq_ready"):
@@ -172,15 +175,38 @@ def _score_lane(state: Dict[str, Any], opp: Dict[str, Any]) -> Dict[str, Any]:
     score += 15 if close_pack.get("status") == "READY_FOR_HUMAN_APPROVAL" else 0
     if COLLECTION_FOCUS == "mercadopago_ars":
         score += 12 if opp.get("collection_focus_eligible") else -80
+
     buyer_risk = _risk(state, buyer.get("id"))
     supplier_risk = _risk(state, supplier.get("id"))
     if buyer_risk.get("risk_tier") == "BLOCKED" or supplier_risk.get("risk_tier") == "BLOCKED":
         score -= 100
     if deal.get("red_team_hold") or deal.get("incident_hold"):
         score -= 70
+
     stage = _stage(state, opp, deal, case, close_pack)
     incoming = _latest_inbound(state, deal_id=str(deal.get("id") or ""), opportunity_id=str(opp.get("id") or ""))
     objection = _detect_objection(incoming)
+    timing_cooldown_active = False
+    timing_cooldown_remaining = None
+    if objection.get("kind") == "timing":
+        elapsed = _hours_since(incoming.get("received_at"))
+        if elapsed is not None and elapsed < TIMING_COOLDOWN_HOURS:
+            timing_cooldown_active = True
+            timing_cooldown_remaining = round(TIMING_COOLDOWN_HOURS - elapsed, 1)
+        else:
+            objection = {
+                "kind": "timing_reengage",
+                "directive": "reengage_once_after_cooldown_with_low_pressure",
+                "confidence": objection.get("confidence", 0.9),
+            }
+
+    blocked = bool(
+        score <= 0
+        or stage == "RISK_HOLD"
+        or objection.get("kind") == "opt_out"
+        or timing_cooldown_active
+        or _is_closed(state, deal)
+    )
     return {
         "lane_id": f"opportunity:{opp.get('id')}",
         "opportunity_id": opp.get("id"),
@@ -198,7 +224,9 @@ def _score_lane(state: Dict[str, Any], opp: Dict[str, Any]) -> Dict[str, Any]:
         "close_pack_status": close_pack.get("status"),
         "objection": objection,
         "last_inbound_id": incoming.get("id") if incoming else None,
-        "blocked": score <= 0 or stage == "RISK_HOLD" or objection.get("kind") == "opt_out" or _is_closed(state, deal),
+        "timing_cooldown_active": timing_cooldown_active,
+        "timing_cooldown_hours_remaining": timing_cooldown_remaining,
+        "blocked": blocked,
     }
 
 
@@ -268,7 +296,10 @@ def _apply_lane_gate(state: Dict[str, Any], active_ids: set[str], cap: int) -> D
 
 
 def _latest_buyer_sent(state: Dict[str, Any], lane_id: str) -> Dict[str, Any]:
-    rows = [x for x in state.get("outbox", []) or [] if x.get("status") == "sent" and x.get("kind") in BUYER_KINDS and _message_lane(state, x) == lane_id]
+    rows = [
+        x for x in state.get("outbox", []) or []
+        if x.get("status") == "sent" and x.get("kind") in BUYER_KINDS and _message_lane(state, x) == lane_id
+    ]
     rows.sort(key=lambda x: str(x.get("sent_at") or ""))
     return rows[-1] if rows else {}
 
@@ -287,8 +318,15 @@ def _buyer_inbound_after(state: Dict[str, Any], sent: Dict[str, Any]) -> bool:
     return False
 
 
+def _followup_rows(state: Dict[str, Any], lane_id: str) -> list[Dict[str, Any]]:
+    return [
+        x for x in state.get("outbox", []) or []
+        if x.get("kind") == "follow_up" and _message_lane(state, x) == lane_id
+    ]
+
+
 def _followup_count(state: Dict[str, Any], lane_id: str) -> int:
-    return sum(1 for x in state.get("outbox", []) or [] if x.get("kind") == "follow_up" and _message_lane(state, x) == lane_id and x.get("status") in {"ready", "sent", "closer_hold"})
+    return sum(1 for x in _followup_rows(state, lane_id) if x.get("status") in {"ready", "sent", "closer_hold"})
 
 
 def _prepare_followup(state: Dict[str, Any], lane: Dict[str, Any]) -> bool:
@@ -297,6 +335,9 @@ def _prepare_followup(state: Dict[str, Any], lane: Dict[str, Any]) -> bool:
     if (lane.get("objection") or {}).get("kind") in {"opt_out", "timing"}:
         return False
     lane_id = str(lane.get("lane_id") or "")
+    existing_followups = _followup_rows(state, lane_id)
+    if any(x.get("status") in {"ready", "closer_hold"} for x in existing_followups):
+        return False
     sent = _latest_buyer_sent(state, lane_id)
     if not sent or _buyer_inbound_after(state, sent):
         return False
@@ -344,20 +385,38 @@ def _prepare_followup(state: Dict[str, Any], lane: Dict[str, Any]) -> bool:
     return True
 
 
+def _stable_lane_order(lanes: list[Dict[str, Any]], memory: Dict[str, Any]) -> list[Dict[str, Any]]:
+    if not lanes:
+        return lanes
+    previous_ids = [str(x) for x in memory.get("active_lane_ids", []) or [] if x]
+    primary_id = str(memory.get("primary_lane_id") or "")
+    if primary_id:
+        previous_ids = [primary_id] + [x for x in previous_ids if x != primary_id]
+    by_id = {str(x.get("lane_id") or ""): x for x in lanes}
+    locked = [by_id[x] for x in previous_ids if x in by_id and not by_id[x].get("blocked")]
+    locked_ids = {str(x.get("lane_id")) for x in locked}
+    rest = [x for x in lanes if str(x.get("lane_id")) not in locked_ids]
+    return locked + rest
+
+
 def closer_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     memory = state.setdefault("closer_memory", {})
     memory["cycles"] = int(memory.get("cycles") or 0) + 1
     lanes = []
+    cooled_down = 0
     for opp in state.get("market_opportunities", []) or []:
         if opp.get("source") != "public_evidence":
             continue
         if COLLECTION_FOCUS == "mercadopago_ars" and not opp.get("collection_focus_eligible"):
             continue
         lane = _score_lane(state, opp)
+        if lane.get("timing_cooldown_active"):
+            cooled_down += 1
         if not lane.get("blocked"):
             lane["next_action"] = _next_action(lane)
             lanes.append(lane)
     lanes.sort(key=lambda x: (_f(x.get("score")), x.get("stage") == "READY_FOR_HUMAN_APPROVAL"), reverse=True)
+    lanes = _stable_lane_order(lanes, memory)
 
     cap = _lane_cap(state)
     active = lanes[:cap] if cap > 0 else []
@@ -376,6 +435,10 @@ def closer_tick(state: Dict[str, Any]) -> Dict[str, Any]:
         memory["primary_lane_id"] = primary.get("lane_id")
         memory["primary_opportunity_id"] = primary.get("opportunity_id")
         memory["primary_deal_id"] = primary.get("deal_id")
+    elif cap > 0:
+        memory["primary_lane_id"] = None
+        memory["primary_opportunity_id"] = None
+        memory["primary_deal_id"] = None
     memory["active_lane_ids"] = list(active_ids)
     memory["last_cycle_at"] = utcnow()
 
@@ -392,6 +455,7 @@ def closer_tick(state: Dict[str, Any]) -> Dict[str, Any]:
         "go_live_stage": (state.get("go_live_memory", {}) or {}).get("stage"),
         "lane_cap": cap,
         "eligible_lanes": len(lanes),
+        "timing_cooldowns": cooled_down,
         "active_lanes": active,
         "primary_lane": primary,
         "primary_next_action": (primary or {}).get("next_action"),
@@ -401,9 +465,10 @@ def closer_tick(state: Dict[str, Any]) -> Dict[str, Any]:
         "collection_focus": COLLECTION_FOCUS or "standard",
         "governance": {
             "one_owner_rule": "Closer Orchestrator owns prioritization from verified demand through close packet; specialist engines remain authoritative for evidence, quotes, risk, negotiation and payments.",
-            "persistence_rule": "At most two evidence-based buyer follow-ups; first after 72h, second after 120h, unless the buyer replies, opts out or asks to revisit later.",
+            "persistence_rule": "At most two evidence-based buyer follow-ups; first after 72h, second after 120h. Pending follow-ups are never stacked. Buyer replies, opt-out and timing requests override persistence.",
+            "timing_rule": "A buyer timing objection creates a seven-day cooldown by default; after cooldown only a low-pressure re-engagement is eligible.",
             "objection_rule": "Price objections first trigger supplier-economics improvement; delivery/technical answers require traceable evidence; competitor objections never trigger invented claims.",
-            "canary_rule": "CANARY keeps one active commercial lane; LIMITED_LIVE two; GOVERNED_LIVE four. Other new-sale messages are held, not deleted.",
+            "canary_rule": "CANARY locks one active commercial lane until it resolves, blocks, cools down or closes; LIMITED_LIVE two; GOVERNED_LIVE four. Other new-sale messages are held, not deleted.",
             "authority_rule": "Research, outreach, RFQ, clarification and nonbinding negotiation may be autonomous. Contract acceptance, binding terms, orders, payments and final legal commitments remain human-authorized.",
         },
     }
