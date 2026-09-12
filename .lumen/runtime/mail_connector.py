@@ -114,6 +114,11 @@ def send_pending(state: Dict[str, Any], live_outbound: bool) -> Dict[str, int]:
             break
         if item.get("status") != "ready":
             continue
+        if item.get("quality_gate") != "passed" or not item.get("communication_reviewed"):
+            item["status"] = "blocked_quality"
+            item["last_error"] = "Mail Connector exige Communication Director + Quality Gate antes de enviar"
+            stats["blocked"] += 1
+            continue
         target = (item.get("contact") or "").strip().lower()
         if not target or not item.get("contact_verified") or target in {x.lower() for x in state["opt_out"]}:
             item["status"] = "blocked"
