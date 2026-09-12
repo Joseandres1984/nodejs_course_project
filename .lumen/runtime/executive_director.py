@@ -1,0 +1,102 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from typing import Any, Dict, List
+
+from autonomy_governor import record_decision
+
+
+def utcnow() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
+def _count(accounts: List[Dict[str, Any]], kind: str, **flags: Any) -> int:
+    total = 0
+    for account in accounts:
+        if account.get("type") != kind:
+            continue
+        if all(account.get(key) == value for key, value in flags.items()):
+            total += 1
+    return total
+
+
+def _deal_economics_gap(state: Dict[str, Any]) -> int:
+    target = float(state.get("policies", {}).get("target_company_share_pct", 12.0))
+    return sum(
+        1 for deal in state.get("deals", [])
+        if deal.get("economics") and float(deal.get("company_share_pct") or 0) < target
+    )
+
+
+def plan_tick(state: Dict[str, Any]) -> Dict[str, Any]:
+    accounts = state.setdefault("candidate_accounts", [])
+    verified_suppliers = _count(accounts, "supplier", verified_company=True)
+    verified_buyers = _count(accounts, "buyer", verified_company=True)
+    demand_buyers = sum(1 for x in accounts if x.get("type") == "buyer" and x.get("verified_company") and x.get("demand_signal"))
+    opportunities = state.get("market_opportunities", [])
+    unconfirmed_opps = sum(1 for x in opportunities if not x.get("requirement_confirmed"))
+    unverified_contact_opps = sum(
+        1 for x in opportunities
+        if not x.get("buyer_contact_verified") or not x.get("supplier_contact_verified")
+    )
+    margin_gaps = _deal_economics_gap(state)
+    pending_approvals = sum(1 for x in state.get("approvals", []) if x.get("status") == "pending")
+
+    priorities: List[Dict[str, Any]] = []
+
+    def add(code: str, priority: int, objective: str, reason: str, autonomous: bool = True) -> None:
+        priorities.append({
+            "code": code,
+            "priority": priority,
+            "objective": objective,
+            "reason": reason,
+            "autonomous": autonomous,
+        })
+
+    if verified_suppliers == 0:
+        add("supplier_gap", 100, "Encontrar y verificar proveedores sólidos", "No hay proveedores verificados para construir oferta real.")
+    if verified_suppliers > 0 and verified_buyers == 0:
+        add("buyer_gap", 100, "Encontrar y verificar compradores con buen encaje", "Ya existe oferta verificada, pero falta el lado comprador del mercado.")
+    elif verified_buyers > 0 and demand_buyers == 0:
+        add("demand_gap", 96, "Validar señales reales de demanda", "Hay compradores verificados, pero todavía no existe evidencia suficiente de intención o necesidad.")
+    if demand_buyers > 0 and verified_suppliers == 0:
+        add("supplier_for_demand", 98, "Encontrar proveedores para demanda verificada", "Existe demanda verificable y falta capacidad de suministro.")
+    if unconfirmed_opps:
+        add("requirement_gap", 92, "Confirmar requerimientos concretos", f"Hay {unconfirmed_opps} oportunidades con evidencia pero requerimiento aún no confirmado.")
+    if unverified_contact_opps:
+        add("contact_gap", 90, "Validar canales comerciales corporativos", f"Hay {unverified_contact_opps} oportunidades sin ambos contactos comerciales verificados.")
+    if margin_gaps:
+        add("margin_gap", 95, "Mejorar economía y proteger margen", f"Hay {margin_gaps} negocios por debajo del margen objetivo.")
+    if pending_approvals:
+        add("approval_gap", 85, "Presentar decisiones de alto impacto para aprobación", f"Hay {pending_approvals} compromisos que requieren autorización humana.", autonomous=False)
+    if not priorities:
+        add("expand_market", 70, "Expandir cuentas y categorías de mayor valor", "No hay un cuello de botella crítico; conviene ampliar mercado con disciplina de evidencia.")
+
+    priorities.sort(key=lambda x: x["priority"], reverse=True)
+    primary = priorities[0]
+    plan = {
+        "updated_at": utcnow(),
+        "primary": primary,
+        "priorities": priorities[:5],
+        "snapshot": {
+            "verified_suppliers": verified_suppliers,
+            "verified_buyers": verified_buyers,
+            "buyers_with_demand": demand_buyers,
+            "market_opportunities": len(opportunities),
+            "pending_approvals": pending_approvals,
+        },
+        "decision_rule": "maximizar valor económico sostenible ajustado por evidencia, riesgo, velocidad y calidad de relación",
+    }
+    state["executive_plan"] = plan
+    record_decision(
+        state,
+        engine="Executive Director",
+        object_type="company",
+        object_id="LUMEN",
+        decision=primary["code"],
+        reason=primary["reason"],
+        action="prioritize_company_objective",
+        confidence=0.9,
+        evidence_refs=[],
+    )
+    return plan
