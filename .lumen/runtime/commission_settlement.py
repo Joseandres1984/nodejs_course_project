@@ -109,13 +109,7 @@ def _commission_received_at(txn: Dict[str, Any], deal: Dict[str, Any]) -> Any:
 
 
 def _commission_due_at(txn: Dict[str, Any], deal: Dict[str, Any]) -> Any:
-    # Prefer a commission-specific due date. Only fall back to transaction payment due date when explicitly shared by the deal.
-    return (
-        txn.get("commission_due_at")
-        or deal.get("commission_due_at")
-        or txn.get("settlement_due_at")
-        or deal.get("settlement_due_at")
-    )
+    return txn.get("commission_due_at") or deal.get("commission_due_at") or txn.get("settlement_due_at") or deal.get("settlement_due_at")
 
 
 def _invoice_ref(txn: Dict[str, Any], deal: Dict[str, Any]) -> Any:
@@ -131,14 +125,14 @@ def _prepare_payment_instruction_message(
 ) -> bool:
     if not config.get("instructions_verified") or not config.get("auto_prepare_enabled"):
         return False
-    if case.get("status") not in {"AWAITING_PAYMENT", "OVERDUE"}:
+    if case.get("status") not in {"AWAITING_PAYMENT", "OVERDUE", "PARTIAL_RECEIVED"}:
         return False
     if case.get("incident_hold") or deal.get("red_team_hold") or deal.get("legal_review_required"):
         return False
     email = str(buyer.get("commercial_email") or "").strip().lower()
     if not email or not buyer.get("verified_contact"):
         return False
-    key = f"commission_settlement|{case.get('transaction_id')}|v1"
+    key = f"commission_settlement|{case.get('transaction_id')}|{case.get('status')}|v1"
     if _existing_message(state, key):
         return False
 
@@ -147,6 +141,7 @@ def _prepare_payment_instruction_message(
     instructions = str(config.get("_instructions") or "").strip()
     if not instructions:
         return False
+    amount_due = _f(case.get("outstanding_amount_usd")) or _f(case.get("expected_amount_usd"))
     state.setdefault("outbox", []).append({
         "id": f"MSG-{len(state.get('outbox', []))+1:04d}",
         "deal_id": deal.get("id"),
@@ -160,7 +155,7 @@ def _prepare_payment_instruction_message(
         "contact_verified": True,
         "subject": "Datos para liquidación de comisión",
         "body": (
-            f"Para la liquidación de nuestra participación comercial{invoice_text}, el importe registrado es USD {case.get('expected_amount_usd', 0):,.2f}. "
+            f"Para la liquidación de nuestra participación comercial{invoice_text}, el saldo registrado es USD {amount_due:,.2f}. "
             f"Los datos de cobro previamente verificados por LUMEN son: {instructions}. "
             "Agradecemos utilizar únicamente estos datos y confirmar la referencia del pago. Si existe cualquier discrepancia, por favor no efectuar la transferencia hasta aclararla por el canal comercial habitual."
         )[:5600],
@@ -175,7 +170,10 @@ def _prepare_payment_instruction_message(
 
 
 def _upsert_realized_revenue(state: Dict[str, Any], case: Dict[str, Any]) -> bool:
-    if case.get("status") != "RECEIVED" or case.get("received_amount_usd") is None:
+    if case.get("status") not in {"RECEIVED", "PARTIAL_RECEIVED"} or case.get("received_amount_usd") is None:
+        return False
+    amount = max(0.0, _f(case.get("received_amount_usd")))
+    if amount <= 0:
         return False
     txn_id = str(case.get("transaction_id") or "")
     ledger = state.setdefault("revenue_ledger", [])
@@ -184,9 +182,9 @@ def _upsert_realized_revenue(state: Dict[str, Any], case: Dict[str, Any]) -> boo
         "transaction_id": txn_id,
         "deal_id": case.get("deal_id"),
         "kind": "commission_settlement",
-        "amount": round(_f(case.get("received_amount_usd")), 2),
+        "amount": round(amount, 2),
         "currency": "USD",
-        "status": "realized",
+        "status": "realized_partial" if case.get("status") == "PARTIAL_RECEIVED" else "realized",
         "source": "explicit_commission_receipt_evidence",
         "received_at": case.get("received_at"),
         "updated_at": utcnow(),
@@ -202,23 +200,24 @@ def _upsert_realized_revenue(state: Dict[str, Any], case: Dict[str, Any]) -> boo
 
 def _materialize_task(state: Dict[str, Any], case: Dict[str, Any]) -> None:
     status = str(case.get("status") or "")
-    if status not in {"SETUP_REQUIRED", "INVOICE_REQUIRED", "OVERDUE", "RECEIVED_AMOUNT_MISSING", "DISPUTED_HOLD"}:
+    if status not in {"SETUP_REQUIRED", "INVOICE_REQUIRED", "OVERDUE", "PARTIAL_RECEIVED", "RECEIVED_AMOUNT_MISSING", "DISPUTED_HOLD"}:
         return
     human = status in {"SETUP_REQUIRED", "INVOICE_REQUIRED", "RECEIVED_AMOUNT_MISSING", "DISPUTED_HOLD"}
     reason_map = {
         "SETUP_REQUIRED": "Falta configurar y verificar un destino real de cobro para las comisiones.",
         "INVOICE_REQUIRED": "La comisión está devengada pero falta referencia de factura/liquidación trazable.",
         "OVERDUE": "La comisión tiene vencimiento explícito superado y sigue sin evidencia de recepción.",
+        "PARTIAL_RECEIVED": "Existe cobro parcial confirmado; mantener reconocido lo recibido y gestionar únicamente el saldo pendiente.",
         "RECEIVED_AMOUNT_MISSING": "Existe señal explícita de comisión cobrada pero falta el importe recibido; no puede contarse como ganancia realizada.",
         "DISPUTED_HOLD": "Existe un incidente/reclamo asociado; se congela la cobranza hasta resolver evidencia y exposición.",
     }
-    priority = {"DISPUTED_HOLD": 98, "OVERDUE": 94, "RECEIVED_AMOUNT_MISSING": 92, "SETUP_REQUIRED": 88, "INVOICE_REQUIRED": 84}.get(status, 80)
+    priority = {"DISPUTED_HOLD": 98, "OVERDUE": 94, "PARTIAL_RECEIVED": 92, "RECEIVED_AMOUNT_MISSING": 92, "SETUP_REQUIRED": 88, "INVOICE_REQUIRED": 84}.get(status, 80)
     task = {
         "key": f"commission_settlement|{case.get('transaction_id')}|{status}",
         "kind": "commission_settlement",
         "title": f"Comisión: {case.get('next_action')}",
         "reason": reason_map.get(status, str(case.get("next_action") or "Revisar liquidación")),
-        "impact": 96 if status in {"OVERDUE", "DISPUTED_HOLD"} else 86,
+        "impact": 96 if status in {"OVERDUE", "DISPUTED_HOLD"} else 88,
         "urgency": priority,
         "confidence": 0.98,
         "effort": 1.0,
@@ -258,6 +257,9 @@ def _case(state: Dict[str, Any], txn: Dict[str, Any], deal: Dict[str, Any], conf
         if received_amount is None:
             status = "RECEIVED_AMOUNT_MISSING"
             next_action = "Registrar el importe efectivamente recibido antes de reconocer ganancia"
+        elif received_amount + 0.01 < expected:
+            status = "PARTIAL_RECEIVED"
+            next_action = "Reconocer el cobro parcial y gestionar únicamente el saldo pendiente"
         else:
             status = "RECEIVED"
             next_action = "Comisión cobrada y disponible para reconocimiento económico"
@@ -322,13 +324,13 @@ def commission_settlement_tick(state: Dict[str, Any]) -> Dict[str, Any]:
             case["payment_message_prepared"] = False
         cases.append(case)
 
-    priority = {"DISPUTED_HOLD": 100, "OVERDUE": 96, "RECEIVED_AMOUNT_MISSING": 94, "SETUP_REQUIRED": 90, "INVOICE_REQUIRED": 86, "AWAITING_PAYMENT": 70, "RECEIVED": 40, "NO_COMMISSION_BASIS": 88}
+    priority = {"DISPUTED_HOLD": 100, "OVERDUE": 96, "PARTIAL_RECEIVED": 94, "RECEIVED_AMOUNT_MISSING": 94, "SETUP_REQUIRED": 90, "NO_COMMISSION_BASIS": 88, "INVOICE_REQUIRED": 86, "AWAITING_PAYMENT": 70, "RECEIVED": 40}
     cases.sort(key=lambda x: priority.get(str(x.get("status")), 50), reverse=True)
     cases = cases[:MAX_CASES]
 
     expected = round(sum(_f(x.get("expected_amount_usd")) for x in cases), 2)
-    received = round(sum(_f(x.get("received_amount_usd")) for x in cases if x.get("status") == "RECEIVED"), 2)
-    outstanding = round(sum(_f(x.get("outstanding_amount_usd")) for x in cases if x.get("status") != "RECEIVED"), 2)
+    received = round(sum(_f(x.get("received_amount_usd")) for x in cases if x.get("status") in {"RECEIVED", "PARTIAL_RECEIVED"}), 2)
+    outstanding = round(sum(_f(x.get("outstanding_amount_usd")) for x in cases), 2)
     primary = cases[0] if cases else None
 
     report = {
@@ -351,7 +353,8 @@ def commission_settlement_tick(state: Dict[str, Any]) -> Dict[str, Any]:
         },
         "stage_counts": {stage: sum(1 for x in cases if x.get("status") == stage) for stage in sorted({str(x.get("status")) for x in cases})},
         "governance": {
-            "cash_truth_rule": "Una comisión solo es ganancia realizada con evidencia explícita del importe recibido; una venta o factura no equivale a efectivo cobrado.",
+            "cash_truth_rule": "Una comisión solo es ganancia realizada por el importe explícitamente recibido; una venta, factura o señal de pago sin monto no equivale a efectivo cobrado.",
+            "partial_payment_rule": "Los cobros parciales se reconocen solo por el importe recibido y mantienen el saldo restante como pendiente.",
             "payment_data_rule": "Los datos bancarios/PSP nunca se persisten en el estado ni en Git; solo pueden provenir de configuración segura de runtime y deben estar marcados como verificados.",
             "authority_rule": "LUMEN puede preparar seguimiento de cobro no vinculante cuando los datos están verificados; no puede mover fondos ni cambiar un destino de cobro por sí solo.",
         },
