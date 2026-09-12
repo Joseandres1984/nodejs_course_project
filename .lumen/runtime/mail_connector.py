@@ -108,11 +108,27 @@ def classify_reply(subject: str, body: str) -> Dict[str, Any]:
 def send_pending(state: Dict[str, Any], live_outbound: bool) -> Dict[str, int]:
     state.setdefault("outbox", []); state.setdefault("opt_out", [])
     stats = {"sent": 0, "blocked": 0, "failed": 0}
-    if not live_outbound:
+
+    # Final production gate. LIVE_OUTBOUND alone is not enough: Go-Live Orchestrator must also
+    # approve the current stage/infrastructure. Local import avoids a module cycle at startup.
+    try:
+        from app import DB_STATUS, LIVE_OUTBOUND
+        from go_live_orchestrator import go_live_tick, go_live_post_cycle
+        launch = go_live_tick(state, DB_STATUS, bool(LIVE_OUTBOUND))
+    except Exception as exc:
+        _log(state, f"Go-Live Orchestrator no pudo evaluar salida: {str(exc)[:140]}")
         return stats
+
+    coo = state.get("autonomous_coo", {}) or {}
+    quality = state.get("quality_gate_stats", {}) or {}
+    if not live_outbound or not launch.get("outbound_allowed"):
+        go_live_post_cycle(state, stats, coo, quality)
+        return stats
+
     status = connector_status()
     if not status["smtp_configured"]:
         _log(state, "Mail Connector: salida real habilitada pero SMTP todavía no está configurado.")
+        go_live_post_cycle(state, stats, coo, quality)
         return stats
     limit = max(1, int(state.get("policies", {}).get("max_outbound_per_tick", 3)))
     for item in state["outbox"]:
@@ -154,6 +170,8 @@ def send_pending(state: Dict[str, Any], live_outbound: bool) -> Dict[str, int]:
             item["last_error"] = str(exc)[:180]
             stats["failed"] += 1
             _log(state, f"Mail Connector no pudo enviar {item['id']}: {str(exc)[:120]}")
+
+    go_live_post_cycle(state, stats, coo, quality)
     return stats
 
 
