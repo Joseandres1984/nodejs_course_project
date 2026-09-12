@@ -73,7 +73,6 @@ def classify_reply(subject: str, body: str) -> Dict[str, Any]:
     text = f"{subject}\n{body}".lower()
     kind = "general"
 
-    # Intent order matters: an objection often contains the word "precio", but it is not a supplier offer.
     if any(k in text for k in ["no me interesa", "no contactar", "no contacten", "baja", "unsubscribe", "remover", "quitarme"]):
         kind = "opt_out"
     elif any(k in text for k in ["caro", "precio alto", "muy alto", "descuento", "mejorar precio", "mejor precio", "fuera de presupuesto", "no nos cierra el precio", "no me cierra el precio"]):
@@ -209,6 +208,7 @@ def fetch_unseen(state: Dict[str, Any], max_messages: int = 10) -> Dict[str, int
 def apply_inbox_to_deals(state: Dict[str, Any]) -> Dict[str, int]:
     state.setdefault("inbox", []); state.setdefault("offers", [])
     stats = {"linked": 0, "offers_created": 0, "objections": 0, "opt_outs": 0}
+    supplier_message_kinds = {"supplier_rfq", "quote_clarification", "supplier_negotiation"}
     for incoming in state["inbox"]:
         if incoming.get("processed"):
             continue
@@ -221,23 +221,55 @@ def apply_inbox_to_deals(state: Dict[str, Any]) -> Dict[str, int]:
             incoming["processed"] = True; incoming["processing_note"] = "sin deal vinculado"; continue
         deal = next((d for d in state.get("deals", []) if d.get("id") == related.get("deal_id")), None)
         if not deal:
-            incoming["processed"] = True; continue
+            incoming["processed"] = True; incoming["processing_note"] = "mensaje vinculado sin deal materializado"; continue
         stats["linked"] += 1
+        incoming["related_message_id"] = related.get("id")
+        incoming["related_message_kind"] = related.get("kind")
         cls = incoming.get("classification", {})
         kind = cls.get("kind")
+        is_revops = deal.get("source") == "public_evidence"
+
         if kind == "commercial_offer" and cls.get("amount"):
+            supplier_name = related.get("counterparty") if related.get("kind") in supplier_message_kinds else deal.get("supplier")
             state["offers"].append({
-                "id": f"OFFER-{len(state['offers'])+1:04d}", "deal_id":deal["id"], "supplier":deal.get("supplier"),
-                "amount":cls["amount"], "currency":cls.get("currency") or "USD", "lead_days":None,
-                "payment_terms":"por validar", "source":"email real", "verified":False, "created_at":utcnow(),
+                "id": f"OFFER-{len(state['offers'])+1:04d}",
+                "deal_id": deal["id"],
+                "supplier": supplier_name,
+                "supplier_account_id": related.get("counterparty_account_id") if related.get("kind") in supplier_message_kinds else deal.get("supplier_account_id"),
+                "amount": cls["amount"],
+                "currency": cls.get("currency") or "USD",
+                "lead_days": None,
+                "payment_terms": "por validar",
+                "source": "email real",
+                "source_message_id": incoming.get("id"),
+                "source_outbound_id": related.get("id"),
+                "verified": False,
+                "created_at": utcnow(),
             })
-            deal["stage"] = "propuesta"; deal["next_action"] = "Normalizar oferta real y recalcular economía"
+            if is_revops:
+                deal["stage"] = "revops_quote_received"
+                deal["next_action"] = "Normalizar oferta real, completar términos faltantes y mantener ejecución RevOps"
+            else:
+                deal["stage"] = "propuesta"
+                deal["next_action"] = "Normalizar oferta real y recalcular economía"
             stats["offers_created"] += 1
         elif kind == "buyer_interest":
-            deal["stage"] = "calificado"; deal["close_prob"] = min(.9, float(deal.get("close_prob",.3))+.12); deal["next_action"] = "Profundizar requerimiento y enviar propuesta"
+            deal["close_prob"] = min(.9, float(deal.get("close_prob", .3)) + .12)
+            if is_revops:
+                deal["stage"] = "revops_active"
+                deal["next_action"] = "RevOps debe completar requerimiento/ofertas antes de preparar propuesta"
+            else:
+                deal["stage"] = "calificado"
+                deal["next_action"] = "Profundizar requerimiento y enviar propuesta"
         elif kind == "price_objection":
-            deal["stage"] = "renegociación"; deal["next_action"] = "Mejorar costo proveedor o reformular propuesta"; stats["objections"] += 1
+            if is_revops:
+                deal["stage"] = "revops_active"
+            else:
+                deal["stage"] = "renegociación"
+            deal["next_action"] = "Mejorar costo proveedor o reformular propuesta"
+            stats["objections"] += 1
         elif kind == "opt_out":
-            deal["next_action"] = "No volver a contactar esta dirección"; stats["opt_outs"] += 1
+            deal["next_action"] = "No volver a contactar esta dirección"
+            stats["opt_outs"] += 1
         incoming["processed"] = True; incoming["deal_id"] = deal["id"]
     return stats
