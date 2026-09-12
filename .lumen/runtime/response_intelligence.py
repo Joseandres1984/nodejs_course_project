@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import re
 from datetime import datetime, timezone
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 from autonomy_governor import record_decision
 
@@ -31,10 +30,7 @@ def _deal(state: Dict[str, Any], deal_id: Any) -> Dict[str, Any]:
 
 
 def _latest_real_offer(state: Dict[str, Any], deal_id: Any) -> Dict[str, Any]:
-    rows = [
-        x for x in state.get("offers", []) or []
-        if str(x.get("deal_id") or "") == str(deal_id or "") and x.get("source") != "demo/simulación"
-    ]
+    rows = [x for x in state.get("offers", []) or [] if str(x.get("deal_id") or "") == str(deal_id or "") and x.get("source") != "demo/simulación"]
     rows.sort(key=lambda x: str(x.get("created_at") or ""))
     return rows[-1] if rows else {}
 
@@ -49,6 +45,13 @@ def _source_message(state: Dict[str, Any], incoming: Dict[str, Any]) -> Dict[str
     rows = [x for x in state.get("outbox", []) or [] if str(x.get("contact") or "").strip().lower() == sender]
     rows.sort(key=lambda x: str(x.get("sent_at") or x.get("created_at") or ""))
     return rows[-1] if rows else {}
+
+
+def _source_lane_id(state: Dict[str, Any], source: Dict[str, Any]) -> str:
+    opportunity_id = str(source.get("opportunity_id") or "")
+    if not opportunity_id and source.get("deal_id"):
+        opportunity_id = str(_deal(state, source.get("deal_id")).get("opportunity_id") or "")
+    return f"opportunity:{opportunity_id}" if opportunity_id else ""
 
 
 def _intent(incoming: Dict[str, Any]) -> str:
@@ -125,36 +128,24 @@ def _field_evidence(offer: Dict[str, Any], deal: Dict[str, Any], intent: str) ->
     return None, None
 
 
-def _buyer_answer_body(evidence: str, intent: str) -> str:
-    suffix = (
-        "Lo compartimos únicamente sobre la base de la información comercial actualmente documentada y queda sujeto a confirmación final antes de cualquier compromiso."
-    )
-    return f"Gracias por la consulta. {evidence} {suffix}"
+def _buyer_answer_body(evidence: str) -> str:
+    return f"Gracias por la consulta. {evidence} Lo compartimos únicamente sobre la base de la información comercial actualmente documentada y queda sujeto a confirmación final antes de cualquier compromiso."
 
 
 def _about_lumen_body() -> str:
-    return (
-        "LUMEN B2B trabaja en investigación comercial, sourcing y coordinación de oportunidades entre empresas compradoras y proveedores. "
-        "Nuestro objetivo es ordenar requerimientos, comparar alternativas y facilitar la conversación comercial con información trazable. "
-        "Las gestiones iniciales son no vinculantes y cualquier condición final queda sujeta a validación antes de asumir compromisos."
-    )
+    return "LUMEN B2B trabaja en investigación comercial, sourcing y coordinación de oportunidades entre empresas compradoras y proveedores. Nuestro objetivo es ordenar requerimientos, comparar alternativas y facilitar la conversación comercial con información trazable. Las gestiones iniciales son no vinculantes y cualquier condición final queda sujeta a validación antes de asumir compromisos."
 
 
 def _internal_approval_body() -> str:
-    return (
-        "Perfecto. Si les resulta útil para la revisión interna, podemos ordenar en un resumen breve los puntos confirmados: alcance, alternativa propuesta, precio, plazo, garantía y condiciones comerciales, usando únicamente información documentada. "
-        "Quedamos a disposición para facilitar esa evaluación sin generar presión ni asumir una decisión de su parte."
-    )
+    return "Perfecto. Si les resulta útil para la revisión interna, podemos ordenar en un resumen breve los puntos confirmados: alcance, alternativa propuesta, precio, plazo, garantía y condiciones comerciales, usando únicamente información documentada. Quedamos a disposición para facilitar esa evaluación sin generar presión ni asumir una decisión de su parte."
 
 
 def _competitor_body() -> str:
-    return (
-        "Entendido. Si están comparando alternativas, podemos mantener la evaluación sobre variables objetivas y verificables —precio total, cumplimiento técnico, plazo, garantía y condiciones comerciales— sin descalificar ni hacer afirmaciones sobre otros proveedores que no podamos acreditar."
-    )
+    return "Entendido. Si están comparando alternativas, podemos mantener la evaluación sobre variables objetivas y verificables —precio total, cumplimiento técnico, plazo, garantía y condiciones comerciales— sin descalificar ni hacer afirmaciones sobre otros proveedores que no podamos acreditar."
 
 
 def _clarification_question(intent: str) -> str:
-    questions = {
+    return {
         "delivery": "¿Podrían confirmar el plazo de entrega actualmente válido y desde qué hito comienza a computarse?",
         "warranty": "¿Podrían confirmar la garantía aplicable, alcance y plazo?",
         "payment_terms": "¿Podrían confirmar las condiciones y forma de pago actualmente ofrecidas?",
@@ -165,8 +156,7 @@ def _clarification_question(intent: str) -> str:
         "documentation": "¿Podrían indicar qué ficha técnica, certificado, manual o documentación de respaldo pueden aportar?",
         "tax_invoice": "¿Podrían confirmar el tratamiento de facturación/impuestos aplicable a la oferta?",
         "general_question": "Recibimos una consulta del comprador que requiere precisión adicional. ¿Podrían ayudarnos a confirmar el punto pendiente sobre su propuesta?",
-    }
-    return questions.get(intent, "¿Podrían ayudarnos a confirmar este punto de la propuesta para responder con precisión al comprador?")
+    }.get(intent, "¿Podrían ayudarnos a confirmar este punto de la propuesta para responder con precisión al comprador?")
 
 
 def _supplier_for_deal(state: Dict[str, Any], deal: Dict[str, Any], offer: Dict[str, Any]) -> Dict[str, Any]:
@@ -186,6 +176,10 @@ def _supplier_for_deal(state: Dict[str, Any], deal: Dict[str, Any], offer: Dict[
 
 def _append_message(state: Dict[str, Any], *, key: str, kind: str, purpose: str, account: Dict[str, Any], source: Dict[str, Any], subject: str, body: str) -> bool:
     if any(str(x.get("execution_key") or "") == key for x in state.get("outbox", []) or []):
+        return False
+    lane_id = _source_lane_id(state, source)
+    active_ids = {str(x) for x in state.get("closer_active_lane_ids", []) or []}
+    if not lane_id or lane_id not in active_ids:
         return False
     contact = str(account.get("commercial_email") or "").strip().lower()
     if not contact or not account.get("verified_contact"):
@@ -210,6 +204,9 @@ def _append_message(state: Dict[str, Any], *, key: str, kind: str, purpose: str,
         "created_at": utcnow(),
         "nonbinding": True,
         "response_intelligence_generated": True,
+        "closer_lane_id": lane_id,
+        "closer_governed": True,
+        "closer_allowed": True,
     })
     return True
 
@@ -219,24 +216,23 @@ def _escalate(state: Dict[str, Any], incoming: Dict[str, Any], source: Dict[str,
     key = f"{incoming.get('id')}|{intent}"
     if any(str(x.get("key") or "") == key for x in rows):
         return
-    rows.append({
-        "key": key,
-        "inbox_id": incoming.get("id"),
-        "deal_id": source.get("deal_id"),
-        "opportunity_id": source.get("opportunity_id"),
-        "intent": intent,
-        "severity": severity,
-        "reason": reason,
-        "status": "open",
-        "created_at": utcnow(),
-    })
+    rows.append({"key": key, "inbox_id": incoming.get("id"), "deal_id": source.get("deal_id"), "opportunity_id": source.get("opportunity_id"), "intent": intent, "severity": severity, "reason": reason, "status": "open", "created_at": utcnow()})
     state["response_escalations"] = rows[-MAX_ESCALATIONS:]
 
 
+def _resolve_escalation(state: Dict[str, Any], incoming: Dict[str, Any], intent: str) -> None:
+    key = f"{incoming.get('id')}|{intent}"
+    for row in state.get("response_escalations", []) or []:
+        if str(row.get("key") or "") == key and row.get("status") == "open":
+            row["status"] = "resolved"
+            row["resolved_at"] = utcnow()
+
+
 def response_intelligence_tick(state: Dict[str, Any]) -> Dict[str, Any]:
-    stats = {"reviewed": 0, "answered": 0, "supplier_clarifications": 0, "escalated": 0, "ignored": 0}
+    stats = {"reviewed": 0, "answered": 0, "supplier_clarifications": 0, "escalated": 0, "ignored": 0, "deferred_by_closer": 0, "waiting_evidence": 0}
     remaining = MAX_AUTO_RESPONSES_PER_TICK
     accounts = _accounts(state)
+    active_ids = {str(x) for x in state.get("closer_active_lane_ids", []) or []}
 
     for incoming in state.get("inbox", []) or []:
         if incoming.get("response_intelligence_processed"):
@@ -247,124 +243,105 @@ def response_intelligence_tick(state: Dict[str, Any]) -> Dict[str, Any]:
             incoming["response_intelligence_note"] = "no_traceable_outbound_source"
             stats["ignored"] += 1
             continue
+        lane_id = _source_lane_id(state, source)
+        if not lane_id or lane_id not in active_ids:
+            incoming["response_intelligence_note"] = "deferred_by_closer_lane_gate"
+            stats["deferred_by_closer"] += 1
+            continue
+
         stats["reviewed"] += 1
         intent = _intent(incoming)
         incoming["response_intent"] = intent
-        incoming["response_intelligence_processed"] = True
         deal = _deal(state, source.get("deal_id"))
         offer = _latest_real_offer(state, source.get("deal_id"))
         sender_account = accounts.get(str(source.get("counterparty_account_id") or ""), {})
         sender_role = str(sender_account.get("type") or "")
 
         if intent == "opt_out":
+            incoming["response_intelligence_processed"] = True
             incoming["response_intelligence_note"] = "opt_out_respected"
             continue
         if intent in {"legal", "incident"}:
             if deal:
-                deal["legal_review_required"] = True if intent == "legal" else bool(deal.get("legal_review_required"))
-                deal["incident_hold"] = True if intent == "incident" else bool(deal.get("incident_hold"))
+                if intent == "legal": deal["legal_review_required"] = True
+                if intent == "incident": deal["incident_hold"] = True
             _escalate(state, incoming, source, intent, "La consulta puede crear exposición legal, contractual, de devolución/reclamo o responsabilidad; no se responde de forma autónoma.", "high")
+            incoming["response_intelligence_processed"] = True
             stats["escalated"] += 1
             continue
         if intent == "price":
+            incoming["response_intelligence_processed"] = True
             incoming["response_intelligence_note"] = "delegated_to_revops_price_negotiation"
             continue
         if sender_role != "buyer":
+            incoming["response_intelligence_processed"] = True
             incoming["response_intelligence_note"] = "supplier_or_nonbuyer_reply_left_to_quote_revops"
             continue
-
         if remaining <= 0:
-            _escalate(state, incoming, source, intent, "Presupuesto de respuestas autónomas agotado en este ciclo; queda para el siguiente ciclo.", "low")
-            stats["escalated"] += 1
+            incoming["response_intelligence_note"] = "deferred_response_budget"
             continue
 
+        static_body = None
+        static_subject = None
+        static_purpose = None
         if intent == "about_lumen":
-            if _append_message(state, key=f"response|{incoming.get('id')}|about", kind="buyer_information_response", purpose="answer_about_lumen", account=sender_account, source=source, subject="Sobre LUMEN B2B", body=_about_lumen_body()):
-                remaining -= 1; stats["answered"] += 1
-            continue
-        if intent == "internal_approval":
-            if _append_message(state, key=f"response|{incoming.get('id')}|approval", kind="buyer_information_response", purpose="support_internal_approval", account=sender_account, source=source, subject="Información para revisión interna", body=_internal_approval_body()):
-                remaining -= 1; stats["answered"] += 1
-            continue
-        if intent == "competitor":
-            if _append_message(state, key=f"response|{incoming.get('id')}|competitor", kind="buyer_information_response", purpose="objective_competitor_comparison", account=sender_account, source=source, subject="Comparación de alternativas", body=_competitor_body()):
-                remaining -= 1; stats["answered"] += 1
-            continue
-        if intent == "interest":
+            static_body, static_subject, static_purpose = _about_lumen_body(), "Sobre LUMEN B2B", "answer_about_lumen"
+        elif intent == "internal_approval":
+            static_body, static_subject, static_purpose = _internal_approval_body(), "Información para revisión interna", "support_internal_approval"
+        elif intent == "competitor":
+            static_body, static_subject, static_purpose = _competitor_body(), "Comparación de alternativas", "objective_competitor_comparison"
+        elif intent == "interest":
+            incoming["response_intelligence_processed"] = True
             incoming["response_intelligence_note"] = "interest_advances_case_without_redundant_acknowledgement"
+            continue
+        if static_body:
+            if _append_message(state, key=f"response|{incoming.get('id')}|{intent}", kind="buyer_information_response", purpose=str(static_purpose), account=sender_account, source=source, subject=str(static_subject), body=str(static_body)):
+                remaining -= 1; stats["answered"] += 1; incoming["response_intelligence_processed"] = True; _resolve_escalation(state, incoming, intent)
             continue
 
         evidence, label = _field_evidence(offer, deal, intent)
         if evidence:
-            # Commercial Execution already owns the standard delivery response. Avoid duplicate if one exists.
-            duplicate_delivery = intent == "delivery" and any(
-                x.get("purpose") == "answer_verified_delivery_question" and str(x.get("revops_case_id") or "") == str(source.get("revops_case_id") or "")
-                for x in state.get("outbox", []) or []
-            )
-            if not duplicate_delivery and _append_message(
-                state,
-                key=f"response|{incoming.get('id')}|{intent}",
-                kind="buyer_information_response",
-                purpose=f"answer_verified_{intent}",
-                account=sender_account,
-                source=source,
-                subject=f"Respuesta sobre {label or 'la consulta'}",
-                body=_buyer_answer_body(evidence, intent),
-            ):
-                remaining -= 1; stats["answered"] += 1
+            duplicate_delivery = intent == "delivery" and any(x.get("purpose") == "answer_verified_delivery_question" and str(x.get("revops_case_id") or "") == str(source.get("revops_case_id") or "") for x in state.get("outbox", []) or [])
+            if duplicate_delivery:
+                incoming["response_intelligence_processed"] = True
+                _resolve_escalation(state, incoming, intent)
+                continue
+            if _append_message(state, key=f"response|{incoming.get('id')}|{intent}", kind="buyer_information_response", purpose=f"answer_verified_{intent}", account=sender_account, source=source, subject=f"Respuesta sobre {label or 'la consulta'}", body=_buyer_answer_body(evidence)):
+                remaining -= 1; stats["answered"] += 1; incoming["response_intelligence_processed"] = True; _resolve_escalation(state, incoming, intent)
             continue
 
         supplier = _supplier_for_deal(state, deal, offer)
-        if supplier and supplier.get("verified_contact") and intent in {"delivery", "warranty", "payment_terms", "validity", "freight_tax", "availability", "technical", "documentation", "tax_invoice", "general_question"}:
-            body = (
-                "Para responder con precisión una consulta del comprador necesitamos validar un punto de su propuesta.\n\n"
-                + _clarification_question(intent)
-                + "\n\nPreferimos confirmar el dato con ustedes antes que asumir una condición no documentada. La consulta es no vinculante."
-            )
-            if _append_message(
-                state,
-                key=f"evidence_clarification|{incoming.get('id')}|{intent}",
-                kind="terms_clarification",
-                purpose=f"buyer_question_evidence_clarification:{intent}",
-                account=supplier,
-                source=source,
-                subject="Confirmación de información para el comprador",
-                body=body,
-            ):
+        supported = {"delivery", "warranty", "payment_terms", "validity", "freight_tax", "availability", "technical", "documentation", "tax_invoice", "general_question"}
+        if supplier and supplier.get("verified_contact") and intent in supported:
+            key = f"evidence_clarification|{incoming.get('id')}|{intent}"
+            existing = any(str(x.get("execution_key") or "") == key for x in state.get("outbox", []) or [])
+            body = "Para responder con precisión una consulta del comprador necesitamos validar un punto de su propuesta.\n\n" + _clarification_question(intent) + "\n\nPreferimos confirmar el dato con ustedes antes que asumir una condición no documentada. La consulta es no vinculante."
+            created = _append_message(state, key=key, kind="terms_clarification", purpose=f"buyer_question_evidence_clarification:{intent}", account=supplier, source=source, subject="Confirmación de información para el comprador", body=body)
+            if created:
                 remaining -= 1; stats["supplier_clarifications"] += 1
                 _escalate(state, incoming, source, intent, "Respuesta al comprador en espera de evidencia del proveedor.", "low")
-            else:
-                _escalate(state, incoming, source, intent, "No existe canal de proveedor verificado para confirmar el dato solicitado.", "medium")
-                stats["escalated"] += 1
+            if created or existing:
+                incoming["response_waiting_supplier"] = True
+                incoming["response_intelligence_note"] = "waiting_for_supplier_evidence"
+                stats["waiting_evidence"] += 1
+                continue
+            incoming["response_intelligence_processed"] = True
+            _escalate(state, incoming, source, intent, "No existe canal de proveedor verificado para confirmar el dato solicitado.", "medium")
+            stats["escalated"] += 1
             continue
 
+        incoming["response_intelligence_processed"] = True
         _escalate(state, incoming, source, intent, "No existe evidencia suficiente para responder automáticamente sin riesgo de inventar datos.", "medium")
         stats["escalated"] += 1
 
     open_escalations = [x for x in state.get("response_escalations", []) or [] if x.get("status") == "open"]
     report = {
-        "updated_at": utcnow(),
-        "mode": "evidence_first_response_intelligence",
-        "stats": stats,
+        "updated_at": utcnow(), "mode": "evidence_first_response_intelligence", "stats": stats,
         "open_escalations": len(open_escalations),
-        "principle": "Responder automáticamente cuando existe evidencia trazable; pedir confirmación al proveedor cuando falta un dato; escalar legal/reclamos/ambigüedad en vez de improvisar.",
-        "supported_intents": [
-            "delivery", "warranty", "payment_terms", "validity", "freight_tax", "availability",
-            "technical", "documentation", "tax_invoice", "about_lumen", "internal_approval", "competitor",
-            "interest", "price", "legal", "incident", "general_question",
-        ],
+        "principle": "Responder automáticamente cuando existe evidencia trazable; pedir confirmación al proveedor cuando falta un dato; escalar legal/reclamos/ambigüedad en vez de improvisar; toda respuesta respeta el carril activo del Closer.",
+        "supported_intents": ["delivery", "warranty", "payment_terms", "validity", "freight_tax", "availability", "technical", "documentation", "tax_invoice", "about_lumen", "internal_approval", "competitor", "interest", "price", "legal", "incident", "general_question"],
     }
     state["response_intelligence"] = report
     if stats["answered"] or stats["supplier_clarifications"] or stats["escalated"]:
-        record_decision(
-            state,
-            engine="Response Intelligence",
-            object_type="system",
-            object_id="conversation_response",
-            decision="evidence_first_conversation_routing",
-            reason=f"Respondidas {stats['answered']}; aclaraciones a proveedor {stats['supplier_clarifications']}; escaladas {stats['escalated']}.",
-            action="respond_or_escalate_without_hallucination",
-            confidence=0.96,
-            evidence_refs=[],
-        )
+        record_decision(state, engine="Response Intelligence", object_type="system", object_id="conversation_response", decision="evidence_first_conversation_routing", reason=f"Respondidas {stats['answered']}; aclaraciones a proveedor {stats['supplier_clarifications']}; escaladas {stats['escalated']}.", action="respond_or_escalate_without_hallucination", confidence=0.96, evidence_refs=[])
     return report
