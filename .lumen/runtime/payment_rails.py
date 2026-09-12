@@ -31,10 +31,34 @@ def _rail_env(prefix: str, code: str, label: str, currency: str, scope: str, pri
     }
 
 
+def _mercadopago_rail() -> Dict[str, Any]:
+    rail = _rail_env(
+        "MERCADOPAGO", "mercadopago_ars", "Mercado Pago ARS", "ARS", "domestic", 100,
+        "Principal local para cobros en Argentina mediante Checkout Pro/API o instrucciones manuales verificadas.",
+    )
+    api_ready = bool(str(os.getenv("LUMEN_MP_ACCESS_TOKEN", "") or "").strip())
+    if api_ready:
+        # This sentinel is internal only. It lets legacy settlement logic understand that the destination
+        # is operationally verified while preventing static bank/payment instructions from being sent.
+        rail.update({
+            "verified": True,
+            "auto_prepare": False,
+            "destination_label": rail.get("destination_label") or "Mercado Pago Checkout Pro",
+            "gateway_mode": "checkout_pro_api",
+            "dynamic_checkout": True,
+            "instructions_present": False,
+            "_instructions": "CHECKOUT_PRO_DYNAMIC_LINK",
+        })
+    else:
+        rail["gateway_mode"] = "manual_instructions"
+        rail["dynamic_checkout"] = False
+    return rail
+
+
 def runtime_rails() -> Dict[str, Dict[str, Any]]:
     # Raw instructions live only in process environment and are stripped before persistence/API.
     return {
-        "mercadopago_ars": _rail_env("MERCADOPAGO", "mercadopago_ars", "Mercado Pago ARS", "ARS", "domestic", 100, "Principal local para cobros en Argentina."),
+        "mercadopago_ars": _mercadopago_rail(),
         "prex_ars": _rail_env("PREX_ARS", "prex_ars", "Prex ARS", "ARS", "domestic", 90, "Respaldo local por CVU/alias."),
         "arg_bank_usd": _rail_env("ARG_BANK_USD", "arg_bank_usd", "Cuenta bancaria argentina USD", "USD", "domestic", 85, "Opcional si más adelante se configura una cuenta bancaria USD apta para el cobro."),
         "payoneer_usd": _rail_env("PAYONEER", "payoneer_usd", "Payoneer USD", "USD", "international", 100, "Principal internacional USD; luego puede retirarse a Prex de forma separada."),
@@ -61,7 +85,10 @@ def _country_for_deal(state: Dict[str, Any], deal: Dict[str, Any]) -> str:
 
 
 def _currency_hint(deal: Dict[str, Any]) -> str:
-    for value in (deal.get("currency"), (deal.get("economics") or {}).get("currency"), (deal.get("trade") or {}).get("currency")):
+    for value in (
+        deal.get("commission_currency"), deal.get("fee_currency"), deal.get("currency"),
+        (deal.get("economics") or {}).get("currency"), (deal.get("trade") or {}).get("currency"),
+    ):
         text = str(value or "").strip().upper()
         if text in {"USD", "EUR", "ARS"}:
             return text
@@ -75,8 +102,12 @@ def _is_argentina(country: str) -> bool:
 
 def choose_payment_route(state: Dict[str, Any], deal: Dict[str, Any]) -> Dict[str, Any]:
     rails = runtime_rails(); country = _country_for_deal(state, deal); currency = _currency_hint(deal); domestic = _is_argentina(country)
-    if domestic:
-        preferred_codes = ["mercadopago_ars", "prex_ars", "arg_bank_usd"]
+    if domestic and currency == "USD":
+        preferred_codes = ["arg_bank_usd"]
+    elif domestic and currency == "EUR":
+        preferred_codes = []
+    elif domestic:
+        preferred_codes = ["mercadopago_ars", "prex_ars"]
     elif currency == "EUR":
         preferred_codes = ["prex_eur_iban", "payoneer_usd", "wise_usd"]
     else:
@@ -89,19 +120,21 @@ def choose_payment_route(state: Dict[str, Any], deal: Dict[str, Any]) -> Dict[st
     if not country:
         status, reason = "COUNTRY_REQUIRED", "Falta país/mercado verificable del comprador para seleccionar un riel de cobro sin adivinar."
     elif selected is None:
-        status, reason = "NO_RAIL_AVAILABLE", "No existe un riel de cobro habilitado para este mercado."
+        status, reason = "NO_RAIL_AVAILABLE", f"No existe un riel de cobro habilitado para {currency or 'la moneda documentada'} en este mercado."
+    elif currency and selected.get("currency") != currency:
+        status, reason = "CURRENCY_MISMATCH", f"El riel {selected.get('label')} no coincide con la moneda documentada {currency}; LUMEN no convierte moneda por su cuenta."
     elif not selected.get("verified"):
-        status, reason = "RAIL_SETUP_REQUIRED", f"{selected.get('label')} es la ruta preferida, pero sus instrucciones todavía no están verificadas."
+        status, reason = "RAIL_SETUP_REQUIRED", f"{selected.get('label')} es la ruta preferida, pero todavía no está verificada."
     else:
         status, reason = "READY", f"Ruta seleccionada por mercado y moneda: {selected.get('label')}."
 
-    fallback = next((public_rail(x) for x in candidates if selected and x.get("code") != selected.get("code") and x.get("verified")), None)
+    fallback = next((public_rail(x) for x in candidates if selected and x.get("code") != selected.get("code") and x.get("verified") and (not currency or x.get("currency") == currency)), None)
     return {
         "deal_id": deal.get("id"), "buyer_country": country or None, "currency_hint": currency or None,
         "domestic": domestic if country else None, "status": status, "reason": reason,
         "selected_rail": public_rail(selected) if selected else None, "fallback_rail": fallback,
         "currency_preference": (selected or {}).get("currency"), "updated_at": utcnow(),
-        "rule": "Nunca inventar datos de cobro; solo usar instrucciones de runtime previamente verificadas.",
+        "rule": "Nunca inventar datos de cobro ni conversiones; usar solo rieles de runtime verificados y compatibles con la moneda documentada.",
     }
 
 
@@ -118,7 +151,6 @@ def payment_rails_tick(state: Dict[str, Any]) -> Dict[str, Any]:
         if deal.get("id"):
             route_index[str(deal.get("id"))] = route
             deal["payment_route"] = route
-            # Pre-Close consumes this boolean; it becomes true only when the chosen runtime rail is verified.
             deal["payment_route_ready"] = route.get("status") == "READY"
             deal["payment_instructions_verified"] = route.get("status") == "READY"
             deal["payment_rail_code"] = ((route.get("selected_rail") or {}).get("code"))
@@ -131,11 +163,22 @@ def payment_rails_tick(state: Dict[str, Any]) -> Dict[str, Any]:
         "ready_routes": sum(1 for x in routes if x.get("status") == "READY"),
         "setup_required": sum(1 for x in routes if x.get("status") != "READY"),
         "governance": {
-            "secret_rule": "Las instrucciones bancarias/PSP no se persisten en Git, estado, logs ni API.",
-            "selection_rule": "Argentina: Mercado Pago, luego Prex ARS. Exterior USD: Payoneer. EUR/SEPA: Prex vIBAN si está habilitado.",
+            "secret_rule": "Las credenciales e instrucciones bancarias/PSP no se persisten en Git, estado, logs ni API.",
+            "selection_rule": "Argentina ARS: Mercado Pago, luego Prex ARS. Argentina USD: solo rail USD verificado. Exterior USD: Payoneer. EUR/SEPA: Prex vIBAN si está habilitado.",
+            "currency_rule": "LUMEN no convierte automáticamente una comisión USD/EUR a ARS para cobrar por Mercado Pago.",
             "prex_rule": "Prex Argentina no se trata como receptor genérico de transferencias bancarias internacionales USD; el vIBAN EUR es un rail separado.",
-            "authority_rule": "El sistema puede seleccionar/preparar el riel; no puede cambiar destinos, mover fondos ni autorizar pagos por sí solo.",
+            "authority_rule": "El sistema puede seleccionar/preparar el riel y un link de cobro sobre términos ya documentados; no puede cambiar destinos, mover fondos ni autorizar pagos por sí solo.",
         },
     }
     state["payment_rails"] = report; state["payment_route_index"] = route_index
+
+    # Checkout Pro is a dynamic collection rail. It creates at most one new preference/request per cycle,
+    # only for real ARS receivables already supported by invoice/settlement evidence.
+    try:
+        from mercadopago_checkout import mercadopago_checkout_tick
+        checkout = mercadopago_checkout_tick(state)
+    except Exception as exc:
+        checkout = {"updated_at": utcnow(), "status": "ERROR", "errors": 1, "error_type": type(exc).__name__}
+        state["mercadopago_checkout"] = checkout
+    report["mercadopago_checkout"] = checkout
     return report
