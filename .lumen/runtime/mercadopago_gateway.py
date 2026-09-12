@@ -58,6 +58,70 @@ def verify_access_token() -> Dict[str, Any]:
         }
 
 
+def create_checkout_probe(amount_ars: float = 100.0) -> Dict[str, Any]:
+    """Create one isolated Checkout Pro preference for operator validation only.
+
+    This function never sends the link, never records revenue, and never mutates a deal.
+    The preference can only become a payment if a human deliberately opens and pays it.
+    """
+    if not ACCESS_TOKEN:
+        raise RuntimeError("mercadopago_access_token_not_configured")
+    try:
+        amount = round(float(amount_ars), 2)
+    except (TypeError, ValueError):
+        raise ValueError("invalid_probe_amount")
+    if amount < 10 or amount > 1000:
+        raise ValueError("probe_amount_out_of_bounds")
+
+    reference = f"LUMEN-PROBE-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+    payload = {
+        "items": [
+            {
+                "id": "LUMEN-CHECKOUT-PROBE",
+                "title": "LUMEN - prueba tecnica de Checkout Pro - NO PAGAR",
+                "currency_id": "ARS",
+                "quantity": 1,
+                "unit_price": amount,
+            }
+        ],
+        "external_reference": reference,
+        "metadata": {
+            "lumen_probe": True,
+            "non_revenue": True,
+            "purpose": "checkout_connectivity_validation",
+        },
+    }
+    req = urllib.request.Request(
+        f"{API_BASE}/checkout/preferences",
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {ACCESS_TOKEN}",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=25) as response:
+        created = json.loads(response.read().decode("utf-8", errors="replace"))
+
+    preference_id = str(created.get("id") or "").strip()
+    init_point = str(created.get("init_point") or "").strip()
+    if not preference_id or not init_point.startswith("https://"):
+        raise RuntimeError("mercadopago_probe_preference_invalid_response")
+    return {
+        "provider": "mercadopago",
+        "probe": True,
+        "non_revenue": True,
+        "payment_requested": False,
+        "amount_ars": amount,
+        "currency": "ARS",
+        "external_reference": reference,
+        "preference_id": preference_id,
+        "init_point": init_point,
+        "created_at": utcnow(),
+    }
+
+
 def _signature_parts(value: str) -> Dict[str, str]:
     out: Dict[str, str] = {}
     for part in str(value or "").split(","):
