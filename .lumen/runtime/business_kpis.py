@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Dict
 
+from autonomous_goal_planner import autonomous_goal_planner_tick
 from autonomous_management_runtime import executive_management_cycle
 from business_controller import business_controller_tick
 from capital_margin_intelligence import capital_margin_tick
@@ -12,6 +13,7 @@ from deal_room import deal_room_tick
 from growth_treasury import growth_treasury_tick
 from negotiation_intelligence import negotiation_intelligence_tick
 from order_to_cash import order_to_cash_tick
+from portfolio_optimizer import portfolio_optimizer_tick
 from venture_attribution import propagate_venture_attribution
 from venture_builder import venture_builder_tick
 
@@ -103,6 +105,14 @@ def kpi_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     growth_treasury = growth_treasury_tick(state)
     venture_attribution = propagate_venture_attribution(state)
     venture_builder = venture_builder_tick(state)
+
+    # Superior economic layer: define the active profit goal, then make every mature cash/deal/venture
+    # compete for scarce attention on a single opportunity-cost ranking. The resulting overlay is for
+    # the NEXT operating cycle and cannot widen constitutional caps or financial authority.
+    goal_planner = autonomous_goal_planner_tick(state)
+    portfolio_optimizer = portfolio_optimizer_tick(state, goal_planner)
+
+    # Deal Room is last so each dossier captures the final goal and portfolio decision.
     deal_room = deal_room_tick(state)
 
     report = {
@@ -112,7 +122,9 @@ def kpi_tick(state: Dict[str, Any]) -> Dict[str, Any]:
         "closing_orchestrator": closing_orchestrator,
         "order_to_cash": order_to_cash, "payment_rails": payment_rails,
         "commission_settlement": commission_settlement, "growth_treasury": growth_treasury,
-        "venture_attribution": venture_attribution, "venture_builder": venture_builder, "deal_room": deal_room,
+        "venture_attribution": venture_attribution, "venture_builder": venture_builder,
+        "autonomous_goal_planner": goal_planner, "portfolio_optimizer": portfolio_optimizer,
+        "deal_room": deal_room,
     }
     state["business_kpis"] = report
     return report
