@@ -6,7 +6,9 @@ from typing import Any, Dict
 from autonomous_management_runtime import executive_management_cycle
 from business_controller import business_controller_tick
 from capital_margin_intelligence import capital_margin_tick
+from commission_settlement import commission_settlement_tick
 from deal_room import deal_room_tick
+from growth_treasury import growth_treasury_tick
 from negotiation_intelligence import negotiation_intelligence_tick
 from order_to_cash import order_to_cash_tick
 from venture_attribution import propagate_venture_attribution
@@ -107,14 +109,21 @@ def kpi_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     # nonbinding proactive supplier negotiation for the next controlled outbound cycle.
     negotiation_intelligence = negotiation_intelligence_tick(state)
 
-    # Order-to-Cash closes the economic loop after a REAL transaction: delivery, acceptance, invoicing,
-    # payment follow-up and customer success. Simulation transactions are explicitly excluded.
+    # Order-to-Cash handles delivery, acceptance, invoicing and ordinary payment follow-up on REAL transactions.
     order_to_cash = order_to_cash_tick(state)
+
+    # Commission Settlement is deliberately separate from customer payment status: a sale does not become
+    # LUMEN cash until the commission receipt amount/status is explicitly evidenced.
+    commission_settlement = commission_settlement_tick(state)
+
+    # Growth Treasury can only plan reinvestment from commissions already recognized as received.
+    # It never executes a subscription, purchase or transfer without human financial approval.
+    growth_treasury = growth_treasury_tick(state)
 
     venture_attribution = propagate_venture_attribution(state)
     venture_builder = venture_builder_tick(state)
 
-    # Deal Room is last so dossiers capture management, capital, negotiation and post-sale context.
+    # Deal Room is last so dossiers capture management, capital, negotiation, post-sale and treasury context.
     deal_room = deal_room_tick(state)
 
     report = {
@@ -128,6 +137,8 @@ def kpi_tick(state: Dict[str, Any]) -> Dict[str, Any]:
         "business_controller": business_controller,
         "negotiation_intelligence": negotiation_intelligence,
         "order_to_cash": order_to_cash,
+        "commission_settlement": commission_settlement,
+        "growth_treasury": growth_treasury,
         "venture_attribution": venture_attribution,
         "venture_builder": venture_builder,
         "deal_room": deal_room,
