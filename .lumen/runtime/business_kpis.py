@@ -6,12 +6,12 @@ from typing import Any, Dict
 from autonomous_management_runtime import executive_management_cycle
 from business_controller import business_controller_tick
 from capital_margin_intelligence import capital_margin_tick
+from closing_orchestrator import closing_orchestrator_tick
 from commission_settlement import commission_settlement_tick
 from deal_room import deal_room_tick
 from growth_treasury import growth_treasury_tick
 from negotiation_intelligence import negotiation_intelligence_tick
 from order_to_cash import order_to_cash_tick
-from payment_rails import payment_rails_tick
 from venture_attribution import propagate_venture_attribution
 from venture_builder import venture_builder_tick
 
@@ -90,11 +90,13 @@ def kpi_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     capital_margin = capital_margin_tick(state)
     business_controller = business_controller_tick(state)
     negotiation_intelligence = negotiation_intelligence_tick(state)
-    order_to_cash = order_to_cash_tick(state)
 
-    # Select the safest configured collection rail before commission settlement.
-    # Argentina: local bank/MP preference. International: Payoneer USD first, Wise fallback.
-    payment_rails = payment_rails_tick(state)
+    # Closing Orchestrator refreshes payment routing, protects LUMEN's revenue entitlement and
+    # separates "ready for human approval" from "already approved" before any real commitment.
+    closing_orchestrator = closing_orchestrator_tick(state)
+    payment_rails = state.get("payment_rails", {}) or {}
+
+    order_to_cash = order_to_cash_tick(state)
     commission_settlement = commission_settlement_tick(state)
 
     # Growth planning uses only commission cash actually received.
@@ -107,6 +109,7 @@ def kpi_tick(state: Dict[str, Any]) -> Dict[str, Any]:
         "updated_at": utcnow(), "funnel": funnel, "conversion": conversion, "health": health, "bottlenecks": bottlenecks,
         "executive_management": executive_management, "capital_margin_intelligence": capital_margin,
         "business_controller": business_controller, "negotiation_intelligence": negotiation_intelligence,
+        "closing_orchestrator": closing_orchestrator,
         "order_to_cash": order_to_cash, "payment_rails": payment_rails,
         "commission_settlement": commission_settlement, "growth_treasury": growth_treasury,
         "venture_attribution": venture_attribution, "venture_builder": venture_builder, "deal_room": deal_room,
