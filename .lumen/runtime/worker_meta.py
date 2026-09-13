@@ -156,9 +156,40 @@ def meta_lumen_cycle() -> Dict[str, Any]:
     return report
 
 
-# One meta-control pass per cron execution. The following normal worker then executes under the resulting
-# priorities and guardrails; the next cron cycle evaluates the outcome and adapts again.
+def agent_workforce_cycle() -> Dict[str, Any]:
+    """Give Meta-LUMEN a 50-person parallel workforce before the normal production worker runs.
+
+    The fleet performs evidence gathering and nonbinding analysis only. Search calls remain under the
+    same shared daily budget and protected retail reserve. Results become research leads/signals and
+    must still pass the existing verification, opportunity, risk and closing gates.
+    """
+    try:
+        from agent_fleet import run_agent_fleet_cycle
+
+        if not load_state():
+            report = {"status": "skipped", "reason": "state_unavailable", "fleet_size": 0}
+            print({"agent_workforce": report}, flush=True)
+            return report
+        report = dict(run_agent_fleet_cycle(STATE) or {})
+        report["persisted"] = bool(save_state())
+        print({"agent_workforce": report}, flush=True)
+        return report
+    except Exception as exc:
+        report = {
+            "status": "degraded_fail_open",
+            "reason": f"{type(exc).__name__}: {str(exc)[:260]}",
+            "fleet_size": 0,
+        }
+        print({"agent_workforce": report}, flush=True)
+        return report
+
+
+# One meta-control pass per cron execution. Meta-LUMEN decides the business focus first.
 meta_lumen_cycle()
+
+# Then the digital organization executes up to 50 parallel assignments under the same evidence,
+# budget and authority boundaries. Its findings are available to the normal worker immediately.
+agent_workforce_cycle()
 
 # Existing production worker remains the execution engine. Importing this wrapper runs it unchanged after
 # installing the Market-demand metadata bridge and all previously deployed demand/retail/distribution hooks.
