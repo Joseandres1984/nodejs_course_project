@@ -13,6 +13,10 @@ import mail_resilience  # noqa: F401,E402
 # (Resend/Brevo) and a circuit-breaker so a blocked SMTP network never stalls the business cycle.
 import https_mail_transport  # noqa: F401,E402
 
+# Install verified social-distribution connectors before Meta-LUMEN imports the distribution
+# operator. External social jobs remain pending until an authorized account/token is configured.
+import social_distribution  # noqa: F401,E402
+
 # Run the complete Meta-LUMEN + production worker first.
 import worker_meta  # noqa: F401,E402
 
