@@ -7,6 +7,7 @@ import runpy
 import autonomous_distribution
 import closer_orchestrator
 import demand_hunter
+import retail_velocity_radar
 import scout_connector
 import war_room
 from portfolio_resilience import adjust_lane, resilience_tick
@@ -75,9 +76,13 @@ def _owned_market_first_channels(category, metrics, learning):
 
 
 def _scout_with_demand_hunter(state):
+    # Give the retail radar a bounded share of the existing search budget first; it leaves at least one
+    # query reserved for the core B2B scout and never exceeds its own small daily cap.
+    retail_report = retail_velocity_radar.retail_velocity_tick(state)
     scout_report = _original_scout_tick(state)
     demand_report = demand_hunter.demand_hunter_tick(state)
     scout_report["demand_hunter"] = demand_report
+    scout_report["retail_velocity"] = retail_report
     return scout_report
 
 
@@ -86,6 +91,7 @@ def _war_room_with_resilience(state):
     report = _original_war_room_tick(state)
     distribution_report = autonomous_distribution.distribution_tick(state)
     report["demand_hunter"] = state.get("demand_hunter", {})
+    report["retail_velocity"] = state.get("retail_velocity_radar", {})
     report["portfolio_resilience"] = resilience_report
     report["autonomous_distribution"] = distribution_report
     state["war_room"] = report
