@@ -5,6 +5,10 @@ from __future__ import annotations
 # while preserving the existing public-search, budget and commission-only guardrails.
 import retail_market_expansion  # noqa: F401,E402
 
+# Harden SMTP/IMAP transport and bounded retry of governed email canaries before the production
+# worker imports Mail Connector functions. This keeps all existing communication/quality gates.
+import mail_resilience  # noqa: F401,E402
+
 # Run the complete Meta-LUMEN + production worker first.
 import worker_meta  # noqa: F401,E402
 
