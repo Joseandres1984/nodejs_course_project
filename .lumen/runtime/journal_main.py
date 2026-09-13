@@ -22,6 +22,7 @@ from creative_distribution_panel import inject_growth_ops_strip, render_creative
 from distribution_receipt_routes import router as distribution_receipt_router
 from distribution_operator import distribution_operator_tick
 from distribution_operator_panel import inject_distribution_strip, render_distribution_operator_page
+from social_distribution_panel import inject_social_strip, render_social_distribution_page
 from system_watchdog import run_system_watchdog
 from system_watchdog_panel import inject_watchdog_strip, render_watchdog_page
 
@@ -176,6 +177,12 @@ def distribution_operator_page(_=Depends(auth)):
     return HTMLResponse(render_distribution_operator_page(STATE))
 
 
+@app.get('/social-distribution', response_class=HTMLResponse, include_in_schema=False)
+def social_distribution_page(_=Depends(auth)):
+    load_state()
+    return HTMLResponse(render_social_distribution_page(STATE))
+
+
 @app.get('/system-test', response_class=HTMLResponse, include_in_schema=False)
 def system_test_page(_=Depends(auth)):
     load_state()
@@ -217,11 +224,11 @@ async def lumen_ui_runtime(request: Request, call_next):
     owner_paths = {
         '/command-center', '/cycle-journal', '/api/cycle-journal', '/market-owner', '/market-owner/publications',
         '/workforce', '/casework', '/partners', '/acquisition', '/creative-factory', '/distribution-proof',
-        '/distribution-operator', '/system-test'
+        '/distribution-operator', '/social-distribution', '/system-test'
     }
     if request.url.path in owner_paths:
         load_state()
-        if request.url.path not in {'/market-owner', '/market-owner/publications', '/workforce', '/casework', '/partners', '/acquisition', '/creative-factory', '/distribution-proof', '/distribution-operator', '/system-test'}:
+        if request.url.path not in {'/market-owner', '/market-owner/publications', '/workforce', '/casework', '/partners', '/acquisition', '/creative-factory', '/distribution-proof', '/distribution-operator', '/social-distribution', '/system-test'}:
             bootstrap_current_cycle(STATE)
 
     response = await call_next(request)
@@ -242,6 +249,7 @@ async def lumen_ui_runtime(request: Request, call_next):
         text = _owner_command_center_links(text)
         text = inject_watchdog_strip(text, STATE)
         text = inject_distribution_strip(text, STATE)
+        text = inject_social_strip(text, STATE)
         text = inject_cycle_journal(text, STATE)
         text = inject_casework_strip(text, STATE)
         text = inject_workforce_strip(text, STATE)
