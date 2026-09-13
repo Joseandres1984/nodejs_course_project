@@ -21,6 +21,10 @@ import social_distribution  # noqa: F401,E402
 # New outreach is still forced through Communication Director, Quality Gate, COO and mail gates.
 import outbound_engine  # noqa: F401,E402
 
+# A resend.dev sender proves the API integration but is sandbox-only. This fail-closed gate keeps
+# prospect outreach prepared until a custom Resend domain has been verified and configured.
+import outbound_domain_gate  # noqa: F401,E402
+
 # Run the complete Meta-LUMEN + production worker first.
 import worker_meta  # noqa: F401,E402
 
