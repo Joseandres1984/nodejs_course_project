@@ -20,6 +20,7 @@ from acquisition_routes import router as acquisition_router
 from acquisition_panel import inject_acquisition_strip, inject_public_acquisition_cta, render_acquisition_page
 from creative_distribution_panel import inject_growth_ops_strip, render_creative_factory_page, render_distribution_proof_page
 from distribution_receipt_routes import router as distribution_receipt_router
+from distribution_operator_panel import inject_distribution_strip, render_distribution_operator_page
 from system_watchdog import run_system_watchdog
 from system_watchdog_panel import inject_watchdog_strip, render_watchdog_page
 
@@ -143,6 +144,12 @@ def distribution_proof_page(_=Depends(auth)):
     return HTMLResponse(render_distribution_proof_page(STATE))
 
 
+@app.get('/distribution-operator', response_class=HTMLResponse, include_in_schema=False)
+def distribution_operator_page(_=Depends(auth)):
+    load_state()
+    return HTMLResponse(render_distribution_operator_page(STATE))
+
+
 @app.get('/system-test', response_class=HTMLResponse, include_in_schema=False)
 def system_test_page(_=Depends(auth)):
     load_state()
@@ -183,11 +190,12 @@ def _owner_command_center_links(text: str) -> str:
 async def lumen_ui_runtime(request: Request, call_next):
     owner_paths = {
         '/command-center', '/cycle-journal', '/api/cycle-journal', '/market-owner', '/market-owner/publications',
-        '/workforce', '/casework', '/partners', '/acquisition', '/creative-factory', '/distribution-proof', '/system-test'
+        '/workforce', '/casework', '/partners', '/acquisition', '/creative-factory', '/distribution-proof',
+        '/distribution-operator', '/system-test'
     }
     if request.url.path in owner_paths:
         load_state()
-        if request.url.path not in {'/market-owner', '/market-owner/publications', '/workforce', '/casework', '/partners', '/acquisition', '/creative-factory', '/distribution-proof', '/system-test'}:
+        if request.url.path not in {'/market-owner', '/market-owner/publications', '/workforce', '/casework', '/partners', '/acquisition', '/creative-factory', '/distribution-proof', '/distribution-operator', '/system-test'}:
             bootstrap_current_cycle(STATE)
 
     response = await call_next(request)
@@ -207,6 +215,7 @@ async def lumen_ui_runtime(request: Request, call_next):
     if path == '/command-center':
         text = _owner_command_center_links(text)
         text = inject_watchdog_strip(text, STATE)
+        text = inject_distribution_strip(text, STATE)
         text = inject_cycle_journal(text, STATE)
         text = inject_casework_strip(text, STATE)
         text = inject_workforce_strip(text, STATE)
