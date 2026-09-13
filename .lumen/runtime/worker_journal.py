@@ -9,6 +9,10 @@ import retail_market_expansion  # noqa: F401,E402
 # worker imports Mail Connector functions. This keeps all existing communication/quality gates.
 import mail_resilience  # noqa: F401,E402
 
+# Railway can block SMTP egress on non-Pro plans. Install an HTTPS transactional-mail fallback
+# (Resend/Brevo) and a circuit-breaker so a blocked SMTP network never stalls the business cycle.
+import https_mail_transport  # noqa: F401,E402
+
 # Run the complete Meta-LUMEN + production worker first.
 import worker_meta  # noqa: F401,E402
 
