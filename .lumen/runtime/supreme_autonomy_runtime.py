@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import os
 from typing import Any, Dict
 
+import app
 import buyer_identity_resolver
 import demand_hunter
 import demand_hunter_runtime
@@ -10,7 +12,7 @@ import scout_connector
 import search_budget_governor
 
 
-VERSION = "1.0-supreme-demand-autonomy"
+VERSION = "1.1-supreme-demand-autonomy"
 
 # Demand discovery + confirmation share one protected lane. The generic/retail pool was reduced by
 # exactly the same amount in search_budget_governor, preserving the original total daily envelope.
@@ -22,6 +24,112 @@ demand_hunter_runtime.DAILY_CAP = search_budget_governor.DEMAND_RESERVED
 
 _BASE_SCOUT_TICK = demand_hunter_runtime._ORIGINAL_SCOUT_TICK
 _ORIGINAL_GENERIC_PLAN = scout_connector._generic_search_plan
+_BASE_LOAD_STATE = app.load_state
+_BASE_SEED_DEMO = app.seed_demo
+
+
+def _env_true(name: str, default: str = "false") -> bool:
+    return str(os.getenv(name, default)).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _purge_demo_commerce(state: Dict[str, Any]) -> Dict[str, int]:
+    """Remove only explicitly demo-tagged commerce and objects linked to demo deals.
+
+    Publicly discovered candidate_accounts are intentionally untouched. The cleanup is idempotent so
+    every production boot can enforce the same truth boundary without risking real commercial data.
+    """
+    demo_opportunity_ids = {
+        str(x.get("id")) for x in state.get("opportunities", []) or []
+        if x.get("id") and str(x.get("source") or "").lower() == "demo"
+    }
+    demo_deal_ids = {
+        str(x.get("id")) for x in state.get("deals", []) or []
+        if x.get("id") and (
+            str(x.get("source") or "").lower() == "demo"
+            or str(x.get("opportunity_id") or "") in demo_opportunity_ids
+        )
+    }
+
+    removed: Dict[str, int] = {}
+
+    def filter_rows(key: str, predicate) -> None:
+        rows = list(state.get(key, []) or [])
+        kept = [row for row in rows if not predicate(row)]
+        removed[key] = len(rows) - len(kept)
+        state[key] = kept
+
+    filter_rows("buyers", lambda x: str(x.get("source") or "").lower() == "demo")
+    filter_rows("suppliers", lambda x: str(x.get("source") or "").lower() == "demo")
+    filter_rows("opportunities", lambda x: str(x.get("source") or "").lower() == "demo")
+    filter_rows(
+        "deals",
+        lambda x: str(x.get("source") or "").lower() == "demo"
+        or str(x.get("id") or "") in demo_deal_ids,
+    )
+    filter_rows(
+        "offers",
+        lambda x: str(x.get("source") or "").lower() in {"demo", "demo/simulación"}
+        or str(x.get("deal_id") or "") in demo_deal_ids,
+    )
+    for key in (
+        "proposals",
+        "negotiations",
+        "approvals",
+        "transactions",
+        "revenue_ledger",
+        "outbox",
+        "conversations",
+        "closing_packs",
+    ):
+        filter_rows(key, lambda x, ids=demo_deal_ids: str(x.get("deal_id") or "") in ids)
+
+    queue = list(state.get("operating_action_queue", []) or [])
+    kept_queue = [
+        row for row in queue
+        if str(row.get("object_id") or "") not in demo_deal_ids
+        and str((row.get("payload") or {}).get("deal_id") or "") not in demo_deal_ids
+    ]
+    removed["operating_action_queue"] = len(queue) - len(kept_queue)
+    state["operating_action_queue"] = kept_queue
+
+    for index_key in ("closing_pack_index", "payment_route_index", "data_truth_index"):
+        index = dict(state.get(index_key, {}) or {})
+        for deal_id in demo_deal_ids:
+            index.pop(deal_id, None)
+        state[index_key] = index
+
+    total = sum(removed.values())
+    state["production_truth_boundary"] = {
+        "demo_seed_enabled": False,
+        "demo_records_removed_this_boot": total,
+        "removed_by_collection": removed,
+        "policy": "production_uses_only_real_or_publicly_discovered_commercial_entities",
+    }
+    return removed
+
+
+def production_load_state() -> bool:
+    loaded = bool(_BASE_LOAD_STATE())
+    if loaded and not _env_true("LUMEN_DEMO_SEED_ENABLED", "false"):
+        _purge_demo_commerce(app.STATE)
+    return loaded
+
+
+def production_seed_demo() -> None:
+    if _env_true("LUMEN_DEMO_SEED_ENABLED", "false"):
+        return _BASE_SEED_DEMO()
+    app.STATE["production_truth_boundary"] = {
+        **dict(app.STATE.get("production_truth_boundary", {}) or {}),
+        "demo_seed_enabled": False,
+        "policy": "production_uses_only_real_or_publicly_discovered_commercial_entities",
+    }
+    return None
+
+
+# worker.py imports these symbols from app only after worker_entry imports this runtime, so production
+# gets a clean real-data boundary without changing the legacy app implementation or its demo capability.
+app.load_state = production_load_state
+app.seed_demo = production_seed_demo
 
 
 def _verified_suppliers(state: Dict[str, Any]) -> list[Dict[str, Any]]:
@@ -91,6 +199,7 @@ def supreme_scout_tick(state: Dict[str, Any]) -> Dict[str, Any]:
         "budget": budget_report,
         "autonomy_policy": "reallocate_existing_search_budget_to_current_bottleneck_without_outreach_bypass",
         "performance_policy": "demand_first_then_identity_then_generic_buyer_discovery",
+        "truth_policy": "demo_commerce_is_quarantined_from_production",
         "updated_at": scout_connector.utcnow(),
     }
     state["supreme_autonomy_runtime"] = runtime
