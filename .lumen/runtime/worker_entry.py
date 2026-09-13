@@ -15,4 +15,9 @@ import supreme_autonomy_runtime  # noqa: F401
 # Operational health must reflect current business risk, not stale diagnostic canary failures.
 import operational_health_runtime  # noqa: F401
 
+# Install HTTPS email routing before worker.py imports `send_pending` from mail_connector.
+# This makes the final worker outbound step use the production-ready Brevo/Resend route instead of
+# falling back to hosting-blocked SMTP while preserving the existing Go-Live/quality/contact gates.
+import https_mail_transport  # noqa: F401
+
 runpy.run_module("worker_journal", run_name="__main__")
