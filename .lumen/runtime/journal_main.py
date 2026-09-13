@@ -1,11 +1,20 @@
 from __future__ import annotations
 
+import html
+import urllib.parse
+
 from fastapi import Depends, Query, Request
 from fastapi.responses import HTMLResponse, Response
 
 from alert_main import app
 from app import STATE, auth, load_state
 from cycle_journal import bootstrap_current_cycle, fetch_cycles, inject_cycle_journal, render_cycle_journal_page
+from market_concierge import router as market_concierge_router
+
+
+# The conversational concierge is the primary buyer intake. The structured form remains
+# available only as a quiet fallback for buyers who explicitly prefer manual entry.
+app.include_router(market_concierge_router)
 
 
 LIVE_JOURNAL_UI = r'''
@@ -71,23 +80,57 @@ def api_cycle_journal(
     return fetch_cycles(page=page, per_page=per_page)
 
 
+def _primary_market_html(text: str) -> str:
+    text = text.replace('/market/inquiry?listing_id=', '/market/concierge?listing_id=')
+    text = text.replace('Solicitar alternativa', 'Hablar con LUMEN')
+    text = text.replace(
+        'Cada consulta entra directamente al circuito autónomo de compradores y proveedores.',
+        'El comprador habla con LUMEN en lenguaje normal; LUMEN entiende el requerimiento, pregunta solo lo imprescindible y toma el control del proceso comercial.',
+    )
+    return text
+
+
+def _concierge_fallback_html(text: str, listing_id: str) -> str:
+    if not listing_id or 'Prefiero completar los datos manualmente' in text:
+        return text
+    href = '/market/inquiry?listing_id=' + urllib.parse.quote(listing_id)
+    fallback = (
+        "<p style='margin:14px 0 0;text-align:center;font-size:11px;color:#6f8998'>"
+        "<a style='color:#7894a3;text-decoration:underline;text-underline-offset:3px' href='"
+        + html.escape(href, quote=True)
+        + "'>Prefiero completar los datos manualmente</a></p>"
+    )
+    return text.replace('</main>', fallback + '</main>', 1)
+
+
 @app.middleware('http')
-async def cycle_journal_command_center_ui(request: Request, call_next):
+async def lumen_ui_runtime(request: Request, call_next):
     if request.url.path in {'/command-center', '/cycle-journal', '/api/cycle-journal'}:
         load_state()
         bootstrap_current_cycle(STATE)
 
     response = await call_next(request)
-    if request.url.path != '/command-center' or 'text/html' not in str(response.headers.get('content-type') or ''):
+    content_type = str(response.headers.get('content-type') or '')
+    if 'text/html' not in content_type:
+        return response
+
+    path = request.url.path
+    if path not in {'/command-center', '/market', '/market/concierge'}:
         return response
 
     body = b''
     async for chunk in response.body_iterator:
         body += chunk
     text = body.decode('utf-8', errors='replace')
-    text = inject_cycle_journal(text, STATE)
-    if 'lumen-cycle-live-v1' not in text:
-        text = text.replace('</body>', LIVE_JOURNAL_UI + '</body>', 1)
+
+    if path == '/command-center':
+        text = inject_cycle_journal(text, STATE)
+        if 'lumen-cycle-live-v1' not in text:
+            text = text.replace('</body>', LIVE_JOURNAL_UI + '</body>', 1)
+    elif path == '/market':
+        text = _primary_market_html(text)
+    elif path == '/market/concierge' and request.method == 'GET':
+        text = _concierge_fallback_html(text, str(request.query_params.get('listing_id') or ''))
 
     headers = dict(response.headers)
     headers.pop('content-length', None)
