@@ -29,15 +29,37 @@ import outbound_domain_gate  # noqa: F401,E402
 import worker_meta  # noqa: F401,E402
 
 from app import STATE, load_state, save_state
+from autonomy_operating_system import autonomy_tick
 from cycle_journal import record_cycle
 from executive_secretary import secretary_tick
 
 
-# Build the executive-secretary brief only after the whole business cycle completed. It consumes
-# existing evidence, alerts and queues; it does not spend additional search quota or widen authority.
+# After the business cycle, collapse demand/opportunity/deal evidence into one canonical state machine.
+# Each case gets exactly one stage, one next action and one owner. Non-binding work stays autonomous;
+# binding close/payment/contract authority remains human-gated.
 load_state()
+autonomy = autonomy_tick(STATE)
+
+# Build the executive-secretary brief from the now-unified queue so the daily brief reflects the same
+# priorities the autonomous operating system will carry into the next cycle.
 secretary = secretary_tick(STATE)
-secretary["persisted"] = bool(save_state())
+persisted = bool(save_state())
+secretary["persisted"] = persisted
+autonomy["persisted"] = persisted
+
+print({
+    "autonomy_operating_system": {
+        "status": autonomy.get("status"),
+        "cases_total": autonomy.get("cases_total"),
+        "stage_counts": autonomy.get("stage_counts"),
+        "human_decisions": autonomy.get("human_decisions_count"),
+        "events_created": autonomy.get("events_created"),
+        "actions_injected": autonomy.get("actions_injected"),
+        "category_order": autonomy.get("procurement_category_order"),
+        "persisted": autonomy.get("persisted"),
+    }
+}, flush=True)
+
 print({
     "executive_secretary": {
         "status": secretary.get("status"),
@@ -50,7 +72,7 @@ print({
     }
 }, flush=True)
 
-# Persist one compact, queryable audit row only after the business cycle and secretarial brief completed.
+# Persist one compact, queryable audit row only after the business cycle, autonomy OS and secretarial brief completed.
 # The journal uses its own Postgres table so the global LUMEN state does not grow without bound.
 journal = record_cycle(STATE, source="worker_complete")
 print({"cycle_journal": {k: v for k, v in journal.items() if k != "entry"}}, flush=True)
