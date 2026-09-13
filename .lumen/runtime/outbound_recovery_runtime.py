@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import json
+import os
+import urllib.error
+import urllib.request
 from datetime import timedelta
 from typing import Any, Dict
 
 import outbound_engine
 from https_mail_transport import transport_status
 
-VERSION = "1.1-outbound-recovery"
+VERSION = "1.2-outbound-recovery"
 MAX_RECOVERY_PER_CYCLE = 2
 MAX_RECOVERY_RETRIES = 2
 _ORIGINAL_TICK = outbound_engine.outbound_engine_tick
@@ -27,12 +31,7 @@ def _suppressed(state: Dict[str, Any], email: str) -> bool:
 
 
 def _successful_recent_contact(state: Dict[str, Any], email: str) -> bool:
-    """Only a verified successful send opens the recontact cooldown.
-
-    queued/ready/blocked/send_failed attempts never reached the counterparty and must not freeze a
-    valid prospect for RECONTACT_DAYS. This preserves anti-spam cooldown after real delivery while
-    allowing bounded transport recovery after a failed attempt.
-    """
+    """Only a verified successful send opens the recontact cooldown."""
     target = str(email or "").strip().lower()
     cutoff = outbound_engine.utcnow_dt() - timedelta(days=outbound_engine.RECONTACT_DAYS)
     for item in reversed(state.get("outbox", []) or []):
@@ -52,9 +51,45 @@ def _successful_recent_contact(state: Dict[str, Any], email: str) -> bool:
 outbound_engine._recently_contacted = _successful_recent_contact
 
 
-def _recover_failed_outbound(state: Dict[str, Any]) -> int:
+def _provider_api_probe() -> Dict[str, Any]:
+    """Read-only provider probe so failed IP auth does not consume delivery retries."""
     transport = transport_status()
+    provider = str(transport.get("provider") or "")
     if not transport.get("ready"):
+        return {"ok": False, "provider": provider or None, "reason": transport.get("reason") or "transport_not_configured"}
+    if provider != "brevo":
+        # Resend/custom providers do not currently require a separate IP-allowlist probe here.
+        return {"ok": True, "provider": provider or None, "reason": None}
+
+    api_key = os.getenv("LUMEN_BREVO_API_KEY", "").strip()
+    if not api_key:
+        return {"ok": False, "provider": "brevo", "reason": "brevo_api_key_missing"}
+    req = urllib.request.Request(
+        "https://api.brevo.com/v3/account",
+        headers={"api-key": api_key, "accept": "application/json"},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            raw = resp.read(4000).decode("utf-8", errors="replace")
+            if 200 <= int(resp.status) < 300:
+                return {"ok": True, "provider": "brevo", "http_status": int(resp.status), "reason": None}
+            return {"ok": False, "provider": "brevo", "http_status": int(resp.status), "reason": raw[:500]}
+    except urllib.error.HTTPError as exc:
+        raw = exc.read(4000).decode("utf-8", errors="replace") if exc.fp else ""
+        reason = raw[:500] or f"http_{exc.code}"
+        try:
+            parsed = json.loads(raw) if raw else {}
+            reason = str(parsed.get("message") or parsed.get("code") or reason)[:500]
+        except Exception:
+            pass
+        return {"ok": False, "provider": "brevo", "http_status": int(exc.code), "reason": reason}
+    except Exception as exc:
+        return {"ok": False, "provider": "brevo", "reason": f"{type(exc).__name__}: {str(exc)[:400]}"}
+
+
+def _recover_failed_outbound(state: Dict[str, Any], probe: Dict[str, Any]) -> int:
+    if not probe.get("ok"):
         return 0
 
     recovered = 0
@@ -76,17 +111,22 @@ def _recover_failed_outbound(state: Dict[str, Any]) -> int:
         item["https_recovery_count"] = int(item.get("https_recovery_count") or 0) + 1
         item["last_transport_error"] = item.pop("last_error", None)
         item["status"] = "ready"
-        item["recovery_reason"] = "previous_delivery_failed_before_verified_contact; retry_same_message_over_ready_https_provider"
+        item["recovery_reason"] = "previous_delivery_failed_before_verified_contact; retry_same_message_after_provider_probe_ok"
         recovered += 1
     return recovered
 
 
 def recovery_outbound_tick(state: Dict[str, Any]) -> Dict[str, Any]:
-    recovered = _recover_failed_outbound(state)
+    probe = _provider_api_probe()
+    recovered = _recover_failed_outbound(state, probe)
     report = dict(_ORIGINAL_TICK(state) or {})
     report["recovery_runtime_version"] = VERSION
     report["failed_messages_requeued"] = recovered
     report["transport_ready_for_recovery"] = bool(transport_status().get("ready"))
+    report["provider_api_probe_ok"] = bool(probe.get("ok"))
+    report["provider_api_probe_provider"] = probe.get("provider")
+    report["provider_api_probe_http_status"] = probe.get("http_status")
+    report["provider_api_probe_reason"] = probe.get("reason")
     report["recent_contact_policy"] = "sent_or_delivered_only"
     state["outbound_engine"] = report
     return report
