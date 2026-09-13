@@ -25,6 +25,11 @@ import outbound_engine  # noqa: F401,E402
 # prospect outreach prepared until a custom Resend domain has been verified and configured.
 import outbound_domain_gate  # noqa: F401,E402
 
+# Recover a previously failed message only when the HTTPS provider is ready and the exact message
+# had already passed Communication Director + Quality Gate. This fixes transport deadlocks without
+# widening targeting, opt-out, risk, contract, payment or publication authority.
+import outbound_recovery_runtime  # noqa: F401,E402
+
 # Run the complete Meta-LUMEN + production worker first.
 import worker_meta  # noqa: F401,E402
 
@@ -32,6 +37,7 @@ from app import STATE, load_state, save_state
 from autonomy_operating_system import autonomy_tick
 from cycle_journal import record_cycle
 from executive_secretary import secretary_tick
+from external_market_readiness import external_market_readiness_tick
 from first_cash_mode import first_cash_tick
 
 
@@ -45,6 +51,10 @@ autonomy = autonomy_tick(STATE)
 # to cash. This does not widen contract/payment/order authority and does not fabricate economic values.
 first_cash = first_cash_tick(STATE, autonomy)
 
+# Audit whether LUMEN is merely online or can actually reach the external market. The audit exposes
+# exact blockers (transport/live/eligibility) and creates a high-severity internal event on change.
+external_readiness = external_market_readiness_tick(STATE)
+
 # Build the executive-secretary brief from the now-unified and cash-prioritized queue so the daily brief
 # reflects the same priorities the autonomous operating system will carry into the next cycle.
 secretary = secretary_tick(STATE)
@@ -52,6 +62,7 @@ persisted = bool(save_state())
 secretary["persisted"] = persisted
 autonomy["persisted"] = persisted
 first_cash["persisted"] = persisted
+external_readiness["persisted"] = persisted
 
 print({
     "autonomy_operating_system": {
@@ -87,6 +98,23 @@ print({
 }, flush=True)
 
 print({
+    "external_market_readiness": {
+        "status": external_readiness.get("status"),
+        "primary_blocker": external_readiness.get("primary_blocker"),
+        "mail_transport_ready": external_readiness.get("mail_transport_ready"),
+        "mail_provider": external_readiness.get("mail_provider"),
+        "outbound_live": external_readiness.get("outbound_live"),
+        "eligible_external_prospects": external_readiness.get("eligible_external_prospects"),
+        "ineligibility_reasons": external_readiness.get("ineligibility_reasons"),
+        "outbox_ready": external_readiness.get("outbox_ready"),
+        "outbox_sent_or_delivered": external_readiness.get("outbox_sent_or_delivered"),
+        "outbox_failed": external_readiness.get("outbox_failed"),
+        "social_jobs_awaiting_authorized_connector": external_readiness.get("social_jobs_awaiting_authorized_connector"),
+        "persisted": external_readiness.get("persisted"),
+    }
+}, flush=True)
+
+print({
     "executive_secretary": {
         "status": secretary.get("status"),
         "news": len(secretary.get("news", []) or []),
@@ -98,7 +126,8 @@ print({
     }
 }, flush=True)
 
-# Persist one compact, queryable audit row only after the business cycle, autonomy OS, first-cash mode
-# and secretarial brief completed. The journal uses its own Postgres table so global state stays bounded.
+# Persist one compact, queryable audit row only after the business cycle, autonomy OS, first-cash mode,
+# external-readiness audit and secretarial brief completed. The journal uses its own Postgres table so
+# global state stays bounded.
 journal = record_cycle(STATE, source="worker_complete")
 print({"cycle_journal": {k: v for k, v in journal.items() if k != "entry"}}, flush=True)
