@@ -18,11 +18,14 @@ from partner_referral import router as partner_referral_router
 from owner_publications import inject_publication_navigation, render_publications_page
 from acquisition_routes import router as acquisition_router
 from acquisition_panel import inject_acquisition_strip, inject_public_acquisition_cta, render_acquisition_page
+from creative_distribution_panel import inject_growth_ops_strip, render_creative_factory_page, render_distribution_proof_page
+from distribution_receipt_routes import router as distribution_receipt_router
 
 
 app.include_router(market_concierge_router)
 app.include_router(partner_referral_router)
 app.include_router(acquisition_router)
+app.include_router(distribution_receipt_router)
 
 
 LIVE_JOURNAL_UI = r'''
@@ -111,6 +114,18 @@ def acquisition_page(_=Depends(auth)):
     return HTMLResponse(render_acquisition_page(STATE))
 
 
+@app.get('/creative-factory', response_class=HTMLResponse, include_in_schema=False)
+def creative_factory_page(_=Depends(auth)):
+    load_state()
+    return HTMLResponse(render_creative_factory_page(STATE))
+
+
+@app.get('/distribution-proof', response_class=HTMLResponse, include_in_schema=False)
+def distribution_proof_page(_=Depends(auth)):
+    load_state()
+    return HTMLResponse(render_distribution_proof_page(STATE))
+
+
 def _primary_market_html(text: str) -> str:
     text = text.replace('/market/inquiry?listing_id=', '/market/concierge?listing_id=')
     text = text.replace('Solicitar alternativa', 'Hablar con LUMEN')
@@ -143,10 +158,13 @@ def _owner_command_center_links(text: str) -> str:
 
 @app.middleware('http')
 async def lumen_ui_runtime(request: Request, call_next):
-    owner_paths = {'/command-center', '/cycle-journal', '/api/cycle-journal', '/market-owner', '/market-owner/publications', '/workforce', '/casework', '/partners', '/acquisition'}
+    owner_paths = {
+        '/command-center', '/cycle-journal', '/api/cycle-journal', '/market-owner', '/market-owner/publications',
+        '/workforce', '/casework', '/partners', '/acquisition', '/creative-factory', '/distribution-proof'
+    }
     if request.url.path in owner_paths:
         load_state()
-        if request.url.path not in {'/market-owner', '/market-owner/publications', '/workforce', '/casework', '/partners', '/acquisition'}:
+        if request.url.path not in {'/market-owner', '/market-owner/publications', '/workforce', '/casework', '/partners', '/acquisition', '/creative-factory', '/distribution-proof'}:
             bootstrap_current_cycle(STATE)
 
     response = await call_next(request)
@@ -170,6 +188,7 @@ async def lumen_ui_runtime(request: Request, call_next):
         text = inject_workforce_strip(text, STATE)
         text = inject_partner_strip(text, STATE)
         text = inject_acquisition_strip(text, STATE)
+        text = inject_growth_ops_strip(text, STATE)
         text = inject_owner_market_strip(text, STATE)
         text = inject_publication_navigation(text)
         if 'lumen-cycle-live-v1' not in text:
