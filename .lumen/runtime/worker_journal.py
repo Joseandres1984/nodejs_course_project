@@ -28,12 +28,29 @@ import outbound_domain_gate  # noqa: F401,E402
 # Run the complete Meta-LUMEN + production worker first.
 import worker_meta  # noqa: F401,E402
 
-from app import STATE, load_state
+from app import STATE, load_state, save_state
 from cycle_journal import record_cycle
+from executive_secretary import secretary_tick
 
 
-# Persist one compact, queryable audit row only after the business cycle completed.
-# The journal uses its own Postgres table so the global LUMEN state does not grow without bound.
+# Build the executive-secretary brief only after the whole business cycle completed. It consumes
+# existing evidence, alerts and queues; it does not spend additional search quota or widen authority.
 load_state()
+secretary = secretary_tick(STATE)
+secretary["persisted"] = bool(save_state())
+print({
+    "executive_secretary": {
+        "status": secretary.get("status"),
+        "news": len(secretary.get("news", []) or []),
+        "new_news": sum(1 for x in secretary.get("news", []) or [] if x.get("new_since_last_brief")),
+        "pending": len(secretary.get("pending", []) or []),
+        "decisions": len(secretary.get("decisions", []) or []),
+        "admin_attention": len(secretary.get("admin_attention", []) or []),
+        "persisted": secretary.get("persisted"),
+    }
+}, flush=True)
+
+# Persist one compact, queryable audit row only after the business cycle and secretarial brief completed.
+# The journal uses its own Postgres table so the global LUMEN state does not grow without bound.
 journal = record_cycle(STATE, source="worker_complete")
 print({"cycle_journal": {k: v for k, v in journal.items() if k != "entry"}}, flush=True)
