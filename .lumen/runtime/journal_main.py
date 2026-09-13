@@ -20,6 +20,7 @@ from acquisition_routes import router as acquisition_router
 from acquisition_panel import inject_acquisition_strip, inject_public_acquisition_cta, render_acquisition_page
 from creative_distribution_panel import inject_growth_ops_strip, render_creative_factory_page, render_distribution_proof_page
 from distribution_receipt_routes import router as distribution_receipt_router
+from distribution_operator import distribution_operator_tick
 from distribution_operator_panel import inject_distribution_strip, render_distribution_operator_page
 from system_watchdog import run_system_watchdog
 from system_watchdog_panel import inject_watchdog_strip, render_watchdog_page
@@ -29,6 +30,30 @@ app.include_router(market_concierge_router)
 app.include_router(partner_referral_router)
 app.include_router(acquisition_router)
 app.include_router(distribution_receipt_router)
+
+
+def _startup_distribution_seed() -> None:
+    try:
+        if not load_state():
+            print({"startup_distribution_operator": {"status": "skipped", "reason": "state_unavailable"}}, flush=True)
+            return
+        current = dict(STATE.get("distribution_operator", {}) or {})
+        if current.get("version") == "1.0-canary":
+            print({"startup_distribution_operator": {"status": "already_materialized", "jobs_total": current.get("jobs_total")}}, flush=True)
+            return
+        report = dict(distribution_operator_tick(STATE) or {})
+        report["persisted"] = bool(save_state())
+        print({"startup_distribution_operator": {
+            "status": report.get("status"),
+            "jobs_total": report.get("jobs_total"),
+            "owned_live": report.get("owned_live"),
+            "external_verified": report.get("external_verified"),
+            "awaiting_connector": report.get("awaiting_connector"),
+            "email_canary": report.get("email_canary"),
+            "persisted": report.get("persisted"),
+        }}, flush=True)
+    except Exception as exc:
+        print({"startup_distribution_operator": {"status": "degraded_fail_open", "reason": f"{type(exc).__name__}: {str(exc)[:260]}"}}, flush=True)
 
 
 def _startup_watchdog() -> None:
@@ -43,6 +68,7 @@ def _startup_watchdog() -> None:
         print({"startup_watchdog": {"status": "degraded_fail_open", "reason": f"{type(exc).__name__}: {str(exc)[:260]}"}}, flush=True)
 
 
+_startup_distribution_seed()
 _startup_watchdog()
 
 
