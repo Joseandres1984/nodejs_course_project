@@ -129,6 +129,7 @@ def meta_lumen_cycle() -> Dict[str, Any]:
                 "evidence-based improvement programs",
                 "commercial preparation and nonbinding execution within existing gates",
                 "elastic digital workforce sizing and role allocation",
+                "persistent professional case ownership and multistage research",
             ],
             "human_required_only_for": [
                 "binding contracts or acceptance of binding terms",
@@ -144,6 +145,34 @@ def meta_lumen_cycle() -> Dict[str, Any]:
     report["persisted"] = bool(persisted)
     print({"meta_autonomy": report}, flush=True)
     return report
+
+
+def professional_casework_cycle() -> Dict[str, Any]:
+    """Work persistent commercial cases before breadth-oriented scouting.
+
+    This is the professional deep-work layer: agents keep ownership of a company/case across cycles,
+    progress through evidence stages, and do not abandon a case merely because one search was inconclusive.
+    It receives first access to the existing general search quota without increasing the total daily cap.
+    """
+    try:
+        from professional_casework import professional_casework_tick
+
+        if not load_state():
+            report = {"status": "skipped", "reason": "state_unavailable", "cases_worked": 0}
+            print({"professional_casework": report}, flush=True)
+            return report
+        report = dict(professional_casework_tick(STATE) or {})
+        report["persisted"] = bool(save_state())
+        print({"professional_casework": report}, flush=True)
+        return report
+    except Exception as exc:
+        report = {
+            "status": "degraded_fail_open",
+            "reason": f"{type(exc).__name__}: {str(exc)[:260]}",
+            "cases_worked": 0,
+        }
+        print({"professional_casework": report}, flush=True)
+        return report
 
 
 def agent_workforce_cycle() -> Dict[str, Any]:
@@ -174,11 +203,15 @@ def agent_workforce_cycle() -> Dict[str, Any]:
         return report
 
 
-# One meta-control pass per cron execution. Meta-LUMEN decides the business focus first.
+# Meta-LUMEN decides the business focus first.
 meta_lumen_cycle()
 
-# Then Meta-LUMEN sizes and composes the digital organization for the current workload.
-# The selected team executes under shared budget/evidence/authority controls and feeds the normal worker.
+# Deep Work gets priority over generic breadth: persistent owned cases are advanced first using the
+# existing shared budget. If the search budget is exhausted, cases remain open with an explicit next step.
+professional_casework_cycle()
+
+# Then Meta-LUMEN sizes and composes the broader digital organization for the current workload.
+# It can use remaining quota for discovery and analysis, but persistent cases are no longer displaced.
 agent_workforce_cycle()
 
 # Existing production worker remains the execution engine. Importing this wrapper runs it unchanged after
