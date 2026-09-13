@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from datetime import datetime, timezone
 from typing import Any, Dict, List
+
+
+PUBLIC_BASE_URL = (os.getenv("LUMEN_PUBLIC_BASE_URL") or "https://lumen-web-production-5755.up.railway.app").strip().rstrip("/")
 
 
 def utcnow() -> str:
@@ -123,18 +127,19 @@ def _performance(state: Dict[str, Any], campaign: Dict[str, Any], variant: Dict[
 
 
 def _channel_payloads(campaign: Dict[str, Any], variant: Dict[str, Any]) -> List[Dict[str, Any]]:
-    link = variant["tracking_path"]
+    tracking_path = str(variant["tracking_path"])
+    link = PUBLIC_BASE_URL + tracking_path
     headline = variant["headline"]
     body = variant["body"]
     cta = variant["cta"]
-    audience = campaign["audience"]
+    common = {"tracking_path": tracking_path, "tracking_url": link, "public_base_url": PUBLIC_BASE_URL}
     return [
-        {"channel": "linkedin_company", "copy": f"{headline}\n\n{body}\n\n{cta}: {link}", "requires_authorized_connector": True},
-        {"channel": "instagram", "copy": f"{headline}\n{body}\n\n{cta} → {link}\n#B2B #Compras #Proveedores", "requires_authorized_connector": True},
-        {"channel": "facebook", "copy": f"{headline}\n\n{body}\n\n{cta}: {link}", "requires_authorized_connector": True},
-        {"channel": "email_b2b", "subject": headline[:120], "copy": f"{body}\n\n{cta}: {link}", "requires_authorized_connector": False, "policy": "verified_business_contacts_only_opt_out_respected"},
-        {"channel": "owned_market", "copy": headline, "requires_authorized_connector": False, "policy": "owned_channel"},
-        {"channel": "paid_ads", "copy": f"{headline} {body}", "requires_authorized_connector": True, "requires_human_budget_approval": True},
+        {**common, "channel": "linkedin_company", "copy": f"{headline}\n\n{body}\n\n{cta}: {link}", "requires_authorized_connector": True},
+        {**common, "channel": "instagram", "copy": f"{headline}\n{body}\n\n{cta} → {link}\n#B2B #Compras #Proveedores", "requires_authorized_connector": True},
+        {**common, "channel": "facebook", "copy": f"{headline}\n\n{body}\n\n{cta}: {link}", "requires_authorized_connector": True},
+        {**common, "channel": "email_b2b", "subject": headline[:120], "copy": f"{body}\n\n{cta}: {link}", "requires_authorized_connector": False, "policy": "verified_business_contacts_only_opt_out_respected"},
+        {**common, "channel": "owned_market", "copy": headline, "requires_authorized_connector": False, "policy": "owned_channel"},
+        {**common, "channel": "paid_ads", "copy": f"{headline} {body}", "requires_authorized_connector": True, "requires_human_budget_approval": True},
     ]
 
 
@@ -167,6 +172,10 @@ def acquisition_campaign_tick(state: Dict[str, Any]) -> Dict[str, Any]:
             for payload in _channel_payloads(campaign, champion):
                 key = f"{campaign['id']}|{champion['id']}|{payload['channel']}"
                 if key in queued_keys:
+                    existing = next((x for x in queue if str(x.get("key") or "") == key), None)
+                    if existing:
+                        existing["payload"] = payload
+                        existing["updated_at"] = utcnow()
                     continue
                 queue.append({
                     "key": key,
@@ -177,11 +186,12 @@ def acquisition_campaign_tick(state: Dict[str, Any]) -> Dict[str, Any]:
                     "payload": payload,
                     "status": "ready_for_authorized_connector" if payload.get("requires_authorized_connector") else "ready_owned_or_existing_channel",
                     "created_at": utcnow(),
+                    "updated_at": utcnow(),
                 })
                 queued_keys.add(key)
     state["acquisition_distribution_queue"] = queue[-300:]
     report = {
-        "version": "1.0-autonomous-growth-acquisition",
+        "version": "1.1-external-tracking-ready",
         "updated_at": utcnow(),
         "campaigns_active": len([x for x in state.get("acquisition_campaigns", []) or [] if x.get("status") == "active"]),
         "campaigns_created": created,
@@ -191,6 +201,7 @@ def acquisition_campaign_tick(state: Dict[str, Any]) -> Dict[str, Any]:
         "click_to_lead_rate": round(total_leads / max(1, total_clicks), 4),
         "champion_changes": optimized,
         "distribution_queue": len(state.get("acquisition_distribution_queue", []) or []),
+        "public_base_url": PUBLIC_BASE_URL,
         "paid_media_policy": "human_approval_required_for_budget_or_spend",
         "organic_policy": "autonomous_only_on_owned_or_pre-authorized_connectors",
         "learning_loop": "clicks_to_leads_to_verified_companies_to_commercial_outcomes",
