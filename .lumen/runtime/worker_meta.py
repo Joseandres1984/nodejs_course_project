@@ -95,6 +95,7 @@ def meta_lumen_cycle() -> Dict[str, Any]:
                 "elastic digital workforce sizing and role allocation",
                 "persistent professional case ownership and multistage research",
                 "store/catalog discovery and commission-attribution preparation",
+                "robots-respecting same-domain public catalog inspection",
             ],
             "human_required_only_for": [
                 "binding contracts or acceptance of binding terms", "payments/orders/financial commitments",
@@ -128,9 +129,8 @@ def professional_casework_cycle() -> Dict[str, Any]:
 
 
 def partner_network_cycle() -> Dict[str, Any]:
-    """Map stores/catalogs and prepare trackable commission referrals after real partner authorization."""
     try:
-        from partner_network import partner_network_tick
+        from partner_network_ext import partner_network_tick
         if not load_state():
             report = {"status": "skipped", "reason": "state_unavailable", "stores_total": 0}
             print({"partner_network": report}, flush=True)
@@ -164,9 +164,6 @@ def agent_workforce_cycle() -> Dict[str, Any]:
 
 meta_lumen_cycle()
 professional_casework_cycle()
-# After deep-work cases, use remaining research quota to build the merchant/affiliate network.
-# Merely finding a store never makes it an authorized partner; monetized links require partner_agreements evidence.
 partner_network_cycle()
-# Breadth-oriented workforce gets whatever shared quota remains after casework and partner development.
 agent_workforce_cycle()
 import worker_with_demand  # noqa: E402,F401
