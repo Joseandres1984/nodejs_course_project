@@ -16,6 +16,10 @@ import supreme_autonomy_runtime  # noqa: F401
 # even when LUMEN does not yet have a verified supplier for that category.
 import public_procurement_runtime  # noqa: F401
 
+# Reorder public-procurement categories from the previous cycle's real economic/progression evidence.
+# Exploration keeps a floor, so the system learns without starving categories that have little history.
+import adaptive_procurement_runtime  # noqa: F401
+
 # Operational health must reflect current business risk, not stale diagnostic canary failures.
 import operational_health_runtime  # noqa: F401
 
