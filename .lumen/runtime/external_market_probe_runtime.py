@@ -1,12 +1,29 @@
 from __future__ import annotations
 
 from collections import Counter
+from datetime import timedelta
 from typing import Any, Dict
 
 from app import STATE, load_state
 import outbound_engine
 
-VERSION = "1.0-external-market-probe"
+VERSION = "1.1-external-market-probe"
+
+
+def _successful_recent_contact(email: str) -> bool:
+    target = str(email or "").strip().lower()
+    cutoff = outbound_engine.utcnow_dt() - timedelta(days=outbound_engine.RECONTACT_DAYS)
+    for item in reversed(STATE.get("outbox", []) or []):
+        if str(item.get("contact") or "").strip().lower() != target:
+            continue
+        if item.get("source") not in {"outbound_engine", "distribution_operator_canary"}:
+            continue
+        if str(item.get("status") or "") not in {"sent", "delivered"}:
+            continue
+        when = outbound_engine._parse(item.get("delivered_at") or item.get("sent_at"))
+        if when and when >= cutoff:
+            return True
+    return False
 
 
 def _reason(account: Dict[str, Any]) -> str | None:
@@ -34,8 +51,8 @@ def _reason(account: Dict[str, Any]) -> str | None:
     relation = outbound_engine._relationship(STATE, account, email)
     if relation.get("opted_out") or relation.get("relationship_state") in {"do_not_contact", "cooldown"}:
         return "relationship_cooldown"
-    if outbound_engine._recently_contacted(STATE, email):
-        return "recent_contact_window"
+    if _successful_recent_contact(email):
+        return "recent_successful_contact_window"
     score, _ = outbound_engine._score(STATE, account)
     if score < outbound_engine.MIN_SCORE:
         return "below_outbound_score"
@@ -59,7 +76,14 @@ def probe() -> Dict[str, Any]:
         recent = []
         if email:
             recent = [
-                {"source": x.get("source"), "status": x.get("status"), "quality": x.get("quality_gate"), "reviewed": bool(x.get("communication_reviewed"))}
+                {
+                    "source": x.get("source"),
+                    "status": x.get("status"),
+                    "quality": x.get("quality_gate"),
+                    "reviewed": bool(x.get("communication_reviewed")),
+                    "provider": x.get("email_provider"),
+                    "error": str(x.get("last_error") or x.get("last_transport_error") or "")[:260],
+                }
                 for x in (STATE.get("outbox", []) or [])
                 if str(x.get("contact") or "").strip().lower() == email
             ][-4:]
@@ -83,6 +107,8 @@ def probe() -> Dict[str, Any]:
             "quality": x.get("quality_gate"),
             "reviewed": bool(x.get("communication_reviewed")),
             "recovery_count": int(x.get("https_recovery_count") or x.get("https_retry_count") or 0),
+            "provider": x.get("email_provider"),
+            "error": str(x.get("last_error") or x.get("last_transport_error") or "")[:400],
         }
         for x in (STATE.get("outbox", []) or []) if x.get("status") == "send_failed"
     ]
