@@ -12,4 +12,7 @@ import demand_hunter_runtime  # noqa: F401 - demand-first scoring/prioritization
 # Final production orchestration: protected demand budget + buyer identity resolution + adaptive search.
 import supreme_autonomy_runtime  # noqa: F401
 
+# Operational health must reflect current business risk, not stale diagnostic canary failures.
+import operational_health_runtime  # noqa: F401
+
 runpy.run_module("worker_journal", run_name="__main__")
