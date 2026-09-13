@@ -10,6 +10,7 @@ from alert_main import app
 from app import STATE, auth, load_state
 from cycle_journal import bootstrap_current_cycle, fetch_cycles, inject_cycle_journal, render_cycle_journal_page
 from market_concierge import router as market_concierge_router
+from market_owner_panel import inject_owner_market_strip, render_owner_market_page
 
 
 # The conversational concierge is the primary buyer intake. The structured form remains
@@ -80,6 +81,12 @@ def api_cycle_journal(
     return fetch_cycles(page=page, per_page=per_page)
 
 
+@app.get('/market-owner', response_class=HTMLResponse, include_in_schema=False)
+def market_owner_page(_=Depends(auth)):
+    load_state()
+    return HTMLResponse(render_owner_market_page(STATE))
+
+
 def _primary_market_html(text: str) -> str:
     text = text.replace('/market/inquiry?listing_id=', '/market/concierge?listing_id=')
     text = text.replace('Solicitar alternativa', 'Hablar con LUMEN')
@@ -103,11 +110,21 @@ def _concierge_fallback_html(text: str, listing_id: str) -> str:
     return text.replace('</main>', fallback + '</main>', 1)
 
 
+def _owner_command_center_links(text: str) -> str:
+    # In the authenticated owner interface, /market means management, not shopping.
+    # The explicit public-store button is added afterwards by inject_owner_market_strip.
+    text = text.replace("href='/market'", "href='/market-owner'")
+    text = text.replace('href="/market"', 'href="/market-owner"')
+    text = text.replace('>LUMEN Market<', '>Market · gestión<')
+    return text
+
+
 @app.middleware('http')
 async def lumen_ui_runtime(request: Request, call_next):
-    if request.url.path in {'/command-center', '/cycle-journal', '/api/cycle-journal'}:
+    if request.url.path in {'/command-center', '/cycle-journal', '/api/cycle-journal', '/market-owner'}:
         load_state()
-        bootstrap_current_cycle(STATE)
+        if request.url.path != '/market-owner':
+            bootstrap_current_cycle(STATE)
 
     response = await call_next(request)
     content_type = str(response.headers.get('content-type') or '')
@@ -124,7 +141,9 @@ async def lumen_ui_runtime(request: Request, call_next):
     text = body.decode('utf-8', errors='replace')
 
     if path == '/command-center':
+        text = _owner_command_center_links(text)
         text = inject_cycle_journal(text, STATE)
+        text = inject_owner_market_strip(text, STATE)
         if 'lumen-cycle-live-v1' not in text:
             text = text.replace('</body>', LIVE_JOURNAL_UI + '</body>', 1)
     elif path == '/market':
