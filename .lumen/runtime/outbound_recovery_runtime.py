@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import Any, Dict
 
 import outbound_engine
 from https_mail_transport import transport_status
 
-VERSION = "1.0-outbound-recovery"
-MAX_RECOVERY_PER_CYCLE = 1
+VERSION = "1.1-outbound-recovery"
+MAX_RECOVERY_PER_CYCLE = 2
 MAX_RECOVERY_RETRIES = 2
 _ORIGINAL_TICK = outbound_engine.outbound_engine_tick
 
@@ -23,6 +24,32 @@ def _suppressed(state: Dict[str, Any], email: str) -> bool:
         if isinstance(row, str) and row.strip().lower() == target:
             return True
     return False
+
+
+def _successful_recent_contact(state: Dict[str, Any], email: str) -> bool:
+    """Only a verified successful send opens the recontact cooldown.
+
+    queued/ready/blocked/send_failed attempts never reached the counterparty and must not freeze a
+    valid prospect for RECONTACT_DAYS. This preserves anti-spam cooldown after real delivery while
+    allowing bounded transport recovery after a failed attempt.
+    """
+    target = str(email or "").strip().lower()
+    cutoff = outbound_engine.utcnow_dt() - timedelta(days=outbound_engine.RECONTACT_DAYS)
+    for item in reversed(state.get("outbox", []) or []):
+        if str(item.get("contact") or "").strip().lower() != target:
+            continue
+        if item.get("source") not in {"outbound_engine", "distribution_operator_canary"}:
+            continue
+        if str(item.get("status") or "") not in {"sent", "delivered"}:
+            continue
+        when = outbound_engine._parse(item.get("delivered_at") or item.get("sent_at"))
+        if when and when >= cutoff:
+            return True
+    return False
+
+
+# Patch eligibility semantics before the original Outbound Engine evaluates prospects.
+outbound_engine._recently_contacted = _successful_recent_contact
 
 
 def _recover_failed_outbound(state: Dict[str, Any]) -> int:
@@ -60,6 +87,7 @@ def recovery_outbound_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     report["recovery_runtime_version"] = VERSION
     report["failed_messages_requeued"] = recovered
     report["transport_ready_for_recovery"] = bool(transport_status().get("ready"))
+    report["recent_contact_policy"] = "sent_or_delivered_only"
     state["outbound_engine"] = report
     return report
 
