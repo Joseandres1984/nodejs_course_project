@@ -3,6 +3,8 @@ from __future__ import annotations
 import copy
 import os
 import runpy
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import autonomous_distribution
 import closer_orchestrator
@@ -11,6 +13,142 @@ import retail_velocity_radar
 import scout_connector
 import war_room
 from portfolio_resilience import adjust_lane, resilience_tick
+
+
+# Search-budget policy: reset by Argentina calendar day and protect a small retail quota
+# so core B2B research cannot consume every query before the retail radar runs.
+_SCOUT_TIMEZONE_NAME = str(os.getenv("LUMEN_SCOUT_TIMEZONE", "America/Argentina/Buenos_Aires")).strip() or "America/Argentina/Buenos_Aires"
+try:
+    _SCOUT_TIMEZONE = ZoneInfo(_SCOUT_TIMEZONE_NAME)
+except Exception:
+    _SCOUT_TIMEZONE = timezone(timedelta(hours=-3))
+
+_RETAIL_RESERVED_QUERIES = max(
+    1,
+    min(
+        max(1, int(scout_connector.DAILY_QUERY_BUDGET) - 1),
+        int(os.getenv("LUMEN_RETAIL_RESERVED_BUDGET", str(retail_velocity_radar.DAILY_RETAIL_BUDGET))),
+    ),
+)
+
+
+def _market_date() -> str:
+    return datetime.now(_SCOUT_TIMEZONE).strftime("%Y-%m-%d")
+
+
+def _market_scout_budget(state):
+    today = _market_date()
+    daily = int(scout_connector.DAILY_QUERY_BUDGET)
+    budget = state.setdefault(
+        "scout_budget",
+        {
+            "date": today,
+            "timezone": _SCOUT_TIMEZONE_NAME,
+            "queries_used": 0,
+            "daily_budget": daily,
+        },
+    )
+
+    # The timezone marker intentionally forces a one-time migration/reset from the old UTC budget.
+    if budget.get("date") != today or budget.get("timezone") != _SCOUT_TIMEZONE_NAME:
+        budget.clear()
+        budget.update(
+            {
+                "date": today,
+                "timezone": _SCOUT_TIMEZONE_NAME,
+                "queries_used": 0,
+                "daily_budget": daily,
+                "reset_reason": "market_day_or_timezone_changed",
+                "reset_at": scout_connector.utcnow(),
+            }
+        )
+
+    budget["daily_budget"] = daily
+    budget["queries_used"] = max(0, int(budget.get("queries_used", 0)))
+    total_remaining = max(0, daily - budget["queries_used"])
+
+    retail_budget = state.get("retail_velocity_budget", {}) or {}
+    retail_used_today = 0
+    if retail_budget.get("date") == today and retail_budget.get("timezone") == _SCOUT_TIMEZONE_NAME:
+        retail_used_today = max(0, int(retail_budget.get("queries_used", 0)))
+
+    reserved_daily = min(_RETAIL_RESERVED_QUERIES, max(0, daily - 1))
+    reserved_remaining = max(0, reserved_daily - min(reserved_daily, retail_used_today))
+    general_remaining = max(0, total_remaining - reserved_remaining)
+
+    # Existing Scout/Demand code reads queries_remaining. Give it only the general pool.
+    # Retail uses queries_remaining_total below, so its protected share remains available.
+    budget["queries_remaining_total"] = total_remaining
+    budget["retail_reserved_daily"] = reserved_daily
+    budget["retail_reserved_used"] = min(reserved_daily, retail_used_today)
+    budget["retail_reserved_remaining"] = reserved_remaining
+    budget["general_queries_remaining"] = general_remaining
+    budget["queries_remaining"] = general_remaining
+    budget["timezone"] = _SCOUT_TIMEZONE_NAME
+    return budget
+
+
+def _market_retail_budget(state):
+    today = _market_date()
+    daily = int(retail_velocity_radar.DAILY_RETAIL_BUDGET)
+    row = state.setdefault(
+        "retail_velocity_budget",
+        {
+            "date": today,
+            "timezone": _SCOUT_TIMEZONE_NAME,
+            "queries_used": 0,
+        },
+    )
+    if row.get("date") != today or row.get("timezone") != _SCOUT_TIMEZONE_NAME:
+        row.clear()
+        row.update(
+            {
+                "date": today,
+                "timezone": _SCOUT_TIMEZONE_NAME,
+                "queries_used": 0,
+                "reset_at": scout_connector.utcnow(),
+            }
+        )
+    row["daily_budget"] = daily
+    row["queries_used"] = max(0, int(row.get("queries_used", 0)))
+    row["queries_remaining"] = max(0, daily - row["queries_used"])
+    row["timezone"] = _SCOUT_TIMEZONE_NAME
+    return row
+
+
+def _market_retail_consume_search_budget(state) -> bool:
+    own = _market_retail_budget(state)
+    global_budget = _market_scout_budget(state)
+    total_remaining = max(
+        0,
+        int(global_budget.get("daily_budget") or scout_connector.DAILY_QUERY_BUDGET)
+        - int(global_budget.get("queries_used") or 0),
+    )
+    if total_remaining <= 0 or int(own.get("queries_remaining") or 0) <= 0:
+        return False
+
+    global_budget["queries_used"] = int(global_budget.get("queries_used") or 0) + 1
+    own["queries_used"] = int(own.get("queries_used") or 0) + 1
+    _market_retail_budget(state)
+    _market_scout_budget(state)
+    return True
+
+
+_original_scout_status = scout_connector.status
+
+
+def _scout_status_with_budget_policy():
+    report = _original_scout_status()
+    report["budget_timezone"] = _SCOUT_TIMEZONE_NAME
+    report["retail_reserved_queries"] = _RETAIL_RESERVED_QUERIES
+    return report
+
+
+# Install budget hooks before the production scout tick is captured.
+scout_connector._budget = _market_scout_budget
+scout_connector.status = _scout_status_with_budget_policy
+retail_velocity_radar._retail_budget = _market_retail_budget
+retail_velocity_radar._consume_search_budget = _market_retail_consume_search_budget
 
 
 _original_scout_tick = scout_connector.scout_tick
@@ -76,13 +214,26 @@ def _owned_market_first_channels(category, metrics, learning):
 
 
 def _scout_with_demand_hunter(state):
-    # Give the retail radar a bounded share of the existing search budget first; it leaves at least one
-    # query reserved for the core B2B scout and never exceeds its own small daily cap.
+    # Retail receives its own protected daily quota first. The global cap still applies, while the
+    # remaining general pool is shared by the core B2B scout and demand hunter.
     retail_report = retail_velocity_radar.retail_velocity_tick(state)
+    after_retail = _market_scout_budget(state)
+    retail_report["global_search_budget_remaining"] = int(after_retail.get("queries_remaining_total") or 0)
+    retail_report["retail_reserved_remaining"] = int(after_retail.get("retail_reserved_remaining") or 0)
+    retail_report["budget_timezone"] = _SCOUT_TIMEZONE_NAME
+
     scout_report = _original_scout_tick(state)
     demand_report = demand_hunter.demand_hunter_tick(state)
+    final_budget = _market_scout_budget(state)
+
     scout_report["demand_hunter"] = demand_report
     scout_report["retail_velocity"] = retail_report
+    scout_report["budget_used_today"] = int(final_budget.get("queries_used") or 0)
+    scout_report["budget_remaining"] = int(final_budget.get("general_queries_remaining") or 0)
+    scout_report["budget_remaining_total"] = int(final_budget.get("queries_remaining_total") or 0)
+    scout_report["retail_reserved_remaining"] = int(final_budget.get("retail_reserved_remaining") or 0)
+    scout_report["budget_timezone"] = _SCOUT_TIMEZONE_NAME
+    scout_report["budget_exhausted"] = int(final_budget.get("general_queries_remaining") or 0) <= 0
     return scout_report
 
 
