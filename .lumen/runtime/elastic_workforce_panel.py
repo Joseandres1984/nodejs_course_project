@@ -49,6 +49,10 @@ def render_workforce_page(state: Dict[str, Any]) -> str:
         "50 especialistas coordinados por Meta-LUMEN. Paralelismo alto, gasto y autoridad centralizados.",
         f"{active} especialistas activos coordinados por Meta-LUMEN. La dotación escala sola entre {scale['min']} y {scale['max']} según el trabajo disponible; gasto y autoridad siguen centralizados.",
     )
+    out = out.replace(
+        '<div><a href="/command-center">← Command Center</a></div>',
+        '<div><a href="/casework">Deep Work · expedientes</a> · <a href="/command-center">← Command Center</a></div>',
+    )
     panel = f'''
     <section class="panel">
       <h2>Escalado automático</h2>
