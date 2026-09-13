@@ -11,7 +11,7 @@ from app import STATE, auth, load_state
 from cycle_journal import bootstrap_current_cycle, fetch_cycles, inject_cycle_journal, render_cycle_journal_page
 from market_concierge import router as market_concierge_router
 from market_owner_panel import inject_owner_market_strip, render_owner_market_page
-from workforce_panel import inject_workforce_strip, render_workforce_page
+from elastic_workforce_panel import inject_workforce_strip, render_workforce_page
 
 
 # The conversational concierge is the primary buyer intake. The structured form remains
