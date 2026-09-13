@@ -7,7 +7,7 @@ from typing import Any, Dict
 import outbound_engine
 from https_mail_transport import transport_status
 
-VERSION = "1.1-external-market-readiness"
+VERSION = "1.2-external-market-readiness"
 MAX_EVENTS = 400
 
 
@@ -48,7 +48,7 @@ def _reason(account: Dict[str, Any], state: Dict[str, Any]) -> str | None:
     return None
 
 
-def _provider_block(state: Dict[str, Any], provider: str | None) -> Dict[str, Any] | None:
+def _legacy_provider_block(state: Dict[str, Any], provider: str | None) -> Dict[str, Any] | None:
     errors = []
     health = dict(state.get("mail_transport_health", {}) or {})
     if health.get("error"):
@@ -61,7 +61,6 @@ def _provider_block(state: Dict[str, Any], provider: str | None) -> Dict[str, An
             errors.append(error)
         if len(errors) >= 8:
             break
-
     joined = "\n".join(errors).lower()
     if provider == "brevo" and (
         "unrecognised ip address" in joined
@@ -74,6 +73,33 @@ def _provider_block(state: Dict[str, Any], provider: str | None) -> Dict[str, An
             "detail": "Brevo está rechazando la API porque la IP de salida de Railway no está autorizada.",
         }
     return None
+
+
+def _provider_block(state: Dict[str, Any], provider: str | None) -> Dict[str, Any] | None:
+    # Outbound Recovery v1.2 runs a read-only live API probe every cycle. Prefer it over historical
+    # send_failed records so a resolved provider issue clears automatically without manual state edits.
+    outbound = dict(state.get("outbound_engine", {}) or {})
+    if "provider_api_probe_ok" in outbound:
+        if outbound.get("provider_api_probe_ok") is True:
+            return None
+        reason = str(outbound.get("provider_api_probe_reason") or "provider_api_probe_failed")
+        status = outbound.get("provider_api_probe_http_status")
+        low = reason.lower()
+        if provider == "brevo" and (
+            "unrecognised ip address" in low
+            or "unrecognized ip address" in low
+            or "authorised_ips" in low
+            or "authorized_ips" in low
+        ):
+            return {
+                "code": "brevo_api_ip_not_authorized",
+                "detail": "Brevo está rechazando la API porque la IP de salida de Railway no está autorizada.",
+            }
+        return {
+            "code": "mail_provider_api_probe_failed",
+            "detail": f"El proveedor {provider or 'de email'} no pasó el probe API ({status or 'sin HTTP'}): {reason[:240]}",
+        }
+    return _legacy_provider_block(state, provider)
 
 
 def _add_event(state: Dict[str, Any], key: str, severity: str, title: str, summary: str) -> None:
@@ -134,6 +160,7 @@ def external_market_readiness_tick(state: Dict[str, Any]) -> Dict[str, Any]:
         status = "READY" if sent == 0 else "ACTIVE"
         blocker = None
 
+    outbound_report = dict(state.get("outbound_engine", {}) or {})
     report = {
         "version": VERSION,
         "updated_at": utcnow(),
@@ -144,6 +171,8 @@ def external_market_readiness_tick(state: Dict[str, Any]) -> Dict[str, Any]:
         "mail_provider": transport.get("provider"),
         "mail_route": transport.get("route"),
         "mail_provider_block_detail": provider_block.get("detail") if provider_block else None,
+        "provider_api_probe_ok": outbound_report.get("provider_api_probe_ok"),
+        "provider_api_probe_http_status": outbound_report.get("provider_api_probe_http_status"),
         "outbound_live": live_requested,
         "commercial_accounts": len(commercial_accounts),
         "eligible_external_prospects": eligible,
