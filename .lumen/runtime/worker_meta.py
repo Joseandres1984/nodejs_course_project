@@ -98,6 +98,7 @@ def meta_lumen_cycle() -> Dict[str, Any]:
                 "robots-respecting same-domain public catalog inspection",
                 "organic acquisition copy generation, owned-channel publication and conversion learning",
                 "autonomous creative specification generation and first-party distribution proof tracking",
+                "continuous technical self-test and watchdog diagnostics",
             ],
             "human_required_only_for": [
                 "binding contracts or acceptance of binding terms", "payments/orders/financial commitments",
@@ -214,6 +215,23 @@ def agent_workforce_cycle() -> Dict[str, Any]:
         return report
 
 
+def system_watchdog_cycle() -> Dict[str, Any]:
+    try:
+        from system_watchdog import run_system_watchdog
+        if not load_state():
+            report = {"status": "degraded", "reason": "state_unavailable", "passed": 0, "warnings": 0, "failed": 1, "total": 1}
+            print({"system_watchdog": report}, flush=True)
+            return report
+        report = dict(run_system_watchdog(STATE, DB_STATUS) or {})
+        report["persisted"] = bool(save_state())
+        print({"system_watchdog": {k: report.get(k) for k in ("status", "passed", "warnings", "failed", "total", "score_pct", "persisted")}}, flush=True)
+        return report
+    except Exception as exc:
+        report = {"status": "degraded_fail_open", "reason": f"{type(exc).__name__}: {str(exc)[:260]}", "passed": 0, "warnings": 0, "failed": 1, "total": 1}
+        print({"system_watchdog": report}, flush=True)
+        return report
+
+
 meta_lumen_cycle()
 professional_casework_cycle()
 partner_network_cycle()
@@ -221,3 +239,4 @@ acquisition_campaign_cycle()
 creative_distribution_cycle()
 agent_workforce_cycle()
 import worker_with_demand  # noqa: E402,F401
+system_watchdog_cycle()
