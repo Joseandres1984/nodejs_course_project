@@ -39,27 +39,25 @@ def request(method: str, path: str, payload=None):
         return int(exc.code), body
 
 
-def die(message: str, details=None):
+def stop(message: str, details=None, code: int = 1):
     print(json.dumps({"brevo_probe": {"ok": False, "error": message, "details": details}}, ensure_ascii=False), flush=True)
-    raise SystemExit(1)
+    raise SystemExit(code)
 
 
 if not API_KEY:
-    die("missing_api_key")
+    stop("missing_api_key")
 if not FROM_EMAIL or "@" not in FROM_EMAIL:
-    die("missing_or_invalid_from_email")
+    stop("missing_or_invalid_from_email")
 
-# Brevo documents GET /v3/account as the API-key validation endpoint.
 account_status, _account = request("GET", "/account")
 if account_status != 200:
-    die("account_auth_failed", {"status": account_status})
+    stop("account_auth_failed", {"status": account_status})
 
-# Sender listing is useful evidence but may be blocked by Brevo/Cloudflare from some hosting IPs.
-# A successful self-addressed transactional send is the definitive operational sender test.
 senders_status, senders_payload = request("GET", "/senders")
 sender_list_accessible = senders_status == 200
 sender_present = None
 safe_sender = None
+match = None
 if sender_list_accessible:
     senders = senders_payload.get("senders", []) if isinstance(senders_payload, dict) else []
     match = next((s for s in senders if str(s.get("email") or "").strip().lower() == FROM_EMAIL), None)
@@ -71,9 +69,23 @@ if sender_list_accessible:
             "name": match.get("name"),
             "active": match.get("active"),
         }
-    if not match:
-        die("configured_sender_not_found_in_brevo", {"from": FROM_EMAIL, "sender_count": len(senders)})
+    else:
+        create_status, create_result = request("POST", "/senders", {"email": FROM_EMAIL, "name": FROM_NAME})
+        if create_status not in {200, 201}:
+            stop("sender_create_failed", {"status": create_status, "response": create_result})
+        print(json.dumps({
+            "brevo_probe": {
+                "ok": False,
+                "account_auth": True,
+                "sender_created": True,
+                "sender_email": FROM_EMAIL,
+                "verification_required": True,
+                "sender_id": create_result.get("id") if isinstance(create_result, dict) else None,
+            }
+        }, ensure_ascii=False), flush=True)
+        raise SystemExit(2)
 
+# A successful self-addressed transactional send is the definitive operational sender test.
 payload = {
     "sender": {"email": FROM_EMAIL, "name": FROM_NAME},
     "to": [{"email": FROM_EMAIL, "name": "LUMEN verification"}],
@@ -83,7 +95,7 @@ payload = {
 send_status, send_result = request("POST", "/smtp/email", payload)
 message_id = str(send_result.get("messageId") or send_result.get("message_id") or "") if isinstance(send_result, dict) else ""
 if send_status != 201 or not message_id:
-    die("transactional_canary_failed", {"status": send_status, "response": send_result})
+    stop("transactional_canary_failed", {"status": send_status, "response": send_result})
 
 print(json.dumps({
     "brevo_probe": {
