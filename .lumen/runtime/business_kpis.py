@@ -20,6 +20,7 @@ from portfolio_optimizer_v2 import portfolio_optimizer_v2_tick
 from self_improvement_lab import self_improvement_tick
 from venture_attribution import propagate_venture_attribution
 from venture_builder import venture_builder_tick
+from whatsapp_probe import whatsapp_probe_tick
 
 
 def utcnow() -> str:
@@ -127,9 +128,22 @@ def kpi_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     # Deal Room is last so each dossier captures final truth, calibration, goal and portfolio decisions.
     deal_room = deal_room_tick(state)
 
-    # Executive Notification Router runs after the business state is fully refreshed so important milestones
-    # can be deduplicated and, when WhatsApp is configured, delivered with a direct Command Center link.
-    notifications = notification_router_tick(state)
+    # A dedicated one-shot probe can be enabled temporarily. In TEST_ONLY mode it deliberately suppresses
+    # normal executive WhatsApp delivery so a configuration test can never flush queued real alerts.
+    whatsapp_probe = whatsapp_probe_tick(state)
+    if whatsapp_probe.get("test_only"):
+        notifications = {
+            "updated_at": utcnow(),
+            "channel": "whatsapp",
+            "mode": "test_only",
+            "probe": whatsapp_probe,
+            "normal_delivery_suppressed": True,
+        }
+        state["notification_router"] = notifications
+    else:
+        # Executive Notification Router runs after the business state is fully refreshed so important milestones
+        # can be deduplicated and, when WhatsApp is configured, delivered with a direct Command Center link.
+        notifications = notification_router_tick(state)
 
     report = {
         "updated_at": utcnow(), "funnel": funnel, "conversion": conversion, "health": health, "bottlenecks": bottlenecks,
@@ -142,7 +156,7 @@ def kpi_tick(state: Dict[str, Any]) -> Dict[str, Any]:
         "commission_settlement": commission_settlement, "growth_treasury": growth_treasury,
         "venture_attribution": venture_attribution, "venture_builder": venture_builder,
         "autonomous_goal_planner": goal_planner, "portfolio_optimizer": portfolio_optimizer,
-        "deal_room": deal_room, "notification_router": notifications,
+        "deal_room": deal_room, "notification_router": notifications, "whatsapp_probe": whatsapp_probe,
     }
     state["business_kpis"] = report
     return report
