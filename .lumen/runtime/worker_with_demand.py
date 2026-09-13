@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import copy
+import os
 import runpy
 
 import autonomous_distribution
@@ -95,6 +97,98 @@ def _score_lane_with_resilience(state, opp):
     return adjust_lane(state, lane)
 
 
+def _market_canary_probe():
+    """Exercise the real Market inquiry handler and Lead Intelligence on an isolated state copy.
+
+    The probe never persists the synthetic buyer, listing, lead, event, or candidate account. Only the
+    PASS/FAIL summary is written to production state, so business KPIs and learning remain uncontaminated.
+    """
+    version = str(os.getenv("LUMEN_MARKET_CANARY_PROBE_VERSION", "")).strip()
+    if not version:
+        return None
+
+    from app import STATE, load_state, save_state
+    import alert_main
+    from lead_intelligence import qualify_tick
+
+    load_state()
+    previous = STATE.get("market_canary_probe", {}) or {}
+    if str(previous.get("version") or "") == version and previous.get("passed") is True:
+        print({"market_canary_probe": {"version": version, "passed": True, "status": "already_verified"}}, flush=True)
+        return previous
+
+    probe_state = {
+        "autonomous_listings": [{
+            "id": "LST-CANARY-PROBE",
+            "category": "instrumentación de presión",
+            "market": "Argentina",
+            "status": "published",
+            "title": "Canary de integración LUMEN Market",
+        }],
+        "market_inquiries": [],
+        "distribution_events": [],
+        "research_leads": [],
+        "candidate_accounts": [],
+        "activity": [],
+        "decision_ledger": [],
+    }
+
+    original_state = alert_main.STATE
+    original_save = alert_main.save_state
+    response_status = None
+    error = None
+    qualification = {}
+    try:
+        alert_main.STATE = probe_state
+        alert_main.save_state = lambda: True
+        response = alert_main.market_inquiry_submit(
+            listing_id="LST-CANARY-PROBE",
+            company="Canary Industrial Argentina",
+            name="LUMEN Integration Probe",
+            email="compras@canary-industrial.example",
+            need="Compras y abastecimiento de industria: requerimos instrumentación de presión para mantenimiento de planta.",
+            phone="",
+            quantity="2 unidades",
+            deadline="30 días",
+            delivery_location="Buenos Aires, Argentina",
+            website="",
+        )
+        response_status = int(getattr(response, "status_code", 0) or 0)
+        qualification = qualify_tick(probe_state)
+    except Exception as exc:
+        error = f"{type(exc).__name__}: {str(exc)[:240]}"
+    finally:
+        alert_main.STATE = original_state
+        alert_main.save_state = original_save
+
+    inquiry_ok = len(probe_state.get("market_inquiries", [])) == 1
+    event_ok = any(x.get("event") == "inquiry" for x in probe_state.get("distribution_events", []))
+    lead_ok = any(x.get("direct_inbound_demand") for x in probe_state.get("research_leads", []))
+    candidate_ok = int(qualification.get("candidates_created") or 0) >= 1
+    passed = bool(response_status == 200 and inquiry_ok and event_ok and lead_ok and candidate_ok and not error)
+
+    summary = {
+        "version": version,
+        "passed": passed,
+        "response_status": response_status,
+        "inquiry_created": inquiry_ok,
+        "distribution_event_created": event_ok,
+        "buyer_lead_created": lead_ok,
+        "lead_intelligence_processed": int(qualification.get("processed") or 0),
+        "candidate_account_created": candidate_ok,
+        "synthetic_business_data_persisted": False,
+        "excluded_from_business_kpis": True,
+        "error": error,
+    }
+    STATE["market_canary_probe"] = copy.deepcopy(summary)
+    if not save_state():
+        summary["summary_persisted"] = False
+    else:
+        summary["summary_persisted"] = True
+    print({"market_canary_probe": summary}, flush=True)
+    return summary
+
+
 demand_hunter._score = _institutional_demand_score
 autonomous_distribution._choose_channels = _owned_market_first_channels
 scout_connector.scout_tick = _scout_with_demand_hunter
@@ -103,3 +197,6 @@ closer_orchestrator._score_lane = _score_lane_with_resilience
 
 # Execute the production worker unchanged after installing reversible hooks.
 runpy.run_module("worker", run_name="__main__")
+
+# One-shot, non-polluting integration verification when its version is explicitly enabled.
+_market_canary_probe()
