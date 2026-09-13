@@ -98,6 +98,7 @@ def meta_lumen_cycle() -> Dict[str, Any]:
                 "robots-respecting same-domain public catalog inspection",
                 "organic acquisition copy generation, owned-channel publication and conversion learning",
                 "autonomous creative specification generation and first-party distribution proof tracking",
+                "governed organic distribution canaries through owned and pre-authorized channels",
                 "continuous technical self-test and watchdog diagnostics",
             ],
             "human_required_only_for": [
@@ -198,6 +199,33 @@ def creative_distribution_cycle() -> Dict[str, Any]:
         return report
 
 
+def distribution_operator_cycle() -> Dict[str, Any]:
+    try:
+        from distribution_operator import distribution_operator_tick
+        if not load_state():
+            report = {"status": "skipped", "reason": "state_unavailable", "jobs_total": 0}
+            print({"distribution_operator": report}, flush=True)
+            return report
+        report = dict(distribution_operator_tick(STATE) or {})
+        report["persisted"] = bool(save_state())
+        print({"distribution_operator": {
+            "status": report.get("status"),
+            "jobs_total": report.get("jobs_total"),
+            "owned_live": report.get("owned_live"),
+            "external_verified": report.get("external_verified"),
+            "awaiting_connector": report.get("awaiting_connector"),
+            "email_sent_verified": report.get("email_sent_verified"),
+            "email_canary": report.get("email_canary"),
+            "funnel": report.get("funnel"),
+            "persisted": report.get("persisted"),
+        }}, flush=True)
+        return report
+    except Exception as exc:
+        report = {"status": "degraded_fail_open", "reason": f"{type(exc).__name__}: {str(exc)[:260]}", "jobs_total": 0}
+        print({"distribution_operator": report}, flush=True)
+        return report
+
+
 def agent_workforce_cycle() -> Dict[str, Any]:
     try:
         from elastic_agent_fleet import run_elastic_agent_fleet_cycle
@@ -237,6 +265,7 @@ professional_casework_cycle()
 partner_network_cycle()
 acquisition_campaign_cycle()
 creative_distribution_cycle()
+distribution_operator_cycle()
 agent_workforce_cycle()
 import worker_with_demand  # noqa: E402,F401
 system_watchdog_cycle()
