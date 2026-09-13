@@ -97,12 +97,14 @@ def meta_lumen_cycle() -> Dict[str, Any]:
                 "store/catalog discovery and commission-attribution preparation",
                 "robots-respecting same-domain public catalog inspection",
                 "organic acquisition copy generation, owned-channel publication and conversion learning",
+                "autonomous creative specification generation and first-party distribution proof tracking",
             ],
             "human_required_only_for": [
                 "binding contracts or acceptance of binding terms", "payments/orders/financial commitments",
                 "material legal or liability decisions", "production code changes and deployments",
                 "activation of a new partner agreement when binding terms must be accepted",
                 "paid advertising budget, spend or binding ad-platform commitment",
+                "authorization of new external publishing connectors or accounts",
             ],
             "production_code_self_modify": False,
         },
@@ -164,6 +166,37 @@ def acquisition_campaign_cycle() -> Dict[str, Any]:
         return report
 
 
+def creative_distribution_cycle() -> Dict[str, Any]:
+    try:
+        from creative_factory import creative_factory_tick
+        from distribution_proof import distribution_proof_tick
+        if not load_state():
+            report = {"status": "skipped", "reason": "state_unavailable", "creative_assets": 0, "proof_rows": 0}
+            print({"creative_distribution": report}, flush=True)
+            return report
+        creative = dict(creative_factory_tick(STATE) or {})
+        proof = dict(distribution_proof_tick(STATE) or {})
+        report = {
+            "status": "healthy",
+            "updated_at": utcnow(),
+            "creative_assets": int(creative.get("assets_total") or 0),
+            "champion_assets": int(creative.get("champion_assets") or 0),
+            "creative_quality_avg": float(creative.get("quality_avg") or 0),
+            "proof_rows": int(proof.get("ledger_total") or 0),
+            "external_verified_published": int(proof.get("external_verified_published") or 0),
+            "owned_live": int(proof.get("owned_live") or 0),
+            "awaiting_connector": int(proof.get("awaiting_connector") or 0),
+            "truth_rule": proof.get("truth_rule"),
+        }
+        report["persisted"] = bool(save_state())
+        print({"creative_distribution": report}, flush=True)
+        return report
+    except Exception as exc:
+        report = {"status": "degraded_fail_open", "reason": f"{type(exc).__name__}: {str(exc)[:260]}", "creative_assets": 0, "proof_rows": 0}
+        print({"creative_distribution": report}, flush=True)
+        return report
+
+
 def agent_workforce_cycle() -> Dict[str, Any]:
     try:
         from elastic_agent_fleet import run_elastic_agent_fleet_cycle
@@ -185,5 +218,6 @@ meta_lumen_cycle()
 professional_casework_cycle()
 partner_network_cycle()
 acquisition_campaign_cycle()
+creative_distribution_cycle()
 agent_workforce_cycle()
 import worker_with_demand  # noqa: E402,F401
