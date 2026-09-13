@@ -12,6 +12,10 @@ import demand_hunter_runtime  # noqa: F401 - demand-first scoring/prioritization
 # Final production orchestration: protected demand budget + buyer identity resolution + adaptive search.
 import supreme_autonomy_runtime  # noqa: F401
 
+# Search public procurement first so published demand can be resolved to buyers in the same cycle,
+# even when LUMEN does not yet have a verified supplier for that category.
+import public_procurement_runtime  # noqa: F401
+
 # Operational health must reflect current business risk, not stale diagnostic canary failures.
 import operational_health_runtime  # noqa: F401
 
