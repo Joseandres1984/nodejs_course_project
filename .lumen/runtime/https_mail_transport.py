@@ -12,13 +12,15 @@ import mail_connector
 import mail_resilience
 
 
-VERSION = "1.0-https-mail"
+VERSION = "1.1-https-mail-provider-selection"
 SMTP_PLATFORM_BLOCKED = os.getenv("LUMEN_SMTP_PLATFORM_BLOCKED", "false").lower() == "true"
+MAIL_PROVIDER = (os.getenv("LUMEN_MAIL_PROVIDER") or "auto").strip().lower()
 RESEND_API_KEY = os.getenv("LUMEN_RESEND_API_KEY", "").strip()
 RESEND_FROM = os.getenv("LUMEN_RESEND_FROM", "").strip()
 BREVO_API_KEY = os.getenv("LUMEN_BREVO_API_KEY", "").strip()
 BREVO_FROM_EMAIL = os.getenv("LUMEN_BREVO_FROM_EMAIL", "").strip()
 BREVO_FROM_NAME = os.getenv("LUMEN_BREVO_FROM_NAME", "LUMEN B2B").strip() or "LUMEN B2B"
+BREVO_SENDER_VERIFIED = os.getenv("LUMEN_BREVO_SENDER_VERIFIED", "false").lower() == "true"
 MAX_HTTPS_RETRIES = max(0, min(3, int(os.getenv("LUMEN_HTTPS_MAIL_MAX_RETRIES", "2"))))
 
 
@@ -31,11 +33,42 @@ def _log(state: Dict[str, Any], message: str) -> None:
     state["activity"] = state["activity"][:100]
 
 
+def _resend_ready() -> bool:
+    return bool(RESEND_API_KEY and RESEND_FROM)
+
+
+def _brevo_ready() -> bool:
+    return bool(BREVO_API_KEY and BREVO_FROM_EMAIL and BREVO_SENDER_VERIFIED)
+
+
 def transport_status() -> Dict[str, Any]:
-    if RESEND_API_KEY and RESEND_FROM:
-        return {"ready": True, "provider": "resend", "route": "https_api_443", "from": RESEND_FROM}
-    if BREVO_API_KEY and BREVO_FROM_EMAIL:
+    # Explicit selection prevents the Resend sandbox sender from shadowing a verified Brevo sender.
+    if MAIL_PROVIDER == "brevo":
+        if _brevo_ready():
+            return {"ready": True, "provider": "brevo", "route": "https_api_443", "from": BREVO_FROM_EMAIL}
+        return {
+            "ready": False,
+            "provider": "brevo",
+            "route": "https_api_443",
+            "smtp_platform_blocked": SMTP_PLATFORM_BLOCKED,
+            "reason": "brevo_not_ready_or_sender_not_verified",
+        }
+    if MAIL_PROVIDER == "resend":
+        if _resend_ready():
+            return {"ready": True, "provider": "resend", "route": "https_api_443", "from": RESEND_FROM}
+        return {
+            "ready": False,
+            "provider": "resend",
+            "route": "https_api_443",
+            "smtp_platform_blocked": SMTP_PLATFORM_BLOCKED,
+            "reason": "resend_not_ready",
+        }
+
+    # Auto mode prefers a provider that is explicitly production-ready.
+    if _brevo_ready():
         return {"ready": True, "provider": "brevo", "route": "https_api_443", "from": BREVO_FROM_EMAIL}
+    if _resend_ready():
+        return {"ready": True, "provider": "resend", "route": "https_api_443", "from": RESEND_FROM}
     return {
         "ready": False,
         "provider": None,
@@ -65,14 +98,14 @@ def _post_json(url: str, payload: Dict[str, Any], headers: Dict[str, str]) -> Di
 def _send_https(target: str, subject: str, body: str) -> tuple[str, str | None]:
     status = transport_status()
     provider = status.get("provider")
-    if provider == "resend":
+    if provider == "resend" and status.get("ready"):
         result = _post_json(
             "https://api.resend.com/emails",
             {"from": RESEND_FROM, "to": [target], "subject": subject, "text": body},
             {"Authorization": f"Bearer {RESEND_API_KEY}"},
         )
         return "resend", str(result.get("id") or "") or None
-    if provider == "brevo":
+    if provider == "brevo" and status.get("ready"):
         result = _post_json(
             "https://api.brevo.com/v3/smtp/email",
             {
@@ -95,9 +128,9 @@ def https_send_pending(state: Dict[str, Any], live_outbound: bool) -> Dict[str, 
                 "version": VERSION,
                 "checked_at": utcnow(),
                 "ok": False,
-                "provider": None,
-                "route": None,
-                "error": "smtp_blocked_by_hosting_platform; configure_resend_or_brevo_https",
+                "provider": status.get("provider"),
+                "route": status.get("route"),
+                "error": status.get("reason") or "smtp_blocked_by_hosting_platform; configure_resend_or_brevo_https",
             }
             return {"sent": 0, "blocked": 0, "failed": 0}
         return mail_resilience.resilient_send_pending(state, live_outbound)
@@ -210,10 +243,10 @@ def https_distribution_tick(state: Dict[str, Any], *args: Any, **kwargs: Any) ->
         report["mail_resilience"] = {
             "version": VERSION,
             "transport_ok": False,
-            "provider": None,
-            "transport_route": None,
+            "provider": status.get("provider"),
+            "transport_route": status.get("route"),
             "requeued": 0,
-            "transport_error": "smtp_blocked_by_hosting_platform; https_provider_not_configured",
+            "transport_error": status.get("reason") or "smtp_blocked_by_hosting_platform; https_provider_not_configured",
             "max_canary_retries": MAX_HTTPS_RETRIES,
         }
     else:
