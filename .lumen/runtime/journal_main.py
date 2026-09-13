@@ -16,10 +16,13 @@ from professional_casework_panel import inject_casework_strip, render_casework_p
 from partner_panel import inject_partner_strip, inject_public_partner_offers, render_partner_page
 from partner_referral import router as partner_referral_router
 from owner_publications import inject_publication_navigation, render_publications_page
+from acquisition_routes import router as acquisition_router
+from acquisition_panel import inject_acquisition_strip, inject_public_acquisition_cta, render_acquisition_page
 
 
 app.include_router(market_concierge_router)
 app.include_router(partner_referral_router)
+app.include_router(acquisition_router)
 
 
 LIVE_JOURNAL_UI = r'''
@@ -102,6 +105,12 @@ def partners_page(_=Depends(auth)):
     return HTMLResponse(render_partner_page(STATE))
 
 
+@app.get('/acquisition', response_class=HTMLResponse, include_in_schema=False)
+def acquisition_page(_=Depends(auth)):
+    load_state()
+    return HTMLResponse(render_acquisition_page(STATE))
+
+
 def _primary_market_html(text: str) -> str:
     text = text.replace('/market/inquiry?listing_id=', '/market/concierge?listing_id=')
     text = text.replace('Solicitar alternativa', 'Hablar con LUMEN')
@@ -134,10 +143,10 @@ def _owner_command_center_links(text: str) -> str:
 
 @app.middleware('http')
 async def lumen_ui_runtime(request: Request, call_next):
-    owner_paths = {'/command-center', '/cycle-journal', '/api/cycle-journal', '/market-owner', '/market-owner/publications', '/workforce', '/casework', '/partners'}
+    owner_paths = {'/command-center', '/cycle-journal', '/api/cycle-journal', '/market-owner', '/market-owner/publications', '/workforce', '/casework', '/partners', '/acquisition'}
     if request.url.path in owner_paths:
         load_state()
-        if request.url.path not in {'/market-owner', '/market-owner/publications', '/workforce', '/casework', '/partners'}:
+        if request.url.path not in {'/market-owner', '/market-owner/publications', '/workforce', '/casework', '/partners', '/acquisition'}:
             bootstrap_current_cycle(STATE)
 
     response = await call_next(request)
@@ -160,6 +169,7 @@ async def lumen_ui_runtime(request: Request, call_next):
         text = inject_casework_strip(text, STATE)
         text = inject_workforce_strip(text, STATE)
         text = inject_partner_strip(text, STATE)
+        text = inject_acquisition_strip(text, STATE)
         text = inject_owner_market_strip(text, STATE)
         text = inject_publication_navigation(text)
         if 'lumen-cycle-live-v1' not in text:
@@ -167,6 +177,7 @@ async def lumen_ui_runtime(request: Request, call_next):
     elif path == '/market':
         text = _primary_market_html(text)
         text = inject_public_partner_offers(text, STATE)
+        text = inject_public_acquisition_cta(text, STATE)
     elif path == '/market/concierge' and request.method == 'GET':
         text = _concierge_fallback_html(text, str(request.query_params.get('listing_id') or ''))
 
