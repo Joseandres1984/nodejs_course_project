@@ -17,6 +17,10 @@ import https_mail_transport  # noqa: F401,E402
 # operator. External social jobs remain pending until an authorized account/token is configured.
 import social_distribution  # noqa: F401,E402
 
+# Install the governed B2B Outbound Engine before worker.py captures Commercial Execution.
+# New outreach is still forced through Communication Director, Quality Gate, COO and mail gates.
+import outbound_engine  # noqa: F401,E402
+
 # Run the complete Meta-LUMEN + production worker first.
 import worker_meta  # noqa: F401,E402
 
