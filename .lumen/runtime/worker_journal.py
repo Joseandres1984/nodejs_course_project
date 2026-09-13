@@ -39,6 +39,7 @@ from cycle_journal import record_cycle
 from executive_secretary import secretary_tick
 from external_market_readiness import external_market_readiness_tick
 from first_cash_mode import first_cash_tick
+from notification_router import notification_router_tick
 
 
 # After the business cycle, collapse demand/opportunity/deal evidence into one canonical state machine.
@@ -58,11 +59,18 @@ external_readiness = external_market_readiness_tick(STATE)
 # Build the executive-secretary brief from the now-unified and cash-prioritized queue so the daily brief
 # reflects the same priorities the autonomous operating system will carry into the next cycle.
 secretary = secretary_tick(STATE)
+
+# Route only evidence-backed IMPORTANT/CRITICAL events through the already configured WhatsApp channel.
+# INFO remains dashboard-only. The router deduplicates stable events and never changes commercial,
+# contractual, payment or publication authority.
+notifications = notification_router_tick(STATE)
+
 persisted = bool(save_state())
 secretary["persisted"] = persisted
 autonomy["persisted"] = persisted
 first_cash["persisted"] = persisted
 external_readiness["persisted"] = persisted
+notifications["persisted"] = persisted
 
 print({
     "autonomy_operating_system": {
@@ -126,8 +134,20 @@ print({
     }
 }, flush=True)
 
+print({
+    "notification_router": {
+        "channel": notifications.get("channel"),
+        "delivery_ready": (notifications.get("status") or {}).get("delivery_ready"),
+        "queued_for_whatsapp": notifications.get("queued_for_whatsapp"),
+        "sent_this_tick": notifications.get("sent_this_tick"),
+        "failed_this_tick": notifications.get("failed_this_tick"),
+        "sent_total": notifications.get("sent_total"),
+        "persisted": notifications.get("persisted"),
+    }
+}, flush=True)
+
 # Persist one compact, queryable audit row only after the business cycle, autonomy OS, first-cash mode,
-# external-readiness audit and secretarial brief completed. The journal uses its own Postgres table so
-# global state stays bounded.
+# external-readiness audit, secretarial brief and notification routing completed. The journal uses its
+# own Postgres table so global state stays bounded.
 journal = record_cycle(STATE, source="worker_complete")
 print({"cycle_journal": {k: v for k, v in journal.items() if k != "entry"}}, flush=True)
