@@ -12,6 +12,7 @@ from cycle_journal import bootstrap_current_cycle, fetch_cycles, inject_cycle_jo
 from market_concierge import router as market_concierge_router
 from market_owner_panel import inject_owner_market_strip, render_owner_market_page
 from elastic_workforce_panel import inject_workforce_strip, render_workforce_page
+from professional_casework_panel import inject_casework_strip, render_casework_page
 
 
 # The conversational concierge is the primary buyer intake. The structured form remains
@@ -94,6 +95,12 @@ def workforce_page(_=Depends(auth)):
     return HTMLResponse(render_workforce_page(STATE))
 
 
+@app.get('/casework', response_class=HTMLResponse, include_in_schema=False)
+def casework_page(_=Depends(auth)):
+    load_state()
+    return HTMLResponse(render_casework_page(STATE))
+
+
 def _primary_market_html(text: str) -> str:
     text = text.replace('/market/inquiry?listing_id=', '/market/concierge?listing_id=')
     text = text.replace('Solicitar alternativa', 'Hablar con LUMEN')
@@ -128,9 +135,9 @@ def _owner_command_center_links(text: str) -> str:
 
 @app.middleware('http')
 async def lumen_ui_runtime(request: Request, call_next):
-    if request.url.path in {'/command-center', '/cycle-journal', '/api/cycle-journal', '/market-owner', '/workforce'}:
+    if request.url.path in {'/command-center', '/cycle-journal', '/api/cycle-journal', '/market-owner', '/workforce', '/casework'}:
         load_state()
-        if request.url.path not in {'/market-owner', '/workforce'}:
+        if request.url.path not in {'/market-owner', '/workforce', '/casework'}:
             bootstrap_current_cycle(STATE)
 
     response = await call_next(request)
@@ -150,6 +157,7 @@ async def lumen_ui_runtime(request: Request, call_next):
     if path == '/command-center':
         text = _owner_command_center_links(text)
         text = inject_cycle_journal(text, STATE)
+        text = inject_casework_strip(text, STATE)
         text = inject_workforce_strip(text, STATE)
         text = inject_owner_market_strip(text, STATE)
         if 'lumen-cycle-live-v1' not in text:
