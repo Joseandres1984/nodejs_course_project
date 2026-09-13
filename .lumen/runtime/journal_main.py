@@ -7,7 +7,7 @@ from fastapi import Depends, Query, Request
 from fastapi.responses import HTMLResponse, Response
 
 from alert_main import app
-from app import STATE, auth, load_state
+from app import DB_STATUS, STATE, auth, load_state, save_state
 from cycle_journal import bootstrap_current_cycle, fetch_cycles, inject_cycle_journal, render_cycle_journal_page
 from market_concierge import router as market_concierge_router
 from market_owner_panel import inject_owner_market_strip, render_owner_market_page
@@ -20,6 +20,7 @@ from acquisition_routes import router as acquisition_router
 from acquisition_panel import inject_acquisition_strip, inject_public_acquisition_cta, render_acquisition_page
 from creative_distribution_panel import inject_growth_ops_strip, render_creative_factory_page, render_distribution_proof_page
 from distribution_receipt_routes import router as distribution_receipt_router
+from system_watchdog import run_system_watchdog
 from system_watchdog_panel import inject_watchdog_strip, render_watchdog_page
 
 
@@ -27,6 +28,21 @@ app.include_router(market_concierge_router)
 app.include_router(partner_referral_router)
 app.include_router(acquisition_router)
 app.include_router(distribution_receipt_router)
+
+
+def _startup_watchdog() -> None:
+    try:
+        if not load_state():
+            print({"startup_watchdog": {"status": "skipped", "reason": "state_unavailable"}}, flush=True)
+            return
+        report = dict(run_system_watchdog(STATE, DB_STATUS) or {})
+        report["persisted"] = bool(save_state())
+        print({"startup_watchdog": {k: report.get(k) for k in ("status", "passed", "warnings", "failed", "total", "score_pct", "persisted")}}, flush=True)
+    except Exception as exc:
+        print({"startup_watchdog": {"status": "degraded_fail_open", "reason": f"{type(exc).__name__}: {str(exc)[:260]}"}}, flush=True)
+
+
+_startup_watchdog()
 
 
 LIVE_JOURNAL_UI = r'''
