@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 import scout_connector
 
 
-VERSION = "1.0-autonomous-search-budget-governor"
+VERSION = "1.1-autonomous-search-budget-governor"
 TZ_NAME = str(os.getenv("LUMEN_SCOUT_TIMEZONE", "America/Argentina/Buenos_Aires")).strip() or "America/Argentina/Buenos_Aires"
 try:
     LOCAL_TZ = ZoneInfo(TZ_NAME)
@@ -57,8 +57,8 @@ def general_budget(state: Dict[str, Any]) -> Dict[str, Any]:
             "reset_at": utcnow(),
         })
     else:
-        # Migration is deliberately non-destructive: if the legacy 24-query budget was already
-        # partly/fully consumed today, never reset it and accidentally create extra provider spend.
+        # Migration is deliberately non-destructive: if the legacy budget was already consumed
+        # today, never reset it and accidentally create extra provider spend.
         budget["timezone"] = TZ_NAME
         budget["queries_used"] = max(0, _int(budget.get("queries_used"), 0))
 
@@ -71,21 +71,21 @@ def general_budget(state: Dict[str, Any]) -> Dict[str, Any]:
     return budget
 
 
+def _migration_debt_for_today(state: Dict[str, Any]) -> int:
+    legacy = state.get("scout_budget", {}) or {}
+    legacy_used = 0
+    if str(legacy.get("date") or "") == local_day():
+        legacy_used = max(0, _int(legacy.get("queries_used"), 0))
+    return min(DEMAND_RESERVED, max(0, legacy_used - GENERAL_POOL_CAP))
+
+
 def demand_budget(state: Dict[str, Any]) -> Dict[str, Any]:
     """Dedicated reserve for Demand Hunter, demand confirmation and buyer identity resolution."""
     today = local_day()
     budget = state.get("demand_search_budget")
 
     if not isinstance(budget, dict) or str(budget.get("date") or "") != today:
-        legacy = state.get("scout_budget", {}) or {}
-        legacy_used = 0
-        if str(legacy.get("date") or "") == today:
-            legacy_used = max(0, _int(legacy.get("queries_used"), 0))
-
-        # Migration debt preserves the original total cap on the deployment day. Example:
-        # legacy_used=24, new general cap=18 => all 6 demand-reserved searches are considered
-        # consumed for today; tomorrow the clean 18+6 split begins automatically.
-        migration_debt = min(DEMAND_RESERVED, max(0, legacy_used - GENERAL_POOL_CAP))
+        migration_debt = _migration_debt_for_today(state)
         budget = {
             "date": today,
             "timezone": TZ_NAME,
@@ -95,6 +95,19 @@ def demand_budget(state: Dict[str, Any]) -> Dict[str, Any]:
             "reset_at": utcnow(),
         }
         state["demand_search_budget"] = budget
+    else:
+        # If today's reserve consists only of migration debt and the owner raises the total cap
+        # mid-day, recompute that debt against the new general-pool size. This releases only the
+        # newly-authorized capacity; it never rewinds real demand searches already executed.
+        prior_migration_debt = max(0, _int(budget.get("migration_debt"), 0))
+        current_used = max(0, _int(budget.get("queries_used"), 0))
+        if current_used == prior_migration_debt:
+            recomputed_debt = _migration_debt_for_today(state)
+            if recomputed_debt < prior_migration_debt:
+                budget["queries_used"] = recomputed_debt
+                budget["migration_debt"] = recomputed_debt
+                budget["migration_debt_adjusted_at"] = utcnow()
+                budget["migration_debt_adjustment_reason"] = "daily_cap_increased_without_rewinding_real_demand_searches"
 
     budget["timezone"] = TZ_NAME
     budget["daily_budget"] = DEMAND_RESERVED
