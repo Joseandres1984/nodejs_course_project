@@ -35,7 +35,7 @@ def _propagate_market_inbound_metadata(state: Dict[str, Any]) -> int:
         if lead.get("demand_signal") and not account.get("demand_signal"):
             account["demand_signal"] = True
             touched = True
-        for key in ("market_inquiry_id", "market_inquiry_key"):
+        for key in ("market_inquiry_id", "market_inquiry_key", "acquisition_campaign_id", "acquisition_variant_id", "acquisition_lead_id"):
             value = lead.get(key)
             if value and account.get(key) != value:
                 account[key] = value
@@ -96,11 +96,13 @@ def meta_lumen_cycle() -> Dict[str, Any]:
                 "persistent professional case ownership and multistage research",
                 "store/catalog discovery and commission-attribution preparation",
                 "robots-respecting same-domain public catalog inspection",
+                "organic acquisition copy generation, owned-channel publication and conversion learning",
             ],
             "human_required_only_for": [
                 "binding contracts or acceptance of binding terms", "payments/orders/financial commitments",
                 "material legal or liability decisions", "production code changes and deployments",
                 "activation of a new partner agreement when binding terms must be accepted",
+                "paid advertising budget, spend or binding ad-platform commitment",
             ],
             "production_code_self_modify": False,
         },
@@ -145,6 +147,23 @@ def partner_network_cycle() -> Dict[str, Any]:
         return report
 
 
+def acquisition_campaign_cycle() -> Dict[str, Any]:
+    try:
+        from acquisition_campaigns import acquisition_campaign_tick
+        if not load_state():
+            report = {"status": "skipped", "reason": "state_unavailable", "campaigns_active": 0}
+            print({"acquisition_campaigns": report}, flush=True)
+            return report
+        report = dict(acquisition_campaign_tick(STATE) or {})
+        report["persisted"] = bool(save_state())
+        print({"acquisition_campaigns": report}, flush=True)
+        return report
+    except Exception as exc:
+        report = {"status": "degraded_fail_open", "reason": f"{type(exc).__name__}: {str(exc)[:260]}", "campaigns_active": 0}
+        print({"acquisition_campaigns": report}, flush=True)
+        return report
+
+
 def agent_workforce_cycle() -> Dict[str, Any]:
     try:
         from elastic_agent_fleet import run_elastic_agent_fleet_cycle
@@ -165,5 +184,6 @@ def agent_workforce_cycle() -> Dict[str, Any]:
 meta_lumen_cycle()
 professional_casework_cycle()
 partner_network_cycle()
+acquisition_campaign_cycle()
 agent_workforce_cycle()
 import worker_with_demand  # noqa: E402,F401
