@@ -7,10 +7,15 @@ from typing import Any, Dict
 import outbound_engine
 
 
-VERSION = "1.0-production-sender-gate"
+VERSION = "1.1-production-sender-gate"
 _REQUESTED_LIVE = os.getenv("LUMEN_OUTBOUND_LIVE", "false").strip().lower() == "true"
+
 _RESEND_API_KEY_PRESENT = bool(os.getenv("LUMEN_RESEND_API_KEY", "").strip())
-_SENDER = os.getenv("LUMEN_RESEND_FROM", "").strip()
+_RESEND_SENDER = os.getenv("LUMEN_RESEND_FROM", "").strip()
+
+_BREVO_API_KEY_PRESENT = bool(os.getenv("LUMEN_BREVO_API_KEY", "").strip())
+_BREVO_SENDER = os.getenv("LUMEN_BREVO_FROM_EMAIL", "").strip()
+_BREVO_SENDER_VERIFIED = os.getenv("LUMEN_BREVO_SENDER_VERIFIED", "false").strip().lower() == "true"
 
 
 def _sender_email(value: str) -> str:
@@ -22,37 +27,53 @@ def _sender_email(value: str) -> str:
     return plain.group(1) if plain else ""
 
 
-_SENDER_EMAIL = _sender_email(_SENDER)
-_SENDER_DOMAIN = _SENDER_EMAIL.rsplit("@", 1)[-1] if "@" in _SENDER_EMAIL else ""
-_SANDBOX_SENDER = _SENDER_DOMAIN == "resend.dev" or _SENDER_DOMAIN.endswith(".resend.dev")
-_PRODUCTION_SENDER_READY = bool(_RESEND_API_KEY_PRESENT and _SENDER_DOMAIN and not _SANDBOX_SENDER)
+_RESEND_EMAIL = _sender_email(_RESEND_SENDER)
+_RESEND_DOMAIN = _RESEND_EMAIL.rsplit("@", 1)[-1] if "@" in _RESEND_EMAIL else ""
+_RESEND_SANDBOX = _RESEND_DOMAIN == "resend.dev" or _RESEND_DOMAIN.endswith(".resend.dev")
+_RESEND_PRODUCTION_READY = bool(_RESEND_API_KEY_PRESENT and _RESEND_DOMAIN and not _RESEND_SANDBOX)
 
-# Fail closed: test-domain credentials can prove the HTTPS integration, but they must never
-# be treated as production-ready cold outbound. A verified custom sending domain is required.
+_BREVO_EMAIL = _sender_email(_BREVO_SENDER)
+_BREVO_DOMAIN = _BREVO_EMAIL.rsplit("@", 1)[-1] if "@" in _BREVO_EMAIL else ""
+_BREVO_READY = bool(_BREVO_API_KEY_PRESENT and _BREVO_EMAIL and _BREVO_SENDER_VERIFIED)
+
+# Production outbound may use either:
+# 1) a verified custom-domain Resend sender; or
+# 2) a Brevo sender that has been explicitly verified in the provider account.
+# The Brevo fallback is intentionally explicit and fail-closed: the API key + sender alone are
+# not enough; LUMEN_BREVO_SENDER_VERIFIED must be set only after a real provider-side probe.
+_PRODUCTION_SENDER_READY = bool(_RESEND_PRODUCTION_READY or _BREVO_READY)
+_SELECTED_PROVIDER = "resend" if _RESEND_PRODUCTION_READY else "brevo" if _BREVO_READY else None
+_SELECTED_DOMAIN = _RESEND_DOMAIN if _RESEND_PRODUCTION_READY else _BREVO_DOMAIN if _BREVO_READY else None
+
 outbound_engine.LIVE = bool(_REQUESTED_LIVE and _PRODUCTION_SENDER_READY)
 _ORIGINAL_TICK = outbound_engine.outbound_engine_tick
 
 
 def gated_outbound_engine_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     report = dict(_ORIGINAL_TICK(state) or {})
+    if outbound_engine.LIVE:
+        blocker = None
+    elif not _REQUESTED_LIVE:
+        blocker = "outbound_live_disabled"
+    elif _RESEND_API_KEY_PRESENT and _RESEND_SANDBOX and not _BREVO_READY:
+        blocker = "verified_custom_resend_domain_or_verified_brevo_sender_required"
+    elif _BREVO_API_KEY_PRESENT and not _BREVO_SENDER_VERIFIED:
+        blocker = "brevo_sender_verification_required"
+    else:
+        blocker = "production_sender_not_ready"
+
     report.update({
         "domain_gate_version": VERSION,
         "live_requested": _REQUESTED_LIVE,
         "production_sender_ready": _PRODUCTION_SENDER_READY,
-        "sender_domain": _SENDER_DOMAIN or None,
-        "sandbox_sender": _SANDBOX_SENDER,
+        "sender_provider": _SELECTED_PROVIDER,
+        "sender_domain": _SELECTED_DOMAIN,
+        "resend_sandbox_sender": _RESEND_SANDBOX,
+        "brevo_sender_verified": _BREVO_SENDER_VERIFIED,
         "live": bool(outbound_engine.LIVE),
         "status": "active" if outbound_engine.LIVE else "prepared",
-        "live_blocker": (
-            None
-            if outbound_engine.LIVE
-            else "outbound_live_disabled"
-            if not _REQUESTED_LIVE
-            else "verified_custom_resend_domain_required"
-            if _SANDBOX_SENDER
-            else "production_resend_sender_not_ready"
-        ),
-        "sender_policy": "verified_custom_domain_required_for_external_prospects",
+        "live_blocker": blocker,
+        "sender_policy": "verified_custom_resend_domain_or_explicitly_verified_brevo_sender_required",
     })
     state["outbound_engine"] = report
     return report
