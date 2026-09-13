@@ -32,6 +32,7 @@ from app import STATE, load_state, save_state
 from autonomy_operating_system import autonomy_tick
 from cycle_journal import record_cycle
 from executive_secretary import secretary_tick
+from first_cash_mode import first_cash_tick
 
 
 # After the business cycle, collapse demand/opportunity/deal evidence into one canonical state machine.
@@ -40,12 +41,17 @@ from executive_secretary import secretary_tick
 load_state()
 autonomy = autonomy_tick(STATE)
 
-# Build the executive-secretary brief from the now-unified queue so the daily brief reflects the same
-# priorities the autonomous operating system will carry into the next cycle.
+# Until LUMEN records a real realized profit, bias the unified queue toward the shortest credible path
+# to cash. This does not widen contract/payment/order authority and does not fabricate economic values.
+first_cash = first_cash_tick(STATE, autonomy)
+
+# Build the executive-secretary brief from the now-unified and cash-prioritized queue so the daily brief
+# reflects the same priorities the autonomous operating system will carry into the next cycle.
 secretary = secretary_tick(STATE)
 persisted = bool(save_state())
 secretary["persisted"] = persisted
 autonomy["persisted"] = persisted
+first_cash["persisted"] = persisted
 
 print({
     "autonomy_operating_system": {
@@ -61,6 +67,26 @@ print({
 }, flush=True)
 
 print({
+    "first_cash_mode": {
+        "status": first_cash.get("status"),
+        "objective": first_cash.get("objective"),
+        "realized_profit_detected": first_cash.get("realized_profit_detected"),
+        "actions_injected": first_cash.get("actions_injected"),
+        "top_cash_cases": [
+            {
+                "id": x.get("id"),
+                "stage": x.get("stage"),
+                "score": x.get("first_cash_score"),
+                "owner": x.get("owner"),
+                "next_action": x.get("next_action"),
+            }
+            for x in (first_cash.get("top_cash_cases") or [])[:3]
+        ],
+        "persisted": first_cash.get("persisted"),
+    }
+}, flush=True)
+
+print({
     "executive_secretary": {
         "status": secretary.get("status"),
         "news": len(secretary.get("news", []) or []),
@@ -72,7 +98,7 @@ print({
     }
 }, flush=True)
 
-# Persist one compact, queryable audit row only after the business cycle, autonomy OS and secretarial brief completed.
-# The journal uses its own Postgres table so the global LUMEN state does not grow without bound.
+# Persist one compact, queryable audit row only after the business cycle, autonomy OS, first-cash mode
+# and secretarial brief completed. The journal uses its own Postgres table so global state stays bounded.
 journal = record_cycle(STATE, source="worker_complete")
 print({"cycle_journal": {k: v for k, v in journal.items() if k != "entry"}}, flush=True)
