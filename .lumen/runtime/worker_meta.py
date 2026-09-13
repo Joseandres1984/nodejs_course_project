@@ -93,13 +93,8 @@ def meta_lumen_cycle() -> Dict[str, Any]:
 
     errors: list[Dict[str, str]] = []
 
-    # Economic target/funnel diagnosis first, because the Orchestrator reads this directive.
     revenue = _safe_meta("Revenue Factory", lambda: revenue_factory_tick(STATE), errors)
-
-    # Digital twin proposes only reversible experiments with evidence thresholds.
     simulator = _safe_meta("Strategy Simulator", lambda: strategy_simulator_tick(STATE), errors)
-
-    # Constitutionally arbitrate the single company mode and kill-switch/resource baseline.
     master = _safe_meta(
         "Master Orchestrator",
         lambda: master_orchestrator_tick(
@@ -109,14 +104,8 @@ def meta_lumen_cycle() -> Dict[str, Any]:
         ),
         errors,
     )
-
-    # CEO-like management can reallocate bounded attention and manage portfolios/programs.
     management = _safe_meta("Autonomous Executive Management", lambda: executive_management_cycle(STATE), errors)
-
-    # Controller closes the feedback loop and may apply a second bounded reversible overlay.
     controller = _safe_meta("Business Controller", lambda: business_controller_tick(STATE), errors)
-
-    # Meta-learning diagnoses systematic weaknesses; code changes remain proposals, never self-deploys.
     improvement = _safe_meta("Self-Improvement Lab", lambda: self_improvement_tick(STATE), errors)
 
     report = {
@@ -139,6 +128,7 @@ def meta_lumen_cycle() -> Dict[str, Any]:
                 "reversible strategy experiments",
                 "evidence-based improvement programs",
                 "commercial preparation and nonbinding execution within existing gates",
+                "elastic digital workforce sizing and role allocation",
             ],
             "human_required_only_for": [
                 "binding contracts or acceptance of binding terms",
@@ -157,20 +147,20 @@ def meta_lumen_cycle() -> Dict[str, Any]:
 
 
 def agent_workforce_cycle() -> Dict[str, Any]:
-    """Give Meta-LUMEN a 50-person parallel workforce before the normal production worker runs.
+    """Let Meta-LUMEN choose an elastic workforce before the normal production worker runs.
 
-    The fleet performs evidence gathering and nonbinding analysis only. Search calls remain under the
-    same shared daily budget and protected retail reserve. Results become research leads/signals and
-    must still pass the existing verification, opportunity, risk and closing gates.
+    The workforce performs evidence gathering and nonbinding analysis only. Meta-LUMEN may scale the
+    number and mix of agents according to workload, but all agents share the same daily search budget,
+    evidence standards and constitutional authority boundaries.
     """
     try:
-        from agent_fleet import run_agent_fleet_cycle
+        from elastic_agent_fleet import run_elastic_agent_fleet_cycle
 
         if not load_state():
             report = {"status": "skipped", "reason": "state_unavailable", "fleet_size": 0}
             print({"agent_workforce": report}, flush=True)
             return report
-        report = dict(run_agent_fleet_cycle(STATE) or {})
+        report = dict(run_elastic_agent_fleet_cycle(STATE) or {})
         report["persisted"] = bool(save_state())
         print({"agent_workforce": report}, flush=True)
         return report
@@ -187,8 +177,8 @@ def agent_workforce_cycle() -> Dict[str, Any]:
 # One meta-control pass per cron execution. Meta-LUMEN decides the business focus first.
 meta_lumen_cycle()
 
-# Then the digital organization executes up to 50 parallel assignments under the same evidence,
-# budget and authority boundaries. Its findings are available to the normal worker immediately.
+# Then Meta-LUMEN sizes and composes the digital organization for the current workload.
+# The selected team executes under shared budget/evidence/authority controls and feeds the normal worker.
 agent_workforce_cycle()
 
 # Existing production worker remains the execution engine. Importing this wrapper runs it unchanged after
