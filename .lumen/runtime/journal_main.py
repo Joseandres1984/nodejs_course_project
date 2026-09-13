@@ -15,6 +15,7 @@ from elastic_workforce_panel import inject_workforce_strip, render_workforce_pag
 from professional_casework_panel import inject_casework_strip, render_casework_page
 from partner_panel import inject_partner_strip, inject_public_partner_offers, render_partner_page
 from partner_referral import router as partner_referral_router
+from owner_publications import inject_publication_navigation, render_publications_page
 
 
 app.include_router(market_concierge_router)
@@ -74,7 +75,13 @@ def api_cycle_journal(page: int = Query(1, ge=1), per_page: int = Query(50, ge=1
 @app.get('/market-owner', response_class=HTMLResponse, include_in_schema=False)
 def market_owner_page(_=Depends(auth)):
     load_state()
-    return HTMLResponse(render_owner_market_page(STATE))
+    return HTMLResponse(inject_publication_navigation(render_owner_market_page(STATE)))
+
+
+@app.get('/market-owner/publications', response_class=HTMLResponse, include_in_schema=False)
+def market_owner_publications_page(_=Depends(auth)):
+    load_state()
+    return HTMLResponse(render_publications_page(STATE))
 
 
 @app.get('/workforce', response_class=HTMLResponse, include_in_schema=False)
@@ -127,10 +134,10 @@ def _owner_command_center_links(text: str) -> str:
 
 @app.middleware('http')
 async def lumen_ui_runtime(request: Request, call_next):
-    owner_paths = {'/command-center', '/cycle-journal', '/api/cycle-journal', '/market-owner', '/workforce', '/casework', '/partners'}
+    owner_paths = {'/command-center', '/cycle-journal', '/api/cycle-journal', '/market-owner', '/market-owner/publications', '/workforce', '/casework', '/partners'}
     if request.url.path in owner_paths:
         load_state()
-        if request.url.path not in {'/market-owner', '/workforce', '/casework', '/partners'}:
+        if request.url.path not in {'/market-owner', '/market-owner/publications', '/workforce', '/casework', '/partners'}:
             bootstrap_current_cycle(STATE)
 
     response = await call_next(request)
@@ -154,6 +161,7 @@ async def lumen_ui_runtime(request: Request, call_next):
         text = inject_workforce_strip(text, STATE)
         text = inject_partner_strip(text, STATE)
         text = inject_owner_market_strip(text, STATE)
+        text = inject_publication_navigation(text)
         if 'lumen-cycle-live-v1' not in text:
             text = text.replace('</body>', LIVE_JOURNAL_UI + '</body>', 1)
     elif path == '/market':
