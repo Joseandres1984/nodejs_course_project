@@ -4,7 +4,7 @@ from fastapi import Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
 
 from app import auth
-from executive_alerts import executive_alert_tick, resolve_executive_alert
+from executive_alerts import executive_alert_tick, resolve_executive_alert, _task_signature
 from main import STATE, load_state, save_state
 from mp_main import app
 
@@ -63,6 +63,36 @@ ACTION_UI = r'''
 '''
 
 
+def _prune_resolved_human_tasks() -> int:
+    resolutions = STATE.get('executive_control_resolutions', {}) or {}
+    if not isinstance(resolutions, dict) or not resolutions:
+        return 0
+
+    kept = []
+    removed = 0
+    for task in STATE.get('operating_action_queue', []) or []:
+        if task.get('autonomous', True):
+            kept.append(task)
+            continue
+        try:
+            signature = _task_signature(task)
+        except Exception:
+            signature = ''
+        if signature and signature in resolutions:
+            removed += 1
+            continue
+        kept.append(task)
+
+    if removed:
+        STATE['operating_action_queue'] = kept
+        STATE.setdefault('activity', []).insert(0, {
+            'ts': (STATE.get('last_tick') or ''),
+            'msg': f'LUMEN retiró {removed} señal(es) ejecutiva(s) ya resuelta(s) de la bandeja "José debe decidir".',
+        })
+        STATE['activity'] = STATE.get('activity', [])[:100]
+    return removed
+
+
 @app.post('/api/executive-alert-action')
 def executive_alert_action(
     alert_id: str = Form(...),
@@ -71,10 +101,11 @@ def executive_alert_action(
 ):
     load_state()
     try:
-        result = resolve_executive_alert(STATE, alert_id, action)
+        resolve_executive_alert(STATE, alert_id, action)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     executive_alert_tick(STATE)
+    _prune_resolved_human_tasks()
     if not save_state():
         raise HTTPException(status_code=503, detail='La acción se procesó en memoria pero no pudo persistirse')
     return RedirectResponse('/command-center', status_code=303)
@@ -82,6 +113,12 @@ def executive_alert_action(
 
 @app.middleware('http')
 async def executive_alert_action_ui(request: Request, call_next):
+    if request.url.path in {'/command-center', '/api/control-tower'}:
+        load_state()
+        executive_alert_tick(STATE)
+        if _prune_resolved_human_tasks():
+            save_state()
+
     response = await call_next(request)
     if request.url.path != '/command-center' or 'text/html' not in str(response.headers.get('content-type') or ''):
         return response
