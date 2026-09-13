@@ -7,7 +7,7 @@ from typing import Any, Dict
 import outbound_engine
 from https_mail_transport import transport_status
 
-VERSION = "1.0-external-market-readiness"
+VERSION = "1.1-external-market-readiness"
 MAX_EVENTS = 400
 
 
@@ -45,6 +45,34 @@ def _reason(account: Dict[str, Any], state: Dict[str, Any]) -> str | None:
     score, _ = outbound_engine._score(state, account)
     if score < outbound_engine.MIN_SCORE:
         return "below_outbound_score"
+    return None
+
+
+def _provider_block(state: Dict[str, Any], provider: str | None) -> Dict[str, Any] | None:
+    errors = []
+    health = dict(state.get("mail_transport_health", {}) or {})
+    if health.get("error"):
+        errors.append(str(health.get("error")))
+    for item in reversed(state.get("outbox", []) or []):
+        if item.get("status") != "send_failed":
+            continue
+        error = str(item.get("last_error") or item.get("last_transport_error") or "")
+        if error:
+            errors.append(error)
+        if len(errors) >= 8:
+            break
+
+    joined = "\n".join(errors).lower()
+    if provider == "brevo" and (
+        "unrecognised ip address" in joined
+        or "unrecognized ip address" in joined
+        or "authorised_ips" in joined
+        or "authorized_ips" in joined
+    ):
+        return {
+            "code": "brevo_api_ip_not_authorized",
+            "detail": "Brevo está rechazando la API porque la IP de salida de Railway no está autorizada.",
+        }
     return None
 
 
@@ -86,7 +114,14 @@ def external_market_readiness_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     awaiting_connector = sum(1 for x in social_jobs if x.get("status") == "awaiting_authorized_connector")
 
     live_requested = bool(getattr(outbound_engine, "LIVE", False))
-    if not transport.get("ready"):
+    provider_block = _provider_block(state, transport.get("provider"))
+    configured = bool(transport.get("ready"))
+    effective_transport_ready = configured and provider_block is None
+
+    if provider_block:
+        status = "BLOCKED"
+        blocker = provider_block["code"]
+    elif not configured:
         status = "BLOCKED"
         blocker = "mail_transport_not_ready"
     elif not live_requested:
@@ -104,9 +139,11 @@ def external_market_readiness_tick(state: Dict[str, Any]) -> Dict[str, Any]:
         "updated_at": utcnow(),
         "status": status,
         "primary_blocker": blocker,
-        "mail_transport_ready": bool(transport.get("ready")),
+        "mail_transport_configured": configured,
+        "mail_transport_ready": effective_transport_ready,
         "mail_provider": transport.get("provider"),
         "mail_route": transport.get("route"),
+        "mail_provider_block_detail": provider_block.get("detail") if provider_block else None,
         "outbound_live": live_requested,
         "commercial_accounts": len(commercial_accounts),
         "eligible_external_prospects": eligible,
@@ -124,12 +161,13 @@ def external_market_readiness_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     if signature != previous_signature:
         if status == "BLOCKED":
             top_reasons = ", ".join(f"{k}={v}" for k, v in list(report["ineligibility_reasons"].items())[:4]) or "sin diagnóstico adicional"
+            detail = report.get("mail_provider_block_detail") or f"Motivos principales: {top_reasons}."
             _add_event(
                 state,
                 f"external_block:{signature}",
                 "HIGH",
                 "Salida comercial externa bloqueada",
-                f"LUMEN está online pero no puede alcanzar mercado por {blocker}. Elegibles={eligible}. Motivos principales: {top_reasons}.",
+                f"LUMEN está online pero no puede alcanzar mercado por {blocker}. Elegibles={eligible}. {detail}",
             )
         elif status == "READY":
             _add_event(
