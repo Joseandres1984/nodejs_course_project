@@ -14,6 +14,35 @@ def _esc(value: Any) -> str:
     return html.escape(str(value or ""), quote=True)
 
 
+def _startup_outbound_snapshot() -> None:
+    try:
+        loaded = load_state()
+        report = dict(STATE.get("outbound_engine", {}) or {})
+        transport = dict(STATE.get("mail_transport_health", {}) or {})
+        print({
+            "startup_outbound_engine": {
+                "state_loaded": bool(loaded),
+                "version": report.get("version"),
+                "status": report.get("status"),
+                "live": bool(report.get("live")),
+                "eligible_prospects": int(report.get("eligible_prospects") or 0),
+                "messages_total": int(report.get("messages_total") or 0),
+                "sent_total": int(report.get("sent_total") or 0),
+                "delivered_verified": int(report.get("delivered_verified") or 0),
+                "send_failed": int(report.get("send_failed") or 0),
+                "replies_detected": int(report.get("replies_detected") or 0),
+                "daily_remaining": int(report.get("daily_remaining") or 0),
+                "mail_transport_ok": bool(transport.get("ok")),
+                "mail_provider": transport.get("provider"),
+            }
+        }, flush=True)
+    except Exception as exc:
+        print({"startup_outbound_engine": {"status": "unavailable", "error": f"{type(exc).__name__}: {str(exc)[:240]}"}}, flush=True)
+
+
+_startup_outbound_snapshot()
+
+
 @app.get("/health/outbound", include_in_schema=False)
 def outbound_health():
     loaded = load_state()
