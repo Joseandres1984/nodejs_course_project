@@ -28,6 +28,10 @@ import operational_health_runtime  # noqa: F401
 # falling back to hosting-blocked SMTP while preserving the existing Go-Live/quality/contact gates.
 import https_mail_transport  # noqa: F401
 
+# Archive each provider-confirmed Brevo send into Gmail Sent via IMAP without resending it.
+# The runtime is idempotent and deduplicates by LUMEN outbox id before appending.
+import gmail_sent_runtime  # noqa: F401
+
 # Shadow market intelligence enriches only the existing robots-respecting public catalog pipeline.
 # It is disabled by default and has no outreach, deal, purchase, approval or financial authority.
 import market_intelligence_runtime  # noqa: F401
