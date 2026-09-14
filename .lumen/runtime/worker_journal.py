@@ -62,8 +62,15 @@ external_readiness = external_market_readiness_tick(STATE)
 from continuous_revenue_drive_runtime import continuous_revenue_drive_tick  # noqa: E402
 continuous_revenue = continuous_revenue_drive_tick(STATE)
 
-# Build the executive-secretary brief from the now-unified, cash-prioritized and continuous-revenue
-# state so the daily brief reflects the same priorities the autonomous operating system will carry.
+# Continuous Learning closes the loop after fresh commercial state and CRD have been calculated.
+# It measures outcomes, updates the improvement ledger, scores already-collected public evidence,
+# and feeds research-only learning context back into the revenue drive. Web content remains
+# untrusted data and this layer cannot widen contractual, financial, legal or deployment authority.
+from continuous_learning_runtime import continuous_learning_tick  # noqa: E402
+continuous_learning = continuous_learning_tick(STATE)
+
+# Build the executive-secretary brief from the now-unified, cash-prioritized, continuous-revenue
+# and learning state so the brief reflects the same priorities carried into the next cycle.
 secretary = secretary_tick(STATE)
 
 # Route only evidence-backed IMPORTANT/CRITICAL events through the already configured WhatsApp channel.
@@ -77,6 +84,7 @@ autonomy["persisted"] = persisted
 first_cash["persisted"] = persisted
 external_readiness["persisted"] = persisted
 continuous_revenue["persisted"] = persisted
+continuous_learning["persisted"] = persisted
 notifications["persisted"] = persisted
 
 print({
@@ -146,6 +154,25 @@ print({
 }, flush=True)
 
 print({
+    "continuous_learning": {
+        "status": continuous_learning.get("status"),
+        "mode": continuous_learning.get("mode"),
+        "objective": continuous_learning.get("objective"),
+        "self_improvement": continuous_learning.get("self_improvement"),
+        "profit_learning": continuous_learning.get("profit_learning"),
+        "external_intelligence": {
+            "status": (continuous_learning.get("external_intelligence") or {}).get("status"),
+            "signals_total": (continuous_learning.get("external_intelligence") or {}).get("signals_total"),
+            "sources_total": (continuous_learning.get("external_intelligence") or {}).get("sources_total"),
+            "high_confidence_signals": (continuous_learning.get("external_intelligence") or {}).get("high_confidence_signals"),
+            "source_classes": (continuous_learning.get("external_intelligence") or {}).get("source_classes"),
+        },
+        "improvement_ledger": continuous_learning.get("improvement_ledger"),
+        "persisted": continuous_learning.get("persisted"),
+    }
+}, flush=True)
+
+print({
     "executive_secretary": {
         "status": secretary.get("status"),
         "news": len(secretary.get("news", []) or []),
@@ -170,7 +197,7 @@ print({
 }, flush=True)
 
 # Persist one compact, queryable audit row only after the business cycle, autonomy OS, first-cash mode,
-# external-readiness audit, continuous revenue drive, secretarial brief and notification routing completed.
-# The journal uses its own Postgres table so global state stays bounded.
+# external-readiness audit, continuous revenue drive, continuous learning, secretarial brief and
+# notification routing completed. The journal uses its own Postgres table so global state stays bounded.
 journal = record_cycle(STATE, source="worker_complete")
 print({"cycle_journal": {k: v for k, v in journal.items() if k != "entry"}}, flush=True)
