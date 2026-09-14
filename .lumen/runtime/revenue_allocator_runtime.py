@@ -6,7 +6,7 @@ from typing import Any, Dict
 import agent_fleet
 import elastic_agent_fleet
 
-VERSION = "1.0-revenue-allocator"
+VERSION = "1.1-revenue-allocator"
 _ORIGINAL_RUN = elastic_agent_fleet.run_elastic_agent_fleet_cycle
 
 LANE_WEIGHTS = {
@@ -72,6 +72,26 @@ def _metrics(state: Dict[str, Any]) -> Dict[str, int]:
     }
 
 
+def _two_brain_weights(state: Dict[str, Any], lane: str) -> tuple[Dict[str, float], int]:
+    weights = dict(LANE_WEIGHTS[lane])
+    learning = state.get("commercial_learning_v2", {}) or {}
+    two = learning.get("two_brain", {}) or {}
+    explore_pct = int((two.get("exploration_brain", {}) or {}).get("attention_pct") or 25)
+    explore_pct = max(15, min(35, explore_pct))
+    target = explore_pct / 100.0
+    exploration_roles = {"buyer_hunter", "market_scout"}
+    current_explore = sum(weights.get(k, 0.0) for k in exploration_roles)
+    current_execute = max(1e-9, 1.0 - current_explore)
+    if current_explore > 0:
+        for role in exploration_roles:
+            weights[role] = weights[role] / current_explore * target
+    for role in weights:
+        if role not in exploration_roles:
+            weights[role] = weights[role] / current_execute * (1.0 - target)
+    total = sum(weights.values()) or 1.0
+    return {k: v / total for k, v in weights.items()}, explore_pct
+
+
 def build_revenue_allocation(state: Dict[str, Any]) -> Dict[str, Any]:
     m = _metrics(state)
     crd = state.get("continuous_revenue_drive", {}) or {}
@@ -98,6 +118,22 @@ def build_revenue_allocation(state: Dict[str, Any]) -> Dict[str, Any]:
         reason = "No hay una ruta de conversión suficientemente madura; ampliar demanda de calidad sin abandonar validación."
         metric = "buyers_with_demand > 0"
 
+    learning = state.get("commercial_learning_v2", {}) or {}
+    anti = learning.get("anti_drift", {}) or {}
+    board = learning.get("review_board", {}) or {}
+    recommended = str(anti.get("recommended_lane") or "")
+    if anti.get("status") == "triggered" and board.get("status") == "AUTO_APPROVED_REVERSIBLE" and recommended in LANE_WEIGHTS:
+        old_lane = lane
+        lane = recommended
+        reason = f"Anti-drift rotó de {old_lane} a {lane}: {anti.get('reason') or 'sin progreso verificable suficiente'}."
+        metric = {
+            "closing": "close_ready > 0", "quote_creation": "real_offers > 0",
+            "opportunity_building": "market_opportunities > 0",
+            "verification_contact": "eligible_external_prospects > 0",
+            "demand_discovery": "buyers_with_demand > 0",
+        }[lane]
+
+    target_weights, explore_pct = _two_brain_weights(state, lane)
     return {
         "version": VERSION,
         "status": "active",
@@ -105,7 +141,10 @@ def build_revenue_allocation(state: Dict[str, Any]) -> Dict[str, Any]:
         "lane": lane,
         "reason": reason,
         "success_metric": metric,
-        "target_weights": dict(LANE_WEIGHTS[lane]),
+        "target_weights": target_weights,
+        "execution_attention_pct": 100 - explore_pct,
+        "exploration_attention_pct": explore_pct,
+        "anti_drift_applied": bool(anti.get("status") == "triggered" and lane == recommended),
         "metrics": m,
         "authority": "attention_and_reversible_workforce_allocation_only",
     }
@@ -118,7 +157,6 @@ def _run_with_revenue_allocation(state: Dict[str, Any]) -> Dict[str, Any]:
     try:
         elastic_agent_fleet.BASE_WEIGHTS.clear()
         elastic_agent_fleet.BASE_WEIGHTS.update(plan["target_weights"])
-        # Keep search-agent selection aligned with the same bottleneck instead of a stale meta directive.
         agent_fleet._bottleneck = lambda _state: str(plan["lane"])
         report = dict(_ORIGINAL_RUN(state) or {})
     finally:
@@ -135,6 +173,9 @@ def _run_with_revenue_allocation(state: Dict[str, Any]) -> Dict[str, Any]:
         "lane": plan["lane"],
         "success_metric": plan["success_metric"],
         "reason": plan["reason"],
+        "execution_attention_pct": plan["execution_attention_pct"],
+        "exploration_attention_pct": plan["exploration_attention_pct"],
+        "anti_drift_applied": plan["anti_drift_applied"],
         "target_weights": plan["target_weights"],
         "actual_role_plan": plan["actual_role_plan"],
     }
