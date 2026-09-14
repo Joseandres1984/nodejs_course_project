@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from fastapi import Request
 
-# Import the production application first so all existing protected routes,
-# middleware, background integrations and command-center behavior stay intact.
-from alert_main import app
+# Import the real production application first so all existing protected routes,
+# middleware, outbound integrations and command-center behavior stay intact.
+from outbound_web import app
 
 # Register the existing public landing routes (/lumen and /about) on the same app.
 from landing_public import _render as render_public_landing  # noqa: E402
