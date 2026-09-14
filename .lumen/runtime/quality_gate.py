@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 
@@ -19,6 +20,8 @@ RISKY_COMMITMENT_PHRASES = (
 )
 REVOPS_MULTITURN_KINDS = {"quote_clarification", "supplier_negotiation", "buyer_information_response", "terms_clarification"}
 RED_TEAM_SENSITIVE_KINDS = {"buyer_proposal", "supplier_negotiation", "buyer_information_response", "payment_status_reminder", "commission_payment_request", "customer_success_checkin"}
+FIRST_TOUCH_OUTBOUND_KINDS = {"network_supplier_intro", "buyer_intro", "buyer_requirement_request"}
+MIN_COMPANY_IDENTITY_CONFIDENCE = max(0.0, min(1.0, float(os.getenv("LUMEN_MIN_COMPANY_IDENTITY_CONFIDENCE", "0.55"))))
 
 
 def _log(state: Dict[str, Any], message: str) -> None:
@@ -69,6 +72,16 @@ def _review(state: Dict[str, Any], item: Dict[str, Any]) -> tuple[bool, List[str
     if _duplicate_sent(state, item) and kind != "follow_up": reasons.append("Mensaje comercial equivalente ya enviado")
     if any(phrase in body.lower() for phrase in RISKY_COMMITMENT_PHRASES): reasons.append("El texto contiene un compromiso financiero/contractual/de responsabilidad no permitido")
 
+    if item.get("source") == "outbound_engine" and kind in FIRST_TOUCH_OUTBOUND_KINDS:
+        try:
+            identity_confidence = float(item.get("company_identity_confidence") or 0.0)
+        except (TypeError, ValueError):
+            identity_confidence = 0.0
+        if identity_confidence < MIN_COMPANY_IDENTITY_CONFIDENCE:
+            reasons.append(
+                f"Identidad empresarial insuficientemente validada ({identity_confidence:.2f} < {MIN_COMPANY_IDENTITY_CONFIDENCE:.2f})"
+            )
+
     relation = _relationship_for(state, target, str(item.get("counterparty") or ""))
     if relation:
         if relation.get("opted_out") or relation.get("relationship_state") == "do_not_contact": reasons.append("Relationship Memory bloquea contacto")
@@ -115,7 +128,7 @@ def quality_tick(state: Dict[str, Any]) -> Dict[str, int]:
         passed, reasons = _review(state, item); item["quality_reviewed"] = True; item["quality_reviewed_at"] = utcnow(); item["quality_gate"] = "passed" if passed else "blocked"; item["quality_reasons"] = reasons[:8]
         if passed:
             stats["passed"] += 1
-            record_decision(state, engine="Quality Gate", object_type="message", object_id=str(item.get("id") or ""), decision="outbound_quality_passed", reason="Contacto, tono, relación, riesgo, Red Team, trazabilidad, Safeguards y riel financiero cumplen las reglas de salida.", action="authorize_message_for_mail_connector", confidence=0.99, evidence_refs=[])
+            record_decision(state, engine="Quality Gate", object_type="message", object_id=str(item.get("id") or ""), decision="outbound_quality_passed", reason="Contacto, identidad empresarial, tono, relación, riesgo, Red Team, trazabilidad, Safeguards y riel financiero cumplen las reglas de salida.", action="authorize_message_for_mail_connector", confidence=0.99, evidence_refs=[])
         else:
             item["status"] = "blocked_quality"; stats["blocked"] += 1
             record_decision(state, engine="Quality Gate", object_type="message", object_id=str(item.get("id") or ""), decision="outbound_blocked", reason="; ".join(reasons[:5]) or "Control de calidad no superado", action="block_outbound", confidence=0.99, evidence_refs=[])
