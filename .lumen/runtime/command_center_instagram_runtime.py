@@ -5,9 +5,14 @@ from __future__ import annotations
 import html
 from typing import Any, Dict
 
-import control_tower as _ct
+from fastapi import Request
+from fastapi.responses import Response
 
-VERSION = "1.0-command-center-instagram"
+import control_tower as _ct
+from app import STATE, load_state
+from outbound_web import app
+
+VERSION = "1.1-command-center-instagram"
 _ORIGINAL_BUILD = _ct.build_control_tower
 _ORIGINAL_RENDER = _ct.render_control_tower
 
@@ -23,10 +28,9 @@ def _i(value: Any, default: int = 0) -> int:
         return default
 
 
-def instagram_build_control_tower(state: Dict[str, Any], db_status: Dict[str, Any]) -> Dict[str, Any]:
-    snapshot = dict(_ORIGINAL_BUILD(state, db_status) or {})
+def _operator_snapshot(state: Dict[str, Any]) -> Dict[str, Any]:
     operator = dict(state.get("instagram_operator", {}) or {})
-    snapshot["instagram_operator"] = {
+    return {
         "status": operator.get("status") or "active",
         "inbox_total": _i(operator.get("inbox_total")),
         "pending_review": _i(operator.get("pending_review")),
@@ -36,26 +40,21 @@ def instagram_build_control_tower(state: Dict[str, Any], db_status: Dict[str, An
         "send_enabled": bool(operator.get("send_enabled")),
         "updated_at": operator.get("updated_at"),
     }
-    state["control_tower"] = snapshot
-    return snapshot
 
 
-def instagram_render_control_tower(snapshot: Dict[str, Any]) -> str:
-    page = _ORIGINAL_RENDER(snapshot)
-    ig = snapshot.get("instagram_operator", {}) or {}
-
-    css = """
+def _instagram_css() -> str:
+    return """
 <style id="lumen-instagram-cc-css">
-.ig-section{margin-top:14px}.ig-link-card{display:block;color:inherit;text-decoration:none}.ig-link-card:hover{border-color:#4f7890}.ig-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}.ig-cta{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:10px}.ig-button{display:inline-block;background:#d7ff64;color:#071018!important;border-radius:9px;padding:10px 14px;font-weight:850;text-decoration:none!important}.ig-state{color:var(--good);font-weight:800}.ig-note{font-size:11px;color:var(--muted);margin-top:4px}
+.ig-section{margin-top:14px}.ig-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}.ig-cta{display:flex;justify-content:space-between;align-items:center;gap:12px}.ig-button{display:inline-block;background:#d7ff64;color:#071018!important;border-radius:9px;padding:10px 14px;font-weight:850;text-decoration:none!important}.ig-state{color:var(--good);font-weight:800}.ig-note{font-size:11px;color:var(--muted);margin-top:4px}
 @media(max-width:900px){.ig-grid{grid-template-columns:1fr 1fr}.ig-cta{align-items:flex-start;flex-direction:column}}
 @media(max-width:620px){.ig-grid{grid-template-columns:1fr 1fr}}
 </style>
 """
-    if "lumen-instagram-cc-css" not in page:
-        page = page.replace("</head>", css + "</head>", 1)
 
-    section = f"""
-<section class="ig-section">
+
+def _instagram_section(ig: Dict[str, Any]) -> str:
+    return f"""
+<section class="ig-section" id="instagram-operator-card">
   <div class="card">
     <div class="ig-cta">
       <div>
@@ -76,11 +75,59 @@ def instagram_render_control_tower(snapshot: Dict[str, Any]) -> str:
   </div>
 </section>
 """
-    if "Abrir Instagram Operator" not in page:
-        page = page.replace("</body>", section + "</body>", 1)
+
+
+def inject_instagram_strip(page: str, state: Dict[str, Any]) -> str:
+    if "lumen-instagram-cc-css" not in page:
+        page = page.replace("</head>", _instagram_css() + "</head>", 1)
+    if "instagram-operator-card" not in page:
+        page = page.replace("</body>", _instagram_section(_operator_snapshot(state)) + "</body>", 1)
+    return page
+
+
+def instagram_build_control_tower(state: Dict[str, Any], db_status: Dict[str, Any]) -> Dict[str, Any]:
+    snapshot = dict(_ORIGINAL_BUILD(state, db_status) or {})
+    snapshot["instagram_operator"] = _operator_snapshot(state)
+    state["control_tower"] = snapshot
+    return snapshot
+
+
+def instagram_render_control_tower(snapshot: Dict[str, Any]) -> str:
+    page = _ORIGINAL_RENDER(snapshot)
+    ig = dict(snapshot.get("instagram_operator", {}) or {})
+    if "lumen-instagram-cc-css" not in page:
+        page = page.replace("</head>", _instagram_css() + "</head>", 1)
+    if "instagram-operator-card" not in page:
+        page = page.replace("</body>", _instagram_section(ig) + "</body>", 1)
     return page
 
 
 _ct.build_control_tower = instagram_build_control_tower
 _ct.render_control_tower = instagram_render_control_tower
-print({"command_center_instagram_runtime": {"version": VERSION, "status": "active", "route": "/instagram"}}, flush=True)
+
+
+@app.middleware("http")
+async def command_center_instagram_injector(request: Request, call_next):
+    response = await call_next(request)
+    if request.url.path != "/command-center":
+        return response
+    if "text/html" not in str(response.headers.get("content-type") or ""):
+        return response
+
+    try:
+        load_state()
+        body = b""
+        async for chunk in response.body_iterator:
+            body += chunk
+        text = body.decode("utf-8", errors="replace")
+        text = inject_instagram_strip(text, STATE)
+        headers = dict(response.headers)
+        headers.pop("content-length", None)
+        print({"command_center_instagram_injector": {"status": "applied", "visible": "instagram-operator-card" in text}}, flush=True)
+        return Response(content=text, status_code=response.status_code, headers=headers, media_type="text/html")
+    except Exception as exc:
+        print({"command_center_instagram_injector": {"status": "error", "error": f"{type(exc).__name__}: {str(exc)[:240]}"}}, flush=True)
+        return response
+
+
+print({"command_center_instagram_runtime": {"version": VERSION, "status": "active", "route": "/instagram", "direct_injector": True}}, flush=True)
