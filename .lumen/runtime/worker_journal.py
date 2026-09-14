@@ -56,8 +56,14 @@ first_cash = first_cash_tick(STATE, autonomy)
 # exact blockers (transport/live/eligibility) and creates a high-severity internal event on change.
 external_readiness = external_market_readiness_tick(STATE)
 
-# Build the executive-secretary brief from the now-unified and cash-prioritized queue so the daily brief
-# reflects the same priorities the autonomous operating system will carry into the next cycle.
+# Continuous Revenue Drive is called explicitly here instead of relying on an import-time wrapper.
+# This makes the revenue fallback deterministic: every completed worker cycle refreshes a ranked,
+# non-binding next-action queue even when fresh search budget is exhausted.
+from continuous_revenue_drive_runtime import continuous_revenue_drive_tick  # noqa: E402
+continuous_revenue = continuous_revenue_drive_tick(STATE)
+
+# Build the executive-secretary brief from the now-unified, cash-prioritized and continuous-revenue
+# state so the daily brief reflects the same priorities the autonomous operating system will carry.
 secretary = secretary_tick(STATE)
 
 # Route only evidence-backed IMPORTANT/CRITICAL events through the already configured WhatsApp channel.
@@ -70,6 +76,7 @@ secretary["persisted"] = persisted
 autonomy["persisted"] = persisted
 first_cash["persisted"] = persisted
 external_readiness["persisted"] = persisted
+continuous_revenue["persisted"] = persisted
 notifications["persisted"] = persisted
 
 print({
@@ -123,6 +130,22 @@ print({
 }, flush=True)
 
 print({
+    "continuous_revenue_drive": {
+        "status": continuous_revenue.get("status"),
+        "mode": continuous_revenue.get("mode"),
+        "objective": continuous_revenue.get("objective"),
+        "never_idle": continuous_revenue.get("never_idle"),
+        "search_budget_exhausted": continuous_revenue.get("search_budget_exhausted"),
+        "search_remaining": continuous_revenue.get("search_remaining"),
+        "primary_lane": continuous_revenue.get("primary_lane"),
+        "primary_action": continuous_revenue.get("primary_action"),
+        "primary_success_metric": continuous_revenue.get("primary_success_metric"),
+        "queue_size": len(continuous_revenue.get("priority_queue") or []),
+        "persisted": continuous_revenue.get("persisted"),
+    }
+}, flush=True)
+
+print({
     "executive_secretary": {
         "status": secretary.get("status"),
         "news": len(secretary.get("news", []) or []),
@@ -147,7 +170,7 @@ print({
 }, flush=True)
 
 # Persist one compact, queryable audit row only after the business cycle, autonomy OS, first-cash mode,
-# external-readiness audit, secretarial brief and notification routing completed. The journal uses its
-# own Postgres table so global state stays bounded.
+# external-readiness audit, continuous revenue drive, secretarial brief and notification routing completed.
+# The journal uses its own Postgres table so global state stays bounded.
 journal = record_cycle(STATE, source="worker_complete")
 print({"cycle_journal": {k: v for k, v in journal.items() if k != "entry"}}, flush=True)
