@@ -40,4 +40,11 @@ import market_intelligence_runtime  # noqa: F401
 # read-only compatibility shim and does not mutate persisted acquisition campaign rows.
 import continuous_learning_compat_runtime  # noqa: F401
 
+# Revenue Execution v2: dynamically allocate the existing workforce to the current revenue lane,
+# adapt the existing search envelope without increasing its total cap, and turn demand evidence into
+# evidence-gated opportunity work plus causal funnel telemetry before Autonomy OS builds its queue.
+import adaptive_search_budget_runtime  # noqa: F401
+import revenue_allocator_runtime  # noqa: F401
+import revenue_execution_bridge_runtime  # noqa: F401
+
 runpy.run_module("worker_journal", run_name="__main__")
