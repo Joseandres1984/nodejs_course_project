@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 import scout_connector
 
 
-VERSION = "1.1-autonomous-search-budget-governor"
+VERSION = "1.2-autonomous-search-budget-governor"
 TZ_NAME = str(os.getenv("LUMEN_SCOUT_TIMEZONE", "America/Argentina/Buenos_Aires")).strip() or "America/Argentina/Buenos_Aires"
 try:
     LOCAL_TZ = ZoneInfo(TZ_NAME)
@@ -79,6 +79,19 @@ def _migration_debt_for_today(state: Dict[str, Any]) -> int:
     return min(DEMAND_RESERVED, max(0, legacy_used - GENERAL_POOL_CAP))
 
 
+def _real_total_remaining(state: Dict[str, Any], demand_used: int) -> int:
+    """Never create new provider capacity by changing lane sizes during the same day.
+
+    General queries already executed above a newly reduced general-pool cap still count against the
+    real daily provider envelope. This matters when LUMEN reallocates budget intraday.
+    """
+    general = state.get("scout_budget", {}) or {}
+    general_used = 0
+    if str(general.get("date") or "") == local_day():
+        general_used = max(0, _int(general.get("queries_used"), 0))
+    return max(0, TOTAL_DAILY_CAP - general_used - max(0, demand_used))
+
+
 def demand_budget(state: Dict[str, Any]) -> Dict[str, Any]:
     """Dedicated reserve for Demand Hunter, demand confirmation and buyer identity resolution."""
     today = local_day()
@@ -112,7 +125,8 @@ def demand_budget(state: Dict[str, Any]) -> Dict[str, Any]:
     budget["timezone"] = TZ_NAME
     budget["daily_budget"] = DEMAND_RESERVED
     budget["queries_used"] = max(0, _int(budget.get("queries_used"), 0))
-    budget["queries_remaining"] = max(0, DEMAND_RESERVED - budget["queries_used"])
+    lane_remaining = max(0, DEMAND_RESERVED - budget["queries_used"])
+    budget["queries_remaining"] = min(lane_remaining, _real_total_remaining(state, budget["queries_used"]))
     budget["governor_version"] = VERSION
     budget["updated_at"] = utcnow()
     return budget
@@ -122,7 +136,8 @@ def reserve_demand_search(state: Dict[str, Any], wanted: int = 1) -> int:
     budget = demand_budget(state)
     count = max(0, min(_int(wanted, 0), _int(budget.get("queries_remaining"), 0)))
     budget["queries_used"] += count
-    budget["queries_remaining"] = max(0, DEMAND_RESERVED - budget["queries_used"])
+    lane_remaining = max(0, DEMAND_RESERVED - budget["queries_used"])
+    budget["queries_remaining"] = min(lane_remaining, _real_total_remaining(state, budget["queries_used"]))
     budget["updated_at"] = utcnow()
     return count
 
@@ -130,21 +145,22 @@ def reserve_demand_search(state: Dict[str, Any], wanted: int = 1) -> int:
 def summary(state: Dict[str, Any]) -> Dict[str, Any]:
     general = general_budget(state)
     demand = demand_budget(state)
-    general_effective = min(GENERAL_POOL_CAP, max(0, _int(general.get("queries_used"), 0)))
-    demand_effective = min(DEMAND_RESERVED, max(0, _int(demand.get("queries_used"), 0)))
+    general_actual = max(0, _int(general.get("queries_used"), 0))
+    demand_actual = max(0, _int(demand.get("queries_used"), 0))
+    actual_total = general_actual + demand_actual
     return {
         "version": VERSION,
         "timezone": TZ_NAME,
         "total_daily_cap": TOTAL_DAILY_CAP,
         "general_retail_pool_daily": GENERAL_POOL_CAP,
-        "general_retail_used": general_effective,
-        "general_retail_remaining": max(0, GENERAL_POOL_CAP - general_effective),
+        "general_retail_used": general_actual,
+        "general_retail_remaining": max(0, GENERAL_POOL_CAP - general_actual),
         "demand_reserved_daily": DEMAND_RESERVED,
-        "demand_used": demand_effective,
-        "demand_remaining": max(0, DEMAND_RESERVED - demand_effective),
-        "effective_total_used": min(TOTAL_DAILY_CAP, general_effective + demand_effective),
-        "effective_total_remaining": max(0, TOTAL_DAILY_CAP - general_effective - demand_effective),
-        "allocation_policy": "demand_reserved_plus_general_retail_same_total_cap",
+        "demand_used": demand_actual,
+        "demand_remaining": int(demand.get("queries_remaining") or 0),
+        "effective_total_used": min(TOTAL_DAILY_CAP, actual_total),
+        "effective_total_remaining": max(0, TOTAL_DAILY_CAP - actual_total),
+        "allocation_policy": "demand_reserved_plus_general_retail_same_total_cap_intraday_safe",
         "updated_at": utcnow(),
     }
 
