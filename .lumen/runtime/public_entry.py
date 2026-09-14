@@ -9,6 +9,9 @@ from outbound_web import app
 # Register the existing public landing routes (/lumen and /about) on the same app.
 from landing_public import _render as render_public_landing  # noqa: E402
 
+# Register public privacy and data-deletion pages used by connected platforms.
+import privacy_public  # noqa: E402,F401
+
 # Register the Instagram integration routes. The connector reads its token only
 # from Railway environment variables and never exposes it in responses.
 import instagram_connector  # noqa: E402,F401
