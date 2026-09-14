@@ -68,4 +68,31 @@ def data_deletion():
     )
 
 
-print({"privacy_public": {"status": "active", "routes": ["/privacy", "/data-deletion"]}}, flush=True)
+@app.get("/terms", response_class=HTMLResponse, include_in_schema=False)
+def terms_of_service():
+    return _page(
+        "Condiciones del Servicio",
+        f"""
+        <h1>Condiciones del Servicio</h1>
+        <p class='muted'>Estas condiciones regulan el uso de los canales digitales y servicios de LUMEN B2B.</p>
+        <div class='card'>
+          <h2>1. Alcance</h2>
+          <p>LUMEN B2B ofrece herramientas y canales de contacto orientados a consultas comerciales, gestión de oportunidades, atención y comunicación B2B.</p>
+          <h2>2. Uso permitido</h2>
+          <p>Las personas usuarias deben utilizar nuestros canales de forma lícita y respetuosa. No está permitido intentar vulnerar sistemas, suplantar identidades, enviar contenido fraudulento, abusivo o malicioso, ni utilizar el servicio para actividades prohibidas por la ley o por las políticas de las plataformas conectadas.</p>
+          <h2>3. Información comercial</h2>
+          <p>Las respuestas, cotizaciones, disponibilidad y demás información comercial pueden estar sujetas a verificación posterior. Ningún mensaje constituye por sí solo una obligación contractual salvo que exista una confirmación expresa y válida por las partes correspondientes.</p>
+          <h2>4. Integraciones de terceros</h2>
+          <p>Algunas funciones dependen de servicios de terceros, incluyendo Meta e Instagram. La disponibilidad de esas funciones puede variar según cambios, límites o políticas de dichas plataformas.</p>
+          <h2>5. Privacidad</h2>
+          <p>El tratamiento de información personal se describe en nuestra <a href='/privacy'>Política de Privacidad</a>.</p>
+          <h2>6. Disponibilidad y cambios</h2>
+          <p>Podemos modificar, suspender o mejorar funciones del servicio cuando sea necesario por razones técnicas, operativas, comerciales o de seguridad.</p>
+          <h2>7. Contacto</h2>
+          <p>Para consultas relacionadas con estas condiciones podés escribir a <a href='mailto:{CONTACT_EMAIL}'>{CONTACT_EMAIL}</a>.</p>
+        </div>
+        """,
+    )
+
+
+print({"privacy_public": {"status": "active", "routes": ["/privacy", "/data-deletion", "/terms"]}}, flush=True)
