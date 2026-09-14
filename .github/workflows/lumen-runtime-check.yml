@@ -6,6 +6,11 @@ on:
     paths:
       - '.lumen/runtime/**'
       - '.github/workflows/lumen-runtime-check.yml'
+  pull_request:
+    branches: [lumen-deploy]
+    paths:
+      - '.lumen/runtime/**'
+      - '.github/workflows/lumen-runtime-check.yml'
   workflow_dispatch:
 
 jobs:
@@ -18,3 +23,5 @@ jobs:
           python-version: '3.12'
       - name: Compile runtime
         run: python -m compileall .lumen/runtime
+      - name: Run market intelligence unit tests
+        run: python -m unittest discover -s .lumen/runtime -p 'test_market_intelligence_scout.py'

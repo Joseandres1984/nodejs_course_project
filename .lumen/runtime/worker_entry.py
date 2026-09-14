@@ -28,4 +28,8 @@ import operational_health_runtime  # noqa: F401
 # falling back to hosting-blocked SMTP while preserving the existing Go-Live/quality/contact gates.
 import https_mail_transport  # noqa: F401
 
+# Shadow market intelligence enriches only the existing robots-respecting public catalog pipeline.
+# It is disabled by default and has no outreach, deal, purchase, approval or financial authority.
+import market_intelligence_runtime  # noqa: F401
+
 runpy.run_module("worker_journal", run_name="__main__")
