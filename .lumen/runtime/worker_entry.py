@@ -36,4 +36,8 @@ import gmail_sent_runtime  # noqa: F401
 # It is disabled by default and has no outreach, deal, purchase, approval or financial authority.
 import market_intelligence_runtime  # noqa: F401
 
+# Normalize legacy production state shapes before Continuous Learning reads metrics. This is a
+# read-only compatibility shim and does not mutate persisted acquisition campaign rows.
+import continuous_learning_compat_runtime  # noqa: F401
+
 runpy.run_module("worker_journal", run_name="__main__")
