@@ -12,7 +12,7 @@ import control_tower as _ct
 from app import STATE, load_state
 from outbound_web import app
 
-VERSION = "1.2-command-center-instagram"
+VERSION = "1.3-command-center-instagram"
 _ORIGINAL_BUILD = _ct.build_control_tower
 _ORIGINAL_RENDER = _ct.render_control_tower
 
@@ -45,9 +45,9 @@ def _operator_snapshot(state: Dict[str, Any]) -> Dict[str, Any]:
 def _instagram_css() -> str:
     return """
 <style id="lumen-instagram-cc-css">
-.ig-section{margin:0 0 14px}.ig-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}.ig-cta{display:flex;justify-content:space-between;align-items:center;gap:12px}.ig-button{display:inline-block;background:#d7ff64;color:#071018!important;border-radius:9px;padding:10px 14px;font-weight:850;text-decoration:none!important}.ig-state{color:var(--good);font-weight:800}.ig-note{font-size:11px;color:var(--muted);margin-top:4px}
+.ig-section{margin:0 0 14px}.ig-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}.ig-cta{display:flex;justify-content:space-between;align-items:center;gap:12px}.ig-button{display:inline-block;background:#d7ff64;color:#071018!important;border-radius:9px;padding:10px 14px;font-weight:850;text-decoration:none!important}.ig-state{color:var(--good);font-weight:800}.ig-note{font-size:11px;color:var(--muted);margin-top:4px}.ig-floating{position:fixed;left:14px;bottom:18px;z-index:10050;background:#d7ff64;color:#071018!important;border:1px solid #efffae;border-radius:999px;padding:12px 16px;font-weight:950;text-decoration:none!important;box-shadow:0 10px 34px #0009;letter-spacing:.01em}
 @media(max-width:900px){.ig-grid{grid-template-columns:1fr 1fr}.ig-cta{align-items:flex-start;flex-direction:column}}
-@media(max-width:620px){.ig-grid{grid-template-columns:1fr 1fr}}
+@media(max-width:620px){.ig-grid{grid-template-columns:1fr 1fr}.ig-floating{left:12px;bottom:76px;padding:11px 14px;font-size:13px}}
 </style>
 """
 
@@ -74,6 +74,7 @@ def _instagram_section(ig: Dict[str, Any]) -> str:
     <div class="ig-note">Estado: <span class="ig-state">{_esc(ig.get('status') or 'active')}</span> · envío automático: no; cada respuesta requiere aprobación.</div>
   </div>
 </section>
+<a class="ig-floating" id="instagram-operator-floating" href="/instagram">Instagram Operator</a>
 """
 
 
@@ -87,6 +88,8 @@ def inject_instagram_strip(page: str, state: Dict[str, Any]) -> str:
             page = page.replace(marker, section + marker, 1)
         else:
             page = page.replace("</body>", section + "</body>", 1)
+    elif "instagram-operator-floating" not in page:
+        page = page.replace("</body>", '<a class="ig-floating" id="instagram-operator-floating" href="/instagram">Instagram Operator</a></body>', 1)
     return page
 
 
@@ -133,11 +136,11 @@ async def command_center_instagram_injector(request: Request, call_next):
         text = inject_instagram_strip(text, STATE)
         headers = dict(response.headers)
         headers.pop("content-length", None)
-        print({"command_center_instagram_injector": {"status": "applied", "visible": "instagram-operator-card" in text, "placement": "top"}}, flush=True)
+        print({"command_center_instagram_injector": {"status": "applied", "visible": "instagram-operator-card" in text, "floating": "instagram-operator-floating" in text, "placement": "top"}}, flush=True)
         return Response(content=text, status_code=response.status_code, headers=headers, media_type="text/html")
     except Exception as exc:
         print({"command_center_instagram_injector": {"status": "error", "error": f"{type(exc).__name__}: {str(exc)[:240]}"}}, flush=True)
         return response
 
 
-print({"command_center_instagram_runtime": {"version": VERSION, "status": "active", "route": "/instagram", "direct_injector": True, "placement": "top"}}, flush=True)
+print({"command_center_instagram_runtime": {"version": VERSION, "status": "active", "route": "/instagram", "direct_injector": True, "placement": "top", "floating_launcher": True}}, flush=True)
