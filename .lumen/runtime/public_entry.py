@@ -21,6 +21,9 @@ import instagram_subscription_runtime  # noqa: E402,F401
 # human-approved replies. This also bridges successful webhooks into the inbox.
 import instagram_operator  # noqa: E402,F401
 
+# Surface Instagram Operator directly inside the owner Command Center.
+import command_center_instagram_runtime  # noqa: E402,F401
+
 
 @app.middleware("http")
 async def public_root_landing(request: Request, call_next):
