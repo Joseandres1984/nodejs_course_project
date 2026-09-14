@@ -44,6 +44,11 @@ import continuous_learning_compat_runtime  # noqa: F401
 # adapt the existing search envelope without increasing its total cap, and turn demand evidence into
 # evidence-gated opportunity work plus causal funnel telemetry before Autonomy OS builds its queue.
 import adaptive_search_budget_runtime  # noqa: F401
+
+# Hard-cap bridge: Agent Fleet and Professional Deep Work must obey the same real provider envelope
+# as Demand Search even after an intraday adaptive reallocation. Already-spent capacity is never recreated.
+import shared_search_cap_runtime  # noqa: F401
+
 import revenue_allocator_runtime  # noqa: F401
 import revenue_execution_bridge_runtime  # noqa: F401
 
