@@ -31,4 +31,8 @@ import quote_accelerator_runtime  # noqa: F401
 import commercial_learning_v2_runtime  # noqa: F401
 import commercial_learning_v2_log_runtime  # noqa: F401
 
+# Final cleanup before Executive Secretary: preserve legacy deals for audit, but suppress any
+# Safe Close / data-truth / first-cash queue item that still points to a quarantined deal.
+import canonical_priority_cleanup  # noqa: F401
+
 runpy.run_module("worker_journal", run_name="__main__")
