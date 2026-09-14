@@ -17,6 +17,10 @@ import instagram_connector  # noqa: E402,F401
 # level to the webhook fields selected in Meta's dashboard.
 import instagram_subscription_runtime  # noqa: E402,F401
 
+# Register the Instagram Operator: inbox, classification, CRM promotion and
+# human-approved replies. This also bridges successful webhooks into the inbox.
+import instagram_operator  # noqa: E402,F401
+
 
 @app.middleware("http")
 async def public_root_landing(request: Request, call_next):
