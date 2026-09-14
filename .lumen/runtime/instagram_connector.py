@@ -126,7 +126,7 @@ def instagram_webhook_verify(request: Request):
 
 @app.post("/webhooks/instagram", include_in_schema=False)
 async def instagram_webhook_receive(request: Request):
-    """Receive signed Instagram webhook events and persist a small audit trail."""
+    """Receive signed Instagram webhook events and persist audit + Operator state atomically."""
     if not INSTAGRAM_APP_SECRET:
         raise HTTPException(status_code=503, detail="Instagram webhook signature verification is not configured")
 
@@ -154,6 +154,33 @@ async def instagram_webhook_receive(request: Request):
         },
     )
     STATE["instagram_webhook_events"] = events[:100]
+
+    operator_created = 0
+    operator_error = None
+    try:
+        # The module is imported lazily to avoid circular imports during startup.
+        # At request time public_entry has already registered Instagram Operator.
+        from instagram_operator import process_instagram_webhook
+
+        operator_result = process_instagram_webhook(payload, persist=False)
+        operator_created = int(operator_result.get("created") or 0)
+    except Exception as exc:
+        operator_error = f"{type(exc).__name__}: {str(exc)[:300]}"
+        print({"instagram_operator_direct_bridge": {"status": "error", "error": operator_error}}, flush=True)
+
     log(f"Instagram webhook recibido ({payload.get('object') or 'evento'}).")
-    save_state()
+    persisted = bool(save_state())
+    print(
+        {
+            "instagram_webhook_receive": {
+                "status": "ok",
+                "persisted": persisted,
+                "operator_created": operator_created,
+                "operator_error": operator_error,
+                "raw_events": len(STATE.get("instagram_webhook_events", []) or []),
+                "operator_inbox": len(STATE.get("instagram_inbox", []) or []),
+            }
+        },
+        flush=True,
+    )
     return {"ok": True}
