@@ -1,22 +1,12 @@
-"""LUMEN Continuous Revenue Drive.
-
-Keeps the autonomous company productive when one resource pool (for example
-external search) is exhausted. It does not authorize binding contracts,
-payments, legal commitments, production self-modification, or new external
-accounts/connectors.
-
-This module is intentionally additive and reversible: importing it installs
-small runtime wrappers around existing ticks so LUMEN always records a
-revenue-oriented fallback plan and keeps reallocating attention to the current
-commercial bottleneck.
-"""
+"""LUMEN Continuous Revenue Drive."""
 from __future__ import annotations
 
-import os
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 
-VERSION = "1.0-continuous-revenue-drive"
+from canonical_revenue_truth_runtime import canonical_revenue_truth_tick
+
+VERSION = "1.1-continuous-revenue-drive-canonical"
 
 
 def _now() -> str:
@@ -27,178 +17,113 @@ def _safe_dict(value: Any) -> Dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def _safe_list(value: Any) -> List[Any]:
-    return value if isinstance(value, list) else []
-
-
-def _score_actions(state: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Build a ranked queue of useful non-binding work from existing state."""
+def _score_actions(state: Dict[str, Any], truth: Dict[str, Any]) -> List[Dict[str, Any]]:
     funnel = _safe_dict(state.get("business_funnel"))
     readiness = _safe_dict(state.get("external_market_readiness"))
-    workforce = _safe_dict(state.get("agent_workforce"))
-    professional = _safe_dict(state.get("professional_casework"))
     acquisition = _safe_dict(state.get("acquisition_campaigns"))
     distribution = _safe_dict(state.get("distribution_operator"))
-
+    counts = truth.get("counts", {}) or {}
     actions: List[Dict[str, Any]] = []
 
     def add(priority: int, lane: str, action: str, reason: str, metric: str) -> None:
-        actions.append({
-            "priority": priority,
-            "lane": lane,
-            "action": action,
-            "reason": reason,
-            "success_metric": metric,
-            "binding": False,
-        })
+        actions.append({"priority": priority, "lane": lane, "action": action, "reason": reason, "success_metric": metric, "binding": False})
 
+    canonical_opps = int(counts.get("canonical_opportunities") or 0)
+    closing_eligible = int(counts.get("closing_eligible_deals") or 0)
+    close_ready = int(counts.get("canonical_close_ready") or 0)
+    demand_buyers = int(counts.get("buyers_with_verified_demand") or 0)
+    real_offers = int(counts.get("real_offers") or 0)
     verified_buyers = int(funnel.get("verified_buyers") or 0)
-    demand_buyers = int(funnel.get("buyers_with_public_demand") or 0)
     verified_channels = int(funnel.get("verified_commercial_channels") or 0)
     verified_emails = int(funnel.get("verified_corporate_emails") or 0)
-    opportunities = int(funnel.get("evidence_backed_opportunities") or workforce.get("workload", {}).get("opportunities") or 0)
-    quotes = int(workforce.get("workload", {}).get("quotes") or 0)
-    proposals = int(funnel.get("proposals") or workforce.get("workload", {}).get("proposals") or 0)
-    close_ready = int(funnel.get("close_ready") or workforce.get("workload", {}).get("close_ready") or 0)
-    leads = int(funnel.get("research_leads") or workforce.get("workload", {}).get("pending_leads") or 0)
     eligible = int(readiness.get("eligible_external_prospects") or 0)
     clicks = int(acquisition.get("clicks") or 0)
     converted_leads = int(acquisition.get("leads") or 0)
 
-    if close_ready <= 0:
-        add(100, "closing", "Advance the strongest active deal toward a safe close-ready state using only non-binding preparation.",
-            "No close-ready deal exists yet.", "close_ready > 0")
-    if quotes <= 0:
-        add(96, "revops", "Convert verified demand into quote-ready requirements and supplier comparison work.",
-            "There are no registered quotes yet.", "quotes > 0")
-    if opportunities <= 0 and demand_buyers > 0:
-        add(94, "opportunity", "Turn verified buyers with public demand into evidence-backed opportunities.",
-            f"{demand_buyers} buyer(s) have public demand but no evidence-backed opportunity is recorded.", "evidence_backed_opportunities > 0")
+    if closing_eligible > 0 and close_ready <= 0:
+        add(100, "closing", "Advance the strongest canonical deal toward a safe close-ready state using only non-binding preparation.", "At least one evidence-backed deal is genuinely on the closing path.", "canonical_close_ready > 0")
+    if canonical_opps > 0 and real_offers <= 0:
+        add(98, "quote_creation", "Turn canonical opportunities into comparable supplier RFQs and real quotes.", "Evidence-backed opportunities exist but no real supplier offer is registered.", "real_offers > 0")
+    if canonical_opps <= 0 and demand_buyers > 0:
+        add(100, "opportunity_building", "Convert the strongest verified demand signals into canonical evidence-backed opportunities.", f"{demand_buyers} verified-demand buyer(s) exist but canonical opportunities remain at zero.", "canonical_opportunities > 0")
     if eligible <= 0 and verified_buyers > 0:
-        add(92, "contact", "Repair prospect eligibility: verify company identity and corporate contact channels for the best buyers.",
-            f"{verified_buyers} verified buyer(s) exist but there are no currently eligible external prospects.", "eligible_external_prospects > 0")
+        add(92, "verification_contact", "Repair prospect eligibility by verifying company identity and corporate contact channels.", "Verified buyers exist but there are no currently eligible external prospects.", "eligible_external_prospects > 0")
     if verified_channels < verified_buyers:
-        add(88, "contact", "Enrich missing corporate contact channels for verified buyers using public evidence.",
-            f"Verified channels ({verified_channels}) trail verified buyers ({verified_buyers}).", "verified_commercial_channels >= verified_buyers")
+        add(88, "verification_contact", "Enrich missing corporate contact channels for verified buyers using public evidence.", "Verified commercial channels trail verified buyers.", "verified_commercial_channels >= verified_buyers")
     if verified_emails < verified_buyers:
-        add(84, "contact", "Prefer verified corporate email/form discovery for buyers lacking a usable channel.",
-            f"Verified corporate emails ({verified_emails}) trail verified buyers ({verified_buyers}).", "verified_corporate_emails increases")
+        add(84, "verification_contact", "Prefer verified corporate email/form discovery for buyers lacking a usable channel.", "Verified corporate emails trail verified buyers.", "verified_corporate_emails increases")
     if clicks > 0 and converted_leads <= 0:
-        add(82, "acquisition", "Analyze landing/message friction and prepare stronger organic variants from observed clicks.",
-            f"Campaigns have {clicks} click(s) and 0 converted leads.", "click_to_lead_rate > 0")
-    if leads > 0:
-        add(76, "research", "Re-rank existing research backlog by proximity to revenue; work highest-confidence buyer cases first.",
-            f"{leads} research lead(s) remain available even if fresh search budget is exhausted.", "verified buyer/contact/opportunity counts increase")
+        add(82, "acquisition", "Analyze landing/message friction and prepare stronger organic variants from observed clicks.", "Campaigns have clicks but no converted leads.", "click_to_lead_rate > 0")
     if int(distribution.get("awaiting_connector") or 0) > 0:
-        add(60, "distribution", "Keep external-connector jobs prepared, but spend active capacity on owned channels and conversion work.",
-            "Some distribution jobs require a connector authorization that cannot be granted autonomously.", "owned_live/clicks/leads increase")
+        add(60, "distribution", "Keep connector-dependent jobs prepared while active capacity stays on owned-channel conversion work.", "Some jobs require connector authorization.", "owned_live/clicks/leads increase")
 
     actions.sort(key=lambda row: (-int(row["priority"]), str(row["lane"])))
     return actions[:12]
 
 
 def continuous_revenue_drive_tick(state: Dict[str, Any]) -> Dict[str, Any]:
-    """Persist a continuous, outcome-driven fallback plan into state."""
-    actions = _score_actions(state)
+    truth = canonical_revenue_truth_tick(state)
+    actions = _score_actions(state, truth)
     scout = _safe_dict(state.get("scout"))
     governor = _safe_dict(scout.get("search_budget_governor"))
     search_remaining = int(governor.get("effective_total_remaining") or scout.get("budget_remaining_total") or 0)
     budget_exhausted = bool(scout.get("budget_exhausted")) or search_remaining <= 0
-
     mode = "SEARCH_PLUS_CONVERSION" if not budget_exhausted else "CONVERSION_WITHOUT_IDLE"
     primary = actions[0] if actions else {
-        "priority": 50,
-        "lane": "learning",
-        "action": "Audit recent outcomes and generate the next reversible commercial experiment.",
-        "reason": "No stronger queued action was detected.",
-        "success_metric": "measurable commercial progress",
-        "binding": False,
+        "priority": 50, "lane": str(truth.get("recommended_lane") or "learning"),
+        "action": "Audit recent outcomes and execute the next canonical non-binding commercial step.",
+        "reason": str(truth.get("reason") or "No stronger queued action was detected."),
+        "success_metric": str(truth.get("target_metric") or "measurable commercial progress"), "binding": False,
     }
-
     previous = _safe_dict(state.get("continuous_revenue_drive"))
-    previous_metric = previous.get("primary_success_metric")
-    previous_lane = previous.get("primary_lane")
-
     snapshot = {
-        "version": VERSION,
-        "updated_at": _now(),
-        "status": "active",
-        "mode": mode,
+        "version": VERSION, "updated_at": _now(), "status": "active", "mode": mode,
         "objective": "maximize verified commercial progress toward realized profitable revenue",
-        "never_idle": True,
-        "search_budget_exhausted": budget_exhausted,
-        "search_remaining": search_remaining,
-        "primary_lane": primary.get("lane"),
-        "primary_action": primary.get("action"),
-        "primary_reason": primary.get("reason"),
-        "primary_success_metric": primary.get("success_metric"),
-        "priority_queue": actions,
-        "reallocation_rule": "move capacity to the highest-value non-binding bottleneck whenever another lane is blocked",
-        "learning_rule": "increase attention to tactics that improve verified conversion metrics; demote stale, duplicate or low-yield tactics",
-        "fallback_when_search_exhausted": [
-            "verify and enrich existing buyer/company identities",
-            "resolve corporate contacts and channels",
-            "convert demand evidence into opportunity and requirement records",
-            "prepare supplier comparisons and quote-ready packages",
-            "improve owned-channel acquisition creatives from observed behavior",
-            "advance active deals with non-binding protective preparation",
-            "review failed or stale cases and reopen with a different reversible tactic",
-        ],
+        "never_idle": True, "search_budget_exhausted": budget_exhausted, "search_remaining": search_remaining,
+        "primary_lane": primary.get("lane"), "primary_action": primary.get("action"),
+        "primary_reason": primary.get("reason"), "primary_success_metric": primary.get("success_metric"),
+        "priority_queue": actions, "canonical_truth_version": truth.get("version"),
+        "canonical_truth_counts": truth.get("counts"),
+        "reallocation_rule": "follow the canonical revenue stage; never jump to closing from raw legacy deal activity",
+        "learning_rule": "increase attention to tactics that improve verified conversion metrics; demote stale duplicate or low-yield tactics",
         "autonomy_guardrails": {
-            "binding_contracts": "human_required",
-            "payments_orders_financial_commitments": "human_required",
-            "material_legal_liability": "human_required",
-            "production_code_changes": "human_required",
-            "new_external_connectors_accounts": "human_required",
-            "paid_media_spend": "human_required",
+            "binding_contracts": "human_required", "payments_orders_financial_commitments": "human_required",
+            "material_legal_liability": "human_required", "production_code_changes": "human_required",
+            "new_external_connectors_accounts": "human_required", "paid_media_spend": "human_required",
         },
         "improvement_signal": {
-            "primary_lane_changed": previous_lane is not None and previous_lane != primary.get("lane"),
-            "metric_changed": previous_metric is not None and previous_metric != primary.get("success_metric"),
+            "primary_lane_changed": previous.get("primary_lane") is not None and previous.get("primary_lane") != primary.get("lane"),
+            "metric_changed": previous.get("primary_success_metric") is not None and previous.get("primary_success_metric") != primary.get("success_metric"),
         },
         "persisted": True,
     }
     state["continuous_revenue_drive"] = snapshot
-
-    # Nudge existing strategic state toward revenue execution without bypassing
-    # any action-level gates.
     meta = _safe_dict(state.get("meta_autonomy"))
     if meta:
         meta["company_mode"] = "REVENUE_EXECUTION"
-        meta["revenue_directive"] = "continuous_conversion_progress"
+        meta["revenue_directive"] = "canonical_revenue_progress"
         meta["management_priority"] = "repair_current_revenue_bottleneck"
         meta["management_department"] = str(primary.get("lane") or "RevOps")
         state["meta_autonomy"] = meta
-
     return snapshot
 
 
 def _install() -> None:
-    """Patch the existing secretary tick to refresh CRD once per worker cycle.
-
-    executive_secretary.secretary_tick is already called near the end of each
-    worker cycle, after business state has been refreshed and before save_state.
-    Wrapping it gives CRD a stable, additive hook without modifying core files.
-    """
     try:
-        import executive_secretary  # type: ignore
-    except Exception as exc:  # pragma: no cover
+        import executive_secretary
+    except Exception as exc:
         print({"continuous_revenue_drive_install": {"status": "error", "error": str(exc)}})
         return
-
     original = getattr(executive_secretary, "secretary_tick", None)
     if not callable(original) or getattr(original, "_continuous_revenue_drive_wrapped", False):
         return
-
     def wrapped(state: Dict[str, Any]):
         crd = continuous_revenue_drive_tick(state)
         print({"continuous_revenue_drive": crd})
         return original(state)
-
-    wrapped._continuous_revenue_drive_wrapped = True  # type: ignore[attr-defined]
-    wrapped._continuous_revenue_drive_original = original  # type: ignore[attr-defined]
+    wrapped._continuous_revenue_drive_wrapped = True
+    wrapped._continuous_revenue_drive_original = original
     executive_secretary.secretary_tick = wrapped
     print({"continuous_revenue_drive_install": {"status": "active", "version": VERSION}})
-
 
 _install()
