@@ -6,7 +6,7 @@ import autonomy_operating_system
 from opportunity_factory_runtime import opportunity_factory_tick
 from revenue_funnel_runtime import revenue_funnel_tick
 
-VERSION = "1.0-revenue-execution-bridge"
+VERSION = "1.1-revenue-execution-bridge"
 _ORIGINAL_AUTONOMY_TICK = autonomy_operating_system.autonomy_tick
 
 
@@ -42,6 +42,13 @@ def _autonomy_with_revenue_execution(state: Dict[str, Any]) -> Dict[str, Any]:
     }
     report["revenue_execution_errors"] = errors
     state["autonomy_operating_system"] = report
+    print({
+        "revenue_execution_v2": {
+            "opportunity_factory": report["opportunity_factory"],
+            "revenue_funnel": report["revenue_funnel"],
+            "errors": errors,
+        }
+    }, flush=True)
     return report
 
 
