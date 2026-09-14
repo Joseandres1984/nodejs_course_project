@@ -5,7 +5,7 @@ from typing import Any, Dict
 
 import control_tower as _ct
 
-VERSION = "1.0-command-center-revenue-v2"
+VERSION = "1.1-command-center-revenue-v2"
 _ORIGINAL_BUILD = _ct.build_control_tower
 _ORIGINAL_RENDER = _ct.render_control_tower
 
@@ -25,6 +25,20 @@ def revenue_v2_build(state: Dict[str, Any], db_status: Dict[str, Any]) -> Dict[s
     snapshot = dict(_ORIGINAL_BUILD(state, db_status) or {})
     allocator = state.get("revenue_allocator", {}) or {}
     budget = state.get("adaptive_search_budget", {}) or {}
+    scout = state.get("scout", {}) or {}
+    governor = scout.get("search_budget_governor", {}) or state.get("search_budget_governor", {}) or {}
+    if not governor:
+        general = state.get("scout_budget", {}) or {}
+        demand = state.get("demand_search_budget", {}) or {}
+        total = _i(general.get("total_daily_cap") or budget.get("total_daily_cap"))
+        used = _i(general.get("queries_used")) + _i(demand.get("queries_used"))
+        governor = {
+            "total_daily_cap": total,
+            "effective_total_used": used,
+            "effective_total_remaining": max(0, total - used),
+            "over_cap_by": max(0, used - total),
+            "hard_cap_enforced_now": bool(general.get("hard_cap_enforced")),
+        }
     factory = state.get("opportunity_factory", {}) or {}
     funnel = state.get("revenue_funnel", {}) or {}
     learning = state.get("commercial_learning_v2", {}) or {}
@@ -32,6 +46,7 @@ def revenue_v2_build(state: Dict[str, Any], db_status: Dict[str, Any]) -> Dict[s
     snapshot["revenue_v2"] = {
         "allocator": allocator,
         "budget": budget,
+        "governor": governor,
         "factory": factory,
         "funnel": funnel,
         "learning": learning,
@@ -60,6 +75,7 @@ def revenue_v2_render(snapshot: Dict[str, Any]) -> str:
     data = snapshot.get("revenue_v2", {}) or {}
     allocator = data.get("allocator", {}) or {}
     budget = data.get("budget", {}) or {}
+    governor = data.get("governor", {}) or {}
     factory = data.get("factory", {}) or {}
     funnel = data.get("funnel", {}) or {}
     learning = data.get("learning", {}) or {}
@@ -89,13 +105,19 @@ def revenue_v2_render(snapshot: Dict[str, Any]) -> str:
     exp = experiments.get("active") or experiments.get("latest") or {}
     execution_pct = ((two.get("execution_brain") or {}).get("attention_pct"))
     exploration_pct = ((two.get("exploration_brain") or {}).get("attention_pct"))
+    used = _i(governor.get("effective_total_used"))
+    cap = _i(governor.get("total_daily_cap") or budget.get("total_daily_cap"))
+    over = _i(governor.get("over_cap_by"))
+    cap_class = "rv2-bad" if over else "rv2-good"
+    cap_text = f"{used}/{cap}" if cap else str(used)
+    cap_note = f"exceso histórico detectado +{over}; nuevas búsquedas bloqueadas" if over else "hard cap compartido respetado"
 
     section = f"""
 <section class="rv2">
   <div class="learning-heading"><h2>Revenue Execution v2</h2><div class="small">ejecución → conversión → aprendizaje → reasignación</div></div>
   <div class="rv2-grid">
     <div class="card"><div class="label">Revenue Allocator</div><div class="rv2-kpi lime">{_esc(allocator.get('lane') or 'esperando ciclo')}</div><div class="rv2-line">{_esc(allocator.get('reason') or '')}</div><div class="rv2-line">{_esc(roles_text)}</div></div>
-    <div class="card"><div class="label">Search Budget adaptativo</div><div class="rv2-kpi">{_i(budget.get('general_pool_daily'))} / {_i(budget.get('demand_reserved_daily'))}</div><div class="rv2-line">general / demanda · total {_i(budget.get('total_daily_cap'))} sin aumento automático</div><div class="rv2-line">{_esc(budget.get('reason') or '')}</div></div>
+    <div class="card"><div class="label">Search Budget adaptativo</div><div class="rv2-kpi">{_i(budget.get('general_pool_daily'))} / {_i(budget.get('demand_reserved_daily'))}</div><div class="rv2-line">general / demanda · reparto objetivo</div><div class="rv2-line"><strong class="{cap_class}">{_esc(cap_text)}</strong> búsquedas reales/tope · {_esc(cap_note)}</div></div>
     <div class="card"><div class="label">Opportunity Factory</div><div class="rv2-kpi blue">{_i(factory.get('enrichment_required'))}</div><div class="rv2-line">casos por enriquecer · {_i(factory.get('ready_for_pipeline'))} listos · {_i(factory.get('opportunities_materialized'))} materializados último ciclo</div></div>
     <div class="card"><div class="label">Supplier / Quote Accelerator</div><div class="rv2-kpi">{_i(quote.get('quote_priority_cases'))}</div><div class="rv2-line">casos prioritarios de cotización · límite de mensajes existente preservado</div></div>
   </div>
@@ -120,4 +142,4 @@ def revenue_v2_render(snapshot: Dict[str, Any]) -> str:
 
 _ct.build_control_tower = revenue_v2_build
 _ct.render_control_tower = revenue_v2_render
-print({"command_center_revenue_v2_runtime": {"version": VERSION, "status": "active"}}, flush=True)
+print({"command_center_revenue_v2_runtime": {"version": VERSION, "status": "active", "hard_cap_visible": True}}, flush=True)
