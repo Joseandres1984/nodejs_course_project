@@ -60,5 +60,6 @@ import quote_accelerator_runtime  # noqa: F401
 # reversible experiments, anti-drift, time-to-revenue memory, two-brain attention and an internal
 # commercial/finance/quality review board. It cannot self-deploy code or widen financial authority.
 import commercial_learning_v2_runtime  # noqa: F401
+import commercial_learning_v2_log_runtime  # noqa: F401
 
 runpy.run_module("worker_journal", run_name="__main__")
