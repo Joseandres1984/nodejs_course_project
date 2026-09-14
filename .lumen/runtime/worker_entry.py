@@ -47,4 +47,13 @@ import adaptive_search_budget_runtime  # noqa: F401
 import revenue_allocator_runtime  # noqa: F401
 import revenue_execution_bridge_runtime  # noqa: F401
 
+# Quote acceleration does not raise outbound caps: it gives the existing bounded message capacity to
+# requirement-ready / quote-starved cases before lower-value RevOps work.
+import quote_accelerator_runtime  # noqa: F401
+
+# Commercial Learning v2 extends Continuous Learning with historical source reputation, controlled
+# reversible experiments, anti-drift, time-to-revenue memory, two-brain attention and an internal
+# commercial/finance/quality review board. It cannot self-deploy code or widen financial authority.
+import commercial_learning_v2_runtime  # noqa: F401
+
 runpy.run_module("worker_journal", run_name="__main__")
