@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import html
 import json
 import os
+import re
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from typing import Any, Dict
@@ -12,7 +15,7 @@ import mail_connector
 import mail_resilience
 
 
-VERSION = "1.1-https-mail-provider-selection"
+VERSION = "1.2-branded-html-outbound"
 SMTP_PLATFORM_BLOCKED = os.getenv("LUMEN_SMTP_PLATFORM_BLOCKED", "false").lower() == "true"
 MAIL_PROVIDER = (os.getenv("LUMEN_MAIL_PROVIDER") or "auto").strip().lower()
 RESEND_API_KEY = os.getenv("LUMEN_RESEND_API_KEY", "").strip()
@@ -95,25 +98,127 @@ def _post_json(url: str, payload: Dict[str, Any], headers: Dict[str, str]) -> Di
         raise RuntimeError(f"http_{exc.code}:{raw[:500]}") from exc
 
 
-def _send_https(target: str, subject: str, body: str) -> tuple[str, str | None]:
+def _safe_tracking_url(value: Any) -> str:
+    url = str(value or "").strip()
+    if not url:
+        return ""
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except Exception:
+        return ""
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.username or parsed.password:
+        return ""
+    return url
+
+
+def _is_railway_url(value: str) -> bool:
+    try:
+        host = (urllib.parse.urlparse(value).hostname or "").lower()
+    except Exception:
+        return False
+    return host.endswith(".up.railway.app") or host.endswith(".railway.app")
+
+
+def _text_for_delivery(body: str, tracking_url: str) -> str:
+    """Keep a useful text fallback without exposing infrastructure URLs to recipients."""
+    text = str(body or "")
+    url = _safe_tracking_url(tracking_url)
+    if not url or not _is_railway_url(url):
+        return text
+    paragraphs = []
+    for paragraph in re.split(r"\n\s*\n", text):
+        if url in paragraph and paragraph.strip().lower().startswith("más información"):
+            paragraphs.append("Más información: respondé este correo y con gusto te compartimos el acceso.")
+        else:
+            paragraphs.append(paragraph)
+    return "\n\n".join(paragraphs)
+
+
+def _paragraph_html(paragraph: str) -> str:
+    escaped = html.escape(paragraph.strip(), quote=False).replace("\n", "<br>")
+    return f'<p style="margin:0 0 18px 0;line-height:1.55;">{escaped}</p>' if escaped else ""
+
+
+def _render_html(body: str, tracking_url: str) -> str:
+    url = _safe_tracking_url(tracking_url)
+    chunks = []
+    cta_inserted = False
+    for paragraph in re.split(r"\n\s*\n", str(body or "").strip()):
+        stripped = paragraph.strip()
+        if not stripped:
+            continue
+        if url and url in stripped and stripped.lower().startswith("más información"):
+            safe_href = html.escape(url, quote=True)
+            chunks.append(
+                '<div style="margin:24px 0 26px 0;">'
+                f'<a href="{safe_href}" style="display:inline-block;background:#172033;color:#ffffff;text-decoration:none;'
+                'font-weight:700;padding:12px 20px;border-radius:8px;">Conocer LUMEN B2B</a>'
+                '</div>'
+            )
+            cta_inserted = True
+            continue
+        if "Saludos cordiales," in stripped and "LUMEN B2B" in stripped:
+            lines = [x.strip() for x in stripped.splitlines() if x.strip()]
+            rendered = []
+            for line in lines:
+                safe = html.escape(line, quote=False)
+                if line == "LUMEN B2B":
+                    rendered.append(f'<strong style="font-size:17px;">{safe}</strong>')
+                elif line == "Inteligencia comercial y oportunidades B2B":
+                    rendered.append(f'<span style="font-weight:600;">{safe}</span>')
+                else:
+                    rendered.append(safe)
+            chunks.append(
+                '<div style="margin-top:28px;padding-top:18px;border-top:1px solid #e5e7eb;line-height:1.55;color:#374151;">'
+                + "<br>".join(rendered)
+                + "</div>"
+            )
+            continue
+        chunks.append(_paragraph_html(stripped))
+
+    if url and not cta_inserted:
+        safe_href = html.escape(url, quote=True)
+        chunks.append(
+            '<div style="margin:24px 0 26px 0;">'
+            f'<a href="{safe_href}" style="display:inline-block;background:#172033;color:#ffffff;text-decoration:none;'
+            'font-weight:700;padding:12px 20px;border-radius:8px;">Conocer LUMEN B2B</a>'
+            '</div>'
+        )
+
+    return (
+        '<!doctype html><html><body style="margin:0;padding:0;background:#ffffff;">'
+        '<div style="max-width:640px;margin:0 auto;padding:28px 22px;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif;'
+        'font-size:16px;color:#111827;">'
+        + "".join(chunks)
+        + '</div></body></html>'
+    )
+
+
+def _send_https(target: str, subject: str, body: str, html_body: str | None = None) -> tuple[str, str | None]:
     status = transport_status()
     provider = status.get("provider")
     if provider == "resend" and status.get("ready"):
+        payload: Dict[str, Any] = {"from": RESEND_FROM, "to": [target], "subject": subject, "text": body}
+        if html_body:
+            payload["html"] = html_body
         result = _post_json(
             "https://api.resend.com/emails",
-            {"from": RESEND_FROM, "to": [target], "subject": subject, "text": body},
+            payload,
             {"Authorization": f"Bearer {RESEND_API_KEY}"},
         )
         return "resend", str(result.get("id") or "") or None
     if provider == "brevo" and status.get("ready"):
+        payload = {
+            "sender": {"email": BREVO_FROM_EMAIL, "name": BREVO_FROM_NAME},
+            "to": [{"email": target}],
+            "subject": subject,
+            "textContent": body,
+        }
+        if html_body:
+            payload["htmlContent"] = html_body
         result = _post_json(
             "https://api.brevo.com/v3/smtp/email",
-            {
-                "sender": {"email": BREVO_FROM_EMAIL, "name": BREVO_FROM_NAME},
-                "to": [{"email": target}],
-                "subject": subject,
-                "textContent": body,
-            },
+            payload,
             {"api-key": BREVO_API_KEY, "accept": "application/json"},
         )
         return "brevo", str(result.get("messageId") or result.get("message_id") or "") or None
@@ -171,14 +276,19 @@ def https_send_pending(state: Dict[str, Any], live_outbound: bool) -> Dict[str, 
         body = str(item.get("body") or "")
         if mail_connector.DISCLOSE_AUTOMATION:
             body += "\n\n—\nLUMEN B2B\nMensaje comercial gestionado con asistencia automatizada."
+        tracking_url = _safe_tracking_url(item.get("tracking_url"))
+        text_body = _text_for_delivery(body, tracking_url)
+        html_body = _render_html(body, tracking_url)
         subject = str(item.get("subject") or "Consulta comercial")
         try:
-            provider, message_id = _send_https(target, subject, body)
+            provider, message_id = _send_https(target, subject, text_body, html_body)
             item["status"] = "sent"
             item["sent_at"] = utcnow()
             item["email_provider"] = provider
             item["email_provider_message_id"] = message_id
             item["smtp_route"] = "https_api_443"
+            item["email_format"] = "multipart_text_html"
+            item["branded_cta"] = bool(tracking_url)
             item.pop("last_error", None)
             stats["sent"] += 1
             state["mail_transport_health"] = {
