@@ -5,8 +5,9 @@ from typing import Any, Dict
 
 import agent_fleet
 import elastic_agent_fleet
+from canonical_revenue_truth_runtime import canonical_revenue_truth_tick
 
-VERSION = "1.1-revenue-allocator"
+VERSION = "1.2-revenue-allocator-canonical"
 _ORIGINAL_RUN = elastic_agent_fleet.run_elastic_agent_fleet_cycle
 
 LANE_WEIGHTS = {
@@ -42,30 +43,26 @@ def utcnow() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
 
-def _active_deals(state: Dict[str, Any]) -> list[Dict[str, Any]]:
-    terminal = {"closed", "lost", "cancelled", "canceled", "cerrado", "perdido", "cancelado"}
-    return [x for x in state.get("deals", []) or [] if str(x.get("stage") or "").strip().lower() not in terminal]
-
-
-def _metrics(state: Dict[str, Any]) -> Dict[str, int]:
+def _metrics(state: Dict[str, Any], truth: Dict[str, Any]) -> Dict[str, int]:
     accounts = list(state.get("candidate_accounts", []) or [])
     buyers = [x for x in accounts if x.get("type") == "buyer" and x.get("verified_company")]
     suppliers = [x for x in accounts if x.get("type") == "supplier" and x.get("verified_company")]
     external = state.get("external_market_readiness", {}) or {}
     reasons = external.get("ineligibility_reasons", {}) or {}
-    opportunities = list(state.get("market_opportunities", []) or [])
-    offers = [x for x in state.get("offers", []) or [] if str(x.get("source") or "") != "demo/simulación"]
-    proposals = list(state.get("proposals", []) or [])
-    close_ready = sum(1 for x in state.get("deals", []) or [] if str(x.get("stage") or "").lower() in {"listo para cerrar", "close_ready", "autorizado para cierre"})
+    counts = truth.get("counts", {}) or {}
     return {
         "verified_buyers": len(buyers),
-        "buyers_with_demand": sum(1 for x in buyers if x.get("demand_signal")),
+        "buyers_with_demand": int(counts.get("buyers_with_verified_demand") or 0),
         "verified_suppliers": len(suppliers),
-        "market_opportunities": len(opportunities),
-        "real_offers": len(offers),
-        "proposals": len(proposals),
-        "active_deals": len(_active_deals(state)),
-        "close_ready": close_ready,
+        "market_opportunities": int(counts.get("canonical_opportunities") or 0),
+        "raw_market_opportunities": int(counts.get("raw_market_opportunities") or 0),
+        "real_offers": int(counts.get("real_offers") or 0),
+        "proposals": int(counts.get("proposals") or 0),
+        "active_deals": int(counts.get("canonical_active_deals") or 0),
+        "raw_deals": int(counts.get("raw_deals") or 0),
+        "closing_eligible_deals": int(counts.get("closing_eligible_deals") or 0),
+        "close_ready": int(counts.get("canonical_close_ready") or 0),
+        "quarantined_deals": int(counts.get("quarantined_deals") or 0),
         "eligible_external_prospects": int(external.get("eligible_external_prospects") or 0),
         "company_not_verified": int(reasons.get("company_not_verified") or 0),
         "contact_not_verified": int(reasons.get("contact_not_verified") or 0),
@@ -93,45 +90,21 @@ def _two_brain_weights(state: Dict[str, Any], lane: str) -> tuple[Dict[str, floa
 
 
 def build_revenue_allocation(state: Dict[str, Any]) -> Dict[str, Any]:
-    m = _metrics(state)
-    crd = state.get("continuous_revenue_drive", {}) or {}
-    crd_lane = str(crd.get("primary_lane") or "").lower()
-
-    if m["active_deals"] > 0 and m["close_ready"] == 0 and crd_lane == "closing":
-        lane = "closing"
-        reason = "Hay operaciones activas pero ninguna close-ready; proteger trabajo cercano a ingreso."
-        metric = "close_ready > 0"
-    elif m["market_opportunities"] > 0 and m["real_offers"] == 0:
-        lane = "quote_creation"
-        reason = "Hay oportunidades pero no hay ofertas reales; mover capacidad hacia proveedores, RevOps y negociación."
-        metric = "real_offers > 0"
-    elif m["buyers_with_demand"] > 0 and m["market_opportunities"] == 0:
-        lane = "opportunity_building"
-        reason = "Existe demanda verificada sin oportunidades materializadas; completar matching y evidencia."
-        metric = "market_opportunities > 0"
-    elif m["eligible_external_prospects"] == 0 and (m["company_not_verified"] + m["contact_not_verified"]) > 0:
-        lane = "verification_contact"
-        reason = "La salida comercial está frenada por identidad/contacto; concentrar verificación antes de más volumen."
-        metric = "eligible_external_prospects > 0"
-    else:
+    truth = canonical_revenue_truth_tick(state)
+    m = _metrics(state, truth)
+    lane = str(truth.get("recommended_lane") or "demand_discovery")
+    if lane not in LANE_WEIGHTS:
         lane = "demand_discovery"
-        reason = "No hay una ruta de conversión suficientemente madura; ampliar demanda de calidad sin abandonar validación."
-        metric = "buyers_with_demand > 0"
+    reason = str(truth.get("reason") or "Seguir el embudo canónico.")
+    metric = str(truth.get("target_metric") or "buyers_with_verified_demand")
 
+    # Anti-drift may challenge tactics inside the current canonical stage, but it cannot leapfrog
+    # the evidence-backed revenue sequence (for example, force closing with zero canonical opportunities).
     learning = state.get("commercial_learning_v2", {}) or {}
     anti = learning.get("anti_drift", {}) or {}
-    board = learning.get("review_board", {}) or {}
-    recommended = str(anti.get("recommended_lane") or "")
-    if anti.get("status") == "triggered" and board.get("status") == "AUTO_APPROVED_REVERSIBLE" and recommended in LANE_WEIGHTS:
-        old_lane = lane
-        lane = recommended
-        reason = f"Anti-drift rotó de {old_lane} a {lane}: {anti.get('reason') or 'sin progreso verificable suficiente'}."
-        metric = {
-            "closing": "close_ready > 0", "quote_creation": "real_offers > 0",
-            "opportunity_building": "market_opportunities > 0",
-            "verification_contact": "eligible_external_prospects > 0",
-            "demand_discovery": "buyers_with_demand > 0",
-        }[lane]
+    anti_note = None
+    if anti.get("status") == "triggered":
+        anti_note = str(anti.get("recommended_lane") or "")
 
     target_weights, explore_pct = _two_brain_weights(state, lane)
     return {
@@ -144,7 +117,9 @@ def build_revenue_allocation(state: Dict[str, Any]) -> Dict[str, Any]:
         "target_weights": target_weights,
         "execution_attention_pct": 100 - explore_pct,
         "exploration_attention_pct": explore_pct,
-        "anti_drift_applied": bool(anti.get("status") == "triggered" and lane == recommended),
+        "anti_drift_applied": False,
+        "anti_drift_suggestion": anti_note,
+        "canonical_truth_version": truth.get("version"),
         "metrics": m,
         "authority": "attention_and_reversible_workforce_allocation_only",
     }
@@ -176,6 +151,9 @@ def _run_with_revenue_allocation(state: Dict[str, Any]) -> Dict[str, Any]:
         "execution_attention_pct": plan["execution_attention_pct"],
         "exploration_attention_pct": plan["exploration_attention_pct"],
         "anti_drift_applied": plan["anti_drift_applied"],
+        "anti_drift_suggestion": plan["anti_drift_suggestion"],
+        "canonical_truth_version": plan["canonical_truth_version"],
+        "metrics": plan["metrics"],
         "target_weights": plan["target_weights"],
         "actual_role_plan": plan["actual_role_plan"],
     }
@@ -183,4 +161,4 @@ def _run_with_revenue_allocation(state: Dict[str, Any]) -> Dict[str, Any]:
 
 
 elastic_agent_fleet.run_elastic_agent_fleet_cycle = _run_with_revenue_allocation
-print({"revenue_allocator_runtime": {"version": VERSION, "status": "active"}}, flush=True)
+print({"revenue_allocator_runtime": {"version": VERSION, "status": "active", "canonical_truth": True}}, flush=True)
