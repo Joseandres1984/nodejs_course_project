@@ -12,7 +12,7 @@ import control_tower as _ct
 from app import STATE, load_state
 from outbound_web import app
 
-VERSION = "1.1-command-center-instagram"
+VERSION = "1.2-command-center-instagram"
 _ORIGINAL_BUILD = _ct.build_control_tower
 _ORIGINAL_RENDER = _ct.render_control_tower
 
@@ -45,7 +45,7 @@ def _operator_snapshot(state: Dict[str, Any]) -> Dict[str, Any]:
 def _instagram_css() -> str:
     return """
 <style id="lumen-instagram-cc-css">
-.ig-section{margin-top:14px}.ig-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}.ig-cta{display:flex;justify-content:space-between;align-items:center;gap:12px}.ig-button{display:inline-block;background:#d7ff64;color:#071018!important;border-radius:9px;padding:10px 14px;font-weight:850;text-decoration:none!important}.ig-state{color:var(--good);font-weight:800}.ig-note{font-size:11px;color:var(--muted);margin-top:4px}
+.ig-section{margin:0 0 14px}.ig-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}.ig-cta{display:flex;justify-content:space-between;align-items:center;gap:12px}.ig-button{display:inline-block;background:#d7ff64;color:#071018!important;border-radius:9px;padding:10px 14px;font-weight:850;text-decoration:none!important}.ig-state{color:var(--good);font-weight:800}.ig-note{font-size:11px;color:var(--muted);margin-top:4px}
 @media(max-width:900px){.ig-grid{grid-template-columns:1fr 1fr}.ig-cta{align-items:flex-start;flex-direction:column}}
 @media(max-width:620px){.ig-grid{grid-template-columns:1fr 1fr}}
 </style>
@@ -81,7 +81,12 @@ def inject_instagram_strip(page: str, state: Dict[str, Any]) -> str:
     if "lumen-instagram-cc-css" not in page:
         page = page.replace("</head>", _instagram_css() + "</head>", 1)
     if "instagram-operator-card" not in page:
-        page = page.replace("</body>", _instagram_section(_operator_snapshot(state)) + "</body>", 1)
+        section = _instagram_section(_operator_snapshot(state))
+        marker = '<div class="grid hero">'
+        if marker in page:
+            page = page.replace(marker, section + marker, 1)
+        else:
+            page = page.replace("</body>", section + "</body>", 1)
     return page
 
 
@@ -98,7 +103,12 @@ def instagram_render_control_tower(snapshot: Dict[str, Any]) -> str:
     if "lumen-instagram-cc-css" not in page:
         page = page.replace("</head>", _instagram_css() + "</head>", 1)
     if "instagram-operator-card" not in page:
-        page = page.replace("</body>", _instagram_section(ig) + "</body>", 1)
+        section = _instagram_section(ig)
+        marker = '<div class="grid hero">'
+        if marker in page:
+            page = page.replace(marker, section + marker, 1)
+        else:
+            page = page.replace("</body>", section + "</body>", 1)
     return page
 
 
@@ -123,11 +133,11 @@ async def command_center_instagram_injector(request: Request, call_next):
         text = inject_instagram_strip(text, STATE)
         headers = dict(response.headers)
         headers.pop("content-length", None)
-        print({"command_center_instagram_injector": {"status": "applied", "visible": "instagram-operator-card" in text}}, flush=True)
+        print({"command_center_instagram_injector": {"status": "applied", "visible": "instagram-operator-card" in text, "placement": "top"}}, flush=True)
         return Response(content=text, status_code=response.status_code, headers=headers, media_type="text/html")
     except Exception as exc:
         print({"command_center_instagram_injector": {"status": "error", "error": f"{type(exc).__name__}: {str(exc)[:240]}"}}, flush=True)
         return response
 
 
-print({"command_center_instagram_runtime": {"version": VERSION, "status": "active", "route": "/instagram", "direct_injector": True}}, flush=True)
+print({"command_center_instagram_runtime": {"version": VERSION, "status": "active", "route": "/instagram", "direct_injector": True, "placement": "top"}}, flush=True)
