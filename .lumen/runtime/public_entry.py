@@ -13,6 +13,10 @@ from landing_public import _render as render_public_landing  # noqa: E402
 # from Railway environment variables and never exposes it in responses.
 import instagram_connector  # noqa: E402,F401
 
+# Ensure the connected Instagram professional account is subscribed at account
+# level to the webhook fields selected in Meta's dashboard.
+import instagram_subscription_runtime  # noqa: E402,F401
+
 
 @app.middleware("http")
 async def public_root_landing(request: Request, call_next):
