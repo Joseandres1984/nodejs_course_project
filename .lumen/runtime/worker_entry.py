@@ -34,6 +34,10 @@ import quote_accelerator_runtime  # noqa: F401
 import commercial_learning_v2_runtime  # noqa: F401
 import commercial_learning_v2_log_runtime  # noqa: F401
 
+# Conversion Sprint tightens OFERTA truth, shifts attention toward requirement/RFQ/quote conversion,
+# and forces experiment rotation after repeated same-lane failures without widening authority.
+import conversion_sprint_runtime  # noqa: F401
+
 # Final cleanup before Executive Secretary: preserve legacy deals for audit, but suppress any
 # Safe Close / data-truth / first-cash queue item that still points to a quarantined deal.
 import canonical_priority_cleanup  # noqa: F401
