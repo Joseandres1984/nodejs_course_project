@@ -21,6 +21,10 @@ SUBSCRIBED_FIELDS = [
     "message_reactions",
     "messaging_seen",
     "messaging_referral",
+    # When another connected app owns the conversation (for example Manychat),
+    # Meta can deliver incoming events to secondary receivers through standby.
+    "messaging_handover",
+    "standby",
 ]
 
 SUBSCRIPTION_STATUS: Dict[str, Any] = {
@@ -84,6 +88,8 @@ def ensure_instagram_subscription() -> Dict[str, Any]:
                         fields.append(str(field))
         status["subscribed_fields"] = fields
         status["ok"] = all(field in fields for field in ("messages", "comments"))
+        status["standby_enabled"] = "standby" in fields
+        status["handover_enabled"] = "messaging_handover" in fields
     except Exception as exc:
         status["error"] = f"{type(exc).__name__}: {str(exc)[:500]}"
 
