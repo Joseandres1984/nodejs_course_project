@@ -42,6 +42,9 @@ import conversion_sprint_runtime  # noqa: F401
 # memory, bounded skill learning and research-gap missions. It only reallocates reversible attention
 # and public research; binding, financial, legal, connector and deployment authority stay human-gated.
 import autonomy_core_runtime  # noqa: F401
+# Close the learning loop after each completed continuous-learning phase so fresh outcomes become
+# experience, lessons, peer briefings and next-cycle research missions before state persistence.
+import autonomy_core_bridge_runtime  # noqa: F401
 
 # Final cleanup before Executive Secretary: preserve legacy deals for audit, but suppress any
 # Safe Close / data-truth / first-cash queue item that still points to a quarantined deal.
