@@ -30,6 +30,10 @@ import outbound_domain_gate  # noqa: F401,E402
 # widening targeting, opt-out, risk, contract, payment or publication authority.
 import outbound_recovery_runtime  # noqa: F401,E402
 
+# Conversion Autonomy installs before worker_meta so professional casework, market matching and
+# revenue-lane allocation use the improved evidence-reuse and anti-loop behavior during this cycle.
+import conversion_autonomy_runtime  # noqa: F401,E402
+
 # Run the complete Meta-LUMEN + production worker first.
 import worker_meta  # noqa: F401,E402
 
@@ -42,10 +46,16 @@ from first_cash_mode import first_cash_tick
 from notification_router import notification_router_tick
 
 
+# After the normal worker has completed, reuse already-collected evidence before asking the web for
+# more data. This may normalize obvious category synonyms, advance professional cases when existing
+# verified facts are sufficient, and re-run the original governed opportunity builder. Score,
+# identity, traceability, contract and payment gates remain unchanged.
+load_state()
+conversion_autonomy = conversion_autonomy_runtime.conversion_autonomy_tick(STATE)
+
 # After the business cycle, collapse demand/opportunity/deal evidence into one canonical state machine.
 # Each case gets exactly one stage, one next action and one owner. Non-binding work stays autonomous;
 # binding close/payment/contract authority remains human-gated.
-load_state()
 autonomy = autonomy_tick(STATE)
 
 # Until LUMEN records a real realized profit, bias the unified queue toward the shortest credible path
@@ -79,6 +89,7 @@ secretary = secretary_tick(STATE)
 notifications = notification_router_tick(STATE)
 
 persisted = bool(save_state())
+conversion_autonomy["persisted"] = persisted
 secretary["persisted"] = persisted
 autonomy["persisted"] = persisted
 first_cash["persisted"] = persisted
@@ -86,6 +97,26 @@ external_readiness["persisted"] = persisted
 continuous_revenue["persisted"] = persisted
 continuous_learning["persisted"] = persisted
 notifications["persisted"] = persisted
+
+print({
+    "conversion_autonomy": {
+        "version": conversion_autonomy.get("version"),
+        "status": conversion_autonomy.get("status"),
+        "mode": conversion_autonomy.get("mode"),
+        "search_budget_exhausted": conversion_autonomy.get("search_budget_exhausted"),
+        "search_remaining": conversion_autonomy.get("search_remaining"),
+        "canonicalized_accounts": conversion_autonomy.get("canonicalized_accounts"),
+        "offline_cases_reviewed": conversion_autonomy.get("offline_cases_reviewed"),
+        "offline_stage_advances": conversion_autonomy.get("offline_stage_advances"),
+        "offline_ready_for_handoff": conversion_autonomy.get("offline_ready_for_handoff"),
+        "pipeline_created": conversion_autonomy.get("pipeline_created"),
+        "pipeline_pairs_evaluated": conversion_autonomy.get("pipeline_pairs_evaluated"),
+        "pipeline_below_threshold": conversion_autonomy.get("pipeline_below_threshold"),
+        "lane_hysteresis": conversion_autonomy.get("lane_hysteresis"),
+        "binding_actions_human_gated": conversion_autonomy.get("binding_actions_human_gated"),
+        "persisted": conversion_autonomy.get("persisted"),
+    }
+}, flush=True)
 
 print({
     "autonomy_operating_system": {
