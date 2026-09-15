@@ -46,6 +46,11 @@ import autonomy_core_runtime  # noqa: F401
 # experience, lessons, peer briefings and next-cycle research missions before state persistence.
 import autonomy_core_bridge_runtime  # noqa: F401
 
+# Temporary cross-functional Mission Teams form around the strongest canonical objectives, share
+# evidence through explicit handoffs, prioritize related professional cases, request peer help and
+# research automatically, and teach successful handoff patterns back into the shared playbook.
+import mission_team_runtime  # noqa: F401
+
 # Final cleanup before Executive Secretary: preserve legacy deals for audit, but suppress any
 # Safe Close / data-truth / first-cash queue item that still points to a quarantined deal.
 import canonical_priority_cleanup  # noqa: F401
