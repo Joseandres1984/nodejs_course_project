@@ -12,7 +12,7 @@ import control_tower as _ct
 from app import STATE, load_state
 from outbound_web import app
 
-VERSION = "1.3-command-center-instagram"
+VERSION = "1.4-command-center-instagram-publishing"
 _ORIGINAL_BUILD = _ct.build_control_tower
 _ORIGINAL_RENDER = _ct.render_control_tower
 
@@ -30,6 +30,7 @@ def _i(value: Any, default: int = 0) -> int:
 
 def _operator_snapshot(state: Dict[str, Any]) -> Dict[str, Any]:
     operator = dict(state.get("instagram_operator", {}) or {})
+    publishing = dict(state.get("instagram_publish_control", {}) or {})
     return {
         "status": operator.get("status") or "active",
         "inbox_total": _i(operator.get("inbox_total")),
@@ -38,14 +39,17 @@ def _operator_snapshot(state: Dict[str, Any]) -> Dict[str, Any]:
         "leads_total": _i(operator.get("leads_total")),
         "sent_total": _i(operator.get("sent_total")),
         "send_enabled": bool(operator.get("send_enabled")),
-        "updated_at": operator.get("updated_at"),
+        "publishing_jobs": _i(publishing.get("jobs_total")),
+        "publishing_connector": bool(publishing.get("connector_configured")),
+        "published_total": _i(publishing.get("published_total")),
+        "updated_at": operator.get("updated_at") or publishing.get("updated_at"),
     }
 
 
 def _instagram_css() -> str:
     return """
 <style id="lumen-instagram-cc-css">
-.ig-section{margin:0 0 14px}.ig-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}.ig-cta{display:flex;justify-content:space-between;align-items:center;gap:12px}.ig-button{display:inline-block;background:#d7ff64;color:#071018!important;border-radius:9px;padding:10px 14px;font-weight:850;text-decoration:none!important}.ig-state{color:var(--good);font-weight:800}.ig-note{font-size:11px;color:var(--muted);margin-top:4px}.ig-floating{position:fixed;left:14px;bottom:18px;z-index:10050;background:#d7ff64;color:#071018!important;border:1px solid #efffae;border-radius:999px;padding:12px 16px;font-weight:950;text-decoration:none!important;box-shadow:0 10px 34px #0009;letter-spacing:.01em}
+.ig-section{margin:0 0 14px}.ig-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}.ig-cta{display:flex;justify-content:space-between;align-items:center;gap:12px}.ig-actions{display:flex;gap:8px;flex-wrap:wrap}.ig-button{display:inline-block;background:#d7ff64;color:#071018!important;border-radius:9px;padding:10px 14px;font-weight:850;text-decoration:none!important}.ig-button.secondary{background:#17303a;color:#e8f0f4!important;border:1px solid #31505d}.ig-state{color:var(--good);font-weight:800}.ig-note{font-size:11px;color:var(--muted);margin-top:4px}.ig-floating{position:fixed;left:14px;bottom:18px;z-index:10050;background:#d7ff64;color:#071018!important;border:1px solid #efffae;border-radius:999px;padding:12px 16px;font-weight:950;text-decoration:none!important;box-shadow:0 10px 34px #0009;letter-spacing:.01em}
 @media(max-width:900px){.ig-grid{grid-template-columns:1fr 1fr}.ig-cta{align-items:flex-start;flex-direction:column}}
 @media(max-width:620px){.ig-grid{grid-template-columns:1fr 1fr}.ig-floating{left:12px;bottom:76px;padding:11px 14px;font-size:13px}}
 </style>
@@ -53,6 +57,7 @@ def _instagram_css() -> str:
 
 
 def _instagram_section(ig: Dict[str, Any]) -> str:
+    connector = "listo" if ig.get("publishing_connector") else "pendiente"
     return f"""
 <section class="ig-section" id="instagram-operator-card">
   <div class="card">
@@ -60,18 +65,21 @@ def _instagram_section(ig: Dict[str, Any]) -> str:
       <div>
         <div class="label">Canal conectado</div>
         <h2 style="margin:5px 0 0">Instagram Operator</h2>
-        <div class="ig-note">Bandeja inteligente, clasificación comercial, CRM y respuestas con aprobación humana.</div>
+        <div class="ig-note">Bandeja inteligente, clasificación comercial, CRM, respuestas y publicaciones con aprobación humana.</div>
       </div>
-      <a class="ig-button" href="/instagram">Abrir Instagram Operator</a>
+      <div class="ig-actions">
+        <a class="ig-button" href="/instagram">Abrir mensajes</a>
+        <a class="ig-button secondary" href="/instagram/publishing">Publicaciones</a>
+      </div>
     </div>
     <div class="ig-grid" style="margin-top:12px">
       <div><div class="label">Inbox</div><div class="metric">{_i(ig.get('inbox_total'))}</div></div>
       <div><div class="label">Pendientes</div><div class="metric">{_i(ig.get('pending_review'))}</div></div>
       <div><div class="label">Señales comerciales</div><div class="metric lime">{_i(ig.get('commercial_signals'))}</div></div>
-      <div><div class="label">Leads</div><div class="metric good">{_i(ig.get('leads_total'))}</div></div>
-      <div><div class="label">Enviadas</div><div class="metric">{_i(ig.get('sent_total'))}</div></div>
+      <div><div class="label">Posts preparados</div><div class="metric good">{_i(ig.get('publishing_jobs'))}</div></div>
+      <div><div class="label">Publicados</div><div class="metric">{_i(ig.get('published_total'))}</div></div>
     </div>
-    <div class="ig-note">Estado: <span class="ig-state">{_esc(ig.get('status') or 'active')}</span> · envío automático: no; cada respuesta requiere aprobación.</div>
+    <div class="ig-note">Estado: <span class="ig-state">{_esc(ig.get('status') or 'active')}</span> · publicación automática: no · conector de publicación: {_esc(connector)} · cada post requiere tu aprobación.</div>
   </div>
 </section>
 <a class="ig-floating" id="instagram-operator-floating" href="/instagram">Instagram Operator</a>
@@ -136,11 +144,11 @@ async def command_center_instagram_injector(request: Request, call_next):
         text = inject_instagram_strip(text, STATE)
         headers = dict(response.headers)
         headers.pop("content-length", None)
-        print({"command_center_instagram_injector": {"status": "applied", "visible": "instagram-operator-card" in text, "floating": "instagram-operator-floating" in text, "placement": "top"}}, flush=True)
+        print({"command_center_instagram_injector": {"status": "applied", "visible": "instagram-operator-card" in text, "floating": "instagram-operator-floating" in text, "placement": "top", "publishing_link": "/instagram/publishing" in text}}, flush=True)
         return Response(content=text, status_code=response.status_code, headers=headers, media_type="text/html")
     except Exception as exc:
         print({"command_center_instagram_injector": {"status": "error", "error": f"{type(exc).__name__}: {str(exc)[:240]}"}}, flush=True)
         return response
 
 
-print({"command_center_instagram_runtime": {"version": VERSION, "status": "active", "route": "/instagram", "direct_injector": True, "placement": "top", "floating_launcher": True}}, flush=True)
+print({"command_center_instagram_runtime": {"version": VERSION, "status": "active", "route": "/instagram", "publishing_route": "/instagram/publishing", "direct_injector": True, "placement": "top", "floating_launcher": True}}, flush=True)
