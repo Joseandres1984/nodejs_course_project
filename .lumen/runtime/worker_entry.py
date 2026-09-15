@@ -38,4 +38,8 @@ import commercial_learning_v2_log_runtime  # noqa: F401
 # Safe Close / data-truth / first-cash queue item that still points to a quarantined deal.
 import canonical_priority_cleanup  # noqa: F401
 
+# Instagram content may be prepared autonomously, but one immutable post can be published only
+# after explicit human approval. The control also prepares a public JPEG asset for Meta to fetch.
+import instagram_publish_control  # noqa: F401
+
 runpy.run_module("worker_journal", run_name="__main__")
