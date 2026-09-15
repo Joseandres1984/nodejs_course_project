@@ -24,6 +24,10 @@ import instagram_subscription_runtime  # noqa: E402,F401
 # human-approved replies. This also bridges successful webhooks into the inbox.
 import instagram_operator  # noqa: E402,F401
 
+# Fallback inbox synchronization through the Conversations API. This keeps
+# LUMEN able to ingest DMs even when Meta does not deliver a webhook event.
+import instagram_conversation_poller  # noqa: E402,F401
+
 # Surface Instagram Operator directly inside the owner Command Center.
 import command_center_instagram_runtime  # noqa: E402,F401
 
