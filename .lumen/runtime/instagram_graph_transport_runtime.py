@@ -14,7 +14,7 @@ from typing import Any, Dict
 import social_distribution
 
 
-VERSION = "1.0.1-instagram-login-publish-transport"
+VERSION = "1.0.2-instagram-login-publish-transport"
 
 
 def _instagram_login_publish(job: Dict[str, Any]) -> Dict[str, Any]:
