@@ -36,6 +36,10 @@ import instagram_conversation_poller  # noqa: E402,F401
 # Instagram Login without requiring LUMEN's Meta app to have Advanced Access.
 import instagram_manychat_bridge  # noqa: E402,F401
 
+# Prepare Instagram post media and expose the authenticated approval/publish cockpit.
+# Every external post is fail-closed until one immutable job receives explicit human approval.
+import instagram_publish_control  # noqa: E402,F401
+
 # Surface Instagram Operator directly inside the owner Command Center.
 import command_center_instagram_runtime  # noqa: E402,F401
 
