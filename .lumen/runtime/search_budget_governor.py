@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 import scout_connector
 
 
-VERSION = "1.3-shared-hard-cap-search-budget-governor"
+VERSION = "1.4-shared-hard-cap-search-budget-governor"
 TZ_NAME = str(os.getenv("LUMEN_SCOUT_TIMEZONE", "America/Argentina/Buenos_Aires")).strip() or "America/Argentina/Buenos_Aires"
 try:
     LOCAL_TZ = ZoneInfo(TZ_NAME)
@@ -58,6 +58,125 @@ def _real_total_remaining(state: Dict[str, Any], demand_used: int | None = None)
     general_used = _general_used_today(state)
     demand_actual = _demand_used_today(state) if demand_used is None else max(0, _int(demand_used, 0))
     return max(0, TOTAL_DAILY_CAP - general_used - demand_actual)
+
+
+def _canonical_usage(raw_general: int, raw_demand: int) -> tuple[int, int]:
+    """Compress legacy over-cap counters without creating fresh provider capacity.
+
+    Historical runtimes could count the same provider envelope through more than one lane. If that
+    persisted state is already above today's provider hard cap, normalize it to exactly the hard cap
+    while preserving a reconciliation snapshot. This is accounting repair only: remaining capacity
+    stays zero for the day, so the migration can never authorize extra searches or extra spend.
+    """
+    raw_general = max(0, _int(raw_general, 0))
+    raw_demand = max(0, _int(raw_demand, 0))
+    target = min(TOTAL_DAILY_CAP, raw_general + raw_demand)
+
+    general = min(raw_general, GENERAL_POOL_CAP)
+    demand = min(raw_demand, DEMAND_RESERVED)
+    remaining = max(0, target - general - demand)
+
+    # If one lane historically consumed capacity beyond today's adaptive split, attribute only as much
+    # overflow as is needed to preserve the provider-level total. Never invent usage above raw counters.
+    if remaining:
+        general_headroom = max(0, raw_general - general)
+        add_general = min(remaining, general_headroom)
+        general += add_general
+        remaining -= add_general
+    if remaining:
+        demand_headroom = max(0, raw_demand - demand)
+        add_demand = min(remaining, demand_headroom)
+        demand += add_demand
+        remaining -= add_demand
+
+    return general, demand
+
+
+def reconcile_legacy_counters(state: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize only persisted same-day counters that predate the shared hard-cap accounting.
+
+    The raw values are retained in `search_budget_reconciliation` for audit. Canonical counters are
+    capped at the provider envelope and therefore cannot poison the dashboard or later lane math.
+    Crucially, a reconciled over-cap day remains fully exhausted.
+    """
+    today = local_day()
+    raw_general = _general_used_today(state)
+    raw_demand = _demand_used_today(state)
+    raw_total = raw_general + raw_demand
+
+    if raw_total <= TOTAL_DAILY_CAP:
+        return {
+            "reconciled": False,
+            "date": today,
+            "raw_general": raw_general,
+            "raw_demand": raw_demand,
+            "raw_total": raw_total,
+            "canonical_total": raw_total,
+            "legacy_overage_absorbed": 0,
+        }
+
+    canonical_general, canonical_demand = _canonical_usage(raw_general, raw_demand)
+    canonical_total = canonical_general + canonical_demand
+
+    general = state.setdefault("scout_budget", {})
+    general.update({
+        "date": today,
+        "timezone": TZ_NAME,
+        "queries_used": canonical_general,
+        "daily_budget": GENERAL_POOL_CAP,
+        "queries_remaining": 0,
+        "real_total_remaining": 0,
+        "actual_total_used": canonical_total,
+        "over_cap_by": 0,
+        "hard_cap_enforced": True,
+        "governor_version": VERSION,
+        "total_daily_cap": TOTAL_DAILY_CAP,
+        "demand_reserved_daily": DEMAND_RESERVED,
+        "general_pool_daily": GENERAL_POOL_CAP,
+        "reconciled_at": utcnow(),
+    })
+
+    demand = state.get("demand_search_budget")
+    if not isinstance(demand, dict):
+        demand = {}
+        state["demand_search_budget"] = demand
+    previous_migration_debt = max(0, _int(demand.get("migration_debt"), 0))
+    demand.update({
+        "date": today,
+        "timezone": TZ_NAME,
+        "queries_used": canonical_demand,
+        "daily_budget": DEMAND_RESERVED,
+        "queries_remaining": 0,
+        "actual_total_used": canonical_total,
+        "over_cap_by": 0,
+        "hard_cap_enforced": True,
+        "governor_version": VERSION,
+        "updated_at": utcnow(),
+        # Neutralize the old migration-debt heuristic so the repaired demand usage is not later
+        # mistaken for synthetic debt and subtracted again, which would recreate budget mid-day.
+        "migration_debt": 0,
+        "legacy_migration_debt": previous_migration_debt,
+        "reconciled_at": utcnow(),
+    })
+
+    record = {
+        "version": VERSION,
+        "date": today,
+        "reconciled": True,
+        "reason": "legacy_multi_lane_counter_overage_normalized_without_reopening_provider_budget",
+        "raw_general": raw_general,
+        "raw_demand": raw_demand,
+        "raw_total": raw_total,
+        "canonical_general": canonical_general,
+        "canonical_demand": canonical_demand,
+        "canonical_total": canonical_total,
+        "provider_daily_cap": TOTAL_DAILY_CAP,
+        "legacy_overage_absorbed": max(0, raw_total - TOTAL_DAILY_CAP),
+        "remaining_after_reconciliation": 0,
+        "reconciled_at": utcnow(),
+    }
+    state["search_budget_reconciliation"] = record
+    return record
 
 
 def general_budget(state: Dict[str, Any]) -> Dict[str, Any]:
@@ -126,7 +245,7 @@ def demand_budget(state: Dict[str, Any]) -> Dict[str, Any]:
     else:
         prior_migration_debt = max(0, _int(budget.get("migration_debt"), 0))
         current_used = max(0, _int(budget.get("queries_used"), 0))
-        if current_used == prior_migration_debt:
+        if current_used == prior_migration_debt and not budget.get("reconciled_at"):
             recomputed_debt = _migration_debt_for_today(state)
             if recomputed_debt < prior_migration_debt:
                 budget["queries_used"] = recomputed_debt
@@ -163,6 +282,8 @@ def summary(state: Dict[str, Any]) -> Dict[str, Any]:
     general_actual = max(0, _int(general.get("queries_used"), 0))
     demand_actual = max(0, _int(demand.get("queries_used"), 0))
     actual_total = general_actual + demand_actual
+    reconciliation = state.get("search_budget_reconciliation", {}) or {}
+    reconciliation_today = reconciliation if str(reconciliation.get("date") or "") == local_day() else {}
     return {
         "version": VERSION,
         "timezone": TZ_NAME,
@@ -173,9 +294,12 @@ def summary(state: Dict[str, Any]) -> Dict[str, Any]:
         "demand_reserved_daily": DEMAND_RESERVED,
         "demand_used": demand_actual,
         "demand_remaining": int(demand.get("queries_remaining") or 0),
-        "effective_total_used": actual_total,
+        "effective_total_used": min(TOTAL_DAILY_CAP, actual_total),
         "effective_total_remaining": max(0, TOTAL_DAILY_CAP - actual_total),
         "over_cap_by": max(0, actual_total - TOTAL_DAILY_CAP),
+        "legacy_overage_absorbed_today": int(reconciliation_today.get("legacy_overage_absorbed") or 0),
+        "raw_total_before_reconciliation": reconciliation_today.get("raw_total"),
+        "accounting_reconciled": bool(reconciliation_today.get("reconciled")),
         "hard_cap_enforced_now": True,
         "allocation_policy": "adaptive_lanes_share_one_hard_daily_cap_no_intraday_budget_recreation",
         "updated_at": utcnow(),
