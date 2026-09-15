@@ -46,4 +46,8 @@ import instagram_graph_transport_runtime  # noqa: F401
 # after explicit human approval. The control also prepares a public JPEG asset for Meta to fetch.
 import instagram_publish_control  # noqa: F401
 
+# Harden WhatsApp delivery before worker_journal imports notification_router. Failures keep
+# their Meta error code/message (without secrets), use bounded retries, and never resend email.
+import whatsapp_resilience_runtime  # noqa: F401
+
 runpy.run_module("worker_journal", run_name="__main__")
