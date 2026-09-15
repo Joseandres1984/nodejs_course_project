@@ -19,6 +19,9 @@ import continuous_learning_compat_runtime  # noqa: F401
 
 # Revenue Execution v2: adaptive budget with one shared hard provider cap.
 import adaptive_search_budget_runtime  # noqa: F401
+# Persisted state is reloaded several times during a worker cycle. Reconcile legacy search counters
+# after every load, using the active adaptive split, without reopening the provider budget.
+import search_budget_reconciliation_runtime  # noqa: F401
 import shared_search_cap_runtime  # noqa: F401
 
 # Single commercial source of truth. This installs the Autonomy OS filter before allocator/bridge
