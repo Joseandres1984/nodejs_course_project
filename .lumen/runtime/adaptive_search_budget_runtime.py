@@ -3,11 +3,14 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Dict
 
+import demand_hunter
+import demand_hunter_runtime
+import demand_intelligence
 import search_budget_governor as governor
 import scout_connector
 from app import STATE, load_state
 
-VERSION = "1.0-adaptive-search-budget"
+VERSION = "1.1-adaptive-search-budget"
 _ORIGINAL_SUMMARY = governor.summary
 
 
@@ -79,15 +82,33 @@ def build_budget_plan(state: Dict[str, Any]) -> Dict[str, Any]:
             "increases_total_cap": False,
             "intraday_reallocation_respects_actual_usage": True,
             "provider_rate_and_cost_envelope_preserved": True,
+            "dependent_runtime_caps_synchronized": True,
+            "legacy_overage_reconciliation_reopens_budget": False,
         },
     }
 
 
 def apply_adaptive_search_budget(state: Dict[str, Any]) -> Dict[str, Any]:
     plan = build_budget_plan(state)
-    governor.DEMAND_RESERVED = int(plan["demand_reserved_daily"])
-    governor.GENERAL_POOL_CAP = int(plan["general_pool_daily"])
-    scout_connector.DAILY_QUERY_BUDGET = int(plan["general_pool_daily"])
+    demand_cap = int(plan["demand_reserved_daily"])
+    general_cap = int(plan["general_pool_daily"])
+
+    governor.DEMAND_RESERVED = demand_cap
+    governor.GENERAL_POOL_CAP = general_cap
+    scout_connector.DAILY_QUERY_BUDGET = general_cap
+
+    # These modules import/copy the lane cap during startup. Keep their runtime values synchronized
+    # whenever the adaptive split changes, otherwise an old 6/18 split can survive beside a new 11/13
+    # split and make the counters drift even though the provider-level hard cap is correct.
+    demand_hunter.DAILY_QUERY_BUDGET = demand_cap
+    demand_intelligence.DAILY_QUERY_BUDGET = demand_cap
+    demand_hunter_runtime.DAILY_CAP = demand_cap
+
+    # Repair only same-day legacy counters that were already above the provider envelope. The repair
+    # keeps the day exhausted and records the original values for audit, so it never creates new spend.
+    reconciliation = governor.reconcile_legacy_counters(state)
+    plan["reconciliation"] = reconciliation
+
     state["adaptive_search_budget"] = plan
     return plan
 
@@ -95,12 +116,16 @@ def apply_adaptive_search_budget(state: Dict[str, Any]) -> Dict[str, Any]:
 def adaptive_summary(state: Dict[str, Any]) -> Dict[str, Any]:
     base = dict(_ORIGINAL_SUMMARY(state) or {})
     plan = state.get("adaptive_search_budget", {}) or build_budget_plan(state)
+    reconciliation = plan.get("reconciliation", {}) or state.get("search_budget_reconciliation", {}) or {}
     base["adaptive"] = {
         "version": VERSION,
         "general_pool_daily": plan.get("general_pool_daily"),
         "demand_reserved_daily": plan.get("demand_reserved_daily"),
         "reason": plan.get("reason"),
         "total_cap_unchanged": True,
+        "dependent_runtime_caps_synchronized": True,
+        "accounting_reconciled": bool(reconciliation.get("reconciled")),
+        "legacy_overage_absorbed": int(reconciliation.get("legacy_overage_absorbed") or 0),
     }
     return base
 
@@ -110,6 +135,13 @@ governor.summary = adaptive_summary
 try:
     load_state()
     _PLAN = apply_adaptive_search_budget(STATE)
-    print({"adaptive_search_budget_runtime": {k: _PLAN.get(k) for k in ("version", "status", "total_daily_cap", "general_pool_daily", "demand_reserved_daily", "reason")}}, flush=True)
+    _RECON = _PLAN.get("reconciliation", {}) or {}
+    print({
+        "adaptive_search_budget_runtime": {
+            **{k: _PLAN.get(k) for k in ("version", "status", "total_daily_cap", "general_pool_daily", "demand_reserved_daily", "reason")},
+            "accounting_reconciled": bool(_RECON.get("reconciled")),
+            "legacy_overage_absorbed": int(_RECON.get("legacy_overage_absorbed") or 0),
+        }
+    }, flush=True)
 except Exception as exc:
     print({"adaptive_search_budget_runtime": {"version": VERSION, "status": "degraded_fail_open", "error": f"{type(exc).__name__}: {str(exc)[:220]}"}}, flush=True)
