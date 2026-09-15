@@ -38,6 +38,11 @@ import commercial_learning_v2_log_runtime  # noqa: F401
 # and forces experiment rotation after repeated same-lane failures without widening authority.
 import conversion_sprint_runtime  # noqa: F401
 
+# Autonomy Core gives the workforce a shared goal/lesson/help blackboard, outcome-based experience
+# memory, bounded skill learning and research-gap missions. It only reallocates reversible attention
+# and public research; binding, financial, legal, connector and deployment authority stay human-gated.
+import autonomy_core_runtime  # noqa: F401
+
 # Final cleanup before Executive Secretary: preserve legacy deals for audit, but suppress any
 # Safe Close / data-truth / first-cash queue item that still points to a quarantined deal.
 import canonical_priority_cleanup  # noqa: F401
