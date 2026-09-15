@@ -3,21 +3,31 @@ from __future__ import annotations
 """LUMEN conversion sprint guardrails.
 
 This runtime is intentionally narrow: it tightens commercial truth, concentrates
-attention on requirement/RFQ/quote conversion, and prevents repeated failed
-experiments from restarting unchanged. It never widens binding authority.
+attention on requirement/RFQ/quote conversion, prevents repeated failed experiments
+from restarting unchanged, and bounds no-effect learning observations. It never
+widens binding authority.
 """
 from typing import Any, Dict
 
 import autonomy_operating_system
 import commercial_learning_v2_runtime
+import continuous_learning_runtime
 import continuous_revenue_drive_runtime
 import revenue_allocator_runtime
 
-VERSION = "1.0-conversion-sprint"
+VERSION = "1.1-conversion-sprint"
+LEARNING_NO_EFFECT_SAMPLE_CAP = 24
 
 
 def _norm(value: Any) -> str:
     return " ".join(str(value or "").strip().lower().split())
+
+
+def _f(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def _linked(row: Dict[str, Any], deal_id: str, opportunity_id: str) -> bool:
@@ -203,6 +213,46 @@ def _guarded_experiments(state: Dict[str, Any], anti: Dict[str, Any]) -> Dict[st
 commercial_learning_v2_runtime._experiments = _guarded_experiments
 
 
+# Improvement Ledger cannot observe a no-effect hypothesis indefinitely.
+_ORIGINAL_LEDGER_UPDATE = continuous_learning_runtime._update_improvement_ledger
+
+
+def _bounded_improvement_ledger(state: Dict[str, Any], metrics: Dict[str, float]):
+    ledger = list(_ORIGINAL_LEDGER_UPDATE(state, metrics) or [])
+    redefinition = []
+    for row in ledger:
+        if row.get("status") != "OBSERVING":
+            continue
+        samples = int(row.get("samples") or 0)
+        if samples < LEARNING_NO_EFFECT_SAMPLE_CAP:
+            continue
+        baseline = row.get("baseline_value")
+        current = row.get("current_value")
+        if baseline is None or current is None:
+            continue
+        delta = _f(current) - _f(baseline)
+        if row.get("direction") == "lower_is_better":
+            delta = -delta
+        tolerance = max(0.01, abs(_f(baseline)) * 0.02)
+        if abs(delta) <= tolerance:
+            row["status"] = "DEMOTED"
+            row["decision"] = "redefine_hypothesis_after_no_effect_sample_cap"
+            row["redefinition_required"] = True
+            row["demotion_reason"] = f"no measurable effect after {samples} samples"
+            redefinition.append({
+                "id": row.get("id"),
+                "code": row.get("code"),
+                "samples": samples,
+                "target_metric": row.get("target_metric"),
+                "reason": row.get("demotion_reason"),
+            })
+    state["continuous_learning_redefinition_required"] = redefinition
+    return ledger
+
+
+continuous_learning_runtime._update_improvement_ledger = _bounded_improvement_ledger
+
+
 # Make Continuous Revenue Drive expose the real subphase: first complete requirements, then RFQ/quotes.
 _ORIGINAL_CRD_TICK = continuous_revenue_drive_runtime.continuous_revenue_drive_tick
 
@@ -234,6 +284,7 @@ def _conversion_crd_tick(state: Dict[str, Any]) -> Dict[str, Any]:
             "canonical_real_offers": offers,
             "truth_rule": "email_sent_is_not_offer; offer_requires_traceable commercial evidence",
             "experiment_rule": "two_consecutive_demotions_force_distinct_lane_test",
+            "learning_rule": f"no-effect observing hypotheses demote after {LEARNING_NO_EFFECT_SAMPLE_CAP} samples and require redefinition",
         }
     else:
         report["conversion_sprint"] = {"active": False}
@@ -253,6 +304,7 @@ print(
             "strict_offer_truth": True,
             "quote_execution_attention_pct": 80,
             "experiment_repeat_guard": True,
+            "learning_no_effect_sample_cap": LEARNING_NO_EFFECT_SAMPLE_CAP,
             "binding_authority_changed": False,
         }
     },
