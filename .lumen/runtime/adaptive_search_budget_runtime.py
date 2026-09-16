@@ -6,11 +6,12 @@ from typing import Any, Dict
 import demand_hunter
 import demand_hunter_runtime
 import demand_intelligence
+import public_procurement_hunter
 import search_budget_governor as governor
 import scout_connector
 from app import STATE, load_state
 
-VERSION = "1.2-adaptive-search-budget"
+VERSION = "1.3-adaptive-search-budget"
 _ORIGINAL_SUMMARY = governor.summary
 
 
@@ -103,12 +104,13 @@ def apply_adaptive_search_budget(state: Dict[str, Any]) -> Dict[str, Any]:
     governor.GENERAL_POOL_CAP = general_cap
     scout_connector.DAILY_QUERY_BUDGET = general_cap
 
-    # These modules import/copy the lane cap during startup. Keep their runtime values synchronized
-    # whenever the adaptive split changes, otherwise an old 6/18 split can survive beside a new 11/13
-    # split and make the counters drift even though the provider-level hard cap is correct.
+    # All demand-side modules share the same Governor pool. Their local ceilings must not strand
+    # otherwise valid provider capacity. Per-tick limits still keep each module bounded, while the
+    # Governor remains the single hard authority that prevents spending beyond TOTAL_DAILY_CAP.
     demand_hunter.DAILY_QUERY_BUDGET = demand_cap
     demand_intelligence.DAILY_QUERY_BUDGET = demand_cap
     demand_hunter_runtime.DAILY_CAP = demand_cap
+    public_procurement_hunter.DAILY_CAP = demand_cap
 
     # Repair only same-day legacy counters that were already above the provider envelope. The repair
     # keeps the day exhausted and records the original values for audit, so it never creates new spend.
@@ -130,6 +132,7 @@ def adaptive_summary(state: Dict[str, Any]) -> Dict[str, Any]:
         "reason": plan.get("reason"),
         "total_cap_unchanged": True,
         "dependent_runtime_caps_synchronized": True,
+        "procurement_can_use_full_demand_pool": True,
         "accounting_reconciled": bool(reconciliation.get("reconciled")),
         "legacy_overage_absorbed": int(reconciliation.get("legacy_overage_absorbed") or 0),
     }
@@ -147,6 +150,7 @@ try:
             **{k: _PLAN.get(k) for k in ("version", "status", "total_daily_cap", "general_pool_daily", "demand_reserved_daily", "reason")},
             "accounting_reconciled": bool(_RECON.get("reconciled")),
             "legacy_overage_absorbed": int(_RECON.get("legacy_overage_absorbed") or 0),
+            "procurement_can_use_full_demand_pool": True,
         }
     }, flush=True)
 except Exception as exc:
