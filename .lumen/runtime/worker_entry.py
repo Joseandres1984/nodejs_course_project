@@ -54,6 +54,11 @@ import autonomy_core_bridge_runtime  # noqa: F401
 # research automatically, and teach successful handoff patterns back into the shared playbook.
 import mission_team_runtime  # noqa: F401
 
+# Conversion unblocker preserves evidence gates but removes avoidable commercial deadlocks:
+# research-source accounts, over-strict pre-RFQ requirements, one-shot buyer outreach, and stalled
+# mission-team attention when a case is waiting on an external response.
+import conversion_unblock_runtime  # noqa: F401
+
 # Final cleanup before Executive Secretary: preserve legacy deals for audit, but suppress any
 # Safe Close / data-truth / first-cash queue item that still points to a quarantined deal.
 import canonical_priority_cleanup  # noqa: F401
