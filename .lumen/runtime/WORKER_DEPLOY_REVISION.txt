@@ -1,0 +1,2 @@
+worker-source-refresh=2026-09-16
+purpose=trigger Railway source refresh after watch-path normalization
