@@ -80,6 +80,10 @@ import procurement_document_enrichment_runtime  # noqa: F401
 # avoiding category-only inference and allowing the RFQ bridge to find the correct official document.
 import procurement_lineage_runtime  # noqa: F401
 
+# Keep the external-readiness dashboard on the same truth standard: provider acceptance and verified
+# delivery are separate, and raw legacy `sent` rows cannot make market reach look healthier than it is.
+import external_market_truth_runtime  # noqa: F401
+
 # Final cleanup before Executive Secretary: preserve legacy deals for audit, but suppress any
 # Safe Close / data-truth / first-cash queue item that still points to a quarantined deal.
 import canonical_priority_cleanup  # noqa: F401
