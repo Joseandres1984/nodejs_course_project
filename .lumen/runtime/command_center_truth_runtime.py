@@ -5,10 +5,154 @@ from __future__ import annotations
 Keeps stable internal/API fields while making the visible Command Center use the technical watchdog
 as its current health source and ARS as the primary Argentina display currency. USD remains a
 reference only when native ARS economics do not exist. No FX conversion is invented.
+
+This module is imported first by lumen-web. It also installs a small persistence-performance patch:
+reuse one PostgreSQL connection per web process and suppress duplicate state reloads occurring
+within the same short dashboard request burst. Business state semantics remain unchanged.
 """
 
 import re
+import threading
+import time
 from typing import Any, Dict, Iterable
+
+import psycopg
+from psycopg.types.json import Jsonb
+
+import app as _app
+
+
+# ---------------------------------------------------------------------------
+# Web persistence hot-path optimization
+# ---------------------------------------------------------------------------
+# The original persistence helpers opened a fresh PostgreSQL connection in
+# ensure_db(), then another one in load_state()/save_state(). The Command Center
+# invokes those helpers more than once during one page load (middleware + route +
+# API refreshes), which turned connection setup into tens of seconds of latency.
+#
+# lumen-web is one process/replica today, so a process-local reusable connection
+# is enough here. Access is serialized with an RLock. On any DB error the
+# connection is discarded and the next call reconnects normally.
+_DB_LOCK = threading.RLock()
+_DB_CONN = None
+_DB_SCHEMA_READY = False
+_LAST_LOAD_MONO = 0.0
+_STATE_CACHE_TTL_SECONDS = 2.0
+
+
+def _reset_db_connection() -> None:
+    global _DB_CONN, _DB_SCHEMA_READY
+    conn = _DB_CONN
+    _DB_CONN = None
+    _DB_SCHEMA_READY = False
+    if conn is not None:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _db_connection():
+    global _DB_CONN
+    if _DB_CONN is None or bool(getattr(_DB_CONN, "closed", False)):
+        _DB_CONN = psycopg.connect(
+            _app.DATABASE_URL,
+            autocommit=True,
+            connect_timeout=10,
+        )
+    return _DB_CONN
+
+
+def _fast_ensure_db() -> bool:
+    global _DB_SCHEMA_READY
+    if not _app.DATABASE_URL:
+        return False
+    with _DB_LOCK:
+        try:
+            conn = _db_connection()
+            if not _DB_SCHEMA_READY:
+                with conn.cursor() as cur:
+                    cur.execute("""CREATE TABLE IF NOT EXISTS lumen_state (
+                        state_key TEXT PRIMARY KEY, payload JSONB NOT NULL,
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())""")
+                _DB_SCHEMA_READY = True
+            _app.DB_STATUS.update({"connected": True, "last_error": None})
+            return True
+        except Exception as exc:
+            _reset_db_connection()
+            _app.DB_STATUS.update({"connected": False, "last_error": str(exc)[:180]})
+            return False
+
+
+def _fast_load_state(force: bool = False) -> bool:
+    global _LAST_LOAD_MONO
+    if not _app.DATABASE_URL:
+        return False
+
+    with _DB_LOCK:
+        monotonic_now = time.monotonic()
+        if (
+            not force
+            and _LAST_LOAD_MONO
+            and monotonic_now - _LAST_LOAD_MONO < _STATE_CACHE_TTL_SECONDS
+            and _app.DB_STATUS.get("connected")
+        ):
+            return True
+
+        if not _fast_ensure_db():
+            return False
+        try:
+            conn = _db_connection()
+            with conn.cursor() as cur:
+                cur.execute("SELECT payload FROM lumen_state WHERE state_key='global'")
+                row = cur.fetchone()
+            _LAST_LOAD_MONO = time.monotonic()
+            if row and isinstance(row[0], dict):
+                current = _app.default_state()
+                current.update(row[0])
+                _app.ensure_commerce_state(current)
+                _app.STATE.clear()
+                _app.STATE.update(current)
+                _app.DB_STATUS.update({"connected": True, "last_error": None})
+                return True
+            return False
+        except Exception as exc:
+            _reset_db_connection()
+            _app.DB_STATUS.update({"connected": False, "last_error": str(exc)[:180]})
+            return False
+
+
+def _fast_save_state() -> bool:
+    global _LAST_LOAD_MONO
+    if not _app.DATABASE_URL:
+        return False
+    with _DB_LOCK:
+        if not _fast_ensure_db():
+            return False
+        try:
+            conn = _db_connection()
+            with conn.cursor() as cur:
+                cur.execute(
+                    """INSERT INTO lumen_state(state_key,payload,updated_at) VALUES ('global',%s,NOW())
+                    ON CONFLICT (state_key) DO UPDATE SET payload=EXCLUDED.payload,updated_at=NOW()""",
+                    (Jsonb(_app.STATE),),
+                )
+            _LAST_LOAD_MONO = time.monotonic()
+            _app.DB_STATUS.update({"connected": True, "last_error": None})
+            return True
+        except Exception as exc:
+            _reset_db_connection()
+            _app.DB_STATUS.update({"connected": False, "last_error": str(exc)[:180]})
+            return False
+
+
+# Install before the rest of lumen-web imports main/journal/outbound modules, so
+# their `from app import load_state, save_state` bindings receive the optimized
+# functions too.
+_app.ensure_db = _fast_ensure_db
+_app.load_state = _fast_load_state
+_app.save_state = _fast_save_state
+
 
 import control_tower as _ct
 
@@ -208,4 +352,11 @@ def truthful_render_control_tower(snapshot: Dict[str, Any]) -> str:
 
 _ct.build_control_tower = truthful_build_control_tower
 _ct.render_control_tower = truthful_render_control_tower
-print({"command_center_truth_runtime": {"status": "active", "health": "watchdog_primary", "currency": "ARS_native_USD_reference"}}, flush=True)
+print({
+    "command_center_truth_runtime": {
+        "status": "active",
+        "health": "watchdog_primary",
+        "currency": "ARS_native_USD_reference",
+        "persistence_hotpath": "reused_connection_ttl_2s",
+    }
+}, flush=True)
