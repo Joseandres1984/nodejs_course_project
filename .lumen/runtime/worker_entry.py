@@ -59,6 +59,10 @@ import mission_team_runtime  # noqa: F401
 # mission-team attention when a case is waiting on an external response.
 import conversion_unblock_runtime  # noqa: F401
 
+# Deep Work must spend capacity on real commercial entities. Historical search/social/job-platform
+# cases stay auditable as evidence, but no longer consume active professional or mission-team slots.
+import casework_hygiene_runtime  # noqa: F401
+
 # Final cleanup before Executive Secretary: preserve legacy deals for audit, but suppress any
 # Safe Close / data-truth / first-cash queue item that still points to a quarantined deal.
 import canonical_priority_cleanup  # noqa: F401
