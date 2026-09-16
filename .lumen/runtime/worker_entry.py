@@ -35,6 +35,9 @@ import external_exploration_runtime  # noqa: F401
 # opportunities and useful stores. Persist zero-yield attempts too, and use bounded exploration/
 # exploitation without ever widening the shared search-provider cap.
 import external_exploration_learning_runtime  # noqa: F401
+# Scale the number of distinct prospect accounts processed when verification/contact queues are large,
+# while preserving every evidence threshold, page limit and outreach authority gate.
+import prospect_throughput_runtime  # noqa: F401
 
 # Single commercial source of truth. This installs the Autonomy OS filter before allocator/bridge
 # wrappers are imported, so raw legacy deals cannot create false closing priority.
