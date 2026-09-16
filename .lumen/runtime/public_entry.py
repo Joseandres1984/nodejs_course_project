@@ -44,6 +44,11 @@ import instagram_graph_transport_runtime  # noqa: E402,F401
 # Every external post is fail-closed until one immutable job receives explicit human approval.
 import instagram_publish_control  # noqa: E402,F401
 
+# Upgrade generated Instagram content to the professional editorial system:
+# adaptive weekday pillars, structured captions/hashtags, QA and 4:5 visual templates.
+# This changes preparation only; every external publication still needs explicit human approval.
+import instagram_pro_editorial_runtime  # noqa: E402,F401
+
 # Replace only the GET publishing cockpit with clearer expired-approval controls and
 # cache-busted previews. The approval/publish backend and human gate stay unchanged.
 import instagram_publishing_ui_fix  # noqa: E402,F401
