@@ -4,6 +4,9 @@ import runpy
 
 # Install the shared search-budget split before other modules import Scout constants.
 import search_budget_governor  # noqa: F401
+# Make provider-budget reservations transactional across concurrent processes. Fail closed if
+# PostgreSQL cannot confirm a claim, so the hard daily cap cannot be overspent by a race.
+import search_budget_atomic_runtime  # noqa: F401
 
 # Existing prospecting and demand-intelligence upgrades.
 import growth_prospector  # noqa: F401 - prospecting patches are applied on import
