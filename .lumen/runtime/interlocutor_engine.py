@@ -75,10 +75,15 @@ def _missing(requirement: Dict[str, Any]) -> List[str]:
 
 
 def _completeness(requirement: Dict[str, Any]) -> int:
+    # REQUIRED_REQUIREMENT_FIELDS can be narrowed at runtime by conversion_unblock_runtime.
+    # Readiness must therefore be driven by the active required set, not by a historical
+    # fixed percentage threshold that assumed five required fields.
+    required_total = max(1, len(REQUIRED_REQUIREMENT_FIELDS))
+    optional_total = max(1, len(OPTIONAL_REQUIREMENT_FIELDS))
     required_done = sum(1 for f in REQUIRED_REQUIREMENT_FIELDS if requirement.get(f) not in (None, "", [], {}))
     optional_done = sum(1 for f in OPTIONAL_REQUIREMENT_FIELDS if requirement.get(f) not in (None, "", [], {}))
-    score = (required_done / len(REQUIRED_REQUIREMENT_FIELDS)) * 85
-    score += (optional_done / len(OPTIONAL_REQUIREMENT_FIELDS)) * 15
+    score = (required_done / required_total) * 85
+    score += (optional_done / optional_total) * 15
     return round(min(100, score))
 
 
@@ -132,9 +137,12 @@ def _refresh_case(case: Dict[str, Any], opportunity: Dict[str, Any]) -> None:
     case["requirement_completeness"] = completeness
     case["buyer_questions"] = _questions(missing)
     confirmed = bool(requirement.get("confirmed_by_buyer"))
-    rfq_ready = confirmed and completeness >= 85 and not missing
+    # No fixed completeness threshold here: all active required fields + buyer evidence
+    # are sufficient for an exploratory supplier RFQ. Optional/closing fields can follow.
+    rfq_ready = confirmed and not missing
     case["supplier_rfq_ready"] = rfq_ready
     opportunity["requirement_confirmed"] = rfq_ready
+    opportunity["requirements_ready_for_rfq"] = rfq_ready
     if rfq_ready:
         case["status"] = "ready_for_supplier_rfq"
         case["next_action"] = "Solicitar ofertas comparables a proveedores validados"
