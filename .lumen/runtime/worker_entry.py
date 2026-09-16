@@ -31,6 +31,10 @@ import shared_search_cap_runtime  # noqa: F401
 # modules retain their own Governor reserve, while general searches rotate buyers, suppliers and
 # stores/distributors and prefer unique company domains over repeated pages from known companies.
 import external_exploration_runtime  # noqa: F401
+# Learn which external-search recipes create verified companies, usable contacts, demand,
+# opportunities and useful stores. Persist zero-yield attempts too, and use bounded exploration/
+# exploitation without ever widening the shared search-provider cap.
+import external_exploration_learning_runtime  # noqa: F401
 
 # Single commercial source of truth. This installs the Autonomy OS filter before allocator/bridge
 # wrappers are imported, so raw legacy deals cannot create false closing priority.
