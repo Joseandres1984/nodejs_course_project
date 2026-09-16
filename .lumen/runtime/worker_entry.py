@@ -102,6 +102,10 @@ import instagram_publish_control  # noqa: F401
 # explicitly human-approved one immutable post at a time.
 import instagram_pro_editorial_runtime  # noqa: F401
 
+# Premium art direction removes dashboard-like framing and replaces it with editorial typography,
+# negative space and asymmetric visuals while preserving the same content QA and approval gate.
+import instagram_art_direction_runtime  # noqa: F401
+
 # Harden WhatsApp delivery before worker_journal imports notification_router. Failures keep
 # their Meta error code/message (without secrets), use bounded retries, and never resend email.
 import whatsapp_resilience_runtime  # noqa: F401
