@@ -96,6 +96,10 @@ import procurement_lineage_runtime  # noqa: F401
 # delivery are separate, and raw legacy `sent` rows cannot make market reach look healthier than it is.
 import external_market_truth_runtime  # noqa: F401
 
+# Prepare a second, bounded money path from the same verified commercial intelligence: paid sourcing
+# and B2B prospecting services. It never replaces commission operations and cannot quote binding terms.
+import service_revenue_runtime  # noqa: F401
+
 # Final cleanup before Executive Secretary: preserve legacy deals for audit, but suppress any
 # Safe Close / data-truth / first-cash queue item that still points to a quarantined deal.
 import canonical_priority_cleanup  # noqa: F401
@@ -128,3 +132,28 @@ import instagram_editorial_learning_runtime  # noqa: F401
 import whatsapp_resilience_runtime  # noqa: F401
 
 runpy.run_module("worker_journal", run_name="__main__")
+
+# The normal commission/revenue cycle completes first. Then the paid-services lane inspects the same
+# verified company state and prepares only nonbinding service opportunities. Persist separately so a
+# failure here can never abort or overwrite the core commercial cycle.
+try:
+    from app import STATE, load_state, save_state
+
+    if load_state():
+        service_revenue = service_revenue_runtime.service_revenue_tick(STATE)
+        service_revenue["persisted"] = bool(save_state())
+        print({
+            "service_revenue_runtime": {
+                "version": service_revenue.get("version"),
+                "status": service_revenue.get("status"),
+                "mode": service_revenue.get("mode"),
+                "active_services": service_revenue.get("active_services"),
+                "prepared_service_opportunities": service_revenue.get("prepared_service_opportunities"),
+                "service_inquiries": service_revenue.get("service_inquiries"),
+                "realized_service_revenue_usd": service_revenue.get("realized_service_revenue_usd"),
+                "commission_business_preserved": service_revenue.get("commission_business_preserved"),
+                "persisted": service_revenue.get("persisted"),
+            }
+        }, flush=True)
+except Exception as exc:
+    print({"service_revenue_runtime": {"status": "degraded_fail_open", "error": f"{type(exc).__name__}: {str(exc)[:260]}"}}, flush=True)
