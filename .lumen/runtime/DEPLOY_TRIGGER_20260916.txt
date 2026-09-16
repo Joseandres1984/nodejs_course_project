@@ -1,3 +1,4 @@
 LUMEN runtime deployment trigger.
-Purpose: verify Railway source-watch refreshes lumen-worker from branch lumen-deploy after watchPatterns were enabled.
+Purpose: refresh Railway source-watch for lumen-worker from branch lumen-deploy after the conversion-unblock runtime was activated.
+Expected runtime revision: 49a973a010944b046a368a83f7551bd691a1dc6a or descendant.
 No runtime behavior is changed by this file.
