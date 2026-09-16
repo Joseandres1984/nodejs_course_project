@@ -10,7 +10,7 @@ import search_budget_governor as governor
 import scout_connector
 from app import STATE, load_state
 
-VERSION = "1.1-adaptive-search-budget"
+VERSION = "1.2-adaptive-search-budget"
 _ORIGINAL_SUMMARY = governor.summary
 
 
@@ -31,10 +31,13 @@ def _signals(state: Dict[str, Any]) -> Dict[str, Any]:
     external = state.get("external_market_readiness", {}) or {}
     reasons = external.get("ineligibility_reasons", {}) or {}
     crd = state.get("continuous_revenue_drive", {}) or {}
+    business = state.get("business_funnel", {}) or {}
     return {
         "verified_buyers": len(buyers),
         "buyers_with_demand": sum(1 for x in buyers if x.get("demand_signal")),
         "market_opportunities": len(state.get("market_opportunities", []) or []),
+        "requirements_ready_for_rfq": _i(business.get("requirements_ready_for_rfq")),
+        "real_offers": _i(business.get("real_offers")),
         "active_deals": sum(1 for x in state.get("deals", []) or [] if str(x.get("stage") or "").lower() not in {"closed", "lost", "cancelled", "canceled", "cerrado"}),
         "close_ready": sum(1 for x in state.get("deals", []) or [] if str(x.get("stage") or "").lower() in {"listo para cerrar", "close_ready", "autorizado para cierre"}),
         "eligible_external_prospects": _i(external.get("eligible_external_prospects")),
@@ -52,6 +55,9 @@ def build_budget_plan(state: Dict[str, Any]) -> Dict[str, Any]:
     if s["verified_buyers"] == 0 or s["buyers_with_demand"] == 0:
         demand_ratio = 0.65
         reason = "Falta demanda/comprador verificado; proteger más capacidad para demanda de alta intención."
+    elif s["market_opportunities"] > 0 and s["requirements_ready_for_rfq"] == 0:
+        demand_ratio = 0.60
+        reason = "Hay oportunidades verificadas pero ninguna lista para RFQ; priorizar demanda pública y evidencia de requisitos reales para destrabar cotizaciones."
     elif s["eligible_external_prospects"] == 0 and s["verification_backlog"] >= 8:
         demand_ratio = 0.35
         reason = "Hay demanda pero la salida está trabada por verificación/contacto; liberar más capacidad general para resolver identidad y canales."
