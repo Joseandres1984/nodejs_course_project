@@ -96,6 +96,12 @@ import instagram_graph_transport_runtime  # noqa: F401
 # after explicit human approval. The control also prepares a public JPEG asset for Meta to fetch.
 import instagram_publish_control  # noqa: F401
 
+# Professional Instagram editorial automation: creates a bounded weekday content calendar,
+# adapts messaging to conversion signals, enforces quality/non-repetition, generates structured
+# captions and hashtags, and upgrades previews to branded 4:5 visual templates. Publication remains
+# explicitly human-approved one immutable post at a time.
+import instagram_pro_editorial_runtime  # noqa: F401
+
 # Harden WhatsApp delivery before worker_journal imports notification_router. Failures keep
 # their Meta error code/message (without secrets), use bounded retries, and never resend email.
 import whatsapp_resilience_runtime  # noqa: F401
