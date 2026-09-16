@@ -106,6 +106,11 @@ import instagram_pro_editorial_runtime  # noqa: F401
 # negative space and asymmetric visuals while preserving the same content QA and approval gate.
 import instagram_art_direction_runtime  # noqa: F401
 
+# Persistent learning observes verified publication + downstream campaign deltas, stores outcome
+# baselines, and uses bounded exploration/exploitation to improve future headlines and visual styles.
+# Shared campaign signals are treated as directional only, never as fabricated Instagram attribution.
+import instagram_editorial_learning_runtime  # noqa: F401
+
 # Harden WhatsApp delivery before worker_journal imports notification_router. Failures keep
 # their Meta error code/message (without secrets), use bounded retries, and never resend email.
 import whatsapp_resilience_runtime  # noqa: F401
