@@ -64,6 +64,10 @@ import instagram_publishing_ui_fix  # noqa: E402,F401
 # Surface Instagram Operator directly inside the owner Command Center.
 import command_center_instagram_runtime  # noqa: E402,F401
 
+# Surface the second revenue path in the same Command Center without mixing its
+# realized revenue with commissions or widening price/contract/payment authority.
+import command_center_services_runtime  # noqa: E402,F401
+
 
 @app.middleware("http")
 async def public_root_landing(request: Request, call_next):
