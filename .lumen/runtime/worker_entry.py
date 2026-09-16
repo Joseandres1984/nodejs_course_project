@@ -76,6 +76,10 @@ import commercial_truth_repair_runtime  # noqa: F401
 # public documents directly to extract exact missing RFQ fields without spending search-provider quota.
 import procurement_document_enrichment_runtime  # noqa: F401
 
+# Preserve exact evidence provenance through lead -> buyer account -> opportunity before enrichment,
+# avoiding category-only inference and allowing the RFQ bridge to find the correct official document.
+import procurement_lineage_runtime  # noqa: F401
+
 # Final cleanup before Executive Secretary: preserve legacy deals for audit, but suppress any
 # Safe Close / data-truth / first-cash queue item that still points to a quarantined deal.
 import canonical_priority_cleanup  # noqa: F401
