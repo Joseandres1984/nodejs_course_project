@@ -49,6 +49,10 @@ import instagram_publish_control  # noqa: E402,F401
 # This changes preparation only; every external publication still needs explicit human approval.
 import instagram_pro_editorial_runtime  # noqa: E402,F401
 
+# Premium art direction removes dashboard-like framing and replaces it with editorial typography,
+# negative space and asymmetric visuals while preserving the same content QA and approval gate.
+import instagram_art_direction_runtime  # noqa: E402,F401
+
 # Replace only the GET publishing cockpit with clearer expired-approval controls and
 # cache-busted previews. The approval/publish backend and human gate stay unchanged.
 import instagram_publishing_ui_fix  # noqa: E402,F401
