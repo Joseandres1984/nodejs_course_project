@@ -44,6 +44,10 @@ import instagram_graph_transport_runtime  # noqa: E402,F401
 # Every external post is fail-closed until one immutable job receives explicit human approval.
 import instagram_publish_control  # noqa: E402,F401
 
+# Replace only the GET publishing cockpit with clearer expired-approval controls and
+# cache-busted previews. The approval/publish backend and human gate stay unchanged.
+import instagram_publishing_ui_fix  # noqa: E402,F401
+
 # Surface Instagram Operator directly inside the owner Command Center.
 import command_center_instagram_runtime  # noqa: E402,F401
 
