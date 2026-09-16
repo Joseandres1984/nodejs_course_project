@@ -27,6 +27,11 @@ import adaptive_search_budget_runtime  # noqa: F401
 import search_budget_reconciliation_runtime  # noqa: F401
 import shared_search_cap_runtime  # noqa: F401
 
+# Keep the general Scout lane permanently productive for net-new market discovery. Dedicated demand
+# modules retain their own Governor reserve, while general searches rotate buyers, suppliers and
+# stores/distributors and prefer unique company domains over repeated pages from known companies.
+import external_exploration_runtime  # noqa: F401
+
 # Single commercial source of truth. This installs the Autonomy OS filter before allocator/bridge
 # wrappers are imported, so raw legacy deals cannot create false closing priority.
 import canonical_revenue_truth_runtime  # noqa: F401
