@@ -10,10 +10,11 @@ from fastapi import Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app import STATE, app, load_state, save_state
+import landing_public
 from service_revenue_runtime import SERVICE_CATALOG
 
 
-VERSION = "1.0-service-inquiry-public"
+VERSION = "1.1-service-inquiry-public"
 EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 ACTIVE_IDS = {str(x["id"]) for x in SERVICE_CATALOG if x.get("status") == "active"}
 
@@ -33,6 +34,17 @@ def _clean(value: Any, limit: int) -> str:
 def _inquiry_id(email: str, service_id: str, need: str) -> str:
     seed = f"{email.lower()}|{service_id}|{need}|{utcnow()}"
     return "INQ-" + hashlib.sha1(seed.encode("utf-8")).hexdigest()[:12].upper()
+
+
+def _surface_services_on_landing() -> None:
+    # Keep the established public landing intact and add one visible path to the new service catalog.
+    marker = '<a href="#contacto">Contacto comercial</a>'
+    replacement = '<div><a href="/services">Servicios</a>&nbsp;&nbsp;&nbsp;<a href="#contacto">Contacto comercial</a></div>'
+    if marker in landing_public.LANDING_HTML and 'href="/services"' not in landing_public.LANDING_HTML:
+        landing_public.LANDING_HTML = landing_public.LANDING_HTML.replace(marker, replacement, 1)
+
+
+_surface_services_on_landing()
 
 
 def _page(result: str = "") -> str:
@@ -134,4 +146,4 @@ def service_inquiry(
     return RedirectResponse("/services?result=received", status_code=303)
 
 
-print({"service_revenue_public": {"version": VERSION, "status": "active", "inquiry_capture": True, "binding_terms": False}}, flush=True)
+print({"service_revenue_public": {"version": VERSION, "status": "active", "inquiry_capture": True, "landing_link": True, "binding_terms": False}}, flush=True)
