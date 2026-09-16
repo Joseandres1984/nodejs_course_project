@@ -53,6 +53,11 @@ import instagram_publish_control  # noqa: E402,F401
 # This changes preparation only; every external publication still needs explicit human approval.
 import instagram_pro_editorial_runtime  # noqa: E402,F401
 
+# Blend the two active paid services into only two editorial pillars per week.
+# The remaining pillars keep building authority/education/network and every publication
+# still requires the existing immutable human approval gate.
+import instagram_service_offers_runtime  # noqa: E402,F401
+
 # Premium art direction removes dashboard-like framing and replaces it with editorial typography,
 # negative space and asymmetric visuals while preserving the same content QA and approval gate.
 import instagram_art_direction_runtime  # noqa: E402,F401
