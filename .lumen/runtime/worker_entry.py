@@ -72,6 +72,10 @@ import adaptive_operator_runtime  # noqa: F401
 # strongly demote stale procurement hits, and count outbound as genuine only after provider acceptance.
 import commercial_truth_repair_runtime  # noqa: F401
 
+# When a current official procurement URL is already known, inspect a tiny bounded number of those
+# public documents directly to extract exact missing RFQ fields without spending search-provider quota.
+import procurement_document_enrichment_runtime  # noqa: F401
+
 # Final cleanup before Executive Secretary: preserve legacy deals for audit, but suppress any
 # Safe Close / data-truth / first-cash queue item that still points to a quarantined deal.
 import canonical_priority_cleanup  # noqa: F401
