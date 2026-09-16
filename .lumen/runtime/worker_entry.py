@@ -68,6 +68,10 @@ import casework_hygiene_runtime  # noqa: F401
 # when search budget is exhausted. It cannot widen binding/spend/deployment authority.
 import adaptive_operator_runtime  # noqa: F401
 
+# Repair conversion truth: reuse only exact current official procurement evidence for RFQ fields,
+# strongly demote stale procurement hits, and count outbound as genuine only after provider acceptance.
+import commercial_truth_repair_runtime  # noqa: F401
+
 # Final cleanup before Executive Secretary: preserve legacy deals for audit, but suppress any
 # Safe Close / data-truth / first-cash queue item that still points to a quarantined deal.
 import canonical_priority_cleanup  # noqa: F401
