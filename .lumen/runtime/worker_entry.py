@@ -50,6 +50,11 @@ import instagram_editorial_learning_runtime  # noqa: F401
 import instagram_service_offers_runtime  # noqa: F401
 import whatsapp_resilience_runtime  # noqa: F401
 
+# Improve A2A candidate selection before the post-cycle agent-network tick runs.
+# This preserves the original probe/handshake caps and all safety guardrails.
+import agent_network_runtime  # noqa: F401
+import agent_network_accelerator_runtime  # noqa: F401
+
 runpy.run_module("worker_journal", run_name="__main__")
 
 try:
@@ -150,6 +155,9 @@ try:
                 "status": agent_network.get("status"),
                 "mode": agent_network.get("mode"),
                 "probes_this_tick": agent_network.get("probes_this_tick"),
+                "registry_query": agent_network.get("registry_query"),
+                "registry_status": agent_network.get("registry_status"),
+                "registry_candidates_this_tick": agent_network.get("registry_candidates_this_tick"),
                 "discovered_this_tick": agent_network.get("discovered_this_tick"),
                 "handshakes_this_tick": agent_network.get("handshakes_this_tick"),
                 "discovered_total": agent_network.get("discovered_total"),
