@@ -19,6 +19,7 @@ import adaptive_search_budget_runtime  # noqa: F401
 import search_budget_reconciliation_runtime  # noqa: F401
 import shared_search_cap_runtime  # noqa: F401
 import search_efficiency_runtime  # noqa: F401
+import search_yield_runtime  # noqa: F401
 import external_exploration_runtime  # noqa: F401
 import external_exploration_learning_runtime  # noqa: F401
 import prospect_throughput_runtime  # noqa: F401
