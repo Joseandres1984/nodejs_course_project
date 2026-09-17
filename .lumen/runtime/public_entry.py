@@ -78,6 +78,10 @@ import command_center_services_runtime  # noqa: E402,F401
 # payment, purchase or commission commitment remains explicitly human-gated.
 import a2a_gateway_runtime  # noqa: E402,F401
 
+# One-time, zero-cost public A2A registry enrollment. Registration publishes only
+# LUMEN's already-public Agent Card URI and records the registry response in state.
+import a2a_public_registration_runtime  # noqa: E402,F401
+
 
 @app.middleware("http")
 async def public_root_landing(request: Request, call_next):
