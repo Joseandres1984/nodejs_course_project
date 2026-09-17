@@ -78,6 +78,10 @@ import command_center_services_runtime  # noqa: E402,F401
 # payment, purchase or commission commitment remains explicitly human-gated.
 import a2a_gateway_runtime  # noqa: E402,F401
 
+# Preserve multi-turn A2A context so commercial requirements can be completed
+# progressively across messages without widening binding authority.
+import a2a_inbound_accelerator_runtime  # noqa: E402,F401
+
 # One-time, zero-cost public A2A registry enrollment. Registration publishes only
 # LUMEN's already-public Agent Card URI and records the registry response in state.
 import a2a_public_registration_runtime  # noqa: E402,F401
