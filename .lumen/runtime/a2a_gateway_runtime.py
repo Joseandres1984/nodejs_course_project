@@ -10,9 +10,10 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 
 from app import STATE, app, load_state, save_state
+from a2a_inbound_bridge_runtime import process_inbound_record
 
 
-VERSION = "1.0-a2a-gateway"
+VERSION = "1.1-a2a-commercial-gateway"
 A2A_PROTOCOL_VERSION = "1.0"
 BASE_URL = (os.getenv("LUMEN_PUBLIC_BASE_URL") or "https://lumen-web-production-5755.up.railway.app").rstrip("/")
 MAX_INBOUND = 120
@@ -29,9 +30,10 @@ def _agent_card() -> Dict[str, Any]:
     return {
         "name": "LUMEN B2B Agent",
         "description": (
-            "AI-assisted B2B sourcing and commercial coordination agent. LUMEN can exchange non-binding "
-            "buyer requirements, supplier RFQs, technical/commercial clarifications and international sourcing data. "
-            "Purchases, payments, contracts, commissions and binding acceptance always require human approval."
+            "AI-assisted B2B sourcing and commercial coordination agent for Argentina, Latin America and global trade. "
+            "LUMEN exchanges non-binding buyer requirements, supplier RFQs, industrial sourcing capabilities, technical/commercial clarifications "
+            "and international logistics inputs. Priority sourcing includes industrial pumps and valves, instrumentation, electrical materials, "
+            "industrial spare parts and related equipment. Purchases, payments, contracts, commissions and binding acceptance always require human approval."
         ),
         "supportedInterfaces": [
             {"url": f"{BASE_URL}/a2a/v1", "protocolBinding": "JSONRPC", "protocolVersion": "1.0"},
@@ -52,29 +54,43 @@ def _agent_card() -> Dict[str, Any]:
                 "id": "b2b-capability-handshake",
                 "name": "B2B agent capability handshake",
                 "description": "Exchange identity, capabilities and preferred non-binding commercial workflow with another business agent.",
-                "tags": ["b2b", "agent-to-agent", "capabilities", "interoperability"],
+                "tags": ["b2b", "agent-to-agent", "capabilities", "interoperability", "commercial-network"],
                 "examples": ["Can we exchange supplier RFQs and availability data agent-to-agent?"],
             },
             {
                 "id": "supplier-rfq-exchange",
                 "name": "Supplier RFQ exchange",
                 "description": "Receive and structure non-binding supplier quotation requests and clarification exchanges.",
-                "tags": ["rfq", "supplier", "quotation", "procurement"],
+                "tags": ["rfq", "supplier", "quotation", "procurement", "sourcing", "supplier-discovery"],
                 "examples": ["Request a non-binding quotation for 10 industrial valves delivered to Argentina."],
             },
             {
                 "id": "buyer-requirement-intake",
                 "name": "Buyer requirement intake",
                 "description": "Receive a buyer need and identify the minimum technical, quantity and delivery information required for sourcing.",
-                "tags": ["buyer", "requirements", "sourcing", "procurement"],
+                "tags": ["buyer", "requirements", "sourcing", "procurement", "demand", "industrial-procurement"],
                 "examples": ["We need pumps with this technical scope, quantity and destination."],
+            },
+            {
+                "id": "industrial-sourcing-latam",
+                "name": "Industrial sourcing for Argentina and Latin America",
+                "description": "Coordinate non-binding sourcing for industrial pumps, valves, instrumentation, electrical materials, spare parts and related equipment.",
+                "tags": ["industrial", "argentina", "latin-america", "pumps", "valves", "instrumentation", "electrical", "spare-parts", "manufacturing"],
+                "examples": ["Find and compare suppliers for industrial instrumentation or pumps required in Argentina."],
             },
             {
                 "id": "global-trade-sourcing",
                 "name": "Global trade sourcing",
                 "description": "Coordinate non-binding international sourcing data including Incoterm, MOQ, origin, HS/NCM, packing and logistics inputs.",
-                "tags": ["international", "sourcing", "incoterm", "logistics", "global-trade"],
+                "tags": ["international", "sourcing", "incoterm", "logistics", "global-trade", "supply-chain", "import-export"],
                 "examples": ["Share FOB/CIF terms, MOQ, origin and packing data for an international supply option."],
+            },
+            {
+                "id": "commercial-opportunity-exchange",
+                "name": "Commercial opportunity exchange",
+                "description": "Receive non-binding buyer requirements or supplier capabilities and route sufficiently detailed messages into LUMEN's verification workflow.",
+                "tags": ["commercial-opportunity", "buyer-demand", "supplier-capability", "verification", "b2b"],
+                "examples": ["We need 20 industrial valves delivered to Buenos Aires and would like sourcing alternatives."],
             },
         ],
     }
@@ -163,7 +179,6 @@ def a2a_agent_card():
     return JSONResponse(_agent_card(), headers={"Cache-Control": "public, max-age=300", "A2A-Version": A2A_PROTOCOL_VERSION})
 
 
-# Transitional compatibility with pre-0.3 A2A discovery clients.
 @app.get("/.well-known/agent.json", include_in_schema=False)
 def a2a_agent_card_legacy():
     return JSONResponse(_agent_card(), headers={"Cache-Control": "public, max-age=300", "A2A-Version": A2A_PROTOCOL_VERSION})
@@ -225,7 +240,7 @@ async def a2a_jsonrpc(request: Request):
     load_state()
     network = _network_state()
     inbound = network.setdefault("inbound", [])
-    inbound.append({
+    inbound_record = {
         "id": f"A2AIN-{uuid.uuid4().hex[:12].upper()}",
         "received_at": utcnow(),
         "context_id": context_id,
@@ -235,7 +250,8 @@ async def a2a_jsonrpc(request: Request):
         "text": text[:8000],
         "binding_intent_detected": binding,
         "status": "human_gate_required" if binding else "received_nonbinding",
-    })
+    }
+    inbound.append(inbound_record)
     del inbound[:-MAX_INBOUND]
 
     if binding:
@@ -247,8 +263,9 @@ async def a2a_jsonrpc(request: Request):
     else:
         state = "TASK_STATE_INPUT_REQUIRED"
         reply_text = (
-            "LUMEN is available for non-binding B2B collaboration. For a sourcing/RFQ exchange, please provide the product or technical scope, "
-            "quantity and delivery destination. For international supply, Incoterm/location, MOQ, country of origin, HS/NCM if known and packing/weight data are also useful. "
+            "LUMEN is available for non-binding B2B collaboration. For a buyer sourcing/RFQ exchange, please include your organization, product or technical scope, "
+            "quantity and delivery destination. Supplier capability messages should include organization identity and the product/capability scope. "
+            "For international supply, Incoterm/location, MOQ, country of origin, HS/NCM if known and packing/weight data are also useful. "
             "Binding purchases, payments, contracts, commissions and acceptance of commercial terms remain human-gated."
         )
 
@@ -258,7 +275,11 @@ async def a2a_jsonrpc(request: Request):
         reply_text,
         {
             "acceptedMode": "nonbinding",
-            "skills": ["supplier-rfq-exchange", "buyer-requirement-intake", "global-trade-sourcing"],
+            "acceptedCommercialMessageTypes": ["buyer_requirement", "supplier_capability", "supplier_rfq", "commercial_clarification"],
+            "buyerMinimumFields": ["counterparty_identity", "product_or_technical_scope", "quantity", "delivery_destination"],
+            "supplierMinimumFields": ["counterparty_identity", "product_or_capability_scope"],
+            "skills": ["supplier-rfq-exchange", "buyer-requirement-intake", "industrial-sourcing-latam", "global-trade-sourcing", "commercial-opportunity-exchange"],
+            "verificationRequiredBeforeCommercialPromotion": True,
             "bindingActionsHumanGated": True,
         },
     )
@@ -280,6 +301,16 @@ async def a2a_jsonrpc(request: Request):
     network["inbound_total"] = int(network.get("inbound_total") or 0) + 1
     save_state()
 
+    try:
+        bridge_result = process_inbound_record(STATE, inbound_record)
+        network["last_inbound_bridge_result"] = bridge_result
+        save_state()
+        print({"a2a_inbound_bridge": bridge_result}, flush=True)
+    except Exception as exc:
+        network["last_inbound_bridge_result"] = {"status": "degraded_fail_open", "error": f"{type(exc).__name__}: {str(exc)[:220]}"}
+        save_state()
+        print({"a2a_inbound_bridge": network["last_inbound_bridge_result"]}, flush=True)
+
     return JSONResponse(
         {"jsonrpc": "2.0", "id": req_id, "result": {"task": task}},
         headers={"A2A-Version": A2A_PROTOCOL_VERSION},
@@ -294,7 +325,8 @@ print({
         "protocol_version": A2A_PROTOCOL_VERSION,
         "agent_card": f"{BASE_URL}/.well-known/agent-card.json",
         "endpoint": f"{BASE_URL}/a2a/v1",
-        "mode": "nonbinding_only",
+        "mode": "nonbinding_commercial_discovery",
+        "inbound_commercial_bridge": True,
         "binding_actions_human_gated": True,
     }
 }, flush=True)
