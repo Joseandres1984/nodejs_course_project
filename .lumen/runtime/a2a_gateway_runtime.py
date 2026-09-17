@@ -13,13 +13,21 @@ from app import STATE, app, load_state, save_state
 from a2a_inbound_bridge_runtime import process_inbound_record
 
 
-VERSION = "1.1-a2a-commercial-gateway"
+VERSION = "1.2-a2a-service-excellence"
 A2A_PROTOCOL_VERSION = "1.0"
 BASE_URL = (os.getenv("LUMEN_PUBLIC_BASE_URL") or "https://lumen-web-production-5755.up.railway.app").rstrip("/")
-MAX_INBOUND = 120
-MAX_TASKS = 120
+MAX_INBOUND = 160
+MAX_TASKS = 160
 RATE_LIMIT_PER_HOUR = 30
 _RATE_BUCKETS: Dict[str, List[float]] = {}
+
+FIELD_LABELS = {
+    "technical_or_product_scope": "product or technical scope/specification",
+    "product_or_capability_scope": "product or capability scope",
+    "quantity": "required quantity",
+    "delivery_destination": "delivery destination",
+    "counterparty_identity": "organization/company identity",
+}
 
 
 def utcnow() -> str:
@@ -88,8 +96,8 @@ def _agent_card() -> Dict[str, Any]:
             {
                 "id": "commercial-opportunity-exchange",
                 "name": "Commercial opportunity exchange",
-                "description": "Receive non-binding buyer requirements or supplier capabilities and route sufficiently detailed messages into LUMEN's verification workflow.",
-                "tags": ["commercial-opportunity", "buyer-demand", "supplier-capability", "verification", "b2b"],
+                "description": "Receive non-binding buyer requirements or supplier capabilities, request missing facts automatically and route complete packets into LUMEN's verification workflow.",
+                "tags": ["commercial-opportunity", "buyer-demand", "supplier-capability", "verification", "follow-up", "b2b"],
                 "examples": ["We need 20 industrial valves delivered to Buenos Aires and would like sourcing alternatives."],
             },
         ],
@@ -110,11 +118,12 @@ def _rate_allowed(request: Request) -> bool:
 
 def _network_state() -> Dict[str, Any]:
     network = STATE.setdefault("agent_network", {})
-    network.setdefault("version", VERSION)
+    network["version"] = VERSION
     network.setdefault("status", "active")
     network.setdefault("mode", "nonbinding_a2a")
     network.setdefault("inbound", [])
     network.setdefault("tasks", [])
+    network.setdefault("conversations", [])
     network.setdefault("guardrails", {
         "autonomous_purchase": False,
         "autonomous_payment": False,
@@ -171,6 +180,72 @@ def _jsonrpc_error(req_id: Any, code: int, message: str) -> JSONResponse:
     return JSONResponse(
         {"jsonrpc": "2.0", "id": req_id, "error": {"code": code, "message": message}},
         headers={"A2A-Version": A2A_PROTOCOL_VERSION},
+    )
+
+
+def _reply_plan(bridge: Dict[str, Any], binding: bool) -> tuple[str, str, Dict[str, Any]]:
+    status = str(bridge.get("status") or "")
+    missing = list(bridge.get("missing_fields") or [])
+    data = {
+        "acceptedMode": "nonbinding",
+        "bridgeStatus": status,
+        "priority": bridge.get("priority"),
+        "priorityScore": bridge.get("priority_score"),
+        "conversationId": bridge.get("conversation_id"),
+        "conversationTurns": bridge.get("conversation_turns"),
+        "missingFields": missing,
+        "acceptedCommercialMessageTypes": ["buyer_requirement", "supplier_capability", "supplier_rfq", "commercial_clarification"],
+        "buyerMinimumFields": ["counterparty_identity", "product_or_technical_scope", "quantity", "delivery_destination"],
+        "supplierMinimumFields": ["counterparty_identity", "product_or_capability_scope"],
+        "verificationRequiredBeforeCommercialPromotion": True,
+        "bindingActionsHumanGated": True,
+    }
+
+    if binding or status == "human_gate_required":
+        return (
+            "TASK_STATE_INPUT_REQUIRED",
+            "LUMEN received the request. Any purchase, payment, contract, commission agreement or binding acceptance requires explicit human approval. "
+            "We can continue exchanging non-binding technical and commercial information while that approval remains pending.",
+            data,
+        )
+
+    if status == "needs_clarification":
+        labels = [FIELD_LABELS.get(field, field.replace("_", " ")) for field in missing]
+        requested = ", ".join(labels) if labels else "the missing commercial details"
+        data["nextAction"] = "provide_missing_fields"
+        return (
+            "TASK_STATE_INPUT_REQUIRED",
+            f"Thanks. LUMEN can continue this B2B conversation. To move the case into verification, please provide: {requested}. "
+            "Once those facts are supplied, LUMEN will re-evaluate the same conversation automatically. No binding commitment is created by this exchange.",
+            data,
+        )
+
+    if status == "candidate_unverified":
+        data["opportunityId"] = bridge.get("opportunity_id")
+        data["opportunityKind"] = bridge.get("opportunity_kind")
+        data["nextAction"] = "counterparty_and_evidence_verification"
+        return (
+            "TASK_STATE_WORKING",
+            "Thank you. LUMEN has received a sufficiently complete non-binding commercial packet and moved it into counterparty/evidence verification. "
+            "We may request technical or commercial clarification as verification progresses. No purchase, payment, contract or acceptance has been made.",
+            data,
+        )
+
+    if status in {"handshake_or_noncommercial", "unclassified_nonbinding"}:
+        data["nextAction"] = "send_buyer_requirement_or_supplier_capability"
+        return (
+            "TASK_STATE_INPUT_REQUIRED",
+            "LUMEN is available for non-binding B2B cooperation. Buyer requirements should include organization identity, product or technical scope, quantity and delivery destination. "
+            "Supplier capability messages should include organization identity and the product/capability scope. International supply can additionally include Incoterm/location, MOQ, origin, HS/NCM and packing/weight data.",
+            data,
+        )
+
+    data["nextAction"] = "continue_nonbinding_exchange"
+    return (
+        "TASK_STATE_INPUT_REQUIRED",
+        "LUMEN is available for non-binding B2B collaboration. Please provide organization identity and the relevant buyer requirement, supplier capability or commercial clarification. "
+        "Binding purchases, payments, contracts, commissions and acceptance remain human-gated.",
+        data,
     )
 
 
@@ -234,11 +309,14 @@ async def a2a_jsonrpc(request: Request):
 
     text = _parts_text(message)
     context_id = str(message.get("contextId") or uuid.uuid4())
-    task_id = str(message.get("taskId") or uuid.uuid4())
     binding = _binding_intent(text)
 
     load_state()
     network = _network_state()
+    tasks = network.setdefault("tasks", [])
+    existing_by_context = next((row for row in tasks if str(row.get("contextId") or "") == context_id), None)
+    task_id = str(message.get("taskId") or (existing_by_context or {}).get("id") or uuid.uuid4())
+
     inbound = network.setdefault("inbound", [])
     inbound_record = {
         "id": f"A2AIN-{uuid.uuid4().hex[:12].upper()}",
@@ -254,62 +332,82 @@ async def a2a_jsonrpc(request: Request):
     inbound.append(inbound_record)
     del inbound[:-MAX_INBOUND]
 
-    if binding:
-        state = "TASK_STATE_INPUT_REQUIRED"
-        reply_text = (
-            "LUMEN received the request, but any purchase, payment, contract, commission agreement or binding acceptance "
-            "requires explicit human approval. We can continue exchanging non-binding technical and commercial information meanwhile."
-        )
-    else:
-        state = "TASK_STATE_INPUT_REQUIRED"
-        reply_text = (
-            "LUMEN is available for non-binding B2B collaboration. For a buyer sourcing/RFQ exchange, please include your organization, product or technical scope, "
-            "quantity and delivery destination. Supplier capability messages should include organization identity and the product/capability scope. "
-            "For international supply, Incoterm/location, MOQ, country of origin, HS/NCM if known and packing/weight data are also useful. "
-            "Binding purchases, payments, contracts, commissions and acceptance of commercial terms remain human-gated."
-        )
+    try:
+        bridge_result = process_inbound_record(STATE, inbound_record)
+    except Exception as exc:
+        bridge_result = {"status": "degraded_fail_open", "error": f"{type(exc).__name__}: {str(exc)[:220]}"}
+    network["last_inbound_bridge_result"] = bridge_result
 
-    response_message = _agent_reply(
-        context_id,
-        task_id,
-        reply_text,
-        {
-            "acceptedMode": "nonbinding",
-            "acceptedCommercialMessageTypes": ["buyer_requirement", "supplier_capability", "supplier_rfq", "commercial_clarification"],
-            "buyerMinimumFields": ["counterparty_identity", "product_or_technical_scope", "quantity", "delivery_destination"],
-            "supplierMinimumFields": ["counterparty_identity", "product_or_capability_scope"],
-            "skills": ["supplier-rfq-exchange", "buyer-requirement-intake", "industrial-sourcing-latam", "global-trade-sourcing", "commercial-opportunity-exchange"],
-            "verificationRequiredBeforeCommercialPromotion": True,
-            "bindingActionsHumanGated": True,
-        },
-    )
-    task = {
-        "id": task_id,
-        "contextId": context_id,
-        "status": {"state": state, "message": response_message, "timestamp": utcnow()},
-        "history": [message, response_message],
-        "metadata": {"lumen": True, "nonbinding": True, "bindingIntentDetected": binding},
-    }
-    tasks = network.setdefault("tasks", [])
-    existing = next((i for i, row in enumerate(tasks) if str(row.get("id")) == task_id), None)
-    if existing is None:
+    state, reply_text, reply_data = _reply_plan(bridge_result, binding)
+    response_message = _agent_reply(context_id, task_id, reply_text, reply_data)
+
+    existing_index = next((i for i, row in enumerate(tasks) if str(row.get("id")) == task_id), None)
+    if existing_index is None and existing_by_context is not None:
+        existing_index = next((i for i, row in enumerate(tasks) if row is existing_by_context), None)
+
+    if existing_index is None:
+        history = [message, response_message]
+        task = {
+            "id": task_id,
+            "contextId": context_id,
+            "status": {"state": state, "message": response_message, "timestamp": utcnow()},
+            "history": history,
+            "metadata": {
+                "lumen": True,
+                "nonbinding": True,
+                "bindingIntentDetected": binding,
+                "bridgeStatus": bridge_result.get("status"),
+                "priority": bridge_result.get("priority"),
+                "priorityScore": bridge_result.get("priority_score"),
+                "conversationId": bridge_result.get("conversation_id"),
+            },
+        }
         tasks.append(task)
     else:
-        tasks[existing] = task
+        task = tasks[existing_index]
+        history = task.setdefault("history", [])
+        history.extend([message, response_message])
+        del history[:-40]
+        task["contextId"] = context_id
+        task["status"] = {"state": state, "message": response_message, "timestamp": utcnow()}
+        metadata = task.setdefault("metadata", {})
+        metadata.update({
+            "lumen": True,
+            "nonbinding": True,
+            "bindingIntentDetected": binding,
+            "bridgeStatus": bridge_result.get("status"),
+            "priority": bridge_result.get("priority"),
+            "priorityScore": bridge_result.get("priority_score"),
+            "conversationId": bridge_result.get("conversation_id"),
+        })
+        tasks[existing_index] = task
+
     del tasks[:-MAX_TASKS]
     network["last_inbound_at"] = utcnow()
     network["inbound_total"] = int(network.get("inbound_total") or 0) + 1
+    network["last_service_excellence_event"] = {
+        "ts": utcnow(),
+        "context_id": context_id,
+        "task_id": task_id,
+        "bridge_status": bridge_result.get("status"),
+        "priority": bridge_result.get("priority"),
+        "priority_score": bridge_result.get("priority_score"),
+        "missing_fields": bridge_result.get("missing_fields") or [],
+        "autonomous_clarification": bridge_result.get("status") == "needs_clarification",
+    }
     save_state()
 
-    try:
-        bridge_result = process_inbound_record(STATE, inbound_record)
-        network["last_inbound_bridge_result"] = bridge_result
-        save_state()
-        print({"a2a_inbound_bridge": bridge_result}, flush=True)
-    except Exception as exc:
-        network["last_inbound_bridge_result"] = {"status": "degraded_fail_open", "error": f"{type(exc).__name__}: {str(exc)[:220]}"}
-        save_state()
-        print({"a2a_inbound_bridge": network["last_inbound_bridge_result"]}, flush=True)
+    print({
+        "a2a_inbound_bridge": bridge_result,
+        "a2a_service_excellence": {
+            "context_id": context_id,
+            "task_id": task_id,
+            "reply_state": state,
+            "autonomous_clarification": bridge_result.get("status") == "needs_clarification",
+            "thread_continuity": True,
+            "binding_actions_human_gated": True,
+        },
+    }, flush=True)
 
     return JSONResponse(
         {"jsonrpc": "2.0", "id": req_id, "result": {"task": task}},
@@ -325,8 +423,11 @@ print({
         "protocol_version": A2A_PROTOCOL_VERSION,
         "agent_card": f"{BASE_URL}/.well-known/agent-card.json",
         "endpoint": f"{BASE_URL}/a2a/v1",
-        "mode": "nonbinding_commercial_discovery",
+        "mode": "nonbinding_commercial_service_excellence",
         "inbound_commercial_bridge": True,
+        "autonomous_clarification": True,
+        "thread_continuity": True,
+        "priority_scoring": True,
         "binding_actions_human_gated": True,
     }
 }, flush=True)
