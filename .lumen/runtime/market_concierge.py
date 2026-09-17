@@ -18,6 +18,10 @@ COMPANY_PATTERNS = (
     re.compile(r"(?:empresa|compañía|compania)\s+([A-ZÁÉÍÓÚÑ0-9][A-ZÁÉÍÓÚÑ0-9& ._-]{1,70})", re.I),
     re.compile(r"(?:soy|somos)\s+de\s+([A-ZÁÉÍÓÚÑ0-9][A-ZÁÉÍÓÚÑ0-9& ._-]{1,70})", re.I),
 )
+UNCERTAIN_REPLY_RE = re.compile(
+    r"\b(?:no\s+s[eé]|a\s+definir|por\s+definir|todav[ií]a\s+no|sin\s+definir|no\s+definid[oa])\b",
+    re.I,
+)
 
 
 def utcnow() -> str:
@@ -49,6 +53,7 @@ def _new_conversation(listing: Dict[str, Any]) -> Dict[str, Any]:
         "company": "",
         "email": "",
         "quantity": "",
+        "delivery_location": "",
         "status": "collecting_need",
         "created_at": utcnow(),
         "updated_at": utcnow(),
@@ -69,10 +74,16 @@ def _extract_company(text: str) -> str:
     return ""
 
 
+def _is_explicit_answer(text: str) -> bool:
+    value = _clean(text, 180)
+    return bool(value) and not UNCERTAIN_REPLY_RE.search(value)
+
+
 def _ingest_message(conv: Dict[str, Any], message: str) -> None:
     text = _clean(message, 1800)
     if not text:
         return
+    status_before = str(conv.get("status") or "")
     conv.setdefault("messages", []).append({"role": "buyer", "text": text, "ts": utcnow()})
     conv["messages"] = conv["messages"][-20:]
 
@@ -84,16 +95,28 @@ def _ingest_message(conv: Dict[str, Any], message: str) -> None:
         company = _extract_company(text)
         if company:
             conv["company"] = company
-        elif conv.get("status") == "awaiting_company" and not email:
+        elif status_before == "awaiting_company" and not email and _is_explicit_answer(text):
             conv["company"] = _clean(text, 80)
 
     if not conv.get("quantity"):
         qty = QTY_RE.search(text)
         if qty:
             conv["quantity"] = qty.group(1) + " unidades"
+        elif status_before == "awaiting_quantity" and _is_explicit_answer(text) and re.search(r"\d", text):
+            conv["quantity"] = _clean(text, 100)
+
+    if (
+        not conv.get("delivery_location")
+        and status_before == "awaiting_delivery_location"
+        and not email
+        and _is_explicit_answer(text)
+        and len(text) >= 3
+    ):
+        conv["delivery_location"] = _clean(text, 180)
 
     contact_only = bool(email and text.strip().lower() == email.group(0).lower())
-    if conv.get("status") not in {"awaiting_company", "awaiting_email"} and not contact_only:
+    answer_only_statuses = {"awaiting_company", "awaiting_email", "awaiting_quantity", "awaiting_delivery_location"}
+    if status_before not in answer_only_statuses and not contact_only:
         parts = conv.setdefault("need_parts", [])
         if text not in parts:
             parts.append(text)
@@ -109,7 +132,13 @@ def _next_question(conv: Dict[str, Any], listing: Dict[str, Any]) -> str:
     need = _need(conv)
     if len(need) < 8:
         conv["status"] = "collecting_need"
-        return f"Contame qué necesitás de {listing.get('category') or 'este producto'}: cantidad, modelo o cualquier detalle que tengas. No hace falta completar campos."
+        return f"Contame qué necesitás de {listing.get('category') or 'este producto'}: modelo, especificación o cualquier detalle que tengas."
+    if not conv.get("quantity"):
+        conv["status"] = "awaiting_quantity"
+        return "¿Qué cantidad necesitás? Puede ser aproximada, pero necesito una cantidad indicada por vos para pedir cotizaciones comparables."
+    if not conv.get("delivery_location"):
+        conv["status"] = "awaiting_delivery_location"
+        return "¿Dónde sería la entrega? Con ciudad, provincia o planta alcanza; no voy a asumir ese dato por vos."
     if not conv.get("email"):
         conv["status"] = "awaiting_email"
         return "Perfecto. ¿A qué email te puedo responder? Podés escribirlo solo, sin completar ningún formulario."
@@ -195,7 +224,7 @@ def concierge_message(
         phone="",
         quantity=str(conv.get("quantity") or ""),
         deadline="",
-        delivery_location="",
+        delivery_location=str(conv.get("delivery_location") or ""),
         website="",
     )
     conv["status"] = "converted_to_market_inquiry"
