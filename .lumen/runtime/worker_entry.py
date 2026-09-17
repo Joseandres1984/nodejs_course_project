@@ -13,6 +13,7 @@ import operational_health_runtime  # noqa: F401
 import https_mail_transport  # noqa: F401
 import gmail_sent_runtime  # noqa: F401
 import market_intelligence_runtime  # noqa: F401
+import retail_consumer_goods_runtime  # noqa: F401
 import continuous_learning_compat_runtime  # noqa: F401
 import adaptive_search_budget_runtime  # noqa: F401
 import search_budget_reconciliation_runtime  # noqa: F401
