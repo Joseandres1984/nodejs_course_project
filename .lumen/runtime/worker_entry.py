@@ -82,9 +82,28 @@ try:
 
     if load_state():
         expansion = dict(expansion_revenue_tick(STATE) or {})
-        expansion["persisted"] = bool(save_state())
         loop = expansion.get("revenue_loop", {}) or {}
         metrics = loop.get("metrics", {}) or {}
+
+        # Service revenue uses its own verified transaction ledger. Reconcile that parallel lane
+        # after the service tick so the expansion dashboard counts only explicit won/paid truth.
+        service_summary = STATE.get("service_revenue_runtime", {}) or {}
+        service_won = max(0, int(service_summary.get("won") or 0))
+        try:
+            service_realized = max(0.0, float(service_summary.get("realized_service_revenue_usd") or 0.0))
+        except (TypeError, ValueError):
+            service_realized = 0.0
+        metrics["sales_closed"] = max(0, int(metrics.get("sales_closed") or 0)) + service_won
+        metrics["revenue_generated_usd"] = round(max(0.0, float(metrics.get("revenue_generated_usd") or 0.0)) + service_realized, 2)
+        STATE["expansion_revenue_metrics"] = metrics
+        if isinstance(STATE.get("expansion_revenue"), dict):
+            STATE["expansion_revenue"]["metrics"] = metrics
+        if isinstance(STATE.get("expansion_phase"), dict):
+            revenue_loop = STATE["expansion_phase"].get("revenue_loop")
+            if isinstance(revenue_loop, dict):
+                revenue_loop["metrics"] = metrics
+
+        expansion["persisted"] = bool(save_state())
         governance = expansion.get("search_governance", {}) or {}
         guardrails = expansion.get("guardrails", {}) or {}
         print({
