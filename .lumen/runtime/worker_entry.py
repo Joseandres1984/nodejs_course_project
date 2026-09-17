@@ -133,3 +133,30 @@ try:
         }, flush=True)
 except Exception as exc:
     print({"expansion_revenue_runtime": {"status": "degraded_fail_open", "error": f"{type(exc).__name__}: {str(exc)[:260]}"}}, flush=True)
+
+# Agent Network is intentionally bounded and fail-open. It probes only already verified supplier
+# domains for public A2A Agent Cards, blocks private-network/cross-domain targets and sends at most
+# one non-binding capability handshake per cycle. It cannot purchase, pay, contract or accept terms.
+try:
+    from app import STATE, load_state, save_state
+    from agent_network_runtime import agent_network_tick
+
+    if load_state():
+        agent_network = dict(agent_network_tick(STATE) or {})
+        agent_network["persisted"] = bool(save_state())
+        print({
+            "agent_network_runtime": {
+                "version": agent_network.get("version"),
+                "status": agent_network.get("status"),
+                "mode": agent_network.get("mode"),
+                "probes_this_tick": agent_network.get("probes_this_tick"),
+                "discovered_this_tick": agent_network.get("discovered_this_tick"),
+                "handshakes_this_tick": agent_network.get("handshakes_this_tick"),
+                "discovered_total": agent_network.get("discovered_total"),
+                "handshakes_total": agent_network.get("handshakes_total"),
+                "binding_actions_human_gated": (agent_network.get("guardrails") or {}).get("binding_actions_human_gated"),
+                "persisted": agent_network.get("persisted"),
+            }
+        }, flush=True)
+except Exception as exc:
+    print({"agent_network_runtime": {"status": "degraded_fail_open", "error": f"{type(exc).__name__}: {str(exc)[:260]}"}}, flush=True)
