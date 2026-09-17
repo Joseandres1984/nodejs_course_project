@@ -73,3 +73,44 @@ try:
         }, flush=True)
 except Exception as exc:
     print({"service_revenue_runtime": {"status": "degraded_fail_open", "error": f"{type(exc).__name__}: {str(exc)[:260]}"}}, flush=True)
+
+# Expansion is intentionally post-cycle and fail-open: it consolidates persisted evidence,
+# never authorizes spend/binding actions, and cannot take the normal worker down if it fails.
+try:
+    from app import STATE, load_state, save_state
+    from expansion_revenue_runtime import expansion_revenue_tick
+
+    if load_state():
+        expansion = dict(expansion_revenue_tick(STATE) or {})
+        expansion["persisted"] = bool(save_state())
+        loop = expansion.get("revenue_loop", {}) or {}
+        metrics = loop.get("metrics", {}) or {}
+        governance = expansion.get("search_governance", {}) or {}
+        guardrails = expansion.get("guardrails", {}) or {}
+        print({
+            "expansion_revenue_runtime": {
+                "version": expansion.get("version"),
+                "status": expansion.get("status"),
+                "companies_known": metrics.get("companies_known"),
+                "catalogs_indexed": metrics.get("catalogs_indexed"),
+                "products_known": metrics.get("products_known"),
+                "needs_detected": metrics.get("needs_detected"),
+                "opportunities_active": metrics.get("opportunities_active"),
+                "buyers_contacted": metrics.get("buyers_contacted"),
+                "suppliers_contacted": metrics.get("suppliers_contacted"),
+                "replies": metrics.get("replies"),
+                "negotiations": metrics.get("negotiations"),
+                "proposals": metrics.get("proposals"),
+                "margin_potential_usd": metrics.get("margin_potential_usd"),
+                "sales_closed": metrics.get("sales_closed"),
+                "revenue_generated_usd": metrics.get("revenue_generated_usd"),
+                "daily_provider_cap": governance.get("daily_provider_cap"),
+                "catalog_first_search_last": governance.get("catalog_first_search_last"),
+                "paid_spend_authority_changed": guardrails.get("paid_spend_authority_changed"),
+                "binding_authority_changed": guardrails.get("binding_authority_changed"),
+                "autonomous_purchase": guardrails.get("autonomous_purchase"),
+                "persisted": expansion.get("persisted"),
+            }
+        }, flush=True)
+except Exception as exc:
+    print({"expansion_revenue_runtime": {"status": "degraded_fail_open", "error": f"{type(exc).__name__}: {str(exc)[:260]}"}}, flush=True)
