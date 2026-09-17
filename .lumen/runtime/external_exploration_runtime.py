@@ -1,17 +1,12 @@
 from __future__ import annotations
 
-"""Net-new external exploration portfolio for LUMEN.
+"""Net-new discovery portfolio for LUMEN with a zero-capital Global Trade lane.
 
-Reserves Scout's general lane for discovering new companies rather than re-running
-buyer demand checks that already have dedicated demand/procurement modules. Each
-Scout cycle starts with a balanced portfolio: one potential buyer, one supplier,
-and one store/distributor query. Queries rotate category, commercial angle and
-Argentine geography. Result storage prefers unique company domains over multiple
-pages from the same company.
-
-This runtime does not increase the shared provider budget and does not expand any
-commercial authority. It only changes how already-authorized public search capacity
-is spent.
+The general Scout lane still uses the same provider budget. Each cycle keeps one
+local buyer query and one local store/distributor query, while the supplier query
+rotates across international industrial sourcing markets. This is research only:
+LUMEN acts as a commercial intermediary/sourcing coordinator, never as importer of
+record, customs broker, freight forwarder, purchaser or payer.
 """
 
 from datetime import datetime, timezone
@@ -21,7 +16,7 @@ import urllib.parse
 import scout_connector
 
 
-VERSION = "1.0-net-new-external-exploration"
+VERSION = "1.1-global-trade-discovery"
 
 _ORIGINAL_STORE_RESULTS = scout_connector._store_results
 
@@ -36,7 +31,7 @@ SEED_CATEGORIES = [
     "mantenimiento industrial",
 ]
 
-GEOGRAPHIES = [
+LOCAL_GEOGRAPHIES = [
     "Argentina",
     "Buenos Aires Argentina",
     "Córdoba Argentina",
@@ -45,18 +40,22 @@ GEOGRAPHIES = [
     "Rosario Argentina",
 ]
 
+GLOBAL_SUPPLIER_MARKETS = [
+    "Brazil",
+    "China",
+    "United States",
+    "Germany",
+    "Italy",
+    "India",
+    "Turkey",
+    "Mexico",
+]
+
 BUYER_ANGLES = [
     "compras abastecimiento mantenimiento",
     "planta producción ingeniería",
     "industria mantenimiento compras",
     "proyectos ingeniería abastecimiento",
-]
-
-SUPPLIER_ANGLES = [
-    "fabricante distribuidor proveedor",
-    "importador representante distribuidor",
-    "proveedor industrial stock catálogo",
-    "fabricante mayorista distribuidor",
 ]
 
 STORE_ANGLES = [
@@ -121,48 +120,77 @@ def _rotation_index(state: Dict[str, Any]) -> int:
 def _query_triplet(state: Dict[str, Any]) -> List[Tuple[str, str, str]]:
     categories = _categories(state) or list(SEED_CATEGORIES)
     idx = _rotation_index(state)
-    # Use three different category offsets so the same cycle spreads across the market.
     buyer_cat = categories[idx % len(categories)]
     supplier_cat = categories[(idx + 5) % len(categories)]
     store_cat = categories[(idx + 11) % len(categories)]
-    geo = GEOGRAPHIES[idx % len(GEOGRAPHIES)]
+    local_geo = LOCAL_GEOGRAPHIES[idx % len(LOCAL_GEOGRAPHIES)]
+    supplier_market = GLOBAL_SUPPLIER_MARKETS[idx % len(GLOBAL_SUPPLIER_MARKETS)]
     buyer_angle = BUYER_ANGLES[idx % len(BUYER_ANGLES)]
-    supplier_angle = SUPPLIER_ANGLES[idx % len(SUPPLIER_ANGLES)]
     store_angle = STORE_ANGLES[idx % len(STORE_ANGLES)]
 
     buyer = (
         f'"{buyer_cat}" (empresa OR industria OR planta OR fábrica OR fabrica) '
-        f'({buyer_angle.replace(" ", " OR ")}) {geo} -proveedor -distribuidor{NEGATIVE}',
+        f'({buyer_angle.replace(" ", " OR ")}) {local_geo} -proveedor -distribuidor{NEGATIVE}',
         "buyer",
         buyer_cat,
     )
     supplier = (
-        f'"{supplier_cat}" ({supplier_angle.replace(" ", " OR ")}) {geo}{NEGATIVE}',
+        f'"{supplier_cat}" (manufacturer OR supplier OR exporter OR distributor) '
+        f'{supplier_market} industrial catalog RFQ{NEGATIVE}',
         "supplier",
         supplier_cat,
     )
     store = (
-        f'"{store_cat}" ({store_angle.replace(" ", " OR ")}) {geo}{NEGATIVE}',
+        f'"{store_cat}" ({store_angle.replace(" ", " OR ")}) {local_geo}{NEGATIVE}',
         "supplier",
         store_cat,
     )
     return [buyer, supplier, store]
 
 
+def _query_market(query: str) -> str | None:
+    low = query.lower()
+    for market in GLOBAL_SUPPLIER_MARKETS:
+        if market.lower() in low:
+            return market
+    return None
+
+
 def _generic_search_plan(state: Dict[str, Any]):
     queue = _query_triplet(state)
+    idx = _rotation_index(state)
+    supplier_market = GLOBAL_SUPPLIER_MARKETS[idx % len(GLOBAL_SUPPLIER_MARKETS)]
     state["external_exploration_portfolio"] = {
         "version": VERSION,
         "status": "active",
-        "mode": "balanced_net_new_domains",
+        "mode": "local_demand_plus_global_supply",
         "queries_planned": len(queue),
-        "portfolio": ["potential_buyers", "suppliers", "stores_and_distributors"],
-        "rotation_index": _rotation_index(state),
+        "portfolio": ["local_potential_buyers", "global_suppliers", "local_stores_and_distributors"],
+        "rotation_index": idx,
+        "global_supplier_market_this_cycle": supplier_market,
+        "global_supplier_markets": list(GLOBAL_SUPPLIER_MARKETS),
         "total_provider_cap_unchanged": True,
         "demand_checks_moved_to_dedicated_lane": True,
+        "global_trade": {
+            "status": "active_research",
+            "business_model": "zero_capital_b2b_intermediation",
+            "role": "commercial_intermediary_and_sourcing_coordinator",
+            "container_strategy": "LCL_or_FCL_only_after_verified_demand_and_real_logistics_costs",
+            "own_capital_required": False,
+            "takes_title_to_goods": False,
+            "importer_of_record": False,
+            "exporter_of_record": False,
+            "customs_broker": False,
+            "freight_forwarder": False,
+            "autonomous_purchase": False,
+            "autonomous_payment": False,
+            "autonomous_binding_contract": False,
+            "commission_or_fee_requires_human_approval": True,
+            "customs_and_logistics_execution": "authorized_third_parties_only",
+        },
         "updated_at": _utcnow(),
     }
-    return "net_new_external_portfolio", queue
+    return "net_new_external_portfolio_global_trade", queue
 
 
 def _known_domains(state: Dict[str, Any]) -> set[str]:
@@ -194,6 +222,9 @@ def _store_results_net_new(
     before_ids = {str(x.get("id") or "") for x in state.get("research_leads", []) or []}
     created = _ORIGINAL_STORE_RESULTS(state, query, lead_type, category, filtered)
     storeish = any(token in query.lower() for token in ("tienda", "mayorista", "ecommerce", "catálogo", "catalogo"))
+    target_market = _query_market(query)
+    global_supplier_search = bool(lead_type == "supplier" and target_market)
+
     for lead in state.get("research_leads", []) or []:
         if str(lead.get("id") or "") in before_ids:
             continue
@@ -201,19 +232,28 @@ def _store_results_net_new(
         lead["exploration_portfolio"] = True
         lead["net_new_domain"] = True
         lead["exploration_version"] = VERSION
+        if global_supplier_search:
+            lead["global_trade_candidate"] = True
+            lead["target_market"] = target_market
+            lead["commercial_role"] = "prospective_international_supplier"
+            lead["requires_company_verification"] = True
+            lead["requires_verified_commercial_channel_before_outreach"] = True
         d = _domain(lead.get("url", ""))
         if d and not lead.get("domain"):
             lead["domain"] = d
 
     report = state.setdefault("external_exploration_portfolio", {})
     report["new_domains_last_query"] = int(created)
-    report["last_query_type"] = "store_or_distributor" if storeish else lead_type
+    report["last_query_type"] = "global_supplier" if global_supplier_search else ("store_or_distributor" if storeish else lead_type)
     report["last_category"] = category
+    if global_supplier_search:
+        report["last_global_supplier_market"] = target_market
+        report["last_global_supplier_candidates_created"] = int(created)
     report["updated_at"] = _utcnow()
     return created
 
 
-# Scout general capacity is discovery-only. Demand/procurement already has a separate Governor lane.
+# Scout capacity is unchanged: one existing supplier-search slot becomes international.
 scout_connector._demand_candidates = lambda state: []
 scout_connector._generic_search_plan = _generic_search_plan
 scout_connector._store_results = _store_results_net_new
@@ -222,11 +262,13 @@ print({
     "external_exploration_runtime": {
         "version": VERSION,
         "status": "active",
-        "general_lane": "net_new_discovery_only",
-        "per_cycle_portfolio": ["buyer", "supplier", "store_or_distributor"],
+        "general_lane": "local_demand_plus_global_supply",
+        "per_cycle_portfolio": ["local_buyer", "global_supplier", "local_store_or_distributor"],
+        "global_supplier_markets": GLOBAL_SUPPLIER_MARKETS,
         "dedupe": "unique_company_domain_first",
         "rotates_categories": True,
         "rotates_geographies": True,
+        "zero_capital_intermediation": True,
         "total_provider_cap_unchanged": True,
     }
 }, flush=True)
