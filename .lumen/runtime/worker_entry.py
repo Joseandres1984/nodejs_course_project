@@ -49,6 +49,7 @@ import instagram_art_direction_runtime  # noqa: F401
 import instagram_editorial_learning_runtime  # noqa: F401
 import instagram_service_offers_runtime  # noqa: F401
 import whatsapp_resilience_runtime  # noqa: F401
+import multicurrency_runtime  # noqa: F401
 
 # Improve A2A candidate selection before the post-cycle agent-network tick runs.
 # This preserves the original probe/handshake caps and all safety guardrails.
@@ -138,6 +139,37 @@ try:
         }, flush=True)
 except Exception as exc:
     print({"expansion_revenue_runtime": {"status": "degraded_fail_open", "error": f"{type(exc).__name__}: {str(exc)[:260]}"}}, flush=True)
+
+# Refresh payment routing and expose a truthful ARS/USD/EUR readiness matrix every cycle.
+# This does not perform FX conversion, move funds or authorize any payment.
+try:
+    from app import STATE, load_state, save_state
+    from payment_rails import payment_rails_tick
+
+    if load_state():
+        payment_rails = dict(payment_rails_tick(STATE) or {})
+        multicurrency = dict(multicurrency_runtime.multicurrency_tick(STATE) or {})
+        persisted = bool(save_state())
+        matrix = multicurrency.get("currency_matrix", {}) or {}
+        print({
+            "multicurrency_runtime": {
+                "version": multicurrency.get("version"),
+                "status": multicurrency.get("status"),
+                "supported_currencies": multicurrency.get("supported_currencies"),
+                "ready_currencies": multicurrency.get("ready_currencies"),
+                "setup_required_currencies": multicurrency.get("setup_required_currencies"),
+                "ars_ready": bool((matrix.get("ARS") or {}).get("ready_to_collect")),
+                "usd_ready": bool((matrix.get("USD") or {}).get("ready_to_collect")),
+                "eur_ready": bool((matrix.get("EUR") or {}).get("ready_to_collect")),
+                "ready_routes": payment_rails.get("ready_routes"),
+                "setup_required_routes": payment_rails.get("setup_required"),
+                "automatic_fx_conversion": False,
+                "autonomous_payment": False,
+                "persisted": persisted,
+            }
+        }, flush=True)
+except Exception as exc:
+    print({"multicurrency_runtime": {"status": "degraded_fail_open", "error": f"{type(exc).__name__}: {str(exc)[:260]}"}}, flush=True)
 
 # Agent Network is intentionally bounded and fail-open. It probes only already verified supplier
 # domains for public A2A Agent Cards, blocks private-network/cross-domain targets and sends at most

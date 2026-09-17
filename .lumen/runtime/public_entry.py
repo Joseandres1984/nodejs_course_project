@@ -86,6 +86,10 @@ import a2a_inbound_accelerator_runtime  # noqa: E402,F401
 # LUMEN's already-public Agent Card URI and records the registry response in state.
 import a2a_public_registration_runtime  # noqa: E402,F401
 
+# Expose truthful ARS/USD/EUR readiness in the owner Command Center and health API.
+# Support, enabled rail and verified collection readiness remain separate concepts.
+import multicurrency_web_runtime  # noqa: E402,F401
+
 
 @app.middleware("http")
 async def public_root_landing(request: Request, call_next):
