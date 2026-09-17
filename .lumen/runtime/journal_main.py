@@ -221,16 +221,7 @@ def _owner_command_center_links(text: str) -> str:
 
 @app.middleware('http')
 async def lumen_ui_runtime(request: Request, call_next):
-    owner_paths = {
-        '/command-center', '/cycle-journal', '/api/cycle-journal', '/market-owner', '/market-owner/publications',
-        '/workforce', '/casework', '/partners', '/acquisition', '/creative-factory', '/distribution-proof',
-        '/distribution-operator', '/social-distribution', '/system-test'
-    }
-    if request.url.path in owner_paths:
-        load_state()
-        if request.url.path not in {'/market-owner', '/market-owner/publications', '/workforce', '/casework', '/partners', '/acquisition', '/creative-factory', '/distribution-proof', '/distribution-operator', '/social-distribution', '/system-test'}:
-            bootstrap_current_cycle(STATE)
-
+    # Route handlers already load current state. Avoid a second pre-request DB read here.
     response = await call_next(request)
     content_type = str(response.headers.get('content-type') or '')
     if 'text/html' not in content_type:
@@ -246,6 +237,9 @@ async def lumen_ui_runtime(request: Request, call_next):
     text = body.decode('utf-8', errors='replace')
 
     if path == '/command-center':
+        # The downstream command-center handler has already loaded STATE.
+        # Bootstrap journal after it responds so the panel remains current without reloading state.
+        bootstrap_current_cycle(STATE)
         text = _owner_command_center_links(text)
         text = inject_watchdog_strip(text, STATE)
         text = inject_distribution_strip(text, STATE)
