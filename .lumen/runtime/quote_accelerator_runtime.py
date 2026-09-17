@@ -5,8 +5,8 @@ from typing import Any, Dict, List
 
 import commercial_execution
 
-VERSION = "1.1-supplier-rfq-standard"
-RFQ_STANDARD = "LUMEN-RFQ-1.0"
+VERSION = "1.2-supplier-rfq-global-trade"
+RFQ_STANDARD = "LUMEN-RFQ-1.1"
 RFQ_REQUIRED_RESPONSE_FIELDS = (
     "unit_price",
     "total_price",
@@ -17,6 +17,17 @@ RFQ_REQUIRED_RESPONSE_FIELDS = (
     "payment_terms",
     "brand_model",
     "technical_sheet_when_applicable",
+)
+RFQ_INTERNATIONAL_FIELDS = (
+    "incoterm_and_named_place",
+    "minimum_order_quantity",
+    "country_of_origin",
+    "hs_code_if_known",
+    "export_dispatch_point",
+    "packing_dimensions",
+    "net_and_gross_weight",
+    "shipment_volume_if_available",
+    "export_documentation",
 )
 _ORIGINAL_ENSURE = commercial_execution._ensure_revops_cases
 _ORIGINAL_MESSAGE = commercial_execution._message
@@ -45,8 +56,15 @@ def _supplier_rfq_body_standard(requirement: Dict[str, Any]) -> str:
         "- marca, fabricante y modelo ofrecido;\n"
         "- ficha técnica o documentación técnica aplicable;\n"
         "- garantía, origen, flete, impuestos y cualquier condición o exclusión relevante.\n\n"
-        "Si la alternativa ofrecida presenta algún desvío respecto del requerimiento, agradeceremos identificarlo expresamente. "
-        "Para suministros internacionales, por favor indicar también Incoterm y lugar convenido.\n\n"
+        "Si la alternativa ofrecida presenta algún desvío respecto del requerimiento, agradeceremos identificarlo expresamente.\n\n"
+        "Si el suministro es internacional, agradeceremos además indicar:\n"
+        "- Incoterm y lugar convenido;\n"
+        "- cantidad mínima de pedido (MOQ), si aplica;\n"
+        "- país de origen de la mercadería;\n"
+        "- código HS/NCM si lo conocen;\n"
+        "- ciudad/puerto o punto previsto de despacho;\n"
+        "- dimensiones de embalaje, peso neto y bruto y volumen de embarque disponible;\n"
+        "- documentación de exportación/origen disponible.\n\n"
         "Esta solicitud es exploratoria y no vinculante. No implica orden de compra, aceptación contractual, compromiso de pago ni aceptación automática de condiciones comerciales; cualquier decisión posterior queda sujeta a revisión final."
     )
 
@@ -68,7 +86,7 @@ def _message_with_rfq_standard(
             f"Nos comunicamos específicamente por {topic}.\n\n"
             f"{body}"
         )
-        purpose = purpose or "supplier_rfq_standard_v1"
+        purpose = purpose or "supplier_rfq_standard_global_trade_v1"
     return _ORIGINAL_MESSAGE(
         state,
         execution_key=execution_key,
@@ -155,6 +173,8 @@ def _ensure_prioritized(state: Dict[str, Any], memory: Dict[str, Any]) -> List[D
             "professional_courteous": True,
             "supplier_personalization": True,
             "required_response_fields": list(RFQ_REQUIRED_RESPONSE_FIELDS),
+            "international_response_fields_when_applicable": list(RFQ_INTERNATIONAL_FIELDS),
+            "global_trade_ready": True,
             "nonbinding_only": True,
             "autonomous_contract_acceptance": False,
             "autonomous_purchase": False,
@@ -174,6 +194,7 @@ print({
         "message_cap_unchanged": True,
         "rfq_standard": RFQ_STANDARD,
         "supplier_personalization": True,
+        "global_trade_ready": True,
         "nonbinding_only": True,
     }
 }, flush=True)
