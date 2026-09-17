@@ -73,6 +73,11 @@ import command_center_instagram_runtime  # noqa: E402,F401
 # realized revenue with commissions or widening price/contract/payment authority.
 import command_center_services_runtime  # noqa: E402,F401
 
+# Publish LUMEN as a standards-based A2A agent. The public Agent Card exposes only
+# non-sensitive capabilities; inbound A2A work is nonbinding and any contractual,
+# payment, purchase or commission commitment remains explicitly human-gated.
+import a2a_gateway_runtime  # noqa: E402,F401
+
 
 @app.middleware("http")
 async def public_root_landing(request: Request, call_next):
