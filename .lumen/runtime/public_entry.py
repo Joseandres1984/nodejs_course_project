@@ -77,9 +77,13 @@ import instagram_publishing_ui_fix  # noqa: E402,F401
 # Surface Instagram Operator directly inside the owner Command Center.
 import command_center_instagram_runtime  # noqa: E402,F401
 
-# Surface the second revenue path in the same Command Center without mixing its
+# Surface the paid-services pipeline in the owner Command Center without mixing
 # realized revenue with commissions or widening price/contract/payment authority.
 import command_center_services_runtime  # noqa: E402,F401
+
+# Surface the new Intelligence revenue lane separately so product-fit candidates,
+# real contacts, replies, paid search usage and realized revenue remain visible and truthful.
+import command_center_intelligence_runtime  # noqa: E402,F401
 
 # Publish LUMEN as a standards-based A2A agent. The public Agent Card exposes only
 # non-sensitive capabilities; inbound A2A work is nonbinding and any contractual,
