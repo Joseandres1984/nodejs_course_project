@@ -12,9 +12,17 @@ from landing_public import _render as render_public_landing  # noqa: E402
 # Register public privacy and data-deletion pages used by connected platforms.
 import privacy_public  # noqa: E402,F401
 
+# Install the four Intelligence revenue products before public service routes capture the
+# shared catalog. This does not authorize paid search, final pricing, contracts or payments.
+import intelligence_revenue_runtime  # noqa: E402,F401
+
 # Public paid-services page and nonbinding inquiry capture. Inquiries are stored as
 # unverified user submissions until LUMEN verifies them; no contract/payment is created automatically.
 import service_revenue_public  # noqa: E402,F401
+
+# Dedicated public Intelligence surface: QuoteCheck, SupplierCheck, Export Scout and Tender Hunter.
+# It feeds the same governed service CRM and captures native currency without fabricating FX values.
+import intelligence_revenue_public  # noqa: E402,F401
 
 # Register the Instagram integration routes. The connector reads its token only
 # from Railway environment variables and never exposes it in responses.
