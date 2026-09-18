@@ -11,7 +11,7 @@ import search_budget_governor as governor
 import scout_connector
 from app import STATE, load_state
 
-VERSION = "1.3-adaptive-search-budget"
+VERSION = "1.4-first-cash-revenue-sprint"
 _ORIGINAL_SUMMARY = governor.summary
 
 
@@ -33,6 +33,7 @@ def _signals(state: Dict[str, Any]) -> Dict[str, Any]:
     reasons = external.get("ineligibility_reasons", {}) or {}
     crd = state.get("continuous_revenue_drive", {}) or {}
     business = state.get("business_funnel", {}) or {}
+    first_cash = state.get("first_cash_mode", {}) or {}
     return {
         "verified_buyers": len(buyers),
         "buyers_with_demand": sum(1 for x in buyers if x.get("demand_signal")),
@@ -45,6 +46,8 @@ def _signals(state: Dict[str, Any]) -> Dict[str, Any]:
         "verification_backlog": _i(reasons.get("company_not_verified")) + _i(reasons.get("contact_not_verified")),
         "crd_lane": str(crd.get("primary_lane") or "").lower(),
         "unlinked_demand": len(state.get("unlinked_demand_signals", []) or []),
+        "first_cash_active": str(first_cash.get("status") or "").upper() == "ACTIVE",
+        "first_cash_focus_cases": len(first_cash.get("top_cash_cases", []) or []),
     }
 
 
@@ -53,7 +56,12 @@ def build_budget_plan(state: Dict[str, Any]) -> Dict[str, Any]:
     s = _signals(state)
 
     # Reallocate the existing envelope only. Never increase the provider/cost cap here.
-    if s["verified_buyers"] == 0 or s["buyers_with_demand"] == 0:
+    # During First Cash, conversion evidence gets priority over broad exploration, but the
+    # general lane retains 30% so identity/contact verification cannot be starved.
+    if s["first_cash_active"] and s["market_opportunities"] > 0 and s["requirements_ready_for_rfq"] == 0:
+        demand_ratio = 0.70
+        reason = "Revenue Sprint 2.0: First Cash activo y 0 requisitos listos para RFQ; priorizar evidencia de demanda/requisitos sin eliminar verificación de identidad y contacto."
+    elif s["verified_buyers"] == 0 or s["buyers_with_demand"] == 0:
         demand_ratio = 0.65
         reason = "Falta demanda/comprador verificado; proteger más capacidad para demanda de alta intención."
     elif s["market_opportunities"] > 0 and s["requirements_ready_for_rfq"] == 0:
@@ -91,6 +99,7 @@ def build_budget_plan(state: Dict[str, Any]) -> Dict[str, Any]:
             "provider_rate_and_cost_envelope_preserved": True,
             "dependent_runtime_caps_synchronized": True,
             "legacy_overage_reconciliation_reopens_budget": False,
+            "general_lane_preserved_for_verification": True,
         },
     }
 
