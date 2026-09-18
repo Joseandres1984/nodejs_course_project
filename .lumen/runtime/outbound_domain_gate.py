@@ -82,3 +82,7 @@ def gated_outbound_engine_tick(state: Dict[str, Any]) -> Dict[str, Any]:
 if not getattr(outbound_engine, "_lumen_production_sender_gate_installed", False):
     outbound_engine.outbound_engine_tick = gated_outbound_engine_tick
     outbound_engine._lumen_production_sender_gate_installed = True
+
+# Revenue focus stays inside the same sender/domain/quality/risk/opt-out and volume gates.
+# This only prioritizes already-qualified paid-service candidates within the existing caps.
+import service_revenue_outbound_runtime  # noqa: E402,F401
