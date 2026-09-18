@@ -12,7 +12,7 @@ import control_tower as _ct
 from app import STATE, load_state
 from outbound_web import app
 
-VERSION = "1.4-command-center-instagram-publishing"
+VERSION = "1.4.1-command-center-instagram-publishing"
 _ORIGINAL_BUILD = _ct.build_control_tower
 _ORIGINAL_RENDER = _ct.render_control_tower
 
@@ -50,8 +50,8 @@ def _instagram_css() -> str:
     return """
 <style id="lumen-instagram-cc-css">
 .ig-section{margin:0 0 14px}.ig-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}.ig-cta{display:flex;justify-content:space-between;align-items:center;gap:12px}.ig-actions{display:flex;gap:8px;flex-wrap:wrap}.ig-button{display:inline-block;background:#d7ff64;color:#071018!important;border-radius:9px;padding:10px 14px;font-weight:850;text-decoration:none!important}.ig-button.secondary{background:#17303a;color:#e8f0f4!important;border:1px solid #31505d}.ig-state{color:var(--good);font-weight:800}.ig-note{font-size:11px;color:var(--muted);margin-top:4px}.ig-floating{position:fixed;left:14px;bottom:18px;z-index:10050;background:#d7ff64;color:#071018!important;border:1px solid #efffae;border-radius:999px;padding:12px 16px;font-weight:950;text-decoration:none!important;box-shadow:0 10px 34px #0009;letter-spacing:.01em}
-@media(max-width:900px){.ig-grid{grid-template-columns:1fr 1fr}.ig-cta{align-items:flex-start;flex-direction:column}}
-@media(max-width:620px){.ig-grid{grid-template-columns:1fr 1fr}.ig-floating{left:12px;bottom:76px;padding:11px 14px;font-size:13px}}
+@media(max-width:900px){.ig-grid{grid-template-columns:1fr 1fr}.ig-cta{align-items:flex-start;flex-direction:column}.ig-floating{display:none}}
+@media(max-width:620px){.ig-grid{grid-template-columns:1fr 1fr}.ig-actions{width:100%}.ig-button{flex:1;text-align:center;min-width:0}}
 </style>
 """
 
@@ -151,4 +151,4 @@ async def command_center_instagram_injector(request: Request, call_next):
         return response
 
 
-print({"command_center_instagram_runtime": {"version": VERSION, "status": "active", "route": "/instagram", "publishing_route": "/instagram/publishing", "direct_injector": True, "placement": "top", "floating_launcher": True}}, flush=True)
+print({"command_center_instagram_runtime": {"version": VERSION, "status": "active", "route": "/instagram", "publishing_route": "/instagram/publishing", "direct_injector": True, "placement": "top", "floating_launcher": True, "mobile_launcher": "embedded_card_only"}}, flush=True)
