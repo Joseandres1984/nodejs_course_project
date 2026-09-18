@@ -14,7 +14,7 @@ import landing_public
 from service_revenue_runtime import SERVICE_CATALOG
 
 
-VERSION = "1.1-service-inquiry-public"
+VERSION = "1.2-low-friction-service-inquiry"
 EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 ACTIVE_IDS = {str(x["id"]) for x in SERVICE_CATALOG if x.get("status") == "active"}
 
@@ -62,7 +62,7 @@ def _page(result: str = "") -> str:
           <h2>{_esc(item['promise'])}</h2>
           <ul>{deliverables}</ul>
           <p class='small'>Los alcances, precio y condiciones finales se confirman caso por caso. No hay compromiso vinculante hasta su aceptación expresa.</p>
-          <a class='cta secondary' href='#consulta' data-service='{_esc(item['id'])}'>Consultar</a>
+          <a class='cta secondary service-choice' href='#consulta' data-service='{_esc(item['id'])}'>Consultar</a>
         </article>
         """)
     return f"""<!doctype html>
@@ -71,27 +71,38 @@ def _page(result: str = "") -> str:
 <meta name='description' content='Servicios LUMEN de sourcing de proveedores y prospección comercial B2B.'>
 <style>
 :root{{--bg:#061117;--panel:#0b1d25;--line:#23404b;--text:#edf5f7;--muted:#9fb2bb;--accent:#d7ff64}}
-*{{box-sizing:border-box}}body{{margin:0;background:linear-gradient(180deg,#061117,#08141b);color:var(--text);font-family:Inter,system-ui,-apple-system,Segoe UI,Arial,sans-serif;line-height:1.55}}a{{color:inherit}}main{{max-width:1100px;margin:auto;padding:28px 22px 70px}}nav{{display:flex;justify-content:space-between;align-items:center;margin-bottom:64px}}.brand{{font-weight:950;letter-spacing:.18em}}nav a{{color:var(--muted);text-decoration:none;font-weight:700}}.hero{{max-width:840px;margin-bottom:42px}}.eyebrow,.tag{{color:var(--accent);font-weight:900;text-transform:uppercase;letter-spacing:.1em;font-size:12px}}h1{{font-size:clamp(42px,7vw,72px);line-height:1.02;letter-spacing:-.04em;margin:12px 0 18px}}.lead{{font-size:19px;color:var(--muted);max-width:760px}}.grid{{display:grid;grid-template-columns:1fr 1fr;gap:18px}}.card,.formbox{{background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:26px}}.card h2{{font-size:24px;line-height:1.15}}ul{{padding-left:20px;color:#c8d7dd}}li{{margin:8px 0}}.small{{color:var(--muted);font-size:13px}}.cta,button{{display:inline-block;background:var(--accent);color:#071018;text-decoration:none;font-weight:950;padding:13px 18px;border:0;border-radius:11px;cursor:pointer}}.secondary{{margin-top:8px}}.formbox{{margin-top:34px}}label{{display:block;font-weight:800;margin:14px 0 6px}}input,select,textarea{{width:100%;background:#07151b;border:1px solid #294653;color:var(--text);border-radius:10px;padding:12px;font:inherit}}textarea{{min-height:150px;resize:vertical}}.notice{{background:#123321;border:1px solid #34784f;border-radius:12px;padding:12px 14px;margin:0 0 22px}}.hp{{position:absolute;left:-9999px}}.fine{{font-size:12px;color:#718793;margin-top:18px}}@media(max-width:760px){{.grid{{grid-template-columns:1fr}}nav{{margin-bottom:42px}}}}
+*{{box-sizing:border-box}}body{{margin:0;background:linear-gradient(180deg,#061117,#08141b);color:var(--text);font-family:Inter,system-ui,-apple-system,Segoe UI,Arial,sans-serif;line-height:1.55}}a{{color:inherit}}main{{max-width:1100px;margin:auto;padding:28px 22px 70px}}nav{{display:flex;justify-content:space-between;align-items:center;margin-bottom:64px}}.brand{{font-weight:950;letter-spacing:.18em}}nav a{{color:var(--muted);text-decoration:none;font-weight:700}}.hero{{max-width:840px;margin-bottom:42px}}.eyebrow,.tag{{color:var(--accent);font-weight:900;text-transform:uppercase;letter-spacing:.1em;font-size:12px}}h1{{font-size:clamp(42px,7vw,72px);line-height:1.02;letter-spacing:-.04em;margin:12px 0 18px}}.lead{{font-size:19px;color:var(--muted);max-width:760px}}.grid{{display:grid;grid-template-columns:1fr 1fr;gap:18px}}.card,.formbox{{background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:26px}}.card h2{{font-size:24px;line-height:1.15}}ul{{padding-left:20px;color:#c8d7dd}}li{{margin:8px 0}}.small{{color:var(--muted);font-size:13px}}.cta,button{{display:inline-block;background:var(--accent);color:#071018;text-decoration:none;font-weight:950;padding:13px 18px;border:0;border-radius:11px;cursor:pointer}}.secondary{{margin-top:8px}}.formbox{{margin-top:34px}}label{{display:block;font-weight:800;margin:14px 0 6px}}input,select,textarea{{width:100%;background:#07151b;border:1px solid #294653;color:var(--text);border-radius:10px;padding:12px;font:inherit}}textarea{{min-height:150px;resize:vertical}}details{{margin:14px 0;border-top:1px solid #1c3742;padding-top:12px}}summary{{cursor:pointer;color:var(--muted);font-weight:800}}.notice{{background:#123321;border:1px solid #34784f;border-radius:12px;padding:12px 14px;margin:0 0 22px}}.hp{{position:absolute;left:-9999px}}.fine{{font-size:12px;color:#718793;margin-top:18px}}@media(max-width:760px){{.grid{{grid-template-columns:1fr}}nav{{margin-bottom:42px}}}}
 </style></head><body><main>
 <nav><div class='brand'>LUMEN</div><a href='/'>Inicio</a></nav>
 {notice}
 <section class='hero'><div class='eyebrow'>Servicios comerciales B2B</div><h1>Dos caminos para generar valor antes del cierre.</h1><p class='lead'>LUMEN mantiene su modelo de oportunidades y comisiones, y suma servicios concretos que pueden contratarse por el trabajo de investigación y desarrollo comercial.</p></section>
 <section class='grid'>{''.join(cards)}</section>
 <section class='formbox' id='consulta'><div class='eyebrow'>Consulta comercial</div><h2>Contanos qué necesitás</h2>
+<p class='small'>Con un email y una descripción breve alcanza para empezar. Los datos adicionales son opcionales.</p>
 <form method='post' action='/api/services/inquiry'>
-<label>Servicio</label><select name='service_id' required>
+<label>Servicio</label><select id='service_id' name='service_id' required>
 <option value='SRV-SOURCING-EXPRESS'>LUMEN Sourcing Express</option>
 <option value='SRV-B2B-PROSPECTING'>LUMEN Prospección B2B</option>
 </select>
-<label>Empresa</label><input name='company' maxlength='180' required>
-<label>Nombre</label><input name='name' maxlength='120' required>
-<label>Email corporativo</label><input type='email' name='email' maxlength='180' required>
+<label>Email de contacto</label><input type='email' name='email' maxlength='180' required autocomplete='email'>
 <label>Qué necesitás</label><textarea name='need' maxlength='1500' required placeholder='Ej.: necesitamos encontrar proveedores de... / vendemos... y queremos detectar empresas objetivo.'></textarea>
+<details><summary>Agregar empresa y nombre (opcional)</summary>
+<label>Empresa <span class='small'>(opcional)</span></label><input name='company' maxlength='180' autocomplete='organization'>
+<label>Nombre <span class='small'>(opcional)</span></label><input name='name' maxlength='120' autocomplete='name'>
+</details>
 <label class='hp'>Sitio web<input name='website' tabindex='-1' autocomplete='off'></label>
 <button type='submit'>Enviar consulta</button>
 </form>
 <p class='fine'>El envío de este formulario no constituye una contratación, presupuesto ni aceptación de términos. LUMEN verifica la consulta antes de incorporarla al proceso comercial.</p>
 </section>
+<script>
+(function(){{
+  var select=document.getElementById('service_id');
+  document.querySelectorAll('.service-choice').forEach(function(el){{
+    el.addEventListener('click',function(){{ if(select) select.value=el.getAttribute('data-service')||select.value; }});
+  }});
+}})();
+</script>
 </main></body></html>"""
 
 
@@ -103,10 +114,10 @@ def services_public(result: str = ""):
 @app.post("/api/services/inquiry", include_in_schema=False)
 def service_inquiry(
     service_id: str = Form(...),
-    company: str = Form(...),
-    name: str = Form(...),
     email: str = Form(...),
     need: str = Form(...),
+    company: str = Form(""),
+    name: str = Form(""),
     website: str = Form(""),
 ):
     # Honeypot: do not persist obvious bot submissions.
@@ -120,7 +131,7 @@ def service_inquiry(
     clean_need = _clean(need, 1500)
     if sid not in ACTIVE_IDS:
         raise HTTPException(status_code=400, detail="service_not_available")
-    if not clean_company or not clean_name or len(clean_need) < 12 or not EMAIL_RE.match(clean_email):
+    if len(clean_need) < 12 or not EMAIL_RE.match(clean_email):
         raise HTTPException(status_code=400, detail="invalid_inquiry")
     if not load_state():
         raise HTTPException(status_code=503, detail="state_unavailable")
@@ -133,7 +144,7 @@ def service_inquiry(
         "name": clean_name,
         "email": clean_email,
         "need": clean_need,
-        "source": "public_service_form",
+        "source": "public_service_form_low_friction",
         "status": "new_unverified",
         "evidence_status": "user_submitted_unverified",
         "binding_commitment": False,
@@ -146,4 +157,4 @@ def service_inquiry(
     return RedirectResponse("/services?result=received", status_code=303)
 
 
-print({"service_revenue_public": {"version": VERSION, "status": "active", "inquiry_capture": True, "landing_link": True, "binding_terms": False}}, flush=True)
+print({"service_revenue_public": {"version": VERSION, "status": "active", "inquiry_capture": True, "required_fields": ["email", "need"], "optional_fields": ["company", "name"], "landing_link": True, "binding_terms": False}}, flush=True)
