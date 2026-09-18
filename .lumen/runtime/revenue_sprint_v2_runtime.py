@@ -22,10 +22,11 @@ import commercial_truth_repair_runtime as truth
 import mission_team_runtime
 import procurement_document_enrichment_runtime as documents
 
-VERSION = "2.0-revenue-sprint"
+VERSION = "2.1-revenue-sprint-hardening"
 MAX_FIRST_CASH_TEAMS = 3
 MAX_DOCUMENT_CANDIDATES = 8
 MAX_STRONG_LINKS_PER_CASE = 2
+MAX_RETAINED_TEAMS = 30
 
 _ORIGINAL_LINKED_CURRENT_URLS = documents._linked_current_urls
 _ORIGINAL_CANDIDATE_URLS = truth._candidate_urls
@@ -104,11 +105,12 @@ def _focus_categories(state: Dict[str, Any]) -> set[str]:
     return cats
 
 
-def _signal_priority(signal: Dict[str, Any], focus_categories: set[str]) -> tuple[float, int, str]:
+def _signal_priority(signal: Dict[str, Any], focus_categories: set[str]) -> tuple[int, str, float, str]:
     score = _float(signal.get("score") or signal.get("priority_score"), 0.0)
     category = _norm(signal.get("category"))
     focused = 1 if category and any(_tokens(category) & _tokens(x) for x in focus_categories) else 0
-    return (score, focused, str(signal.get("url") or signal.get("source_url") or ""))
+    created = str(signal.get("created_at") or signal.get("updated_at") or "")
+    return (focused, created, score, str(signal.get("url") or signal.get("source_url") or ""))
 
 
 def _linked_current_urls_first_cash(state: Dict[str, Any]) -> List[str]:
@@ -116,11 +118,14 @@ def _linked_current_urls_first_cash(state: Dict[str, Any]) -> List[str]:
     signals = list((truth._signal_map(state) or {}).values())
     focus_categories = _focus_categories(state)
     signals.sort(key=lambda x: _signal_priority(x, focus_categories), reverse=True)
+    prioritized: List[str] = []
     for signal in signals[:MAX_DOCUMENT_CANDIDATES]:
         url = str(signal.get("url") or signal.get("source_url") or "")
-        if url and url not in base:
-            base.append(url)
-    return base
+        if url and url not in prioritized:
+            prioritized.append(url)
+    # First Cash/current evidence must be attempted before older linked evidence because the
+    # enrichment runtime has a strict two-document-per-cycle GET budget.
+    return list(dict.fromkeys(prioritized + base))
 
 
 def _source_ids(row: Dict[str, Any]) -> set[str]:
@@ -207,7 +212,16 @@ def _canonical_opportunities_first_cash(state: Dict[str, Any]) -> List[Dict[str,
 
 
 def _prepare_teams_first_cash(state: Dict[str, Any]) -> Dict[str, Any]:
-    focus = set(_focus_opportunity_ids(state))
+    focus_order = _focus_opportunity_ids(state)
+    focus = set(focus_order)
+    # Preserve object references before the original runtime rebuilds/truncates state. The original
+    # implementation keeps only the final 30 rows; after First Cash sorting, that could discard the
+    # very top active teams from persisted state even though its local active count was correct.
+    before_refs = {
+        str(team.get("opportunity_id") or ""): team
+        for team in state.get("mission_teams", []) or []
+        if isinstance(team, dict) and team.get("opportunity_id")
+    }
     reallocated = 0
     first_cash_active = str((state.get("first_cash_mode", {}) or {}).get("status") or "").upper() == "ACTIVE"
     if first_cash_active and focus:
@@ -222,9 +236,38 @@ def _prepare_teams_first_cash(state: Dict[str, Any]) -> Dict[str, Any]:
             team["sprint_reallocated_at"] = _now()
             team["sprint_reallocation_reason"] = "first_cash_focus"
             reallocated += 1
+
     report = dict(_ORIGINAL_PREPARE_TEAMS(state) or {})
+
+    recovered: List[Dict[str, Any]] = []
+    if first_cash_active and focus_order:
+        for oid in focus_order:
+            team = before_refs.get(oid)
+            if isinstance(team, dict) and team.get("status") == "active":
+                team["sprint_focus_retained"] = True
+                team["sprint_focus_retained_at"] = _now()
+                recovered.append(team)
+
+    if recovered:
+        current = [x for x in state.get("mission_teams", []) or [] if isinstance(x, dict)]
+        recovered_ids = {str(x.get("opportunity_id") or "") for x in recovered}
+        rest = [x for x in current if str(x.get("opportunity_id") or "") not in recovered_ids]
+        keep_rest = max(0, MAX_RETAINED_TEAMS - len(recovered))
+        state["mission_teams"] = recovered + (rest[-keep_rest:] if keep_rest else [])
+        active = [x for x in state["mission_teams"] if x.get("status") == "active"]
+        control = state.get("mission_team_control", {}) or {}
+        control["active_teams"] = len(active)
+        control["reserve_teams"] = sum(1 for x in state["mission_teams"] if x.get("status") == "reserve")
+        control["revenue_sprint_focus_retained"] = len(recovered)
+        state["mission_team_control"] = control
+        report.update({
+            "active_teams": len(active),
+            "reserve_teams": control.get("reserve_teams"),
+            "revenue_sprint_focus_retained": len(recovered),
+        })
+
     report["revenue_sprint_v2"] = True
-    report["first_cash_focus_opportunity_ids"] = list(focus)
+    report["first_cash_focus_opportunity_ids"] = focus_order
     report["teams_reallocated"] = reallocated
     return report
 
@@ -315,8 +358,10 @@ print({
         "version": VERSION,
         "status": "installed",
         "official_document_broadening": True,
+        "recent_first_cash_document_priority": True,
         "exact_evidence_requirement_gate": True,
         "first_cash_mission_focus": True,
+        "mission_team_retention_hardened": True,
         "search_spend_increased": False,
         "outbound_caps_increased": False,
         "binding_authority_changed": False,
