@@ -106,6 +106,10 @@ import multicurrency_web_runtime  # noqa: E402,F401
 # read-only endpoint. This avoids browser request stampedes while the worker persists large state.
 import command_center_fastpath_runtime  # noqa: E402,F401
 
+# Put the truth-first Revenue Cockpit above the legacy operational panels. This is a read-only
+# owner view: it never widens search/send budgets, pricing authority, contracts or payments.
+import command_center_revenue_v2_runtime  # noqa: E402,F401
+
 
 @app.middleware("http")
 async def public_root_landing(request: Request, call_next):
