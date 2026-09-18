@@ -83,6 +83,11 @@ if not getattr(outbound_engine, "_lumen_production_sender_gate_installed", False
     outbound_engine.outbound_engine_tick = gated_outbound_engine_tick
     outbound_engine._lumen_production_sender_gate_installed = True
 
+# Install the intelligence-product catalog and service-CRM augmentation before the outbound bridge
+# captures service_revenue_tick. This keeps QuoteCheck, SupplierCheck, Export Scout and Tender Hunter
+# inside the same truth, price, contract, risk, opt-out and volume controls as existing services.
+import intelligence_revenue_runtime  # noqa: E402,F401
+
 # Revenue focus stays inside the same sender/domain/quality/risk/opt-out and volume gates.
 # This only prioritizes already-qualified paid-service candidates within the existing caps.
 import service_revenue_outbound_runtime  # noqa: E402,F401
