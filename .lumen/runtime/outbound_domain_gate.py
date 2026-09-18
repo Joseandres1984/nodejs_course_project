@@ -93,6 +93,11 @@ import intelligence_quality_gate_runtime  # noqa: E402,F401
 # This only prioritizes already-qualified paid-service candidates within the existing caps.
 import service_revenue_outbound_runtime  # noqa: E402,F401
 
+# Add transparent launch pricing to those already-governed service messages. The wrapper is installed
+# after the service-specific copy so it can append a non-binding starting price without bypassing
+# targeting, quality, opt-out, sender, volume, contract or payment controls.
+import offer_outbound_runtime  # noqa: E402,F401
+
 # Guarantee that the service + Intelligence revenue engine executes after the main business cycle
 # whenever Continuous Revenue Drive runs. This turns the new lane into deterministic cycle work,
 # not an import-time side effect, while preserving every existing spend and binding-action gate.
