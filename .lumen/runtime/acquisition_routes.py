@@ -14,6 +14,7 @@ from main import STATE, load_state, save_state
 
 router = APIRouter()
 FREE_EMAIL_DOMAINS = {"gmail.com", "hotmail.com", "outlook.com", "yahoo.com", "icloud.com", "live.com", "proton.me", "protonmail.com"}
+LANDING_VERSION = "1.2-low-friction"
 
 
 def utcnow() -> str:
@@ -48,6 +49,7 @@ def _event(event: str, campaign: Optional[Dict[str, Any]], variant: Optional[Dic
         "campaign_id": (campaign or {}).get("id"),
         "variant_id": (variant or {}).get("id"),
         "audience": (campaign or {}).get("audience"),
+        "landing_version": LANDING_VERSION,
         "created_at": utcnow(),
         **extra,
     })
@@ -76,35 +78,58 @@ def acquisition_redirect(token: str, request: Request):
     return RedirectResponse(_join_path(str(campaign.get("audience") or "buyer"), str(variant.get("token") or "")), status_code=302)
 
 
-def _landing_copy(audience: str) -> tuple[str, str, str]:
+def _landing_copy(audience: str) -> tuple[str, str, str, str, str]:
     if audience == "supplier":
-        return "Sumate a la red de proveedores de LUMEN", "Contanos qué vende tu empresa. LUMEN investiga oportunidades compatibles y organiza conversaciones comerciales cuando existe encaje real.", "Quiero recibir oportunidades"
+        return (
+            "Sumate a la red de proveedores de LUMEN",
+            "Contanos qué vende tu empresa. LUMEN investiga oportunidades compatibles y organiza conversaciones comerciales cuando existe encaje real.",
+            "Quiero recibir oportunidades",
+            "¿Qué productos o servicios ofrecés?",
+            "Ej.: válvulas industriales, instrumentación, mantenimiento eléctrico, logística...",
+        )
     if audience == "partner":
-        return "Convertí tu catálogo en un canal de oportunidades atribuibles", "Tu tienda sigue cobrando y entregando. LUMEN puede originar compradores y trabajar con comisión o success fee únicamente bajo un acuerdo comercial válido.", "Quiero ser partner"
-    return "Contanos qué necesitás. LUMEN busca alternativas por vos.", "Partimos de una necesidad real, investigamos proveedores y organizamos la comparación. No hace falta navegar decenas de tiendas para empezar.", "Buscar alternativas"
+        return (
+            "Convertí tu catálogo en un canal de oportunidades atribuibles",
+            "Tu tienda sigue cobrando y entregando. LUMEN puede originar compradores y trabajar con comisión o success fee únicamente bajo un acuerdo comercial válido.",
+            "Quiero ser partner",
+            "¿Qué vendés y qué tipo de partnership te interesa?",
+            "Ej.: tenemos catálogo online de herramientas y buscamos ventas B2B a comisión...",
+        )
+    return (
+        "Contanos qué necesitás. LUMEN busca alternativas por vos.",
+        "Partimos de una necesidad real, investigamos proveedores y organizamos la comparación. Para empezar alcanza con tu contacto y una descripción breve.",
+        "Buscar alternativas",
+        "¿Qué necesitás comprar?",
+        "Ej.: 20 sensores de nivel, entrega en Buenos Aires, alternativa equivalente aceptada...",
+    )
 
 
 def _render_form(audience: str, token: str, done: bool = False, error: str = "") -> HTMLResponse:
-    title, lead, cta = _landing_copy(audience)
+    title, lead, cta, details_label, placeholder = _landing_copy(audience)
     if done:
-        body = "<div class='ok'><b>Listo.</b><br>La información ya entró al circuito comercial de LUMEN. Vamos a validarla antes de cualquier contacto o compromiso.</div>"
+        body = "<div class='ok'><b>Listo.</b><br>La información ya entró al circuito comercial de LUMEN. La vamos a validar antes de cualquier contacto o compromiso.</div>"
     else:
-        need_label = "¿Qué necesitás comprar?" if audience == "buyer" else "¿Qué productos/servicios ofrecés?" if audience == "supplier" else "¿Qué vende tu tienda y qué tipo de partnership te interesa?"
         body = f"""
         {f"<div class='err'>{html.escape(error)}</div>" if error else ""}
+        <div class='fast'><b>Solo 2 datos para empezar.</b><span> Podés completar el resto después.</span></div>
         <form method='post' action='/join/{html.escape(audience)}'>
           <input type='hidden' name='c' value='{html.escape(token)}'>
           <input class='hp' name='website_check' autocomplete='off' tabindex='-1'>
-          <label>Empresa o negocio<input name='company' maxlength='160' required></label>
-          <label>Email de contacto<input name='email' type='email' maxlength='180' required></label>
-          <label>Sitio web <span>(opcional)</span><input name='website' maxlength='300'></label>
-          <label>Categoría <span>(opcional)</span><input name='category' maxlength='160'></label>
-          <label>{html.escape(need_label)}<textarea name='details' maxlength='1800' required></textarea></label>
+          <label>Email de contacto<input name='email' type='email' maxlength='180' autocomplete='email' placeholder='tu@email.com' required></label>
+          <label>{html.escape(details_label)}<textarea name='details' maxlength='1800' placeholder='{html.escape(placeholder)}' required></textarea></label>
+          <details>
+            <summary>Agregar datos de empresa <span>(opcional)</span></summary>
+            <div class='optional'>
+              <label>Empresa o negocio<input name='company' maxlength='160' autocomplete='organization'></label>
+              <label>Sitio web<input name='website' maxlength='300' inputmode='url' placeholder='https://...'></label>
+              <label>Categoría<input name='category' maxlength='160' placeholder='Ej.: electricidad industrial'></label>
+            </div>
+          </details>
           <button type='submit'>{html.escape(cta)}</button>
         </form>
         """
-    return HTMLResponse(f"""<!doctype html><html lang='es'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>LUMEN · {html.escape(title)}</title><style>
-    :root{{--bg:#061018;--panel:#0c1d27;--line:#285166;--text:#edf7fb;--muted:#91a9b8;--lime:#d7ff64;--blue:#8bd8ff}}*{{box-sizing:border-box}}body{{margin:0;background:radial-gradient(circle at 10% 0,#12334a 0,#061018 38%);color:var(--text);font-family:Inter,system-ui,-apple-system,sans-serif}}.wrap{{max-width:760px;margin:auto;padding:42px 20px 80px}}.brand{{font-weight:950;letter-spacing:.18em;color:var(--lime)}}h1{{font-size:clamp(36px,7vw,62px);line-height:1.02;margin:14px 0}}.lead{{font-size:18px;color:var(--muted);line-height:1.55}}.box{{margin-top:24px;border:1px solid var(--line);border-radius:20px;background:linear-gradient(180deg,#0d202b,#08151d);padding:22px}}label{{display:block;font-weight:850;margin:14px 0}}label span{{font-weight:500;color:var(--muted)}}input,textarea{{display:block;width:100%;margin-top:7px;padding:12px;border:1px solid #31576d;border-radius:11px;background:#06131b;color:#fff;font:inherit}}textarea{{min-height:130px;resize:vertical}}button{{background:var(--lime);color:#061008;border:0;border-radius:11px;padding:13px 17px;font-weight:950;font-size:16px;cursor:pointer}}.fine{{color:#7893a2;font-size:12px;line-height:1.5;margin-top:14px}}.ok,.err{{padding:15px;border-radius:12px;line-height:1.5}}.ok{{background:#123321;border:1px solid #34784f}}.err{{background:#3a1818;border:1px solid #7c3b3b}}.hp{{position:absolute;left:-10000px;width:1px;height:1px}}
+    return HTMLResponse(f"""<!doctype html><html lang='es'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>LUMEN · {html.escape(title)}</title><meta name='description' content='Contacto comercial B2B con LUMEN.'><style>
+    :root{{--bg:#061018;--panel:#0c1d27;--line:#285166;--text:#edf7fb;--muted:#91a9b8;--lime:#d7ff64;--blue:#8bd8ff}}*{{box-sizing:border-box}}body{{margin:0;background:radial-gradient(circle at 10% 0,#12334a 0,#061018 38%);color:var(--text);font-family:Inter,system-ui,-apple-system,sans-serif}}.wrap{{max-width:700px;margin:auto;padding:38px 20px 72px}}.brand{{font-weight:950;letter-spacing:.18em;color:var(--lime)}}h1{{font-size:clamp(35px,7vw,58px);line-height:1.03;margin:14px 0}}.lead{{font-size:18px;color:var(--muted);line-height:1.55;max-width:640px}}.box{{margin-top:24px;border:1px solid var(--line);border-radius:20px;background:linear-gradient(180deg,#0d202b,#08151d);padding:22px}}.fast{{padding:11px 13px;border:1px solid #31576d;background:#0b2532;border-radius:11px;color:#dff5ff}}.fast span{{color:var(--muted)}}label{{display:block;font-weight:850;margin:14px 0}}label span,summary span{{font-weight:500;color:var(--muted)}}input,textarea{{display:block;width:100%;margin-top:7px;padding:13px;border:1px solid #31576d;border-radius:11px;background:#06131b;color:#fff;font:inherit;outline:none}}input:focus,textarea:focus{{border-color:var(--blue);box-shadow:0 0 0 3px #8bd8ff18}}textarea{{min-height:125px;resize:vertical}}details{{margin:8px 0 18px;border-top:1px solid #183748;padding-top:14px}}summary{{cursor:pointer;color:#b8cad4;font-weight:800}}.optional{{padding-top:1px}}button{{width:100%;background:var(--lime);color:#061008;border:0;border-radius:11px;padding:14px 17px;font-weight:950;font-size:16px;cursor:pointer}}button:hover{{filter:brightness(1.03)}}.fine{{color:#7893a2;font-size:12px;line-height:1.5;margin-top:14px}}.ok,.err{{padding:15px;border-radius:12px;line-height:1.5}}.ok{{background:#123321;border:1px solid #34784f}}.err{{background:#3a1818;border:1px solid #7c3b3b}}.hp{{position:absolute;left:-10000px;width:1px;height:1px}}@media(max-width:540px){{.wrap{{padding:28px 16px 58px}}.box{{padding:18px}}}}
     </style></head><body><main class='wrap'><div class='brand'>LUMEN</div><h1>{html.escape(title)}</h1><p class='lead'>{html.escape(lead)}</p><section class='box'>{body}</section><p class='fine'>LUMEN no genera compras, contratos ni pagos desde este formulario. La información se usa para investigación comercial y validación de encaje.</p></main></body></html>""")
 
 
@@ -123,9 +148,9 @@ def acquisition_landing(audience: str, c: str = Query("")):
 def acquisition_submit(
     audience: str,
     c: str = Form(""),
-    company: str = Form(...),
     email: str = Form(...),
     details: str = Form(...),
+    company: str = Form(""),
     website: str = Form(""),
     category: str = Form(""),
     website_check: str = Form(""),
@@ -136,11 +161,17 @@ def acquisition_submit(
     campaign, variant = _variant(c) if c else (None, None)
     if website_check.strip():
         return _render_form(audience, c, done=True)
-    company, email, details = _clean(company, 160), _clean(email.lower(), 180), _clean(details, 1800)
-    website, category = _clean(website, 300), _clean(category, 160)
+
+    email = _clean(email.lower(), 180)
+    details = _clean(details, 1800)
+    company = _clean(company, 160)
+    website = _clean(website, 300)
+    category = _clean(category, 160)
     domain = _email_domain(email)
-    if not company or not details or not domain:
-        return _render_form(audience, c, error="Completá empresa, email válido y una descripción breve.")
+    if not details or not domain:
+        return _render_form(audience, c, error="Completá un email válido y una descripción breve.")
+
+    company_display = company or (domain if domain not in FREE_EMAIL_DOMAINS else "Contacto entrante")
     fingerprint = hashlib.sha1(f"{audience}|{email}|{details.lower()}".encode("utf-8")).hexdigest()[:20]
     rows = STATE.setdefault("acquisition_leads", [])
     if any(x.get("fingerprint") == fingerprint for x in rows):
@@ -150,7 +181,8 @@ def acquisition_submit(
         "id": lid,
         "fingerprint": fingerprint,
         "audience": audience,
-        "company": company,
+        "company": company_display,
+        "company_supplied": bool(company),
         "email": email,
         "email_domain": domain,
         "website": website,
@@ -159,6 +191,7 @@ def acquisition_submit(
         "campaign_id": (campaign or {}).get("id"),
         "variant_id": (variant or {}).get("id"),
         "source": "lumen_acquisition_campaign",
+        "landing_version": LANDING_VERSION,
         "status": "new",
         "created_at": utcnow(),
     }
@@ -178,7 +211,7 @@ def acquisition_submit(
             "id": rlid,
             "type": lead_type,
             "category": category or ("general B2B" if audience != "partner" else "tienda partner"),
-            "title": company,
+            "title": company_display,
             "url": source_url,
             "snippet": f"Lead entrante de campaña LUMEN ({audience}). {details[:700]}",
             "status": "research_required",
@@ -193,7 +226,7 @@ def acquisition_submit(
         })
         row["research_lead_id"] = rlid
     _event("lead", campaign, variant, acquisition_lead_id=lid, audience=audience)
-    STATE.setdefault("activity", []).insert(0, {"ts": utcnow(), "msg": f"Growth: nueva captación {audience} de {company}."})
+    STATE.setdefault("activity", []).insert(0, {"ts": utcnow(), "msg": f"Growth: nueva captación {audience} de {company_display}."})
     STATE["activity"] = STATE["activity"][:100]
     if not save_state():
         raise HTTPException(status_code=503, detail="lead_received_but_persistence_unavailable")
@@ -223,3 +256,6 @@ def track_market_click(listing_id: str = Query("")):
     STATE["market_reach_events"] = rows[-5000:]
     save_state()
     return Response(status_code=204)
+
+
+print({"acquisition_routes": {"version": LANDING_VERSION, "status": "active", "required_fields": ["email", "details"], "optional_fields": ["company", "website", "category"]}}, flush=True)
