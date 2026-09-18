@@ -92,3 +92,8 @@ import intelligence_quality_gate_runtime  # noqa: E402,F401
 # Revenue focus stays inside the same sender/domain/quality/risk/opt-out and volume gates.
 # This only prioritizes already-qualified paid-service candidates within the existing caps.
 import service_revenue_outbound_runtime  # noqa: E402,F401
+
+# Guarantee that the service + Intelligence revenue engine executes after the main business cycle
+# whenever Continuous Revenue Drive runs. This turns the new lane into deterministic cycle work,
+# not an import-time side effect, while preserving every existing spend and binding-action gate.
+import intelligence_cycle_bridge_runtime  # noqa: E402,F401
