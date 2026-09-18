@@ -76,3 +76,8 @@ print({
         "spend_changed": False,
     }
 }, flush=True)
+
+# Install the next conversion layer only after the First Cash team activation wrapper exists.
+# It binds those teams to concrete cases, supports exact multi-source requirement completion,
+# and restricts follow-ups to verified-delivery/no-reply contacts without changing any cap.
+import revenue_sprint_v21_conversion_runtime  # noqa: E402,F401
