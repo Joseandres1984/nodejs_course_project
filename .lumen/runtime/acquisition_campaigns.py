@@ -7,6 +7,8 @@ from typing import Any, Dict, List
 
 
 PUBLIC_BASE_URL = (os.getenv("LUMEN_PUBLIC_BASE_URL") or "https://lumen-web-production-5755.up.railway.app").strip().rstrip("/")
+VERSION = "1.2-conversion-first-learning"
+ZERO_LEAD_ROTATION_CLICKS = 8
 
 
 def utcnow() -> str:
@@ -116,14 +118,48 @@ def _performance(state: Dict[str, Any], campaign: Dict[str, Any], variant: Dict[
         if str(account.get("source_lead_id") or "") in lead_ids and account.get("verified_company"):
             verified += 1
     conversion = submissions / max(1, clicks)
+
+    # Revenue learning must reward commercial signal, not curiosity. A click is useful as
+    # exposure evidence, but repeated zero-lead clicks become negative evidence.
+    if submissions > 0:
+        score = submissions * 35 + verified * 45 + conversion * 100 + min(clicks, 10) * 0.15
+    else:
+        score = min(clicks, 3) * 0.1 - max(0, clicks - 3) * 2.0
+
     return {
         "clicks": clicks,
         "landing_views": visits,
         "submissions": submissions,
         "verified_companies": verified,
         "click_to_lead_rate": round(conversion, 4),
-        "score": round(submissions * 25 + verified * 35 + min(20, clicks) * 0.5, 2),
+        "score": round(score, 2),
+        "zero_lead_negative_evidence": bool(clicks >= ZERO_LEAD_ROTATION_CLICKS and submissions == 0),
     }
+
+
+def _choose_champion(campaign: Dict[str, Any]) -> Dict[str, Any] | None:
+    variants = [x for x in campaign.get("variants", []) or [] if isinstance(x, dict)]
+    if not variants:
+        return None
+
+    current_id = str(campaign.get("champion_variant_id") or "")
+    current = next((x for x in variants if str(x.get("id") or "") == current_id), variants[0])
+    converting = [x for x in variants if int((x.get("performance") or {}).get("submissions") or 0) > 0]
+    if converting:
+        return max(converting, key=lambda x: float((x.get("performance") or {}).get("score") or 0.0))
+
+    current_perf = current.get("performance", {}) or {}
+    if int(current_perf.get("clicks") or 0) < ZERO_LEAD_ROTATION_CLICKS:
+        return current
+
+    # No variant has converted yet and the current champion has enough negative evidence.
+    # Explore the least-exposed non-exhausted alternative instead of rewarding more clicks.
+    alternatives = [x for x in variants if str(x.get("id") or "") != str(current.get("id") or "") and x.get("status") != "needs_rotation"]
+    if not alternatives:
+        alternatives = [x for x in variants if str(x.get("id") or "") != str(current.get("id") or "")]
+    if not alternatives:
+        return current
+    return min(alternatives, key=lambda x: int((x.get("performance") or {}).get("clicks") or 0))
 
 
 def _channel_payloads(campaign: Dict[str, Any], variant: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -149,25 +185,29 @@ def acquisition_campaign_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     queued_keys = {str(x.get("key") or "") for x in queue}
     total_clicks = total_leads = 0
     optimized = 0
+    zero_lead_rotations = 0
 
     for campaign in state.get("acquisition_campaigns", []) or []:
-        scored = []
+        previous_champion_id = str(campaign.get("champion_variant_id") or "")
         for variant in campaign.get("variants", []) or []:
             perf = _performance(state, campaign, variant)
             variant["performance"] = perf
             total_clicks += int(perf["clicks"])
             total_leads += int(perf["submissions"])
-            scored.append((float(perf["score"]), variant))
-            if perf["clicks"] >= 15 and perf["submissions"] == 0:
+            if perf["clicks"] >= ZERO_LEAD_ROTATION_CLICKS and perf["submissions"] == 0:
                 variant["status"] = "needs_rotation"
             elif variant.get("status") == "needs_rotation" and perf["submissions"] > 0:
                 variant["status"] = "testing"
-        if scored:
-            scored.sort(key=lambda x: x[0], reverse=True)
-            champion = scored[0][1]
-            if campaign.get("champion_variant_id") != champion.get("id") and champion.get("performance", {}).get("clicks", 0) >= 5:
-                campaign["champion_variant_id"] = champion["id"]
+
+        champion = _choose_champion(campaign)
+        if champion:
+            new_champion_id = str(champion.get("id") or "")
+            if previous_champion_id != new_champion_id:
+                campaign["champion_variant_id"] = new_champion_id
                 optimized += 1
+                previous = next((x for x in campaign.get("variants", []) or [] if str(x.get("id") or "") == previous_champion_id), {})
+                if previous and int((previous.get("performance") or {}).get("submissions") or 0) == 0:
+                    zero_lead_rotations += 1
             campaign["updated_at"] = utcnow()
             for payload in _channel_payloads(campaign, champion):
                 key = f"{campaign['id']}|{champion['id']}|{payload['channel']}"
@@ -189,9 +229,10 @@ def acquisition_campaign_tick(state: Dict[str, Any]) -> Dict[str, Any]:
                     "updated_at": utcnow(),
                 })
                 queued_keys.add(key)
+
     state["acquisition_distribution_queue"] = queue[-300:]
     report = {
-        "version": "1.1-external-tracking-ready",
+        "version": VERSION,
         "updated_at": utcnow(),
         "campaigns_active": len([x for x in state.get("acquisition_campaigns", []) or [] if x.get("status") == "active"]),
         "campaigns_created": created,
@@ -200,11 +241,13 @@ def acquisition_campaign_tick(state: Dict[str, Any]) -> Dict[str, Any]:
         "leads": total_leads,
         "click_to_lead_rate": round(total_leads / max(1, total_clicks), 4),
         "champion_changes": optimized,
+        "zero_lead_rotations": zero_lead_rotations,
+        "zero_lead_rotation_threshold_clicks": ZERO_LEAD_ROTATION_CLICKS,
         "distribution_queue": len(state.get("acquisition_distribution_queue", []) or []),
         "public_base_url": PUBLIC_BASE_URL,
         "paid_media_policy": "human_approval_required_for_budget_or_spend",
         "organic_policy": "autonomous_only_on_owned_or_pre-authorized_connectors",
-        "learning_loop": "clicks_to_leads_to_verified_companies_to_commercial_outcomes",
+        "learning_loop": "qualified_leads_and_verified_companies_over_raw_click_volume",
     }
     state["acquisition_engine"] = report
     return report
