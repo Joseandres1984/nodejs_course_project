@@ -114,6 +114,10 @@ import command_center_revenue_v2_runtime  # noqa: E402,F401
 # the legacy operational panel stack. The full Command Center remains available separately.
 import revenue_cockpit_dedicated_runtime  # noqa: E402,F401
 
+# Keep a permanent, mobile-friendly way to re-enter Revenue Cockpit from the full
+# Command Center so navigation is bidirectional rather than relying on browser history.
+import command_center_revenue_launcher_runtime  # noqa: E402,F401
+
 
 @app.middleware("http")
 async def public_root_landing(request: Request, call_next):
