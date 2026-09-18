@@ -7,8 +7,9 @@ import outbound_engine
 import service_revenue_runtime
 
 
-VERSION = "1.0-service-revenue-outbound-bridge"
+VERSION = "1.1-intelligence-products"
 SERVICE_URL = outbound_engine.PUBLIC_BASE_URL.rstrip("/") + "/services"
+INTELLIGENCE_URL = outbound_engine.PUBLIC_BASE_URL.rstrip("/") + "/intelligence"
 
 _ORIGINAL_ELIGIBLE = outbound_engine._eligible
 _ORIGINAL_MESSAGE_TEXT = outbound_engine._message_text
@@ -25,7 +26,7 @@ def _service_contexts(state: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     for row in state.get("service_sales_pipeline", []) or []:
         if not isinstance(row, dict):
             continue
-        if row.get("source") != "verified_account_fit":
+        if row.get("source") not in {"verified_account_fit", "intelligence_product_fit"}:
             continue
         if not row.get("proactive_attention_active"):
             continue
@@ -44,6 +45,7 @@ def _service_contexts(state: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
             "company_name": row.get("company_name"),
             "email": email,
             "qualification_score": row.get("qualification_score"),
+            "intelligence_revenue": bool(row.get("intelligence_revenue")),
         }
     return contexts
 
@@ -78,6 +80,10 @@ def _service_message_text(account: Dict[str, Any], variant: Dict[str, Any], trac
 
     company = outbound_engine._company(account)
     service_id = str(ctx.get("service_id") or "")
+    target_url = INTELLIGENCE_URL if service_id.startswith("SRV-") and service_id in {
+        "SRV-QUOTECHECK", "SRV-SUPPLIERCHECK", "SRV-EXPORT-SCOUT", "SRV-TENDER-HUNTER"
+    } else SERVICE_URL
+
     if service_id == "SRV-SOURCING-EXPRESS":
         kind = "service_sourcing_intro"
         subject = f"{company}: búsqueda de proveedores B2B"
@@ -87,7 +93,7 @@ def _service_message_text(account: Dict[str, Any], variant: Dict[str, Any], trac
             "Podemos investigar alternativas, ordenar evidencia disponible y preparar una preselección para acelerar el análisis, sin comprometer ninguna compra.\n\n"
             "Si hoy tienen una búsqueda activa, con una descripción breve del requerimiento alcanza para evaluar si podemos ayudarlos."
         )
-    else:
+    elif service_id == "SRV-B2B-PROSPECTING":
         kind = "service_b2b_prospecting_intro"
         subject = f"{company}: prospección comercial B2B"
         body = (
@@ -96,7 +102,46 @@ def _service_message_text(account: Dict[str, Any], variant: Dict[str, Any], trac
             "Trabajamos con evidencia pública y canales corporativos verificables; no prometemos ventas ni respuestas que todavía no existan.\n\n"
             "Si están buscando desarrollar nuevos clientes, con indicarnos qué productos o rubros quieren impulsar podemos evaluar un diagnóstico inicial."
         )
-    body += f"\n\nAlcance y consulta: {SERVICE_URL}"
+    elif service_id == "SRV-QUOTECHECK":
+        kind = "intelligence_quotecheck_intro"
+        subject = f"{company}: revisión de cotizaciones con evidencia"
+        body = (
+            f"Hola equipo de {company},\n\n"
+            "LUMEN QuoteCheck Global ayuda a revisar una cotización de compra: estructura el alcance, busca referencias y alternativas públicas cuando existen y separa los datos comprobables de los costos o condiciones que no pueden observarse. "
+            "El objetivo es detectar preguntas, desvíos respaldados y palancas de negociación sin inventar un precio de mercado.\n\n"
+            "Si tienen una cotización activa, con producto, cantidad, moneda y país podemos evaluar si el análisis aporta valor."
+        )
+    elif service_id == "SRV-SUPPLIERCHECK":
+        kind = "intelligence_suppliercheck_intro"
+        subject = f"{company}: verificación de proveedor antes de comprar"
+        body = (
+            f"Hola equipo de {company},\n\n"
+            "LUMEN SupplierCheck organiza evidencia pública sobre un proveedor: identidad comercial, canales oficiales, señales verificables, datos faltantes y banderas de riesgo. "
+            "No sustituye una auditoría legal o financiera, pero puede ayudar a decidir qué verificar antes de comprar o contratar.\n\n"
+            "Si están evaluando un proveedor, podemos revisar el caso y preparar un diagnóstico no vinculante."
+        )
+    elif service_id == "SRV-EXPORT-SCOUT":
+        kind = "intelligence_export_scout_intro"
+        subject = f"{company}: compradores y distribuidores en nuevos mercados"
+        body = (
+            f"Hola equipo de {company},\n\n"
+            "LUMEN Export Scout investiga mercados, importadores, distribuidores y compradores potenciales para una oferta concreta. "
+            "Priorizamos empresas y canales corporativos con evidencia pública y explicamos por qué cada objetivo podría encajar; no prometemos ventas ni respuestas.\n\n"
+            "Si quieren explorar nuevos países, con indicarnos producto y mercados de interés podemos evaluar un diagnóstico inicial."
+        )
+    elif service_id == "SRV-TENDER-HUNTER":
+        kind = "intelligence_tender_hunter_intro"
+        subject = f"{company}: radar de licitaciones y oportunidades"
+        body = (
+            f"Hola equipo de {company},\n\n"
+            "LUMEN Tender Hunter Global busca y prioriza licitaciones, compras públicas y oportunidades abiertas compatibles con una oferta definida. "
+            "Las oportunidades se reportan con fuente, fechas y requisitos observables; cualquier participación o compromiso permanece bajo revisión humana.\n\n"
+            "Si quieren vigilar oportunidades para un producto o rubro, podemos evaluar un radar inicial."
+        )
+    else:
+        return _ORIGINAL_MESSAGE_TEXT(account, variant, tracking_url)
+
+    body += f"\n\nAlcance y consulta: {target_url}"
     body += "\n\nSi no corresponde contactarlos por este medio, avísennos y no volveremos a escribir."
     return kind, subject[:180], body[:5000]
 
@@ -131,23 +176,26 @@ def _queue_service_first(state: Dict[str, Any], prospects: List[Dict[str, Any]])
         ctx = contexts.get(aid)
         if not ctx:
             continue
+        intelligence = bool(ctx.get("intelligence_revenue"))
         msg.update({
             "service_revenue": True,
+            "intelligence_revenue": intelligence,
             "service_id": ctx.get("service_id"),
             "service_name": ctx.get("service_name"),
             "service_pipeline_id": ctx.get("pipeline_id"),
             "service_opportunity_id": ctx.get("service_opportunity_id"),
-            "purpose": "paid_service_revenue_acquisition",
-            "tracking_url": SERVICE_URL,
+            "purpose": "paid_intelligence_revenue_acquisition" if intelligence else "paid_service_revenue_acquisition",
+            "tracking_url": INTELLIGENCE_URL if intelligence else SERVICE_URL,
         })
         seq = seq_index.get(str(msg.get("outbound_sequence_id") or ""))
         if isinstance(seq, dict):
             seq.update({
                 "service_revenue": True,
+                "intelligence_revenue": intelligence,
                 "service_id": ctx.get("service_id"),
                 "service_pipeline_id": ctx.get("pipeline_id"),
                 "service_opportunity_id": ctx.get("service_opportunity_id"),
-                "tracking_url": SERVICE_URL,
+                "tracking_url": INTELLIGENCE_URL if intelligence else SERVICE_URL,
             })
         pipeline = pipeline_index.get(str(ctx.get("pipeline_id") or ""))
         if isinstance(pipeline, dict):
@@ -160,6 +208,7 @@ def _queue_service_first(state: Dict[str, Any], prospects: List[Dict[str, Any]])
         "version": VERSION,
         "status": "active",
         "service_candidates_in_eligible_set": len(contexts),
+        "intelligence_candidates_in_eligible_set": sum(1 for x in contexts.values() if x.get("intelligence_revenue")),
         "service_messages_queued_this_cycle": service_queued,
         "all_new_messages_queued_this_cycle": queued,
         "same_outbound_daily_cap": outbound_engine.MAX_NEW_PER_DAY,
@@ -205,6 +254,7 @@ def _sync_service_outbound_audit(state: Dict[str, Any]) -> Dict[str, int]:
             "pipeline_id": msg.get("service_pipeline_id"),
             "service_opportunity_id": msg.get("service_opportunity_id"),
             "service_id": msg.get("service_id"),
+            "intelligence_revenue": bool(msg.get("intelligence_revenue")),
             "provider_accepted": provider_accepted,
             "accepted_at": msg.get("sent_at") if provider_accepted else audit.get("accepted_at"),
             "reply_received": reply_received,
@@ -246,7 +296,7 @@ print({
     "service_revenue_outbound_bridge": {
         "version": VERSION,
         "status": "installed",
-        "priority": "paid_service_candidates_first_within_existing_caps",
+        "priority": "paid_service_and_intelligence_candidates_first_within_existing_caps",
         "max_new_per_cycle_unchanged": outbound_engine.MAX_NEW_PER_CYCLE,
         "max_new_per_day_unchanged": outbound_engine.MAX_NEW_PER_DAY,
         "paid_spend": False,
