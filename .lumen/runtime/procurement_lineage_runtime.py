@@ -166,3 +166,4 @@ print(
 # Mission Team tick, while preserving the lineage runtime's own behavior and authority boundaries.
 import revenue_sprint_v2_runtime  # noqa: E402,F401
 import revenue_sprint_v2_team_fix  # noqa: E402,F401
+import revenue_sprint_v23_requirement_extractor  # noqa: E402,F401
