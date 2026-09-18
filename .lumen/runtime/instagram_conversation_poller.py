@@ -15,7 +15,7 @@ from app import STATE, auth, load_state, save_state
 from outbound_web import app
 from instagram_operator import process_instagram_webhook
 
-VERSION = "1.0-instagram-conversation-poller"
+VERSION = "1.1-instagram-conversation-poller-fallbacks"
 INSTAGRAM_ACCESS_TOKEN = os.getenv("LUMEN_INSTAGRAM_ACCESS_TOKEN", "").strip()
 INSTAGRAM_USER_ID = os.getenv("LUMEN_INSTAGRAM_USER_ID", "").strip()
 INSTAGRAM_GRAPH_BASE = os.getenv("LUMEN_INSTAGRAM_GRAPH_BASE", "https://graph.instagram.com").rstrip("/")
@@ -34,6 +34,7 @@ STATUS: Dict[str, Any] = {
     "last_error": None,
     "last_sync_at": None,
     "poll_seconds": POLL_SECONDS,
+    "conversation_routes_checked": [],
 }
 
 
@@ -97,18 +98,46 @@ def _iter_messages(conversation: Dict[str, Any]) -> Iterable[Dict[str, Any]]:
             yield row
 
 
-def _conversation_list() -> list[Dict[str, Any]]:
-    # Instagram Login supports the professional-account conversations edge without a Facebook Page.
-    # Ask for messages inline first so a normal poll is a single Graph request.
+def _conversation_list() -> tuple[list[Dict[str, Any]], list[str]]:
+    """Try compatible Instagram Login conversation routes before accepting an empty inbox.
+
+    Some deployments resolve the professional account edge by configured id while others work
+    through /me. Meta examples have also varied on whether platform=instagram is present for the
+    Instagram Login host, so an empty successful response is not treated as definitive until the
+    compatible alternatives have been checked. This remains read-only and bounded.
+    """
     fields = f"id,updated_time,participants,messages.limit({MAX_MESSAGES}){{id,created_time,from,to,message}}"
-    params = {"platform": "instagram", "fields": fields, "limit": MAX_CONVERSATIONS}
-    try:
-        data = _graph_get(f"{INSTAGRAM_USER_ID}/conversations", params)
-    except Exception:
-        # Some Instagram Login deployments accept /me/conversations instead of the professional id.
-        data = _graph_get("me/conversations", params)
-    rows = data.get("data") if isinstance(data, dict) else []
-    return [x for x in (rows or []) if isinstance(x, dict)]
+    route_specs = [
+        (f"{INSTAGRAM_USER_ID}/conversations", True, "configured_id+platform"),
+        (f"{INSTAGRAM_USER_ID}/conversations", False, "configured_id"),
+        ("me/conversations", True, "me+platform"),
+        ("me/conversations", False, "me"),
+    ]
+    checked: list[str] = []
+    errors: list[str] = []
+    any_success = False
+
+    for path, with_platform, label in route_specs:
+        if not INSTAGRAM_USER_ID and path.startswith("/conversations"):
+            continue
+        params: Dict[str, Any] = {"fields": fields, "limit": MAX_CONVERSATIONS}
+        if with_platform:
+            params["platform"] = "instagram"
+        try:
+            data = _graph_get(path, params)
+            any_success = True
+            checked.append(label)
+            rows = data.get("data") if isinstance(data, dict) else []
+            clean_rows = [x for x in (rows or []) if isinstance(x, dict)]
+            if clean_rows:
+                return clean_rows, checked
+        except Exception as exc:
+            checked.append(label + ":error")
+            errors.append(f"{label}={type(exc).__name__}:{str(exc)[:180]}")
+
+    if any_success:
+        return [], checked
+    raise RuntimeError("all_instagram_conversation_routes_failed: " + " | ".join(errors[:4]))
 
 
 def _message_sender_id(message: Dict[str, Any]) -> str:
@@ -168,6 +197,7 @@ def poll_once() -> Dict[str, Any]:
         "last_error": None,
         "last_sync_at": _now_iso(),
         "poll_seconds": POLL_SECONDS,
+        "conversation_routes_checked": [],
     }
     if not report["configured"]:
         report["status"] = "not_configured"
@@ -175,7 +205,8 @@ def poll_once() -> Dict[str, Any]:
         return report
 
     try:
-        conversations = _conversation_list()
+        conversations, routes_checked = _conversation_list()
+        report["conversation_routes_checked"] = routes_checked
         own_ids = _own_ids()
         report["conversations_seen"] = len(conversations)
         created = 0
@@ -218,6 +249,8 @@ def poll_once() -> Dict[str, Any]:
             save_state()
         report["messages_seen"] = message_count
         report["operator_created"] = created
+        if not conversations:
+            report["status"] = "ok_empty_after_compatible_routes"
     except Exception as exc:
         report["status"] = "error"
         report["last_error"] = f"{type(exc).__name__}: {str(exc)[:700]}"
