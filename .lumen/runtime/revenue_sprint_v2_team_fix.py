@@ -81,3 +81,7 @@ print({
 # It binds those teams to concrete cases, supports exact multi-source requirement completion,
 # and restricts follow-ups to verified-delivery/no-reply contacts without changing any cap.
 import revenue_sprint_v21_conversion_runtime  # noqa: E402,F401
+
+# Tighten the evidence rule after conversion hooks are installed: a category-similar procurement
+# document may inform research, but it cannot populate an RFQ field unless buyer/account lineage is exact.
+import revenue_sprint_v21_truth_hardening  # noqa: E402,F401
