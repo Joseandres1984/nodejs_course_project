@@ -110,6 +110,10 @@ import command_center_fastpath_runtime  # noqa: E402,F401
 # owner view: it never widens search/send budgets, pricing authority, contracts or payments.
 import command_center_revenue_v2_runtime  # noqa: E402,F401
 
+# Register a clean revenue-only owner view so commercial truth is immediately visible without
+# the legacy operational panel stack. The full Command Center remains available separately.
+import revenue_cockpit_dedicated_runtime  # noqa: E402,F401
+
 
 @app.middleware("http")
 async def public_root_landing(request: Request, call_next):
