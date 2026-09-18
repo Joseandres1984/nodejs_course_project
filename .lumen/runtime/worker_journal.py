@@ -25,6 +25,10 @@ import outbound_engine  # noqa: F401,E402
 # prospect outreach prepared until a custom Resend domain has been verified and configured.
 import outbound_domain_gate  # noqa: F401,E402
 
+# Revenue Sprint 2.0 adds provider-event delivery truth for Brevo. It polls only already-sent
+# governed messages and never changes send caps, targets, spending or binding authority.
+import brevo_delivery_truth_runtime  # noqa: F401,E402
+
 # Recover a previously failed message only when the HTTPS provider is ready and the exact message
 # had already passed Communication Director + Quality Gate. This fixes transport deadlocks without
 # widening targeting, opt-out, risk, contract, payment or publication authority.
@@ -33,6 +37,10 @@ import outbound_recovery_runtime  # noqa: F401,E402
 # Conversion Autonomy installs before worker_meta so professional casework, market matching and
 # revenue-lane allocation use the improved evidence-reuse and anti-loop behavior during this cycle.
 import conversion_autonomy_runtime  # noqa: F401,E402
+
+# Revenue Sprint 2.0 installs before worker_meta so document enrichment, exact-evidence requirement
+# repair and Mission Team selection are conversion-first during the actual production cycle.
+import revenue_sprint_v2_runtime  # noqa: F401,E402
 
 # Run the complete Meta-LUMEN + production worker first.
 import worker_meta  # noqa: F401,E402
@@ -61,6 +69,11 @@ autonomy = autonomy_tick(STATE)
 # Until LUMEN records a real realized profit, bias the unified queue toward the shortest credible path
 # to cash. This does not widen contract/payment/order authority and does not fabricate economic values.
 first_cash = first_cash_tick(STATE, autonomy)
+
+# Revenue Sprint 2.0 re-applies the exact-evidence requirement bridge after the current cycle has
+# fetched/parsed any official documents and locks the next Mission Team cycle onto the top First Cash
+# opportunities. It also exposes one compact scoreboard for requirement/delivery progress.
+revenue_sprint = revenue_sprint_v2_runtime.revenue_sprint_v2_tick(STATE, first_cash)
 
 # Audit whether LUMEN is merely online or can actually reach the external market. The audit exposes
 # exact blockers (transport/live/eligibility) and creates a high-severity internal event on change.
@@ -93,6 +106,7 @@ conversion_autonomy["persisted"] = persisted
 secretary["persisted"] = persisted
 autonomy["persisted"] = persisted
 first_cash["persisted"] = persisted
+revenue_sprint["persisted"] = persisted
 external_readiness["persisted"] = persisted
 continuous_revenue["persisted"] = persisted
 continuous_learning["persisted"] = persisted
@@ -148,6 +162,22 @@ print({
             for x in (first_cash.get("top_cash_cases") or [])[:3]
         ],
         "persisted": first_cash.get("persisted"),
+    }
+}, flush=True)
+
+print({
+    "revenue_sprint_v2": {
+        "version": revenue_sprint.get("version"),
+        "status": revenue_sprint.get("status"),
+        "objective": revenue_sprint.get("objective"),
+        "first_cash_focus_opportunity_ids": revenue_sprint.get("first_cash_focus_opportunity_ids"),
+        "active_focus_teams": revenue_sprint.get("active_focus_teams"),
+        "requirement_completion": revenue_sprint.get("requirement_completion"),
+        "delivery_truth": revenue_sprint.get("delivery_truth"),
+        "search_spend_increased": revenue_sprint.get("search_spend_increased"),
+        "outbound_caps_increased": revenue_sprint.get("outbound_caps_increased"),
+        "binding_authority_changed": revenue_sprint.get("binding_authority_changed"),
+        "persisted": revenue_sprint.get("persisted"),
     }
 }, flush=True)
 
@@ -228,7 +258,8 @@ print({
 }, flush=True)
 
 # Persist one compact, queryable audit row only after the business cycle, autonomy OS, first-cash mode,
-# external-readiness audit, continuous revenue drive, continuous learning, secretarial brief and
-# notification routing completed. The journal uses its own Postgres table so global state stays bounded.
+# Revenue Sprint 2.0, external-readiness audit, continuous revenue drive, continuous learning,
+# secretarial brief and notification routing completed. The journal uses its own Postgres table so
+# global state stays bounded.
 journal = record_cycle(STATE, source="worker_complete")
 print({"cycle_journal": {k: v for k, v in journal.items() if k != "entry"}}, flush=True)
