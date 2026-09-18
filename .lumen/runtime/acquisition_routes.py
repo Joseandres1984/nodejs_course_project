@@ -11,10 +11,11 @@ from fastapi import APIRouter, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from main import STATE, load_state, save_state
+import commercial_offer_engine_runtime as offers
 
 router = APIRouter()
 FREE_EMAIL_DOMAINS = {"gmail.com", "hotmail.com", "outlook.com", "yahoo.com", "icloud.com", "live.com", "proton.me", "protonmail.com"}
-LANDING_VERSION = "1.2-low-friction"
+LANDING_VERSION = "2.0-revenue-sprint-diagnostic"
 
 
 def utcnow() -> str:
@@ -62,6 +63,54 @@ def _join_path(audience: str, token: str) -> str:
     return f"/join/{audience}?c={urllib.parse.quote(token)}"
 
 
+def _diagnostic_service(audience: str, details: str) -> Optional[str]:
+    text = _clean(details, 2200).lower()
+    if audience == "buyer":
+        if any(k in text for k in ("cotiz", "presupuesto", "precio recibido", "oferta recibida", "comparar precio")):
+            return "SRV-QUOTECHECK"
+        if any(k in text for k in ("verificar proveedor", "proveedor confiable", "riesgo proveedor", "validar proveedor", "due diligence")):
+            return "SRV-SUPPLIERCHECK"
+        return "SRV-SOURCING-EXPRESS"
+    if audience == "supplier":
+        if any(k in text for k in ("export", "importador", "distribuidor internacional", "vender en otro pais", "vender en otro país", "mercado internacional")):
+            return "SRV-EXPORT-SCOUT"
+        if any(k in text for k in ("licit", "tender", "concurso", "compras publicas", "compras públicas")):
+            return "SRV-TENDER-HUNTER"
+        return "SRV-B2B-PROSPECTING"
+    return None
+
+
+def _instant_diagnostic(audience: str, details: str, company: str = "", category: str = "", email: str = "") -> Dict[str, Any]:
+    if audience == "partner":
+        return {
+            "route": "partner_commission",
+            "title": "Ruta sugerida: partnership a comisión",
+            "summary": "LUMEN puede evaluar tu catálogo y oportunidades atribuibles. Una comisión real sólo se activa después de un acuerdo comercial explícito.",
+            "binding": False,
+        }
+    service_id = _diagnostic_service(audience, details)
+    if not service_id:
+        return {}
+    offer = offers.recommend_offer(service_id, {
+        "need": details,
+        "company_name": company,
+        "category": category,
+        "email": email,
+        "source": "acquisition_instant_diagnostic",
+    }, STATE)
+    if not offer:
+        return {}
+    return {
+        "route": "paid_service",
+        "service_id": service_id,
+        "title": f"Ruta sugerida: {offer.get('service_name')}",
+        "summary": f"Paquete inicial recomendado: {offer.get('tier_label')} · USD {int(float(offer.get('recommended_price_usd') or 0))}.",
+        "scope": list(offer.get("scope") or [])[:4],
+        "offer": offer,
+        "binding": False,
+    }
+
+
 @router.get("/c/{token}", include_in_schema=False)
 def acquisition_redirect(token: str, request: Request):
     load_state()
@@ -82,8 +131,8 @@ def _landing_copy(audience: str) -> tuple[str, str, str, str, str]:
     if audience == "supplier":
         return (
             "Sumate a la red de proveedores de LUMEN",
-            "Contanos qué vende tu empresa. LUMEN investiga oportunidades compatibles y organiza conversaciones comerciales cuando existe encaje real.",
-            "Quiero recibir oportunidades",
+            "Contanos qué vende tu empresa. LUMEN analiza el encaje y te muestra inmediatamente qué ruta comercial tiene más sentido.",
+            "Analizar mi oportunidad",
             "¿Qué productos o servicios ofrecés?",
             "Ej.: válvulas industriales, instrumentación, mantenimiento eléctrico, logística...",
         )
@@ -91,27 +140,41 @@ def _landing_copy(audience: str) -> tuple[str, str, str, str, str]:
         return (
             "Convertí tu catálogo en un canal de oportunidades atribuibles",
             "Tu tienda sigue cobrando y entregando. LUMEN puede originar compradores y trabajar con comisión o success fee únicamente bajo un acuerdo comercial válido.",
-            "Quiero ser partner",
+            "Analizar partnership",
             "¿Qué vendés y qué tipo de partnership te interesa?",
             "Ej.: tenemos catálogo online de herramientas y buscamos ventas B2B a comisión...",
         )
     return (
-        "Contanos qué necesitás. LUMEN busca alternativas por vos.",
-        "Partimos de una necesidad real, investigamos proveedores y organizamos la comparación. Para empezar alcanza con tu contacto y una descripción breve.",
-        "Buscar alternativas",
-        "¿Qué necesitás comprar?",
-        "Ej.: 20 sensores de nivel, entrega en Buenos Aires, alternativa equivalente aceptada...",
+        "Decinos qué necesitás. Recibí un diagnóstico inmediato.",
+        "Pegá una necesidad, cotización o descripción de compra. LUMEN identifica la ruta más útil antes de empezar la investigación.",
+        "Obtener diagnóstico",
+        "¿Qué necesitás comprar o revisar?",
+        "Ej.: me cotizaron 20 sensores de nivel para Buenos Aires y quiero comparar precio y proveedores...",
     )
 
 
-def _render_form(audience: str, token: str, done: bool = False, error: str = "") -> HTMLResponse:
+def _render_form(audience: str, token: str, done: bool = False, error: str = "", diagnostic: Optional[Dict[str, Any]] = None) -> HTMLResponse:
     title, lead, cta, details_label, placeholder = _landing_copy(audience)
     if done:
-        body = "<div class='ok'><b>Listo.</b><br>La información ya entró al circuito comercial de LUMEN. La vamos a validar antes de cualquier contacto o compromiso.</div>"
+        if diagnostic:
+            scope = "".join(f"<li>{html.escape(str(x))}</li>" for x in diagnostic.get("scope", []) or [])
+            body = f"""
+            <div class='ok'><b>Listo. Tu consulta ya entró al circuito comercial.</b></div>
+            <div class='diag'>
+              <div class='eyebrow'>DIAGNÓSTICO INMEDIATO</div>
+              <h2>{html.escape(str(diagnostic.get('title') or 'Ruta sugerida'))}</h2>
+              <p>{html.escape(str(diagnostic.get('summary') or ''))}</p>
+              {f"<ul>{scope}</ul>" if scope else ""}
+              <p class='note'>Es una recomendación inicial no vinculante. LUMEN valida la evidencia antes de cualquier propuesta, compra, contrato o pago.</p>
+              <a class='link' href='/services'>Ver servicios y alcances</a>
+            </div>
+            """
+        else:
+            body = "<div class='ok'><b>Listo.</b><br>La información ya entró al circuito comercial de LUMEN. La vamos a validar antes de cualquier contacto o compromiso.</div>"
     else:
         body = f"""
         {f"<div class='err'>{html.escape(error)}</div>" if error else ""}
-        <div class='fast'><b>Solo 2 datos para empezar.</b><span> Podés completar el resto después.</span></div>
+        <div class='fast'><b>Solo 2 datos.</b><span> Al enviar, te mostramos una ruta recomendada inmediatamente.</span></div>
         <form method='post' action='/join/{html.escape(audience)}'>
           <input type='hidden' name='c' value='{html.escape(token)}'>
           <input class='hp' name='website_check' autocomplete='off' tabindex='-1'>
@@ -128,8 +191,8 @@ def _render_form(audience: str, token: str, done: bool = False, error: str = "")
           <button type='submit'>{html.escape(cta)}</button>
         </form>
         """
-    return HTMLResponse(f"""<!doctype html><html lang='es'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>LUMEN · {html.escape(title)}</title><meta name='description' content='Contacto comercial B2B con LUMEN.'><style>
-    :root{{--bg:#061018;--panel:#0c1d27;--line:#285166;--text:#edf7fb;--muted:#91a9b8;--lime:#d7ff64;--blue:#8bd8ff}}*{{box-sizing:border-box}}body{{margin:0;background:radial-gradient(circle at 10% 0,#12334a 0,#061018 38%);color:var(--text);font-family:Inter,system-ui,-apple-system,sans-serif}}.wrap{{max-width:700px;margin:auto;padding:38px 20px 72px}}.brand{{font-weight:950;letter-spacing:.18em;color:var(--lime)}}h1{{font-size:clamp(35px,7vw,58px);line-height:1.03;margin:14px 0}}.lead{{font-size:18px;color:var(--muted);line-height:1.55;max-width:640px}}.box{{margin-top:24px;border:1px solid var(--line);border-radius:20px;background:linear-gradient(180deg,#0d202b,#08151d);padding:22px}}.fast{{padding:11px 13px;border:1px solid #31576d;background:#0b2532;border-radius:11px;color:#dff5ff}}.fast span{{color:var(--muted)}}label{{display:block;font-weight:850;margin:14px 0}}label span,summary span{{font-weight:500;color:var(--muted)}}input,textarea{{display:block;width:100%;margin-top:7px;padding:13px;border:1px solid #31576d;border-radius:11px;background:#06131b;color:#fff;font:inherit;outline:none}}input:focus,textarea:focus{{border-color:var(--blue);box-shadow:0 0 0 3px #8bd8ff18}}textarea{{min-height:125px;resize:vertical}}details{{margin:8px 0 18px;border-top:1px solid #183748;padding-top:14px}}summary{{cursor:pointer;color:#b8cad4;font-weight:800}}.optional{{padding-top:1px}}button{{width:100%;background:var(--lime);color:#061008;border:0;border-radius:11px;padding:14px 17px;font-weight:950;font-size:16px;cursor:pointer}}button:hover{{filter:brightness(1.03)}}.fine{{color:#7893a2;font-size:12px;line-height:1.5;margin-top:14px}}.ok,.err{{padding:15px;border-radius:12px;line-height:1.5}}.ok{{background:#123321;border:1px solid #34784f}}.err{{background:#3a1818;border:1px solid #7c3b3b}}.hp{{position:absolute;left:-10000px;width:1px;height:1px}}@media(max-width:540px){{.wrap{{padding:28px 16px 58px}}.box{{padding:18px}}}}
+    return HTMLResponse(f"""<!doctype html><html lang='es'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>LUMEN · {html.escape(title)}</title><meta name='description' content='Diagnóstico comercial B2B con LUMEN.'><style>
+    :root{{--bg:#061018;--panel:#0c1d27;--line:#285166;--text:#edf7fb;--muted:#91a9b8;--lime:#d7ff64;--blue:#8bd8ff}}*{{box-sizing:border-box}}body{{margin:0;background:radial-gradient(circle at 10% 0,#12334a 0,#061018 38%);color:var(--text);font-family:Inter,system-ui,-apple-system,sans-serif}}.wrap{{max-width:700px;margin:auto;padding:38px 20px 72px}}.brand{{font-weight:950;letter-spacing:.18em;color:var(--lime)}}h1{{font-size:clamp(35px,7vw,58px);line-height:1.03;margin:14px 0}}h2{{font-size:25px;margin:8px 0 10px}}.lead{{font-size:18px;color:var(--muted);line-height:1.55;max-width:640px}}.box{{margin-top:24px;border:1px solid var(--line);border-radius:20px;background:linear-gradient(180deg,#0d202b,#08151d);padding:22px}}.fast{{padding:11px 13px;border:1px solid #31576d;background:#0b2532;border-radius:11px;color:#dff5ff}}.fast span{{color:var(--muted)}}label{{display:block;font-weight:850;margin:14px 0}}label span,summary span{{font-weight:500;color:var(--muted)}}input,textarea{{display:block;width:100%;margin-top:7px;padding:13px;border:1px solid #31576d;border-radius:11px;background:#06131b;color:#fff;font:inherit;outline:none}}input:focus,textarea:focus{{border-color:var(--blue);box-shadow:0 0 0 3px #8bd8ff18}}textarea{{min-height:125px;resize:vertical}}details{{margin:8px 0 18px;border-top:1px solid #183748;padding-top:14px}}summary{{cursor:pointer;color:#b8cad4;font-weight:800}}.optional{{padding-top:1px}}button{{width:100%;background:var(--lime);color:#061008;border:0;border-radius:11px;padding:14px 17px;font-weight:950;font-size:16px;cursor:pointer}}button:hover{{filter:brightness(1.03)}}.fine,.note{{color:#7893a2;font-size:12px;line-height:1.5;margin-top:14px}}.ok,.err,.diag{{padding:15px;border-radius:12px;line-height:1.5}}.ok{{background:#123321;border:1px solid #34784f}}.err{{background:#3a1818;border:1px solid #7c3b3b}}.diag{{margin-top:14px;background:#0a2330;border:1px solid #31576d}}.diag p{{color:#b8cad4}}.diag ul{{padding-left:20px;color:#dceaf0}}.eyebrow{{font-size:11px;font-weight:950;letter-spacing:.14em;color:var(--lime)}}.link{{display:inline-block;margin-top:8px;color:#071018;background:var(--lime);text-decoration:none;font-weight:900;padding:10px 14px;border-radius:9px}}.hp{{position:absolute;left:-10000px;width:1px;height:1px}}@media(max-width:540px){{.wrap{{padding:28px 16px 58px}}.box{{padding:18px}}}}
     </style></head><body><main class='wrap'><div class='brand'>LUMEN</div><h1>{html.escape(title)}</h1><p class='lead'>{html.escape(lead)}</p><section class='box'>{body}</section><p class='fine'>LUMEN no genera compras, contratos ni pagos desde este formulario. La información se usa para investigación comercial y validación de encaje.</p></main></body></html>""")
 
 
@@ -172,10 +235,13 @@ def acquisition_submit(
         return _render_form(audience, c, error="Completá un email válido y una descripción breve.")
 
     company_display = company or (domain if domain not in FREE_EMAIL_DOMAINS else "Contacto entrante")
+    diagnostic = _instant_diagnostic(audience, details, company_display, category, email)
     fingerprint = hashlib.sha1(f"{audience}|{email}|{details.lower()}".encode("utf-8")).hexdigest()[:20]
     rows = STATE.setdefault("acquisition_leads", [])
-    if any(x.get("fingerprint") == fingerprint for x in rows):
-        return _render_form(audience, c, done=True)
+    existing = next((x for x in rows if x.get("fingerprint") == fingerprint), None)
+    if existing:
+        return _render_form(audience, c, done=True, diagnostic=existing.get("instant_diagnostic") or diagnostic)
+
     lid = f"ACLEAD-{len(rows)+1:06d}"
     row = {
         "id": lid,
@@ -194,6 +260,8 @@ def acquisition_submit(
         "landing_version": LANDING_VERSION,
         "status": "new",
         "created_at": utcnow(),
+        "instant_diagnostic": diagnostic,
+        "recommended_offer": diagnostic.get("offer") if isinstance(diagnostic, dict) else None,
     }
     rows.append(row)
     STATE["acquisition_leads"] = rows[-2000:]
@@ -223,14 +291,23 @@ def acquisition_submit(
             "acquisition_lead_id": lid,
             "direct_inbound_demand": audience == "buyer",
             "demand_signal": audience == "buyer",
+            "recommended_service_id": diagnostic.get("service_id") if isinstance(diagnostic, dict) else None,
         })
         row["research_lead_id"] = rlid
-    _event("lead", campaign, variant, acquisition_lead_id=lid, audience=audience)
-    STATE.setdefault("activity", []).insert(0, {"ts": utcnow(), "msg": f"Growth: nueva captación {audience} de {company_display}."})
+    _event(
+        "lead",
+        campaign,
+        variant,
+        acquisition_lead_id=lid,
+        audience=audience,
+        recommended_service_id=diagnostic.get("service_id") if isinstance(diagnostic, dict) else None,
+        instant_diagnostic_shown=bool(diagnostic),
+    )
+    STATE.setdefault("activity", []).insert(0, {"ts": utcnow(), "msg": f"Growth: nueva captación {audience} de {company_display}; diagnóstico inmediato generado."})
     STATE["activity"] = STATE["activity"][:100]
     if not save_state():
         raise HTTPException(status_code=503, detail="lead_received_but_persistence_unavailable")
-    return _render_form(audience, c, done=True)
+    return _render_form(audience, c, done=True, diagnostic=diagnostic)
 
 
 @router.post("/track/market-view", include_in_schema=False)
@@ -258,4 +335,4 @@ def track_market_click(listing_id: str = Query("")):
     return Response(status_code=204)
 
 
-print({"acquisition_routes": {"version": LANDING_VERSION, "status": "active", "required_fields": ["email", "details"], "optional_fields": ["company", "website", "category"]}}, flush=True)
+print({"acquisition_routes": {"version": LANDING_VERSION, "status": "active", "required_fields": ["email", "details"], "optional_fields": ["company", "website", "category"], "instant_diagnostic": True}}, flush=True)
