@@ -40,3 +40,7 @@ def _install()->None:
         crd=continuous_revenue_drive_tick(state); print({"continuous_revenue_drive":crd}); return original(state)
     wrapped._continuous_revenue_drive_wrapped=True; wrapped._continuous_revenue_drive_original=original; executive_secretary.secretary_tick=wrapped; print({"continuous_revenue_drive_install":{"status":"active","version":VERSION}})
 _install()
+
+# Install the unified monetization director after Continuous Revenue Drive so its
+# four-lane priorities persist on top of the canonical revenue truth every cycle.
+import money_engine_runtime  # noqa: E402,F401
