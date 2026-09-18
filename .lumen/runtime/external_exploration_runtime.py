@@ -16,7 +16,7 @@ import urllib.parse
 import scout_connector
 
 
-VERSION = "1.1-global-trade-discovery"
+VERSION = "1.2-global-trade-discovery-compat"
 
 _ORIGINAL_STORE_RESULTS = scout_connector._store_results
 
@@ -58,12 +58,24 @@ BUYER_ANGLES = [
     "proyectos ingeniería abastecimiento",
 ]
 
+SUPPLIER_ANGLES = [
+    "manufacturer supplier exporter distributor",
+    "industrial manufacturer exporter catalog",
+    "supplier factory RFQ industrial",
+    "manufacturer distributor export catalog",
+]
+
 STORE_ANGLES = [
     'mayorista distribuidor "tienda online"',
     'distribuidor catálogo stock tienda',
     'ecommerce industrial mayorista distribuidor',
     'tienda técnica catálogo productos',
 ]
+
+# Backward-compatible public recipe surface used by the persistent exploration-learning layer.
+# Keeping both local and international markets avoids the old missing-attribute crash while letting
+# the learner keep exploring a broader market universe under the same search cap.
+GEOGRAPHIES = LOCAL_GEOGRAPHIES + GLOBAL_SUPPLIER_MARKETS
 
 NEGATIVE = " -linkedin -facebook -instagram -youtube -wikipedia -indeed -glassdoor -pinterest -mercadolibre"
 
@@ -265,6 +277,7 @@ print({
         "general_lane": "local_demand_plus_global_supply",
         "per_cycle_portfolio": ["local_buyer", "global_supplier", "local_store_or_distributor"],
         "global_supplier_markets": GLOBAL_SUPPLIER_MARKETS,
+        "legacy_learning_surface": {"GEOGRAPHIES": len(GEOGRAPHIES), "SUPPLIER_ANGLES": len(SUPPLIER_ANGLES)},
         "dedupe": "unique_company_domain_first",
         "rotates_categories": True,
         "rotates_geographies": True,
