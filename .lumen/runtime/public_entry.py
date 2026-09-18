@@ -102,6 +102,10 @@ import a2a_public_registration_runtime  # noqa: E402,F401
 # Support, enabled rail and verified collection readiness remain separate concepts.
 import multicurrency_web_runtime  # noqa: E402,F401
 
+# Install the production WhatsApp Cloud API webhook. Verification uses a Railway-only
+# token; inbound events are trusted for commercial ingest only after Meta signature verification.
+import whatsapp_webhook_runtime  # noqa: E402,F401
+
 # Coalesce repeated authenticated Command Center reads and route the alert widget to a compact
 # read-only endpoint. This avoids browser request stampedes while the worker persists large state.
 import command_center_fastpath_runtime  # noqa: E402,F401
