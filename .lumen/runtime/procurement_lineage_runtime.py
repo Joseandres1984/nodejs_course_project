@@ -119,3 +119,9 @@ print(
     },
     flush=True,
 )
+
+# Worker entry imports procurement lineage before worker_journal. Loading the Revenue Sprint hooks
+# here guarantees its First Cash Mission Team activation shim is installed before the production
+# Mission Team tick, while preserving the lineage runtime's own behavior and authority boundaries.
+import revenue_sprint_v2_runtime  # noqa: E402,F401
+import revenue_sprint_v2_team_fix  # noqa: E402,F401
