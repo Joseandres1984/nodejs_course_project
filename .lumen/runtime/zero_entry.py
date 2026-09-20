@@ -39,18 +39,21 @@ os.environ.setdefault("LUMEN_OUTBOUND_MAX_FOLLOWUPS_PER_CYCLE", "4")
 os.environ.setdefault("LUMEN_SOCIAL_CANARY_MAX_PER_CYCLE", "1")
 os.environ.setdefault("LUMEN_SOCIAL_CANARY_MAX_PER_DAY", "4")
 os.environ.setdefault("LUMEN_PUBLIC_BASE_URL", "https://lumen-zero-public.joseandresceol1-jac.workers.dev")
+os.environ.setdefault("LUMEN_COMMAND_CENTER_URL", "https://lumen-zero-dashboard.joseandresceol1-jac.workers.dev")
 # Shadow intelligence only enriches already-permitted public catalog crawls; it adds no provider
 # spend and cannot authorize outreach, payments or binding actions.
 os.environ.setdefault("LUMEN_MARKET_INTELLIGENCE_SHADOW_ENABLED", "true")
 os.environ.setdefault("PYTHONHASHSEED", "0")
 
-# Install replacements before any production module captures app/scout/mail functions.
+# Install replacements before any production module captures app/scout/mail/watchdog functions.
 import d1_persistence_runtime  # noqa: F401,E402
 # Signed Meta webhook payloads land in a dedicated D1 queue. Patch load_state now so every normal
 # LUMEN Zero cycle can ingest them through the existing Instagram Operator before business logic.
 import instagram_webhook_d1_bridge_runtime  # noqa: F401,E402
 import zero_scout_runtime  # noqa: F401,E402
 import zero_mail_runtime  # noqa: F401,E402
+import zero_watchdog_runtime  # noqa: F401,E402
+import zero_notification_runtime  # noqa: F401,E402
 import zero_public_inquiry_bridge_runtime  # noqa: F401,E402
 import zero_instagram_control_bridge_runtime  # noqa: F401,E402
 
