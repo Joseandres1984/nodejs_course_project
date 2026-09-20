@@ -82,17 +82,9 @@ import zero_search_budget_runtime  # noqa: F401,E402
 # but cannot become counterparties or consume commercial execution capacity.
 import zero_discovery_quality_runtime  # noqa: F401,E402
 
-# Recover a bounded batch of concrete Railway-era commercial accounts from the checked-in historical
-# artifact. Imported rows are historical evidence only: all legacy verification flags are namespaced,
-# current verified_company/contact are forced false, suppressions are preserved, and no outbound is
-# triggered here. The normal current verifier below remains the sole promotion authority.
-import railway_legacy_recovery_runtime  # noqa: F401,E402
-try:
-    legacy_recovery = railway_legacy_recovery_runtime.recover_once()
-    print({"railway_legacy_recovery": legacy_recovery}, flush=True)
-except Exception as exc:
-    print({"railway_legacy_recovery": {"status": "degraded_fail_closed", "error": f"{type(exc).__name__}: {str(exc)[:300]}", "outbound_triggered": False}}, flush=True)
-
+# Railway history is deliberately NOT injected into the live candidate queue here. It is imported by
+# the dedicated one-time legacy recovery workflow into an isolated D1 namespace, where every record
+# remains outbound-unsafe until a future bridge supplies fresh evidence and passes current gates.
 import company_verification_scheduler_runtime  # noqa: F401,E402
 import company_identity_quality_runtime  # noqa: F401,E402
 import executive_secretary_log_bridge  # noqa: F401,E402
