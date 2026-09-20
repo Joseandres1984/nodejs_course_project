@@ -53,21 +53,22 @@ async function loadState(env) {
   const binary = atob(encoded);
   const compressed = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) compressed[i] = binary.charCodeAt(i);
-
   const stream = new Blob([compressed]).stream().pipeThrough(new DecompressionStream("deflate"));
   const raw = new Uint8Array(await new Response(stream).arrayBuffer());
   const digest = await sha256Hex(raw);
   if (manifest.payload_sha256 && digest !== manifest.payload_sha256) throw new Error("state_checksum_mismatch");
-
-  const state = JSON.parse(new TextDecoder().decode(raw));
-  return { state, manifest };
+  return { state: JSON.parse(new TextDecoder().decode(raw)), manifest };
 }
 
-function n(v) { return Number(v || 0); }
-function arr(v) { return Array.isArray(v) ? v : []; }
-function obj(v) { return v && typeof v === "object" && !Array.isArray(v) ? v : {}; }
-function s(v, fallback = "") { const out = String(v ?? "").trim(); return out || fallback; }
-function firstObj(...values) { for (const value of values) { if (value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length) return value; } return {}; }
+const n = (v) => Number(v || 0);
+const arr = (v) => Array.isArray(v) ? v : [];
+const obj = (v) => v && typeof v === "object" && !Array.isArray(v) ? v : {};
+const s = (v, d = "") => String(v ?? d);
+
+function money(v) {
+  const x = Number(v || 0);
+  return `$${x.toLocaleString("es-AR", { maximumFractionDigits: 0 })}`;
+}
 
 function summarize(state, manifest) {
   const funnel = obj(state.business_funnel);
@@ -76,227 +77,96 @@ function summarize(state, manifest) {
   const scoutBudget = obj(state.scout_budget);
   const demandBudget = obj(state.demand_search_budget);
   const adaptiveBudget = obj(state.adaptive_search_budget);
-  const workforceRoot = obj(state.agent_workforce);
-  const workforce = firstObj(workforceRoot.last_cycle, state.agent_workforce_last, state.workforce_last_cycle);
   const watchdog = obj(state.system_watchdog);
-  const revenue = obj(state.revenue_execution_v2);
-  const revenueFunnel = obj(revenue.revenue_funnel);
-  const revCounts = obj(revenueFunnel.counts);
+  const workforceRoot = obj(state.agent_workforce);
+  const workforce = obj(workforceRoot.last_cycle);
+  const moneyEngine = obj(state.money_engine);
   const secretary = obj(state.executive_secretary_private_bridge || state.executive_secretary);
-  const crd = obj(state.continuous_revenue_drive);
-  const money = obj(state.money_engine);
-  const service = firstObj(state.service_growth_pipeline, state.service_revenue_runtime);
-  const intelligence = firstObj(state.intelligence_revenue_engine, obj(state.intelligence_cycle_bridge).intelligence_revenue);
-  const partner = obj(state.partner_network);
-  const distribution = obj(state.distribution_operator);
-  const acquisition = obj(state.acquisition_campaigns);
+  const policies = obj(state.policies);
   const instagram = obj(state.instagram_publish_control);
   const notification = obj(state.notification_router);
-  const meta = obj(state.meta_autonomy);
-  const canonical = obj(state.canonical_priority_cleanup);
+
+  const opportunities = arr(state.opportunities).slice().sort((a,b)=>n(b.score)-n(a.score)).slice(0,12).map((o)=>({
+    id:s(o.id,"—"), buyer:s(o.buyer || o.company || o.account,"—"), need:s(o.need || o.category || o.title,"—"),
+    supplier:s(o.supplier,"—"), score:n(o.score), pipeline:n(o.pipeline || o.value || o.amount), status:s(o.status || o.stage,"—"), source:s(o.source,"—")
+  }));
+  const deals = arr(state.deals).slice().sort((a,b)=>n(b.expected_value || b.pipeline)-n(a.expected_value || a.pipeline)).slice(0,12).map((d)=>({
+    id:s(d.id,"—"), buyer:s(d.buyer || d.company || d.account,"—"), stage:s(d.stage || d.status,"—"),
+    close_prob:n(d.close_prob), expected_value:n(d.expected_value), pipeline:n(d.pipeline), company_profit:n(d.company_profit), company_share_pct:n(d.company_share_pct), source:s(d.source,"—")
+  }));
+  const approvals = arr(state.approvals).filter((a)=>s(a.status).toLowerCase()==="pending").slice(0,10).map((a)=>({
+    id:s(a.id,"—"), deal_id:s(a.deal_id,"—"), company_profit:n(a.company_profit), company_share_pct:n(a.company_share_pct), reason:s(a.reason || a.kind,"requiere aprobación humana")
+  }));
+  const outbox = arr(state.outbox).slice(-12).reverse().map((m)=>({
+    id:s(m.id,"—"), counterparty:s(m.counterparty || m.to || m.company,"—"), kind:s(m.kind || m.channel || m.type,"—"), status:s(m.status,"—")
+  }));
+  const offers = [...arr(state.offers), ...arr(state.supplier_quotes), ...arr(state.quotes)].slice(-12).reverse().map((o)=>({
+    id:s(o.id,"—"), supplier:s(o.supplier || o.company || o.vendor,"—"), amount:n(o.amount || o.amount_usd || o.total), lead_days:n(o.lead_days || o.delivery_days), source:s(o.source,"—"), status:s(o.status,"—")
+  }));
+  const activity = arr(state.activity).slice(0,30).map((x)=>({ts:s(x.ts),msg:s(x.msg)}));
+  const pending = arr(secretary.pending).slice(0,10).map((x)=>({title:s(x.title,"Pendiente"),reason:s(x.reason),priority:n(x.priority),risk:s(x.risk)}));
+  const goals = arr(state.standing_goals).slice(0,8);
+
+  const pipeline = opportunities.reduce((a,o)=>a+n(o.pipeline),0);
+  const expectedValue = deals.reduce((a,d)=>a+n(d.expected_value),0);
+  const potentialProfit = deals.filter((d)=>!s(d.stage).toLowerCase().includes("cerrado")).reduce((a,d)=>a+n(d.company_profit),0);
+  const transactions = arr(state.transactions);
+  const registeredProfit = transactions.reduce((a,t)=>a+n(t.company_profit || t.profit || t.amount),0);
+  const realizedRevenue = n(moneyEngine.realized_revenue_truth_usd || obj(state.service_growth_pipeline).realized_service_revenue_usd || obj(state.expansion_revenue_runtime).revenue_generated_usd);
 
   const generalDaily = n(adaptiveBudget.general_pool_daily || scoutBudget.daily_budget || scoutStatus.general_retail_pool_daily);
   const demandDaily = n(adaptiveBudget.demand_reserved_daily || demandBudget.daily_budget || scoutStatus.demand_reserved_daily);
-  const hardCap = n(adaptiveBudget.total_daily_cap || scoutStatus.daily_query_budget || scoutBudget.total_daily_cap || (generalDaily + demandDaily));
+  const hardCap = n(adaptiveBudget.total_daily_cap || scoutStatus.daily_query_budget || scoutBudget.total_daily_cap || generalDaily + demandDaily);
   const generalUsed = n(scoutBudget.queries_used);
   const demandUsed = n(demandBudget.queries_used);
-  const totalUsed = Math.min(hardCap || (generalUsed + demandUsed), generalUsed + demandUsed);
-  const totalRemaining = Math.max(0, (hardCap || 0) - generalUsed - demandUsed);
-  const generalRemaining = scoutBudget.queries_remaining !== undefined ? n(scoutBudget.queries_remaining) : Math.max(0, generalDaily - generalUsed);
-  const demandRemaining = demandBudget.queries_remaining !== undefined ? n(demandBudget.queries_remaining) : Math.max(0, demandDaily - demandUsed);
-
+  const totalUsed = Math.min(hardCap || generalUsed + demandUsed, generalUsed + demandUsed);
+  const remaining = Math.max(0, hardCap - generalUsed - demandUsed);
   const fleetSize = n(workforce.fleet_size || workforceRoot.roster_count || arr(workforceRoot.roster).length);
-  const companyCycle = n(workforce.company_cycle || state.ticks);
-  const workerStatus = s(workforce.status, fleetSize ? "healthy" : "unknown");
-  const byRoleRaw = obj(workforce.by_role);
-  const byRole = Object.entries(byRoleRaw).map(([key, value]) => ({
-    key,
-    recruited: n(obj(value).recruited),
-    assignments: n(obj(value).assignments),
-    web_searches: n(obj(value).web_searches),
-    errors: n(obj(value).errors),
-  })).filter((x) => x.recruited || x.assignments || x.web_searches || x.errors);
-
-  const activities = arr(state.activity).slice(0, 36).map((x) => ({ ts: x.ts || "", msg: x.msg || "" }));
-  const pending = arr(secretary.pending).slice(0, 12).map((x) => ({
-    title: x.title || "Pendiente", reason: x.reason || "", priority: n(x.priority), risk: x.risk || "",
-  }));
-  const news = arr(secretary.news).slice(0, 8).map((x) => ({
-    title: x.title || "Novedad", summary: x.summary || "", category: x.category || "", created_at: x.created_at || "",
-  }));
-
-  const realizedRevenue = n(
-    money.realized_revenue_truth_usd ||
-    service.realized_service_revenue_usd ||
-    obj(state.expansion_revenue_runtime).revenue_generated_usd
-  );
 
   return {
-    status: {
-      runtime: "LUMEN Zero",
-      persistence: "Cloudflare D1",
-      state_updated_at: manifest.updated_at || state.last_tick || null,
-      state_bytes: n(manifest.uncompressed_bytes),
-      ticks: n(state.ticks),
-      watchdog_status: watchdog.status || "unknown",
-      watchdog_score: n(watchdog.score_pct),
-      company_cycle: companyCycle,
-      fleet_size: fleetSize,
-      worker_status: workerStatus,
-      master_mode: s(meta.company_mode || state.master_company_mode, "REVENUE_EXECUTION"),
-      management_department: s(meta.management_department, "Market Intelligence"),
-      management_priority: s(meta.management_priority, "repair_weakest_department"),
+    status:{
+      updated_at:manifest.updated_at || state.last_tick || null, ticks:n(state.ticks), last_tick:s(state.last_tick), last_origin:s(state.last_tick_origin,"—"),
+      watchdog_score:n(watchdog.score_pct), watchdog_status:s(watchdog.status,"unknown"), fleet_size:fleetSize,
+      worker_status:s(workforce.status,fleetSize?"healthy":"unknown"), persistence:"Cloudflare D1", state_bytes:n(manifest.uncompressed_bytes)
     },
-    funnel: {
-      research_leads: n(funnel.research_leads ?? arr(state.research_leads).length),
-      candidate_accounts: n(funnel.candidate_accounts ?? arr(state.candidate_accounts).length),
-      verified_companies: n(funnel.verified_companies),
-      verified_buyers: n(funnel.verified_buyers),
-      verified_suppliers: n(funnel.verified_suppliers),
-      verified_contacts: n(funnel.verified_commercial_channels || funnel.verified_corporate_emails),
-      buyers_with_demand: n(funnel.buyers_with_public_demand),
-      requirements_ready: n(funnel.requirements_ready_for_rfq),
-      opportunities: n(funnel.evidence_backed_opportunities ?? revCounts.market_opportunities),
-      outbound_sent: n(funnel.outbound_sent),
-      inbound_received: n(funnel.inbound_received),
-      real_offers: n(funnel.real_offers),
-      proposals: n(funnel.proposals),
-      viable_deals: n(funnel.viable_deals),
-      close_ready: n(funnel.close_ready),
+    money:{pipeline,expected_value:expectedValue,potential_profit:potentialProfit,registered_profit:registeredProfit,realized_revenue:realizedRevenue,pending_closures:approvals.length},
+    goals, opportunities, deals, approvals, outbox, offers, activity, pending,
+    policies:{min_share:n(policies.min_company_share_pct),target_share:n(policies.target_company_share_pct),risk_reserve:n(policies.risk_reserve_pct)},
+    funnel:{
+      leads:n(funnel.research_leads ?? arr(state.research_leads).length), candidates:n(funnel.candidate_accounts ?? arr(state.candidate_accounts).length),
+      verified:n(funnel.verified_companies), buyers:n(funnel.verified_buyers), suppliers:n(funnel.verified_suppliers), contacts:n(funnel.verified_commercial_channels || funnel.verified_corporate_emails),
+      demand:n(funnel.buyers_with_public_demand), opportunities:n(funnel.evidence_backed_opportunities), proposals:n(funnel.proposals), close_ready:n(funnel.close_ready), outbound_sent:n(funnel.outbound_sent), inbound:n(funnel.inbound_received)
     },
-    scout: {
-      provider: scoutStatus.provider || "bing_rss_public",
-      paid_search: Boolean(scoutStatus.paid_search),
-      used: totalUsed,
-      remaining: totalRemaining,
-      general_used: generalUsed,
-      general_remaining: generalRemaining,
-      demand_used: demandUsed,
-      demand_remaining: demandRemaining,
-      hard_cap: hardCap,
-      general_daily: generalDaily,
-      demand_daily: demandDaily,
-      strategy: s(obj(state.scout).strategy || crd.primary_lane, "demand_discovery"),
-      budget_reason: s(adaptiveBudget.reason),
-    },
-    outbound: {
-      live: Boolean(readiness.outbound_live),
-      mail_ready: Boolean(readiness.mail_transport_ready),
-      mail_provider: readiness.mail_provider || null,
-      eligible_prospects: n(readiness.eligible_external_prospects),
-      blocker: readiness.primary_blocker || null,
-      outbox_ready: n(readiness.outbox_ready),
-      sent_or_delivered: n(readiness.outbox_sent_or_delivered),
-      failed: n(readiness.outbox_failed),
-      social_waiting: n(readiness.social_jobs_awaiting_authorized_connector),
-      instagram_configured: Boolean(instagram.connector_configured),
-      instagram_approval_required: instagram.approval_required_per_post !== false,
-      whatsapp_ready: Boolean(notification.delivery_ready),
-    },
-    revenue: {
-      realized_usd: realizedRevenue,
-      opportunities: n(revCounts.market_opportunities),
-      proposals: n(revCounts.proposals),
-      active_deals: n(revCounts.active_deals),
-      close_ready: n(revCounts.close_ready),
-      primary_lane: s(crd.primary_lane, "distribution"),
-      primary_action: s(crd.primary_action),
-      objective: s(crd.objective, "maximizar progreso comercial verificado hacia ingresos rentables"),
-      service_pipeline: n(service.pipeline_total || service.prepared_service_opportunities),
-      service_contacted: n(service.real_contacted),
-      intelligence_candidates: n(intelligence.verified_candidates),
-      intelligence_contacted: n(intelligence.real_contacted),
-      partner_stores: n(partner.stores_total),
-      active_partners: n(partner.active_partners),
-      referral_offers: n(partner.referral_offers_active),
-    },
-    distribution: {
-      jobs_total: n(distribution.jobs_total),
-      owned_live: n(distribution.owned_live),
-      external_verified: n(distribution.external_verified),
-      awaiting_connector: n(distribution.awaiting_connector),
-      campaigns_active: n(acquisition.campaigns_active),
-      clicks: n(acquisition.clicks),
-      leads: n(acquisition.leads),
-    },
-    workforce: {
-      fleet_size: fleetSize,
-      assignments_created: n(workforce.assignments_created),
-      assignments_completed: n(workforce.assignments_completed),
-      searches: n(workforce.provider_searches || workforce.web_searches),
-      cache_hits: n(workforce.search_cache_hits),
-      errors: n(workforce.errors),
-      bottleneck: s(workforce.bottleneck, "verification_contact"),
-      scale_direction: s(workforce.scale_direction, "hold"),
-      workload_score: n(workforce.workload_score),
-      by_role: byRole,
-      top_findings: arr(workforce.top_findings).slice(0, 9),
-    },
-    strategy: {
-      canonical_lane: s(canonical.canonical_lane || crd.primary_lane, "demand_discovery"),
-      management_department: s(meta.management_department, "Market Intelligence"),
-      controller_mode: s(meta.controller_mode, "BUILD_VALUE"),
-      recommended_scenario: s(meta.recommended_scenario, "baseline"),
-    },
-    activity: activities,
-    pending,
-    news,
+    scout:{provider:s(scoutStatus.provider,"bing_rss_public"),used:totalUsed,remaining,hard_cap:hardCap,general_used:generalUsed,demand_used:demandUsed},
+    outbound:{live:Boolean(readiness.outbound_live),mail_ready:Boolean(readiness.mail_transport_ready),mail_provider:s(readiness.mail_provider,"—"),eligible:n(readiness.eligible_external_prospects),blocker:s(readiness.primary_blocker),failed:n(readiness.outbox_failed),instagram:Boolean(instagram.connector_configured),whatsapp:Boolean(notification.delivery_ready)},
+    governance:{financial_commitments:false,contracts:"aprobación humana",unverified_contact:"no enviar",live_outbound:Boolean(readiness.outbound_live),automation_disclosed:Boolean(readiness.automation_disclosure || state.disclose_automation)}
   };
 }
 
-const HTML = `<!doctype html>
-<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#071018"><title>LUMEN · Centro de Comando</title>
-<style>
-:root{color-scheme:dark;--bg:#060d13;--bg2:#0a1822;--card:#0c1720;--card2:#0f202b;--line:#1b3544;--line2:#274e61;--text:#eef7fb;--muted:#86a0af;--lime:#d7ff64;--good:#8ee8bf;--warn:#ffd36e;--bad:#ff8f94;--blue:#7bdcff;--violet:#b8a7ff;--shadow:0 18px 50px #0007}*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:radial-gradient(circle at 95% 0,#153a47 0,#0a1922 24%,#060d13 55%) fixed;color:var(--text);font:14px Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:0}.shell{max-width:1420px;margin:auto;padding:18px 18px 88px}.topbar{position:sticky;top:0;z-index:10;padding:14px 0 12px;background:linear-gradient(180deg,#060d13f5 70%,#060d1300);backdrop-filter:blur(16px)}.brandline{display:flex;justify-content:space-between;gap:16px;align-items:center}.brand{display:flex;align-items:center;gap:12px}.mark{width:42px;height:42px;border-radius:13px;background:linear-gradient(145deg,var(--lime),#76e2bc);color:#071018;display:grid;place-items:center;font-weight:1000;box-shadow:0 0 26px #d7ff6433}.logo{font-size:25px;font-weight:950;letter-spacing:.16em;line-height:1}.sub{color:var(--muted);font-size:12px;margin-top:5px}.topactions{display:flex;gap:8px;align-items:center}.pill{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line2);border-radius:999px;padding:8px 11px;color:var(--good);background:#0b211b;font-size:12px;white-space:nowrap}.dot{width:8px;height:8px;border-radius:50%;background:currentColor;box-shadow:0 0 12px currentColor}.btn{background:var(--lime);color:#071018;border:0;border-radius:11px;padding:10px 13px;font-weight:900;cursor:pointer}.btn:active{transform:translateY(1px)}.tabs{display:flex;gap:8px;overflow:auto;padding:8px 0 2px;scrollbar-width:none}.tabs::-webkit-scrollbar{display:none}.tab{border:1px solid var(--line);background:#0a151d;color:var(--muted);padding:8px 12px;border-radius:999px;white-space:nowrap;cursor:pointer;font-weight:700}.tab.active{color:#071018;background:var(--lime);border-color:var(--lime)}.view{display:none}.view.active{display:block}.hero{display:grid;grid-template-columns:1.55fr .9fr;gap:12px;margin-top:10px}.heroMain{background:linear-gradient(135deg,#0d202b,#0b151d 70%);border:1px solid var(--line);border-radius:22px;padding:22px;box-shadow:var(--shadow);position:relative;overflow:hidden}.heroMain:after{content:"";position:absolute;width:240px;height:240px;border-radius:50%;right:-90px;top:-110px;background:radial-gradient(circle,#d7ff6430,#d7ff6400 67%)}.eyebrow{text-transform:uppercase;letter-spacing:.16em;font-size:10px;color:var(--muted);font-weight:800}.headline{font-size:clamp(25px,4vw,43px);font-weight:950;line-height:1.03;margin:8px 0 12px;max-width:780px}.headline em{font-style:normal;color:var(--lime)}.heroText{max-width:780px;color:#a9c0cc;line-height:1.55}.heroMeta{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}.chip{border:1px solid #28485a;border-radius:10px;background:#08131a;padding:8px 10px;color:#b7cad5;font-size:12px}.heroSide{display:grid;grid-template-columns:1fr 1fr;gap:10px}.mini{background:linear-gradient(180deg,#0e1d27,#0a151d);border:1px solid var(--line);border-radius:18px;padding:16px}.mini .val{font-size:26px;font-weight:900;margin-top:8px}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.section{margin-top:12px}.card{background:linear-gradient(180deg,#0e1c26,#0a151d);border:1px solid var(--line);border-radius:18px;padding:16px;box-shadow:0 12px 34px #0004}.cardTitle{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}.label{text-transform:uppercase;letter-spacing:.13em;font-size:10px;color:var(--muted);font-weight:800}.kpi{font-size:29px;font-weight:900;margin-top:7px;letter-spacing:-.02em}.kpi.sm{font-size:22px}.good{color:var(--good)}.warn{color:var(--warn)}.bad{color:var(--bad)}.blue{color:var(--blue)}.muted{color:var(--muted)}.tiny{font-size:12px;color:var(--muted);line-height:1.45}.cols{display:grid;grid-template-columns:1.2fr .8fr;gap:12px}.colsEqual{display:grid;grid-template-columns:1fr 1fr;gap:12px}.bar{height:8px;background:#071018;border:1px solid #173241;border-radius:999px;overflow:hidden;margin-top:10px}.bar>i{display:block;height:100%;background:linear-gradient(90deg,var(--lime),var(--good));width:0;transition:width .35s ease}.bar.warnbar>i{background:linear-gradient(90deg,var(--warn),var(--lime))}.row{display:grid;grid-template-columns:1fr auto;gap:12px;padding:10px 0;border-bottom:1px solid #17303e;align-items:center}.row:last-child{border-bottom:0}.row b{font-variant-numeric:tabular-nums}.funnelRow{display:grid;grid-template-columns:minmax(130px,1fr) minmax(90px,2fr) 42px;gap:10px;align-items:center;padding:8px 0}.funnelTrack{height:9px;border-radius:999px;background:#071018;border:1px solid #173241;overflow:hidden}.funnelFill{height:100%;min-width:2px;background:linear-gradient(90deg,#56cfb2,var(--lime));border-radius:999px}.channel{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 0;border-bottom:1px solid #17303e}.channel:last-child{border-bottom:0}.channelLeft{display:flex;align-items:center;gap:10px}.icon{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;background:#102532;border:1px solid #214658;font-weight:900}.state{padding:5px 8px;border-radius:999px;font-size:10px;font-weight:900;letter-spacing:.05em;background:#13231d;color:var(--good);border:1px solid #275443}.state.off{background:#261719;color:var(--bad);border-color:#593036}.state.wait{background:#272214;color:var(--warn);border-color:#594c25}.activity{max-height:520px;overflow:auto;padding-right:4px}.event{padding:11px 0;border-bottom:1px solid #17303e}.event:last-child{border-bottom:0}.time{font-size:11px;color:#668396;margin-top:4px}.priority{border:1px solid #1b3544;border-radius:13px;padding:12px;margin-top:8px;background:#09151d}.priorityHead{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.priorityScore{font-size:11px;padding:4px 7px;border-radius:8px;background:#17242d;color:var(--lime)}.roles{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}.role{padding:11px;border-radius:13px;border:1px solid #1d3948;background:#0a161e}.role b{display:block;font-size:18px;margin-top:4px}.lane{border:1px solid #1b3544;border-radius:14px;padding:13px;background:#09151d}.laneTop{display:flex;justify-content:space-between;gap:10px;align-items:center}.metricline{display:flex;gap:15px;flex-wrap:wrap;margin-top:9px}.metricline span{font-size:11px;color:var(--muted)}.metricline b{color:var(--text);font-size:13px;margin-left:4px}.banner{padding:13px 14px;border:1px solid #3b5b2a;background:#142017;border-radius:15px;color:#dff5b3;line-height:1.5}.empty{padding:20px 0;color:var(--muted);text-align:center}.bottomNav{display:none}.skeleton{opacity:.5;animation:pulse 1.2s infinite}@keyframes pulse{50%{opacity:.8}}@media(max-width:980px){.hero{grid-template-columns:1fr}.grid{grid-template-columns:1fr 1fr}.cols,.colsEqual{grid-template-columns:1fr}.roles{grid-template-columns:1fr 1fr}}@media(max-width:620px){.shell{padding:10px 12px 88px}.topbar{padding-top:8px}.brandline{align-items:flex-start}.topactions .pill{display:none}.logo{font-size:22px}.mark{width:38px;height:38px}.heroMain{padding:18px}.heroSide{grid-template-columns:1fr 1fr}.grid{grid-template-columns:1fr 1fr}.card{padding:14px}.kpi{font-size:26px}.headline{font-size:29px}.roles{grid-template-columns:1fr 1fr}.tabs{display:none}.bottomNav{display:grid;grid-template-columns:repeat(4,1fr);position:fixed;left:10px;right:10px;bottom:10px;z-index:20;background:#0a151df2;border:1px solid #284456;border-radius:18px;padding:6px;box-shadow:var(--shadow);backdrop-filter:blur(18px)}.navBtn{border:0;background:transparent;color:#7f98a6;padding:9px 2px;border-radius:12px;font-size:10px;font-weight:800}.navBtn.active{background:#17272f;color:var(--lime)}.funnelRow{grid-template-columns:110px 1fr 35px}.heroMeta{gap:6px}.chip{padding:7px 8px}}@media(max-width:380px){.grid{grid-template-columns:1fr}.heroSide{grid-template-columns:1fr 1fr}.roles{grid-template-columns:1fr}.headline{font-size:26px}}
-</style></head><body><div class="shell">
-<div class="topbar"><div class="brandline"><div class="brand"><div class="mark">L</div><div><div class="logo">LUMEN</div><div class="sub">Centro de Comando · Zero Cost Runtime</div></div></div><div class="topactions"><span class="pill"><i class="dot"></i><span id="updatedTop">Cargando estado</span></span><button class="btn" onclick="load()">Actualizar</button></div></div><div class="tabs"><button class="tab active" data-view="summary">Resumen</button><button class="tab" data-view="commercial">Comercial</button><button class="tab" data-view="operations">Operación</button><button class="tab" data-view="activity">Actividad</button></div></div>
-
-<section class="view active" id="view-summary">
-<div class="hero"><div class="heroMain"><div class="eyebrow">Misión actual</div><div class="headline">Convertir investigación en <em>negocios reales</em>.</div><div class="heroText" id="missionText">LUMEN está leyendo el estado operativo y comercial.</div><div class="heroMeta"><span class="chip" id="modeChip">Modo —</span><span class="chip" id="laneChip">Carril —</span><span class="chip" id="cycleChip">Ciclo —</span><span class="chip" id="freshChip">Estado —</span></div></div><div class="heroSide"><div class="mini"><div class="label">Watchdog</div><div class="val" id="watchdogHero">–</div><div class="bar"><i id="watchbarHero"></i></div></div><div class="mini"><div class="label">Fuerza digital</div><div class="val" id="fleetHero">–</div><div class="tiny" id="fleetHeroDetail">agentes</div></div><div class="mini"><div class="label">Scout disponible</div><div class="val" id="searchHero">–</div><div class="tiny" id="searchHeroDetail">búsquedas</div></div><div class="mini"><div class="label">Email</div><div class="val" id="mailHero">–</div><div class="tiny" id="mailHeroDetail">canal</div></div></div></div>
-<div class="grid section"><div class="card"><div class="label">Leads de investigación</div><div class="kpi" id="leads">–</div><div class="tiny">materia prima comercial</div></div><div class="card"><div class="label">Empresas verificadas</div><div class="kpi blue" id="verified">–</div><div class="tiny">identidad corporativa confirmada</div></div><div class="card"><div class="label">Prospectos habilitados</div><div class="kpi" id="eligible">–</div><div class="tiny">aptos para salida comercial</div></div><div class="card"><div class="label">Ingresos realizados USD</div><div class="kpi good" id="revenue">–</div><div class="tiny">sólo cobros/realizaciones verificadas</div></div></div>
-<div class="cols section"><div class="card"><div class="cardTitle"><div class="label">Embudo comercial real</div><span class="tiny" id="funnelHint"></span></div><div id="funnelVisual"></div></div><div class="card"><div class="cardTitle"><div class="label">Cuello de botella</div><span class="state wait" id="blockerState">ATENCIÓN</span></div><div class="kpi sm" id="blocker">–</div><div class="tiny" id="blockerDetail"></div><div class="banner section" id="nextAction">Analizando próxima acción…</div></div></div>
-<div class="colsEqual section"><div class="card"><div class="cardTitle"><div class="label">Canales externos</div><span class="tiny">estado real</span></div><div id="channels"></div></div><div class="card"><div class="cardTitle"><div class="label">Presupuesto de búsqueda</div><span class="tiny" id="searchProvider"></span></div><div class="row"><span>General</span><b id="generalBudget">–</b></div><div class="bar"><i id="generalBar"></i></div><div class="row"><span>Demanda / compras públicas</span><b id="demandBudget">–</b></div><div class="bar warnbar"><i id="demandBar"></i></div><div class="tiny section" id="budgetReason"></div></div></div>
-</section>
-
-<section class="view" id="view-commercial">
-<div class="grid section"><div class="card"><div class="label">Inbound recibido</div><div class="kpi" id="inbound">–</div></div><div class="card"><div class="label">Emails enviados</div><div class="kpi" id="sent">–</div></div><div class="card"><div class="label">Oportunidades</div><div class="kpi" id="opps">–</div></div><div class="card"><div class="label">Propuestas</div><div class="kpi" id="proposals">–</div></div></div>
-<div class="colsEqual section"><div class="card"><div class="cardTitle"><div class="label">Monetización</div><span class="tiny">rutas paralelas</span></div><div id="moneyLanes"></div></div><div class="card"><div class="cardTitle"><div class="label">Distribución / adquisición</div><span class="tiny">canales propios y autorizados</span></div><div id="distribution"></div></div></div>
-<div class="cols section"><div class="card"><div class="label">Embudo detallado</div><div id="funnelRows"></div></div><div class="card"><div class="label">Estrategia comercial</div><div id="strategyRows"></div></div></div>
-</section>
-
-<section class="view" id="view-operations">
-<div class="grid section"><div class="card"><div class="label">Agentes activos</div><div class="kpi" id="fleet">–</div></div><div class="card"><div class="label">Asignaciones completadas</div><div class="kpi" id="assignments">–</div></div><div class="card"><div class="label">Búsquedas este ciclo</div><div class="kpi" id="cycleSearches">–</div></div><div class="card"><div class="label">Errores de agentes</div><div class="kpi" id="agentErrors">–</div></div></div>
-<div class="colsEqual section"><div class="card"><div class="cardTitle"><div class="label">Equipos digitales</div><span class="tiny" id="scaleDirection"></span></div><div class="roles" id="roles"></div></div><div class="card"><div class="cardTitle"><div class="label">Hallazgos del ciclo</div><span class="tiny" id="workload"></span></div><div id="findings"></div></div></div>
-<div class="colsEqual section"><div class="card"><div class="label">Sistema</div><div id="systemRows"></div></div><div class="card"><div class="label">Estado de búsqueda</div><div id="searchRows"></div></div></div>
-</section>
-
-<section class="view" id="view-activity">
-<div class="cols section"><div class="card"><div class="cardTitle"><div class="label">Actividad reciente</div><span class="tiny">últimos eventos persistidos</span></div><div class="activity" id="activity"></div></div><div><div class="card"><div class="cardTitle"><div class="label">Prioridades de LUMEN</div><span class="tiny">orden operativo</span></div><div id="pending"></div></div><div class="card section"><div class="cardTitle"><div class="label">Novedades</div><span class="tiny">eventos ejecutivos</span></div><div id="news"></div></div></div></div>
-</section>
-</div>
-<div class="bottomNav"><button class="navBtn active" data-view="summary">RESUMEN</button><button class="navBtn" data-view="commercial">COMERCIAL</button><button class="navBtn" data-view="operations">OPERACIÓN</button><button class="navBtn" data-view="activity">ACTIVIDAD</button></div>
-<script>
-const $=id=>document.getElementById(id);const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const fmt=n=>Number(n||0).toLocaleString('es-AR');
-const pct=(a,b)=>b>0?Math.max(0,Math.min(100,(Number(a||0)/Number(b))*100)):0;
+const HTML = `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#071018"><title>LUMEN · Centro de Comando</title><style>
+:root{color-scheme:dark;--bg:#071018;--card:#0c1720;--line:#183343;--muted:#89a2b2;--lime:#d7ff64;--good:#9ce8c5;--bad:#ff9898;--warn:#ffd36e;--blue:#78d7ff}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 95% 0,#12313e 0,#071018 38%) fixed;color:#eaf2f7;font:14px Inter,system-ui,-apple-system;padding:18px}.wrap{max-width:1380px;margin:auto}.top{display:flex;justify-content:space-between;gap:16px;align-items:flex-end;margin-bottom:16px}.logo{font-size:34px;font-weight:900;letter-spacing:.16em}.sub{color:var(--muted);margin-top:4px}.badge{padding:8px 11px;border:1px solid #2a5163;border-radius:999px;color:var(--good);background:#0d2019;font-size:12px}.goals{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}.goal{background:#101f2a;border:1px solid #234457;border-radius:9px;padding:8px 10px}.grid5{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.two{display:grid;grid-template-columns:1.35fr 1fr;gap:12px;margin-top:12px}.three{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:12px}.card{background:linear-gradient(180deg,#0e1b24,#0a151d);border:1px solid var(--line);border-radius:15px;padding:16px;box-shadow:0 12px 28px #0005;overflow:auto}.label{color:var(--muted);text-transform:uppercase;font-size:10px;letter-spacing:.13em;font-weight:800}.kpi{font-size:27px;font-weight:850;margin-top:7px}.good{color:var(--good)}.bad{color:var(--bad)}.warn{color:var(--warn)}.blue{color:var(--blue)}.tiny{font-size:12px;color:var(--muted);line-height:1.45}.section{margin-top:12px}table{width:100%;border-collapse:collapse;min-width:520px}th,td{text-align:left;padding:9px 7px;border-bottom:1px solid #17303e;vertical-align:top}th{color:#7894a5;font-size:10px;text-transform:uppercase;letter-spacing:.08em}.score,.profit{font-weight:800;color:var(--good)}.status{color:var(--lime)}.source{font-size:10px;color:var(--muted)}.activity{max-height:500px;overflow:auto}.event{padding:10px 0;border-bottom:1px solid #17303e}.time{font-size:11px;color:#627f90;margin-top:3px}.row{display:flex;justify-content:space-between;gap:10px;padding:10px 0;border-bottom:1px solid #17303e}.bar{height:8px;background:#071018;border:1px solid #173241;border-radius:999px;overflow:hidden;margin-top:9px}.bar i{display:block;height:100%;background:linear-gradient(90deg,var(--lime),var(--good));width:0}.btn{background:var(--lime);color:#071018;border:0;border-radius:10px;padding:10px 13px;font-weight:900;cursor:pointer}.topactions{display:flex;gap:8px;align-items:center}.pill{border:1px solid #284658;border-radius:999px;padding:8px 10px;color:var(--good);background:#0d2019;font-size:12px}.note{padding:12px 13px;border:1px solid #294451;border-radius:12px;background:#0a151d;color:#a6bdc8;line-height:1.5}@media(max-width:1050px){.grid5{grid-template-columns:repeat(3,1fr)}.grid4{grid-template-columns:repeat(2,1fr)}.two,.three{grid-template-columns:1fr}}@media(max-width:620px){body{padding:12px}.top{align-items:flex-start;flex-direction:column}.logo{font-size:28px}.grid5,.grid4{grid-template-columns:1fr 1fr}.kpi{font-size:24px}.topactions{width:100%;justify-content:space-between}.pill{font-size:10px;padding:7px 8px}.card{padding:14px}}@media(max-width:390px){.grid5,.grid4{grid-template-columns:1fr}}
+</style></head><body><div class="wrap"><div class="top"><div><div class="logo">LUMEN</div><div class="sub">Sistema Operativo B2B Autónomo · Centro de Comando Zero</div></div><div class="topactions"><span class="pill" id="updated">Cargando…</span><button class="btn" onclick="load()">Actualizar</button></div></div>
+<div class="goals" id="goals"></div>
+<div class="grid5"><div class="card"><div class="label">Pipeline registrado</div><div class="kpi" id="pipeline">–</div></div><div class="card"><div class="label">Valor esperado</div><div class="kpi" id="ev">–</div></div><div class="card"><div class="label">Ganancia potencial</div><div class="kpi" id="potential">–</div></div><div class="card"><div class="label">Ingresos realizados</div><div class="kpi good" id="realized">–</div></div><div class="card"><div class="label">Cierres pendientes</div><div class="kpi" id="pendingClosures">–</div></div></div>
+<div class="grid4 section"><div class="card"><div class="label">Watchdog</div><div class="kpi" id="watchdog">–</div><div class="bar"><i id="watchbar"></i></div></div><div class="card"><div class="label">Scout</div><div class="kpi" id="scout">–</div><div class="tiny" id="scoutDetail"></div></div><div class="card"><div class="label">Email</div><div class="kpi" id="email">–</div><div class="tiny" id="emailDetail"></div></div><div class="card"><div class="label">Fuerza digital</div><div class="kpi" id="fleet">–</div><div class="tiny" id="fleetDetail"></div></div></div>
+<div class="two"><div><div class="card"><div class="label">Radar de oportunidades</div><table><thead><tr><th>ID</th><th>Comprador</th><th>Necesidad</th><th>Puntaje</th><th>Pipeline</th><th>Fuente</th></tr></thead><tbody id="oppRows"></tbody></table></div><div class="card section"><div class="label">Mesa de negocios</div><table><thead><tr><th>ID</th><th>Comprador</th><th>Etapa</th><th>Cierre</th><th>Valor esperado</th><th>Queda para nosotros</th></tr></thead><tbody id="dealRows"></tbody></table></div><div class="card section"><div class="label">Cierres que requieren decisión humana</div><table><thead><tr><th>ID</th><th>Deal</th><th>Ganancia</th><th>% nuestro</th><th>Motivo</th></tr></thead><tbody id="approvalRows"></tbody></table></div></div><div><div class="card"><div class="label">Actividad autónoma</div><div class="activity" id="activity"></div><div class="tiny section" id="lastCycle"></div></div><div class="card section"><div class="label">Política económica</div><div id="policyRows"></div><div class="note section">Este panel conserva el modo seguro: muestra el estado real, pero no modifica políticas ni ejecuta cierres desde el navegador.</div></div><div class="card section"><div class="label">Embudo comercial real</div><div id="funnel"></div></div><div class="card section"><div class="label">Pendientes prioritarios</div><div id="pending"></div></div></div></div>
+<div class="three"><div class="card"><div class="label">Comunicaciones preparadas</div><table><thead><tr><th>ID</th><th>Contraparte</th><th>Tipo</th><th>Estado</th></tr></thead><tbody id="outRows"></tbody></table></div><div class="card"><div class="label">Ofertas / cotizaciones</div><table><thead><tr><th>ID</th><th>Proveedor</th><th>Importe</th><th>Entrega</th><th>Fuente</th></tr></thead><tbody id="offerRows"></tbody></table></div><div class="card"><div class="label">Gobernanza y canales</div><div id="governance"></div></div></div>
+<div class="sub section">Todos los números son los registros actualmente persistidos en LUMEN Zero. El panel no inventa negocios ni convierte datos demo en ingresos reales.</div></div><script>
+const $=id=>document.getElementById(id);const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));const money=v=>'$'+Number(v||0).toLocaleString('es-AR',{maximumFractionDigits:0});
+function empty(cols,text){return '<tr><td colspan="'+cols+'" class="tiny">'+esc(text)+'</td></tr>'}
 function rows(items){return items.map(([a,b])=>'<div class="row"><span>'+esc(a)+'</span><b>'+esc(b)+'</b></div>').join('')}
-function setView(name){document.querySelectorAll('.view').forEach(x=>x.classList.toggle('active',x.id==='view-'+name));document.querySelectorAll('[data-view]').forEach(x=>x.classList.toggle('active',x.dataset.view===name));window.scrollTo({top:0,behavior:'smooth'});}
-document.querySelectorAll('[data-view]').forEach(x=>x.addEventListener('click',()=>setView(x.dataset.view)));
-function stateBadge(ok,waiting){return '<span class="state '+(ok?'':waiting?'wait':'off')+'">'+(ok?'OPERATIVO':waiting?'EN ESPERA':'NO LISTO')+'</span>'}
-function channelRow(icon,title,detail,ok,waiting){return '<div class="channel"><div class="channelLeft"><div class="icon">'+esc(icon)+'</div><div><b>'+esc(title)+'</b><div class="tiny">'+esc(detail)+'</div></div></div>'+stateBadge(ok,waiting)+'</div>'}
-function funnelVisual(d){const stages=[['Leads',d.research_leads],['Candidatas',d.candidate_accounts],['Verificadas',d.verified_companies],['Contactos',d.verified_contacts],['Demanda',d.buyers_with_demand],['Oportunidades',d.opportunities],['Propuestas',d.proposals],['Cierre',d.close_ready]];const max=Math.max(1,...stages.map(x=>Number(x[1]||0)));return stages.map(x=>'<div class="funnelRow"><span>'+esc(x[0])+'</span><div class="funnelTrack"><div class="funnelFill" style="width:'+Math.max(x[1]?3:0,(Number(x[1]||0)/max)*100)+'%"></div></div><b>'+fmt(x[1])+'</b></div>').join('')}
-function lane(title,status,metrics){return '<div class="lane section"><div class="laneTop"><b>'+esc(title)+'</b><span class="state '+(status==='activo'?'':'wait')+'">'+esc(status.toUpperCase())+'</span></div><div class="metricline">'+metrics.map(x=>'<span>'+esc(x[0])+' <b>'+esc(x[1])+'</b></span>').join('')+'</div></div>'}
-function roleName(k){return ({buyer_hunter:'Buyer Hunter',supplier_hunter:'Supplier Hunter',market_scout:'Market Scout',research_analyst:'Research',revops:'RevOps',negotiator:'Negociador',market_manager:'Market',risk_quality:'Risk & QA',finance:'Finance'})[k]||k}
-function humanBlocker(x){return ({no_eligible_external_prospects:'Sin prospectos verificados habilitados',outbound_live_disabled:'Salida comercial desactivada',mail_provider_api_probe_failed:'Email no disponible'})[x]||x||'Sin bloqueo crítico'}
-function freshLabel(ts){if(!ts)return 'sin fecha';const d=new Date(String(ts).replace(' UTC','Z'));if(Number.isNaN(d.getTime()))return ts;const mins=Math.round((Date.now()-d.getTime())/60000);if(mins<2)return 'actualizado ahora';if(mins<60)return 'hace '+mins+' min';const h=Math.round(mins/60);return 'hace '+h+' h'}
-async function load(){try{const r=await fetch('/api/summary',{cache:'no-store'});if(!r.ok)throw new Error('HTTP '+r.status);const d=await r.json();const okMail=d.outbound.mail_ready&&d.outbound.live;const updated=freshLabel(d.status.state_updated_at);$('updatedTop').textContent=updated;$('modeChip').textContent='Modo '+d.status.master_mode;$('laneChip').textContent='Carril '+d.revenue.primary_lane;$('cycleChip').textContent='Ciclo '+d.status.company_cycle;$('freshChip').textContent=updated;$('missionText').textContent=d.revenue.primary_action||d.revenue.objective;$('watchdogHero').textContent=Number(d.status.watchdog_score||0).toFixed(1)+'%';$('watchdogHero').className='val '+(d.status.watchdog_score>=90?'good':d.status.watchdog_score>=75?'warn':'bad');$('watchbarHero').style.width=Math.max(0,Math.min(100,d.status.watchdog_score))+'%';$('fleetHero').textContent=fmt(d.status.fleet_size);$('fleetHeroDetail').textContent='agentes · '+d.status.worker_status;$('searchHero').textContent=fmt(d.scout.remaining);$('searchHeroDetail').textContent='de '+fmt(d.scout.hard_cap)+' búsquedas diarias';$('mailHero').textContent=okMail?'OK':'WAIT';$('mailHero').className='val '+(okMail?'good':'warn');$('mailHeroDetail').textContent=(d.outbound.mail_provider||'sin proveedor')+' · enviados '+fmt(d.funnel.outbound_sent);
-$('leads').textContent=fmt(d.funnel.research_leads);$('verified').textContent=fmt(d.funnel.verified_companies);$('eligible').textContent=fmt(d.outbound.eligible_prospects);$('revenue').textContent='$'+Number(d.revenue.realized_usd||0).toFixed(2);$('funnelVisual').innerHTML=funnelVisual(d.funnel);$('funnelHint').textContent=fmt(d.funnel.research_leads)+' → '+fmt(d.funnel.close_ready);$('blocker').textContent=humanBlocker(d.outbound.blocker);$('blocker').className='kpi sm '+(d.outbound.blocker?'warn':'good');$('blockerState').textContent=d.outbound.blocker?'ATENCIÓN':'LIBRE';$('blockerState').className='state '+(d.outbound.blocker?'wait':'');$('blockerDetail').textContent='Elegibles '+fmt(d.outbound.eligible_prospects)+' · Outbox '+fmt(d.outbound.outbox_ready)+' · Social esperando '+fmt(d.outbound.social_waiting);$('nextAction').textContent=d.revenue.primary_action||'Seguir construyendo evidencia comercial verificada.';
-$('channels').innerHTML=channelRow('@','Email',d.outbound.mail_provider||'sin proveedor',okMail,!okMail)+channelRow('IG','Instagram',d.outbound.instagram_configured?'conector autorizado':'conector pendiente',d.outbound.instagram_configured,!d.outbound.instagram_configured)+channelRow('WA','WhatsApp',d.outbound.whatsapp_ready?'entrega disponible':'conector pendiente',d.outbound.whatsapp_ready,!d.outbound.whatsapp_ready);$('searchProvider').textContent=d.scout.provider;$('generalBudget').textContent=fmt(d.scout.general_used)+' / '+fmt(d.scout.general_daily);$('generalBar').style.width=pct(d.scout.general_used,d.scout.general_daily)+'%';$('demandBudget').textContent=fmt(d.scout.demand_used)+' / '+fmt(d.scout.demand_daily);$('demandBar').style.width=pct(d.scout.demand_used,d.scout.demand_daily)+'%';$('budgetReason').textContent=d.scout.budget_reason||'Presupuesto compartido con tope diario.';
-$('inbound').textContent=fmt(d.funnel.inbound_received);$('sent').textContent=fmt(d.funnel.outbound_sent);$('opps').textContent=fmt(d.funnel.opportunities);$('proposals').textContent=fmt(d.funnel.proposals);$('moneyLanes').innerHTML=lane('First Cash / negocio B2B',d.revenue.primary_lane?'activo':'espera',[['Oportunidades',fmt(d.funnel.opportunities)],['Close ready',fmt(d.funnel.close_ready)]])+lane('Servicios',d.revenue.service_pipeline||d.revenue.service_contacted?'activo':'espera',[['Pipeline',fmt(d.revenue.service_pipeline)],['Contactados',fmt(d.revenue.service_contacted)]])+lane('Inteligencia comercial',d.revenue.intelligence_candidates||d.revenue.intelligence_contacted?'activo':'espera',[['Candidatos',fmt(d.revenue.intelligence_candidates)],['Contactados',fmt(d.revenue.intelligence_contacted)]])+lane('Partners / referral',d.revenue.active_partners?'activo':'espera',[['Tiendas',fmt(d.revenue.partner_stores)],['Partners',fmt(d.revenue.active_partners)],['Ofertas',fmt(d.revenue.referral_offers)]]);$('distribution').innerHTML=rows([['Jobs preparados',fmt(d.distribution.jobs_total)],['Owned live',fmt(d.distribution.owned_live)],['Externos verificados',fmt(d.distribution.external_verified)],['Esperando conector',fmt(d.distribution.awaiting_connector)],['Campañas activas',fmt(d.distribution.campaigns_active)],['Clicks',fmt(d.distribution.clicks)],['Leads',fmt(d.distribution.leads)]]);$('funnelRows').innerHTML=rows([['Leads investigación',fmt(d.funnel.research_leads)],['Cuentas candidatas',fmt(d.funnel.candidate_accounts)],['Empresas verificadas',fmt(d.funnel.verified_companies)],['Compradores verificados',fmt(d.funnel.verified_buyers)],['Proveedores verificados',fmt(d.funnel.verified_suppliers)],['Contactos verificados',fmt(d.funnel.verified_contacts)],['Demanda pública',fmt(d.funnel.buyers_with_demand)],['Requisitos listos',fmt(d.funnel.requirements_ready)],['Oportunidades',fmt(d.funnel.opportunities)],['Ofertas reales',fmt(d.funnel.real_offers)],['Propuestas',fmt(d.funnel.proposals)],['Deals viables',fmt(d.funnel.viable_deals)],['Close ready',fmt(d.funnel.close_ready)]]);$('strategyRows').innerHTML=rows([['Carril canónico',d.strategy.canonical_lane],['Área a mejorar',d.strategy.management_department],['Controller',d.strategy.controller_mode],['Escenario',d.strategy.recommended_scenario],['Objetivo',d.revenue.objective]]);
-$('fleet').textContent=fmt(d.workforce.fleet_size);$('assignments').textContent=fmt(d.workforce.assignments_completed)+'/'+fmt(d.workforce.assignments_created);$('cycleSearches').textContent=fmt(d.workforce.searches);$('agentErrors').textContent=fmt(d.workforce.errors);$('agentErrors').className='kpi '+(d.workforce.errors?'bad':'good');$('scaleDirection').textContent='escala '+d.workforce.scale_direction;$('workload').textContent='carga '+Number(d.workforce.workload_score||0).toFixed(1);$('roles').innerHTML=d.workforce.by_role.length?d.workforce.by_role.map(x=>'<div class="role"><div class="tiny">'+esc(roleName(x.key))+'</div><b>'+fmt(x.recruited)+'</b><div class="tiny">'+fmt(x.assignments)+' asignaciones · '+fmt(x.errors)+' errores</div></div>').join(''):'<div class="empty">Sin desglose de roles en este estado.</div>';$('findings').innerHTML=d.workforce.top_findings.length?d.workforce.top_findings.map(x=>'<div class="event">'+esc(x)+'</div>').join(''):'<div class="empty">Sin hallazgos persistidos.</div>';$('systemRows').innerHTML=rows([['Runtime',d.status.runtime],['Persistencia',d.status.persistence],['Estado D1',updated],['Watchdog',Number(d.status.watchdog_score||0).toFixed(1)+'%'],['Ciclos',fmt(d.status.ticks)],['Estado workforce',d.status.worker_status]]);$('searchRows').innerHTML=rows([['Proveedor',d.scout.provider],['Pagado',d.scout.paid_search?'sí':'no'],['Usadas',fmt(d.scout.used)],['Restantes',fmt(d.scout.remaining)],['Tope diario',fmt(d.scout.hard_cap)],['Estrategia',d.scout.strategy]]);
-$('activity').innerHTML=d.activity.length?d.activity.map(x=>'<div class="event"><div>'+esc(x.msg)+'</div><div class="time">'+esc(x.ts)+'</div></div>').join(''):'<div class="empty">Sin actividad.</div>';$('pending').innerHTML=d.pending.length?d.pending.map(x=>'<div class="priority"><div class="priorityHead"><b>'+esc(x.title)+'</b><span class="priorityScore">P '+Number(x.priority||0).toFixed(0)+'</span></div><div class="tiny section">'+esc(x.reason)+'</div></div>').join(''):'<div class="empty">Sin pendientes prioritarios.</div>';$('news').innerHTML=d.news.length?d.news.map(x=>'<div class="event"><b>'+esc(x.title)+'</b><div class="tiny">'+esc(x.summary)+'</div><div class="time">'+esc(x.created_at)+'</div></div>').join(''):'<div class="empty">Sin novedades nuevas.</div>';
-}catch(e){$('updatedTop').textContent='Error leyendo estado';console.error(e)}}load();setInterval(load,30000);
+async function load(){try{const r=await fetch('/api/summary',{cache:'no-store'});if(!r.ok)throw new Error('HTTP '+r.status);const d=await r.json();$('updated').textContent='Estado: '+(d.status.updated_at||'sin fecha');$('goals').innerHTML=d.goals.length?d.goals.map(g=>'<span class="goal">'+esc(g)+'</span>').join(''):'<span class="goal">Encontrar compradores B2B de alto valor</span><span class="goal">Crear negocios rentables y repetibles</span>';$('pipeline').textContent=money(d.money.pipeline);$('ev').textContent=money(d.money.expected_value);$('potential').textContent=money(d.money.potential_profit);$('realized').textContent=money(d.money.realized_revenue);$('pendingClosures').textContent=d.money.pending_closures;$('watchdog').textContent=Number(d.status.watchdog_score||0).toFixed(1)+'%';$('watchbar').style.width=Math.max(0,Math.min(100,d.status.watchdog_score||0))+'%';$('scout').textContent=d.scout.remaining+'/'+d.scout.hard_cap;$('scoutDetail').textContent=d.scout.provider+' · usadas '+d.scout.used+' · general '+d.scout.general_used+' · demanda '+d.scout.demand_used;$('email').textContent=d.outbound.mail_ready&&d.outbound.live?'OPERATIVO':'EN ESPERA';$('email').className='kpi '+(d.outbound.mail_ready&&d.outbound.live?'good':'warn');$('emailDetail').textContent=d.outbound.mail_provider+' · elegibles '+d.outbound.eligible+(d.outbound.blocker?' · '+d.outbound.blocker:'');$('fleet').textContent=d.status.fleet_size;$('fleetDetail').textContent=d.status.worker_status+' · ticks '+d.status.ticks;
+$('oppRows').innerHTML=d.opportunities.length?d.opportunities.map(o=>'<tr><td>'+esc(o.id)+'</td><td>'+esc(o.buyer)+'</td><td>'+esc(o.need)+'</td><td class="score">'+esc(o.score)+'</td><td>'+money(o.pipeline)+'</td><td class="source">'+esc(o.source)+'</td></tr>').join(''):empty(6,'Todavía no hay oportunidades registradas.');
+$('dealRows').innerHTML=d.deals.length?d.deals.map(x=>'<tr><td>'+esc(x.id)+'</td><td>'+esc(x.buyer)+'</td><td><span class="status">'+esc(x.stage)+'</span></td><td>'+Math.round(Number(x.close_prob||0)*100)+'%</td><td>'+money(x.expected_value)+'</td><td class="profit">'+money(x.company_profit)+' ('+Number(x.company_share_pct||0).toFixed(1)+'%)</td></tr>').join(''):empty(6,'Todavía no hay negocios abiertos.');
+$('approvalRows').innerHTML=d.approvals.length?d.approvals.map(a=>'<tr><td>'+esc(a.id)+'</td><td>'+esc(a.deal_id)+'</td><td>'+money(a.company_profit)+'</td><td>'+Number(a.company_share_pct||0).toFixed(1)+'%</td><td>'+esc(a.reason)+'</td></tr>').join(''):empty(5,'No hay cierres esperando aprobación.');
+$('activity').innerHTML=d.activity.length?d.activity.map(e=>'<div class="event"><div>'+esc(e.msg)+'</div><div class="time">'+esc(e.ts)+'</div></div>').join(''):'<div class="event">Autopilot listo.</div>';$('lastCycle').textContent='Último ciclo: '+(d.status.last_tick||'sin ejecutar')+' · origen: '+d.status.last_origin+' · persistencia: '+d.status.persistence;
+$('policyRows').innerHTML=rows([['Mínimo nuestro',Number(d.policies.min_share||0).toFixed(1)+'%'],['Objetivo nuestro',Number(d.policies.target_share||0).toFixed(1)+'%'],['Reserva de riesgo',Number(d.policies.risk_reserve||0).toFixed(1)+'%']]);
+$('funnel').innerHTML=rows([['Leads de investigación',d.funnel.leads],['Cuentas candidatas',d.funnel.candidates],['Empresas verificadas',d.funnel.verified],['Compradores verificados',d.funnel.buyers],['Proveedores verificados',d.funnel.suppliers],['Contactos verificados',d.funnel.contacts],['Demanda pública',d.funnel.demand],['Oportunidades',d.funnel.opportunities],['Propuestas',d.funnel.proposals],['Close ready',d.funnel.close_ready],['Outbound enviados',d.funnel.outbound_sent],['Inbound recibidos',d.funnel.inbound]]);
+$('pending').innerHTML=d.pending.length?d.pending.map(p=>'<div class="event"><b>'+esc(p.title)+'</b><div class="tiny">'+esc(p.reason)+'</div></div>').join(''):'<div class="tiny section">Sin pendientes prioritarios.</div>';
+$('outRows').innerHTML=d.outbox.length?d.outbox.map(m=>'<tr><td>'+esc(m.id)+'</td><td>'+esc(m.counterparty)+'</td><td>'+esc(m.kind)+'</td><td>'+esc(m.status)+'</td></tr>').join(''):empty(4,'Sin comunicaciones preparadas todavía.');
+$('offerRows').innerHTML=d.offers.length?d.offers.map(o=>'<tr><td>'+esc(o.id)+'</td><td>'+esc(o.supplier)+'</td><td>'+money(o.amount)+'</td><td>'+(o.lead_days?esc(o.lead_days)+' días':'—')+'</td><td>'+esc(o.source)+'</td></tr>').join(''):empty(5,'Sin ofertas o cotizaciones registradas.');
+$('governance').innerHTML=rows([['Compromiso financiero real','DESHABILITADO'],['Contratos','Aprobación humana'],['Contacto no verificado','No enviar'],['Salida real',d.governance.live_outbound?'ACTIVA':'INACTIVA'],['Email',d.outbound.mail_ready?'OPERATIVO':'EN ESPERA'],['Instagram',d.outbound.instagram?'CONECTADO':'NO CONFIGURADO'],['WhatsApp',d.outbound.whatsapp?'LISTO':'NO DISPONIBLE'],['Persistencia',d.status.persistence]]);
+}catch(e){$('updated').textContent='Error leyendo estado';console.error(e)}}load();setInterval(load,30000);
 </script></body></html>`;
 
 export default {
@@ -304,22 +174,13 @@ export default {
     const auth = authOK(request, env);
     if (auth === null) return locked();
     if (!auth) return unauthorized();
-
     const url = new URL(request.url);
-    if (url.pathname === "/health") {
-      return Response.json({ ok: true, service: "lumen-zero-dashboard", backend: "cloudflare-worker+d1", ui: "command-center-v2" }, { headers: { "Cache-Control": "no-store" } });
-    }
+    if (url.pathname === "/health") return Response.json({ok:true,service:"lumen-zero-dashboard",backend:"cloudflare-worker+d1"},{headers:{"Cache-Control":"no-store"}});
     if (url.pathname === "/api/summary") {
-      try {
-        const { state, manifest } = await loadState(env);
-        return Response.json(summarize(state, manifest), { headers: { "Cache-Control": "no-store" } });
-      } catch (e) {
-        return Response.json({ ok: false, error: String(e && e.message || e) }, { status: 503, headers: { "Cache-Control": "no-store" } });
-      }
+      try { const {state,manifest}=await loadState(env); return Response.json(summarize(state,manifest),{headers:{"Cache-Control":"no-store"}}); }
+      catch (e) { return Response.json({ok:false,error:String(e?.message||e)},{status:503,headers:{"Cache-Control":"no-store"}}); }
     }
-    if (url.pathname === "/" || url.pathname === "/index.html") {
-      return new Response(HTML, { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "X-Frame-Options": "DENY", "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff", "Permissions-Policy": "camera=(), microphone=(), geolocation=()" } });
-    }
-    return new Response("Not found", { status: 404 });
-  },
+    if (url.pathname === "/" || url.pathname === "/index.html") return new Response(HTML,{headers:{"Content-Type":"text/html; charset=utf-8","Cache-Control":"no-store","X-Frame-Options":"DENY","Referrer-Policy":"no-referrer","X-Content-Type-Options":"nosniff"}});
+    return new Response("Not found",{status:404});
+  }
 };
