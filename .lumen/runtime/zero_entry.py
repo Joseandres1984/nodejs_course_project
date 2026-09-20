@@ -45,8 +45,9 @@ os.environ.setdefault("LUMEN_COMMAND_CENTER_URL", "https://lumen-zero-dashboard.
 os.environ.setdefault("LUMEN_MARKET_INTELLIGENCE_SHADOW_ENABLED", "true")
 os.environ.setdefault("PYTHONHASHSEED", "0")
 
-# Install replacements before any production module captures app/scout/mail/watchdog functions.
+# Install replacements before any production module captures app/scout/mail/watchdog/journal functions.
 import d1_persistence_runtime  # noqa: F401,E402
+import zero_cycle_journal_runtime  # noqa: F401,E402
 # Signed Meta webhook payloads land in a dedicated D1 queue. Patch load_state now so every normal
 # LUMEN Zero cycle can ingest them through the existing Instagram Operator before business logic.
 import instagram_webhook_d1_bridge_runtime  # noqa: F401,E402
@@ -98,6 +99,18 @@ except Exception as exc:
 
 # worker_entry executes the complete production cycle at import time, matching the Railway start.
 import worker_entry  # noqa: F401,E402
+
+# Run the zero-cost owner-alert route once after the complete business cycle. This explicit pass is
+# intentional: legacy modules may capture the original WhatsApp router before the adapter is loaded.
+# Stable event keys plus owner_email_sent_at keep the fallback idempotent.
+try:
+    import app as lumen_app  # noqa: E402
+    owner_notifications = zero_notification_runtime.zero_notification_router_tick(lumen_app.STATE)
+    lumen_app.STATE["zero_owner_notifications"] = owner_notifications.get("owner_email_fallback", {})
+    owner_persisted = lumen_app.save_state()
+    print({"zero_owner_notifications": {**(owner_notifications.get("owner_email_fallback", {}) or {}), "persisted": bool(owner_persisted)}}, flush=True)
+except Exception as exc:
+    print({"zero_owner_notifications": {"status": "degraded_fail_open", "error": f"{type(exc).__name__}: {str(exc)[:300]}"}}, flush=True)
 
 # Export the final post projection after the cycle so the secure Cloudflare console always shows
 # the canonical approval/publication state rather than a stale pre-cycle snapshot.
