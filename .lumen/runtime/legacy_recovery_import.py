@@ -22,10 +22,12 @@ import d1_persistence_runtime  # noqa: E402,F401
 import app as lumen_app  # noqa: E402
 
 ARCHIVE_FILE = Path(__file__).resolve().parents[1] / "recovery" / "railway_legacy_accounts_20260919.zlib.b64"
-# Pin both the checked-in Git object and the decompressed historical payload. The text transport
-# damaged the zlib checksum trailer, but prior recovery work captured the authoritative payload hash.
+# Pin both the checked-in Git object and the decompressed historical payload. The text-only transport
+# introduced one known base64 transposition; repairing it is accepted only if the resulting payload
+# exactly matches the independently captured historical SHA-256 below.
 EXPECTED_GIT_BLOB_SHA1 = "eaed75548aa1e3f2911efdbeacfa154cac554c9f"
 EXPECTED_PAYLOAD_SHA256 = "fd3a2342a601caf9454277229e7b69a77b5e30ae6015e6576bbf757552de85b1"
+KNOWN_TRANSPORT_CORRECTIONS = ((b"ZOrinku", b"ZOrniku"),)
 RECOVERY_KEY = "railway_20260919"
 SNAPSHOT_AT = "2026-09-19T14:45:58Z"
 EXPECTED_ACCOUNT_COUNT = 580
@@ -53,25 +55,23 @@ def load_archive() -> tuple[Dict[str, Any], str, str]:
         raise RuntimeError(f"legacy archive Git blob mismatch: {got_blob}")
 
     encoded = b"".join(file_bytes.split())
+    transport_repaired = False
+    for wrong, right in KNOWN_TRANSPORT_CORRECTIONS:
+        if wrong in encoded:
+            encoded = encoded.replace(wrong, right)
+            transport_repaired = True
+
     try:
         packed = base64.b64decode(encoded, validate=True)
     except Exception as exc:
         raise RuntimeError(f"legacy archive base64 decode failed: {type(exc).__name__}") from exc
 
-    recovery_mode = "standard_zlib"
+    recovery_mode = "text_transport_repair_then_standard_zlib" if transport_repaired else "standard_zlib"
     try:
         raw = zlib.decompress(packed)
     except zlib.error as exc:
-        # The canonical text transport is known to preserve a valid DEFLATE stream while carrying
-        # a damaged zlib integrity trailer. Ignore only that wrapper checksum; the decompressed bytes
-        # must still match the separately pinned SHA-256 below or the import fails closed.
-        if "incorrect data check" not in str(exc).lower() or len(packed) < 7:
-            raise RuntimeError(f"legacy archive zlib decode failed: {exc}") from exc
-        try:
-            raw = zlib.decompress(packed[2:-4], wbits=-zlib.MAX_WBITS)
-        except Exception as inner:
-            raise RuntimeError(f"legacy raw-deflate recovery failed: {type(inner).__name__}") from inner
-        recovery_mode = "raw_deflate_verified_payload_hash"
+        # Fail closed for any unrecognized corruption. We do not import a best-effort payload.
+        raise RuntimeError(f"legacy archive zlib decode failed after known correction: {exc}") from exc
 
     digest = hashlib.sha256(raw).hexdigest()
     if digest != EXPECTED_PAYLOAD_SHA256:
