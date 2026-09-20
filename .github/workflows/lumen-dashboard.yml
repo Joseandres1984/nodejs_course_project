@@ -72,3 +72,5 @@ jobs:
           done
           echo "LUMEN_UNIFIED_DASHBOARD health=failed"
           exit 1
+
+# deploy trigger: full command center restoration 2026-09-20
