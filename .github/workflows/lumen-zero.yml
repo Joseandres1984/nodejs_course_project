@@ -40,6 +40,8 @@ jobs:
       LUMEN_IMAP_USER: ${{ secrets.LUMEN_IMAP_USER }}
       LUMEN_IMAP_PASSWORD: ${{ secrets.LUMEN_IMAP_PASSWORD }}
       LUMEN_LIVE_OUTBOUND: ${{ secrets.LUMEN_LIVE_OUTBOUND }}
+      # Legacy outbound_engine.py reads this older name; mirror the same operator switch.
+      LUMEN_OUTBOUND_LIVE: ${{ secrets.LUMEN_LIVE_OUTBOUND }}
       LUMEN_DISCLOSE_AUTOMATION: ${{ secrets.LUMEN_DISCLOSE_AUTOMATION }}
 
       # Optional API mail providers; SMTP remains the zero-cost fallback.
@@ -124,6 +126,9 @@ jobs:
           imap_user = os.getenv("LUMEN_IMAP_USER", "").strip()
           imap_password = os.getenv("LUMEN_IMAP_PASSWORD", "")
           imap_port_raw = os.getenv("LUMEN_IMAP_PORT", "993").strip() or "993"
+
+          print("MAIL_PREFLIGHT outbound_live=enabled" if truthy("LUMEN_LIVE_OUTBOUND") else "MAIL_PREFLIGHT outbound_live=disabled")
+          print("MAIL_PREFLIGHT disclosure=enabled" if truthy("LUMEN_DISCLOSE_AUTOMATION", "true") else "MAIL_PREFLIGHT disclosure=disabled")
 
           smtp_ok = False
           imap_ok = False
