@@ -1,0 +1,66 @@
+name: LUMEN Public Web
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/lumen-public.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lumen-public-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy-public:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.LUMEN_D1_ACCOUNT_ID }}
+    steps:
+      - name: Checkout LUMEN Zero
+        uses: actions/checkout@v4
+        with:
+          ref: lumen-zero
+
+      - name: Deployment preflight
+        id: preflight
+        shell: bash
+        run: |
+          if [[ -n "$CLOUDFLARE_API_TOKEN" && -n "$CLOUDFLARE_ACCOUNT_ID" ]]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "LUMEN public Worker deployment credentials configured."
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "LUMEN public Worker waiting for Cloudflare credentials."
+          fi
+
+      - name: Set up Node
+        if: steps.preflight.outputs.ready == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Deploy public Worker
+        if: steps.preflight.outputs.ready == 'true'
+        working-directory: .lumen/public-worker
+        run: npx --yes wrangler@4 deploy
+
+      - name: Verify public health
+        if: steps.preflight.outputs.ready == 'true'
+        shell: bash
+        run: |
+          for i in {1..12}; do
+            code=$(curl -sS -o /tmp/lumen-public-health.json -w '%{http_code}' 'https://lumen-zero-public.joseandresceol1-jac.workers.dev/health' || true)
+            if [[ "$code" == "200" ]]; then
+              cat /tmp/lumen-public-health.json
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Public health check did not return 200 in time."
+          exit 1
