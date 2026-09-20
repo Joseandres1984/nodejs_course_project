@@ -1,0 +1,60 @@
+name: LUMEN Legacy Recovery
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/lumen-legacy-recovery.yml
+
+permissions:
+  contents: read
+
+# Serialize with the production zero-cost runtime so the one-time import cannot race a normal save.
+concurrency:
+  group: lumen-zero-production
+  cancel-in-progress: false
+
+jobs:
+  import-legacy-history:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      LUMEN_ZERO_COST_MODE: "true"
+      LUMEN_D1_ACCOUNT_ID: ${{ secrets.LUMEN_D1_ACCOUNT_ID }}
+      LUMEN_D1_DATABASE_ID: ${{ secrets.LUMEN_D1_DATABASE_ID }}
+      LUMEN_D1_API_TOKEN: ${{ secrets.LUMEN_D1_API_TOKEN }}
+
+    steps:
+      - name: Checkout LUMEN Zero
+        uses: actions/checkout@v4
+        with:
+          ref: lumen-zero
+
+      - name: D1 recovery preflight
+        id: preflight
+        shell: bash
+        run: |
+          if [[ -z "$LUMEN_D1_ACCOUNT_ID" || -z "$LUMEN_D1_DATABASE_ID" || -z "$LUMEN_D1_API_TOKEN" ]]; then
+            echo "LUMEN_LEGACY_RECOVERY status=blocked reason=d1_credentials_missing"
+            exit 1
+          fi
+          echo "LUMEN_LEGACY_RECOVERY preflight=ok"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: .lumen/runtime/requirements.txt
+
+      - name: Install runtime dependencies
+        run: python -m pip install --disable-pip-version-check -r .lumen/runtime/requirements.txt
+
+      - name: Syntax check recovery importer
+        working-directory: .lumen/runtime
+        run: python -m py_compile legacy_recovery_import.py d1_persistence_runtime.py
+
+      - name: Import isolated historical recovery into D1
+        working-directory: .lumen/runtime
+        run: python legacy_recovery_import.py
