@@ -33,6 +33,11 @@ EXPECTED_PART_SHA256 = {
     "part05.txt": "30048fa5f5408d2313a2ea81a4ca472b272730ea75baa1396684b877b1fa6818",
     "part06.txt": "639f44256f59b5d3bc2ef07a3ef86e6f3ed6a40941384bb7e91dc52be4066e84",
 }
+# The archive was transported through a text-only connector. These corrections repair
+# known transport transpositions; the exact checksums below remain the authority.
+KNOWN_TEXT_CORRECTIONS = {
+    "part00.txt": (("ZOrinku", "ZOrniku"),),
+}
 RECOVERY_KEY = "railway_20260919"
 SNAPSHOT_AT = "2026-09-19T14:45:58Z"
 
@@ -54,6 +59,8 @@ def load_archive() -> Dict[str, Any]:
     values = []
     for part in parts:
         value = "".join(part.read_text(encoding="utf-8").split())
+        for wrong, right in KNOWN_TEXT_CORRECTIONS.get(part.name, ()):
+            value = value.replace(wrong, right)
         got = hashlib.sha256(value.encode("ascii")).hexdigest()
         expected = EXPECTED_PART_SHA256.get(part.name)
         if got != expected:
