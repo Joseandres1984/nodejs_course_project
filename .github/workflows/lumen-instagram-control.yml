@@ -1,0 +1,73 @@
+name: LUMEN Instagram Control
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/lumen-instagram-control.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lumen-instagram-control-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy-control:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.LUMEN_D1_ACCOUNT_ID }}
+      LUMEN_DASHBOARD_PASSWORD: ${{ secrets.LUMEN_DASHBOARD_PASSWORD }}
+    steps:
+      - name: Checkout LUMEN Zero
+        uses: actions/checkout@v4
+        with:
+          ref: lumen-zero
+
+      - name: Deployment preflight
+        id: preflight
+        shell: bash
+        run: |
+          if [[ -n "$CLOUDFLARE_API_TOKEN" && -n "$CLOUDFLARE_ACCOUNT_ID" && -n "$LUMEN_DASHBOARD_PASSWORD" ]]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "Instagram control deployment credentials configured."
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "Instagram control is prepared but waiting for an existing deployment secret."
+          fi
+
+      - name: Set up Node
+        if: steps.preflight.outputs.ready == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Deploy control Worker
+        if: steps.preflight.outputs.ready == 'true'
+        working-directory: .lumen/instagram-control
+        run: npx --yes wrangler@4 deploy
+
+      - name: Install control password
+        if: steps.preflight.outputs.ready == 'true'
+        working-directory: .lumen/instagram-control
+        shell: bash
+        run: printf '%s' "$LUMEN_DASHBOARD_PASSWORD" | npx --yes wrangler@4 secret put LUMEN_DASHBOARD_PASSWORD
+
+      - name: Verify authenticated health
+        if: steps.preflight.outputs.ready == 'true'
+        shell: bash
+        run: |
+          for i in {1..12}; do
+            code=$(curl -sS -u "socio:$LUMEN_DASHBOARD_PASSWORD" -o /tmp/lumen-instagram-control-health.json -w '%{http_code}' 'https://lumen-instagram-control.joseandresceol1-jac.workers.dev/health' || true)
+            if [[ "$code" == "200" ]]; then
+              echo "INSTAGRAM_CONTROL health=ok auth=required"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "INSTAGRAM_CONTROL health=failed"
+          exit 1
