@@ -23,8 +23,9 @@ os.environ["LUMEN_ZERO_COST_MODE"] = "true"
 import d1_persistence_runtime  # noqa: E402,F401
 import app as lumen_app  # noqa: E402
 
-ARCHIVE_PATH = Path(__file__).resolve().parents[1] / "recovery" / "railway_legacy_accounts_20260919_v2.zlib.b64"
+ARCHIVE_DIR = Path(__file__).resolve().parents[1] / "recovery" / "railway_legacy_accounts_20260919_chunks"
 EXPECTED_SHA256 = "fd3a2342a601caf9454277229e7b69a77b5e30ae6015e6576bbf757552de85b1"
+EXPECTED_CHUNKS = 7
 RECOVERY_KEY = "railway_20260919"
 SNAPSHOT_AT = "2026-09-19T14:45:58Z"
 
@@ -40,8 +41,11 @@ def stable_hash_without_recovery(state: Dict[str, Any]) -> str:
 
 
 def load_archive() -> Dict[str, Any]:
-    encoded = ARCHIVE_PATH.read_text(encoding="utf-8").strip()
-    raw = zlib.decompress(base64.b64decode(encoded.encode("ascii")))
+    parts = sorted(ARCHIVE_DIR.glob("part*.txt"))
+    if len(parts) != EXPECTED_CHUNKS:
+        raise RuntimeError(f"legacy archive chunk count mismatch: {len(parts)}")
+    encoded = "".join(part.read_text(encoding="utf-8").strip() for part in parts)
+    raw = zlib.decompress(base64.b64decode(encoded.encode("ascii"), validate=True))
     digest = hashlib.sha256(raw).hexdigest()
     if digest != EXPECTED_SHA256:
         raise RuntimeError(f"legacy archive checksum mismatch: {digest}")
@@ -149,12 +153,14 @@ def main() -> None:
         "suppressed_do_not_contact_count": suppressed,
         "policy": {
             "preserve_opt_outs": True,
-            "fresh_company_verification_required": True,
-            "fresh_contact_verification_required": True,
+            "fresh_company_ververification_required": True,
+            "fresh_contact_reverification_required": True,
             "quality_gate_required": True,
             "no_legacy_verification_trust": True,
         },
     }
+    # Keep both spelling variants for backwards/forwards compatibility and audit clarity.
+    current["policy"]["fresh_company_reverification_required"] = True
     root[RECOVERY_KEY] = current
 
     # Safety invariant: the import is allowed to change only legacy_recovery.
