@@ -15,6 +15,12 @@ for _key in list(os.environ):
     if _key.startswith("LUMEN_") and not str(os.environ.get(_key) or "").strip():
         os.environ.pop(_key, None)
 
+# Backward-compatibility: app.py uses LUMEN_LIVE_OUTBOUND while outbound_engine.py historically
+# reads LUMEN_OUTBOUND_LIVE. Keep both in sync before either module is imported so one operator
+# switch controls the whole outbound stack.
+if "LUMEN_LIVE_OUTBOUND" in os.environ and "LUMEN_OUTBOUND_LIVE" not in os.environ:
+    os.environ["LUMEN_OUTBOUND_LIVE"] = os.environ["LUMEN_LIVE_OUTBOUND"]
+
 # Hard policy: this entrypoint is always zero-cost. Search has a conservative daily frontier so
 # public providers are not hammered; existing evidence is reused by the normal LUMEN engines.
 os.environ["LUMEN_ZERO_COST_MODE"] = "true"
