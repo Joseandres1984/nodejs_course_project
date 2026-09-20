@@ -1,9 +1,11 @@
 const MAX_NEED = 1500;
 const SERVICES = [
-  { id: "SRV-QUOTECHECK", name: "Quote Check", desc: "Revisión y comparación estructurada de cotizaciones B2B." },
-  { id: "SRV-SUPPLIERCHECK", name: "Supplier Check", desc: "Investigación y verificación comercial de proveedores." },
-  { id: "SRV-EXPORT-SCOUT", name: "Export Scout", desc: "Búsqueda de mercados, importadores, distribuidores y compradores con evidencia pública." },
-  { id: "SRV-TENDER-HUNTER", name: "Tender Hunter", desc: "Detección y preanálisis de oportunidades y licitaciones públicas relevantes." },
+  { id: "SRV-QUOTECHECK", name: "LUMEN QuoteCheck Global", from_usd: 59, desc: "Revisión documental y comparación estructurada de cotizaciones B2B con referencias públicas disponibles." },
+  { id: "SRV-SUPPLIERCHECK", name: "LUMEN SupplierCheck", from_usd: 79, desc: "Investigación de identidad, canales oficiales, señales públicas y riesgo comercial de proveedores." },
+  { id: "SRV-SOURCING-EXPRESS", name: "LUMEN Sourcing Express", from_usd: 149, desc: "Investigación y preselección de proveedores para una necesidad B2B concreta." },
+  { id: "SRV-B2B-PROSPECTING", name: "LUMEN Prospección B2B", from_usd: 199, desc: "Empresas objetivo, señales públicas y canales corporativos compatibles con una oferta B2B." },
+  { id: "SRV-EXPORT-SCOUT", name: "LUMEN Export Scout", from_usd: 249, desc: "Búsqueda de mercados, importadores, distribuidores y compradores con evidencia pública." },
+  { id: "SRV-TENDER-HUNTER", name: "LUMEN Tender Hunter Global", from_usd: 99, desc: "Detección y preanálisis de oportunidades y licitaciones públicas relevantes." },
 ];
 const SERVICE_IDS = new Set(SERVICES.map((x) => x.id));
 const RAW_ASSET_BASE = "https://raw.githubusercontent.com/Joseandres1984/nodejs_course_project/lumen-zero/.lumen/public/instagram/";
@@ -29,8 +31,8 @@ function home() {
   return shell("LUMEN | Inteligencia comercial B2B", `<main><section class="hero"><div class="eyebrow">Inteligencia comercial B2B · Argentina</div><h1>Conectamos demanda empresarial con oferta confiable.</h1><p class="lead">LUMEN investiga mercados, detecta oportunidades, identifica compradores y proveedores, organiza cotizaciones y coordina procesos comerciales con evidencia verificable.</p><p><a class="cta" href="/services">Ver servicios</a></p></section><section class="section"><div class="grid"><article class="card"><h3>Detectar</h3><p>Señales de demanda, oportunidades, mercados y necesidades reales.</p></article><article class="card"><h3>Validar</h3><p>Empresas, contactos corporativos y evidencia antes de avanzar.</p></article><article class="card"><h3>Comparar</h3><p>Alternativas de suministro, cotizaciones, condiciones y riesgo.</p></article><article class="card"><h3>Coordinar</h3><p>Outreach, seguimiento, negociación asistida y trazabilidad comercial.</p></article></div></section><section class="section"><div class="box"><h2>Operación con límites claros</h2><p class="small">LUMEN automatiza investigación, priorización y preparación comercial. Contratos vinculantes, movimientos de dinero y compromisos legales permanecen sujetos a autorización humana.</p></div></section></main>`);
 }
 function services(received=false) {
-  const cards = SERVICES.map((s)=>`<article class="card"><div class="eyebrow">LUMEN Intelligence</div><h3>${esc(s.name)}</h3><div class="price">Desde USD 249</div><p>${esc(s.desc)}</p><p class="small">Paquete inicial de alcance acotado. Mercados, proveedores, segmentos o profundidad adicionales se cotizan antes de contratar.</p></article>`).join("");
-  const options = SERVICES.map((s)=>`<option value="${s.id}">${esc(s.name)}</option>`).join("");
+  const cards = SERVICES.map((s)=>`<article class="card"><div class="eyebrow">Servicio LUMEN</div><h3>${esc(s.name)}</h3><div class="price">Desde USD ${s.from_usd}</div><p>${esc(s.desc)}</p><p class="small">Precio de lanzamiento para el paquete inicial de alcance acotado. Casos de mayor cobertura o complejidad se cotizan antes de contratar.</p></article>`).join("");
+  const options = SERVICES.map((s)=>`<option value="${s.id}">${esc(s.name)} · desde USD ${s.from_usd}</option>`).join("");
   return shell("LUMEN | Servicios", `<main><section class="hero"><div class="eyebrow">Servicios e intelligence</div><h1>Investigación comercial que termina en acción.</h1><p class="lead">Productos de entrada claros, alcance controlado y evidencia trazable. Enviar una consulta no crea un cargo ni un compromiso vinculante.</p></section>${received?'<div class="notice">Consulta recibida. LUMEN la incorporará al próximo ciclo comercial. No se realizó ningún cargo.</div>':''}<section class="grid">${cards}</section><section class="section"><div class="box"><div class="eyebrow">Consulta comercial</div><h2>Contanos qué necesitás</h2><form method="post" action="/api/services/inquiry"><label>Servicio</label><select name="service_id" required>${options}</select><label>Email de contacto</label><input type="email" name="email" maxlength="180" required autocomplete="email"><label>Qué necesitás</label><textarea name="need" maxlength="1500" minlength="12" required placeholder="Producto, mercado, proveedor, cotización u oportunidad que querés investigar."></textarea><label>Empresa <span class="small">(opcional)</span></label><input name="company" maxlength="180" autocomplete="organization"><label>Nombre <span class="small">(opcional)</span></label><input name="name" maxlength="120" autocomplete="name"><label class="hp">Sitio web<input name="website" tabindex="-1" autocomplete="off"></label><p><button type="submit">Preparar mi caso</button></p></form><p class="small">El precio y alcance final se confirman antes de contratar. LUMEN no realiza conversiones de moneda sin una fuente verificada.</p></div></section></main>`);
 }
 function intelligence() {
@@ -66,14 +68,14 @@ async function media(pathname) {
 export default {
   async fetch(request, env) {
     const url=new URL(request.url);
-    if (request.method==="GET" && url.pathname==="/health") return json({ok:true,service:"lumen-zero-public",storage:"cloudflare-d1",inquiry_capture:true,instagram_media:true});
+    if (request.method==="GET" && url.pathname==="/health") return json({ok:true,service:"lumen-zero-public",storage:"cloudflare-d1",inquiry_capture:true,instagram_media:true,services:SERVICES.length});
     if (request.method==="GET" && url.pathname==="/") return html(home());
     if (request.method==="GET" && url.pathname==="/services") return html(services(url.searchParams.get("result")==="received"));
     if (request.method==="GET" && url.pathname==="/intelligence") return html(intelligence());
     if (request.method==="GET" && url.pathname==="/privacy") return html(privacy());
     if (request.method==="GET" && url.pathname.startsWith("/media/instagram/")) return media(url.pathname);
     if (request.method==="POST" && url.pathname==="/api/services/inquiry") return handleInquiry(request,env);
-    if (request.method==="GET" && url.pathname==="/api/services/pricing") return json({currency:"USD",from_usd:249,pricing_mode:"launch_scope_controlled",services:SERVICES,binding:false,payment_created:false});
+    if (request.method==="GET" && url.pathname==="/api/services/pricing") return json({currency:"USD",from_usd:59,pricing_mode:"launch_scope_controlled",services:SERVICES,binding:false,payment_created:false});
     return new Response("not_found",{status:404,headers:{"content-type":"text/plain; charset=utf-8"}});
   }
 };
