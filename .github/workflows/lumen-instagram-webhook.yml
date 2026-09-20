@@ -62,3 +62,5 @@ jobs:
         working-directory: .lumen/instagram-webhook
         shell: bash
         run: printf '%s' "$LUMEN_INSTAGRAM_APP_SECRET" | npx --yes wrangler@4 secret put LUMEN_INSTAGRAM_APP_SECRET
+
+      # Deploy trigger: Instagram credentials configured by operator.
