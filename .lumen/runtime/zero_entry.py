@@ -82,9 +82,16 @@ import zero_search_budget_runtime  # noqa: F401,E402
 # but cannot become counterparties or consume commercial execution capacity.
 import zero_discovery_quality_runtime  # noqa: F401,E402
 
-# Railway history is deliberately NOT injected into the live candidate queue here. It is imported by
-# the dedicated one-time legacy recovery workflow into an isolated D1 namespace, where every record
-# remains outbound-unsafe until a future bridge supplies fresh evidence and passes current gates.
+# Railway history stays isolated in D1. This bridge processes only a tiny bounded batch each cycle,
+# collects fresh same-domain public evidence, preserves legacy opt-outs/cooldowns, and may create a
+# current candidate only after fresh category + role evidence. It never sets verified_company,
+# verified_contact or outbound eligibility; the existing current gates below remain authoritative.
+import legacy_reverification_runtime  # noqa: F401,E402
+try:
+    legacy_reverification_runtime.run_once()
+except Exception as exc:
+    print({"legacy_reverification_runtime": {"status": "degraded_fail_closed", "error": f"{type(exc).__name__}: {str(exc)[:300]}", "bridge_sets_verified_company": False, "bridge_sets_verified_contact": False, "bridge_sets_outbound_safe": False}}, flush=True)
+
 import company_verification_scheduler_runtime  # noqa: F401,E402
 import company_identity_quality_runtime  # noqa: F401,E402
 import executive_secretary_log_bridge  # noqa: F401,E402
