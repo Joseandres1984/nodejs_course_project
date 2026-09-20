@@ -21,29 +21,22 @@ os.environ["LUMEN_ZERO_COST_MODE"] = "true"
 import d1_persistence_runtime  # noqa: E402,F401
 import app as lumen_app  # noqa: E402
 
-ARCHIVE_DIR = Path(__file__).resolve().parents[1] / "recovery" / "railway_legacy_accounts_20260919_chunks"
-EXPECTED_SHA256 = "fd3a2342a601caf9454277229e7b69a77b5e30ae6015e6576bbf757552de85b1"
-EXPECTED_ENCODED_SHA256 = "bc803455a2fa8c5b62379430bfcd8be71c2c553c190b0faace89b283a78a072f"
-EXPECTED_PART_SHA256 = {
-    "part00.txt": "64c4d513967c8b717303d3d82ec1fb3f5735362c08f6085711c3e294b90e3d70",
-    "part01.txt": "c587b23cd149340342723c1a4d1758d6e060f8b02049d73e1aa68cc47fa9ffd4",
-    "part02.txt": "dccdaa132c4e7c3eecbf6418b0a106bdd07585b197af46f590eb9d6f7e563c43",
-    "part03.txt": "661aeb1d26931608ec906cefc1f8b1868b9d40ff5fead3fba3eac32187fd114e",
-    "part04.txt": "7b8c1e3afe15832095f17a0b7b3610067e1010f591b883349600a0678cdfc4ad",
-    "part05.txt": "30048fa5f5408d2313a2ea81a4ca472b272730ea75baa1396684b877b1fa6818",
-    "part06.txt": "639f44256f59b5d3bc2ef07a3ef86e6f3ed6a40941384bb7e91dc52be4066e84",
-}
-# The archive was transported through a text-only connector. These corrections repair
-# known transport transpositions; the exact checksums below remain the authority.
-KNOWN_TEXT_CORRECTIONS = {
-    "part00.txt": (("ZOrinku", "ZOrniku"),),
-}
+ARCHIVE_FILE = Path(__file__).resolve().parents[1] / "recovery" / "railway_legacy_accounts_20260919.zlib.b64"
+# Git blob identity of the canonical checked-in archive. Verifying the Git object hash avoids
+# trusting connector-transported chunk copies while still pinning the exact historical artifact.
+EXPECTED_GIT_BLOB_SHA1 = "eaed75548aa1e3f2911efdbeacfa154cac554c9f"
 RECOVERY_KEY = "railway_20260919"
 SNAPSHOT_AT = "2026-09-19T14:45:58Z"
+EXPECTED_ACCOUNT_COUNT = 580
 
 
 def utcnow() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _git_blob_sha1(raw: bytes) -> str:
+    header = f"blob {len(raw)}\0".encode("ascii")
+    return hashlib.sha1(header + raw).hexdigest()
 
 
 def stable_hash_without_recovery(state: Dict[str, Any]) -> str:
@@ -52,37 +45,32 @@ def stable_hash_without_recovery(state: Dict[str, Any]) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
-def load_archive() -> Dict[str, Any]:
-    parts = sorted(ARCHIVE_DIR.glob("part*.txt"))
-    if len(parts) != len(EXPECTED_PART_SHA256):
-        raise RuntimeError(f"legacy archive chunk count mismatch: {len(parts)}")
-    values = []
-    for part in parts:
-        value = "".join(part.read_text(encoding="utf-8").split())
-        for wrong, right in KNOWN_TEXT_CORRECTIONS.get(part.name, ()):
-            value = value.replace(wrong, right)
-        got = hashlib.sha256(value.encode("ascii")).hexdigest()
-        expected = EXPECTED_PART_SHA256.get(part.name)
-        if got != expected:
-            raise RuntimeError(f"legacy archive chunk checksum mismatch: {part.name} got={got}")
-        values.append(value)
-    encoded = "".join(values)
-    encoded_digest = hashlib.sha256(encoded.encode("ascii")).hexdigest()
-    if encoded_digest != EXPECTED_ENCODED_SHA256:
-        raise RuntimeError(f"legacy encoded archive checksum mismatch: {encoded_digest}")
-    raw = zlib.decompress(base64.b64decode(encoded.encode("ascii"), validate=True))
-    digest = hashlib.sha256(raw).hexdigest()
-    if digest != EXPECTED_SHA256:
-        raise RuntimeError(f"legacy archive checksum mismatch: {digest}")
-    payload = json.loads(raw.decode("utf-8"))
+def load_archive() -> tuple[Dict[str, Any], str]:
+    file_bytes = ARCHIVE_FILE.read_bytes()
+    got_blob = _git_blob_sha1(file_bytes)
+    if got_blob != EXPECTED_GIT_BLOB_SHA1:
+        raise RuntimeError(f"legacy archive Git blob mismatch: {got_blob}")
+
+    encoded = b"".join(file_bytes.split())
+    try:
+        packed = base64.b64decode(encoded, validate=True)
+        raw = zlib.decompress(packed)
+        payload = json.loads(raw.decode("utf-8"))
+    except Exception as exc:
+        raise RuntimeError(f"legacy archive decode failed: {type(exc).__name__}") from exc
+
     if not isinstance(payload, dict):
         raise RuntimeError("legacy archive payload is not an object")
     accounts = payload.get("accounts")
-    if not isinstance(accounts, list) or len(accounts) != 580:
+    if not isinstance(accounts, list) or len(accounts) != EXPECTED_ACCOUNT_COUNT:
         raise RuntimeError(f"legacy archive account count mismatch: {len(accounts) if isinstance(accounts, list) else 'invalid'}")
     if payload.get("historical_only") is not True or payload.get("auto_promote_to_current_pipeline") is not False:
         raise RuntimeError("legacy archive safety policy mismatch")
-    return payload
+
+    # Reject malformed account rows rather than guessing at their structure.
+    if any(not isinstance(row, dict) for row in accounts):
+        raise RuntimeError("legacy archive contains non-object account rows")
+    return payload, hashlib.sha256(raw).hexdigest()
 
 
 def queue_priority(account: Dict[str, Any]) -> float:
@@ -134,7 +122,7 @@ def build_reverification_queue(accounts: List[Dict[str, Any]]) -> List[Dict[str,
 
 
 def main() -> None:
-    archive = load_archive()
+    archive, archive_sha256 = load_archive()
     if not lumen_app.load_state():
         raise RuntimeError(f"refusing recovery import because current D1 state could not be loaded: {lumen_app.DB_STATUS}")
 
@@ -144,23 +132,25 @@ def main() -> None:
         raise RuntimeError("existing legacy_recovery namespace is not an object")
 
     existing = root.get(RECOVERY_KEY)
-    if isinstance(existing, dict) and existing.get("archive_sha256") == EXPECTED_SHA256:
+    if isinstance(existing, dict) and existing.get("archive_git_blob_sha1") == EXPECTED_GIT_BLOB_SHA1:
         count = len(existing.get("accounts") or [])
         promoted = int(existing.get("auto_promoted_to_current_pipeline") or 0)
-        if count != 580 or promoted != 0:
-            raise RuntimeError(f"existing recovery record failed safety verification: count={count} promoted={promoted}")
-        print({"legacy_recovery_import": {"status": "already_imported", "accounts": count, "auto_promoted": promoted, "safe_for_outbound": 0}}, flush=True)
+        outbound_safe = int(existing.get("safe_for_outbound_count") or 0)
+        if count != EXPECTED_ACCOUNT_COUNT or promoted != 0 or outbound_safe != 0:
+            raise RuntimeError(f"existing recovery record failed safety verification: count={count} promoted={promoted} safe={outbound_safe}")
+        print({"legacy_recovery_import": {"status": "already_imported", "accounts": count, "auto_promoted": 0, "safe_for_outbound": 0}}, flush=True)
         return
 
     accounts = archive["accounts"]
     queue = build_reverification_queue(accounts)
     suppressed = sum(1 for row in queue if row.get("do_not_contact"))
     root[RECOVERY_KEY] = {
-        "schema_version": 1,
+        "schema_version": 2,
         "source": archive.get("source"),
         "snapshot_at": archive.get("snapshot_at") or SNAPSHOT_AT,
         "imported_at": utcnow(),
-        "archive_sha256": EXPECTED_SHA256,
+        "archive_git_blob_sha1": EXPECTED_GIT_BLOB_SHA1,
+        "archive_sha256": archive_sha256,
         "historical_only": True,
         "requires_reverification_before_outbound": True,
         "auto_promote_to_current_pipeline": False,
@@ -188,7 +178,7 @@ def main() -> None:
         raise RuntimeError("D1 verification reload failed")
 
     restored = (lumen_app.STATE.get("legacy_recovery") or {}).get(RECOVERY_KEY) or {}
-    if len(restored.get("accounts") or []) != 580:
+    if len(restored.get("accounts") or []) != EXPECTED_ACCOUNT_COUNT:
         raise RuntimeError("D1 verification failed: recovered account count is not 580")
     if int(restored.get("auto_promoted_to_current_pipeline") or 0) != 0:
         raise RuntimeError("D1 verification failed: legacy accounts were promoted")
@@ -197,14 +187,15 @@ def main() -> None:
 
     print({"legacy_recovery_import": {
         "status": "imported_verified",
-        "accounts": 580,
+        "accounts": EXPECTED_ACCOUNT_COUNT,
         "unique_domains": len(queue),
         "pending_reverification": len(queue) - suppressed,
         "suppressed_do_not_contact": suppressed,
         "auto_promoted": 0,
         "safe_for_outbound": 0,
         "active_state_unchanged": True,
-        "archive_sha256": EXPECTED_SHA256,
+        "archive_git_blob_sha1": EXPECTED_GIT_BLOB_SHA1,
+        "archive_sha256": archive_sha256,
     }}, flush=True)
 
 
