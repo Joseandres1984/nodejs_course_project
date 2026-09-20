@@ -53,7 +53,7 @@ def load_archive() -> Dict[str, Any]:
         raise RuntimeError(f"legacy archive chunk count mismatch: {len(parts)}")
     values = []
     for part in parts:
-        value = part.read_text(encoding="utf-8").strip()
+        value = "".join(part.read_text(encoding="utf-8").split())
         got = hashlib.sha256(value.encode("ascii")).hexdigest()
         expected = EXPECTED_PART_SHA256.get(part.name)
         if got != expected:
