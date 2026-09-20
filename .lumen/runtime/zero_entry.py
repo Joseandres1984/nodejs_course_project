@@ -39,6 +39,9 @@ os.environ.setdefault("LUMEN_OUTBOUND_MAX_FOLLOWUPS_PER_CYCLE", "4")
 os.environ.setdefault("LUMEN_SOCIAL_CANARY_MAX_PER_CYCLE", "1")
 os.environ.setdefault("LUMEN_SOCIAL_CANARY_MAX_PER_DAY", "4")
 os.environ.setdefault("LUMEN_PUBLIC_BASE_URL", "https://lumen-zero-public.joseandresceol1-jac.workers.dev")
+# Shadow intelligence only enriches already-permitted public catalog crawls; it adds no provider
+# spend and cannot authorize outreach, payments or binding actions.
+os.environ.setdefault("LUMEN_MARKET_INTELLIGENCE_SHADOW_ENABLED", "true")
 os.environ.setdefault("PYTHONHASHSEED", "0")
 
 # Install replacements before any production module captures app/scout/mail functions.
