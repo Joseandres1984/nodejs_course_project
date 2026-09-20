@@ -22,9 +22,10 @@ import d1_persistence_runtime  # noqa: E402,F401
 import app as lumen_app  # noqa: E402
 
 ARCHIVE_FILE = Path(__file__).resolve().parents[1] / "recovery" / "railway_legacy_accounts_20260919.zlib.b64"
-# Git blob identity of the canonical checked-in archive. Verifying the Git object hash avoids
-# trusting connector-transported chunk copies while still pinning the exact historical artifact.
+# Pin both the checked-in Git object and the decompressed historical payload. The text transport
+# damaged the zlib checksum trailer, but prior recovery work captured the authoritative payload hash.
 EXPECTED_GIT_BLOB_SHA1 = "eaed75548aa1e3f2911efdbeacfa154cac554c9f"
+EXPECTED_PAYLOAD_SHA256 = "fd3a2342a601caf9454277229e7b69a77b5e30ae6015e6576bbf757552de85b1"
 RECOVERY_KEY = "railway_20260919"
 SNAPSHOT_AT = "2026-09-19T14:45:58Z"
 EXPECTED_ACCOUNT_COUNT = 580
@@ -45,7 +46,7 @@ def stable_hash_without_recovery(state: Dict[str, Any]) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
-def load_archive() -> tuple[Dict[str, Any], str]:
+def load_archive() -> tuple[Dict[str, Any], str, str]:
     file_bytes = ARCHIVE_FILE.read_bytes()
     got_blob = _git_blob_sha1(file_bytes)
     if got_blob != EXPECTED_GIT_BLOB_SHA1:
@@ -54,11 +55,32 @@ def load_archive() -> tuple[Dict[str, Any], str]:
     encoded = b"".join(file_bytes.split())
     try:
         packed = base64.b64decode(encoded, validate=True)
+    except Exception as exc:
+        raise RuntimeError(f"legacy archive base64 decode failed: {type(exc).__name__}") from exc
+
+    recovery_mode = "standard_zlib"
+    try:
         raw = zlib.decompress(packed)
+    except zlib.error as exc:
+        # The canonical text transport is known to preserve a valid DEFLATE stream while carrying
+        # a damaged zlib integrity trailer. Ignore only that wrapper checksum; the decompressed bytes
+        # must still match the separately pinned SHA-256 below or the import fails closed.
+        if "incorrect data check" not in str(exc).lower() or len(packed) < 7:
+            raise RuntimeError(f"legacy archive zlib decode failed: {exc}") from exc
+        try:
+            raw = zlib.decompress(packed[2:-4], wbits=-zlib.MAX_WBITS)
+        except Exception as inner:
+            raise RuntimeError(f"legacy raw-deflate recovery failed: {type(inner).__name__}") from inner
+        recovery_mode = "raw_deflate_verified_payload_hash"
+
+    digest = hashlib.sha256(raw).hexdigest()
+    if digest != EXPECTED_PAYLOAD_SHA256:
+        raise RuntimeError(f"legacy payload checksum mismatch: {digest}")
+
+    try:
         payload = json.loads(raw.decode("utf-8"))
     except Exception as exc:
-        raise RuntimeError(f"legacy archive decode failed: {type(exc).__name__}") from exc
-
+        raise RuntimeError(f"legacy payload JSON decode failed: {type(exc).__name__}") from exc
     if not isinstance(payload, dict):
         raise RuntimeError("legacy archive payload is not an object")
     accounts = payload.get("accounts")
@@ -66,11 +88,9 @@ def load_archive() -> tuple[Dict[str, Any], str]:
         raise RuntimeError(f"legacy archive account count mismatch: {len(accounts) if isinstance(accounts, list) else 'invalid'}")
     if payload.get("historical_only") is not True or payload.get("auto_promote_to_current_pipeline") is not False:
         raise RuntimeError("legacy archive safety policy mismatch")
-
-    # Reject malformed account rows rather than guessing at their structure.
     if any(not isinstance(row, dict) for row in accounts):
         raise RuntimeError("legacy archive contains non-object account rows")
-    return payload, hashlib.sha256(raw).hexdigest()
+    return payload, digest, recovery_mode
 
 
 def queue_priority(account: Dict[str, Any]) -> float:
@@ -122,7 +142,7 @@ def build_reverification_queue(accounts: List[Dict[str, Any]]) -> List[Dict[str,
 
 
 def main() -> None:
-    archive, archive_sha256 = load_archive()
+    archive, archive_sha256, recovery_mode = load_archive()
     if not lumen_app.load_state():
         raise RuntimeError(f"refusing recovery import because current D1 state could not be loaded: {lumen_app.DB_STATUS}")
 
@@ -132,7 +152,7 @@ def main() -> None:
         raise RuntimeError("existing legacy_recovery namespace is not an object")
 
     existing = root.get(RECOVERY_KEY)
-    if isinstance(existing, dict) and existing.get("archive_git_blob_sha1") == EXPECTED_GIT_BLOB_SHA1:
+    if isinstance(existing, dict) and existing.get("archive_sha256") == EXPECTED_PAYLOAD_SHA256:
         count = len(existing.get("accounts") or [])
         promoted = int(existing.get("auto_promoted_to_current_pipeline") or 0)
         outbound_safe = int(existing.get("safe_for_outbound_count") or 0)
@@ -151,6 +171,7 @@ def main() -> None:
         "imported_at": utcnow(),
         "archive_git_blob_sha1": EXPECTED_GIT_BLOB_SHA1,
         "archive_sha256": archive_sha256,
+        "archive_recovery_mode": recovery_mode,
         "historical_only": True,
         "requires_reverification_before_outbound": True,
         "auto_promote_to_current_pipeline": False,
@@ -194,7 +215,7 @@ def main() -> None:
         "auto_promoted": 0,
         "safe_for_outbound": 0,
         "active_state_unchanged": True,
-        "archive_git_blob_sha1": EXPECTED_GIT_BLOB_SHA1,
+        "archive_recovery_mode": recovery_mode,
         "archive_sha256": archive_sha256,
     }}, flush=True)
 
