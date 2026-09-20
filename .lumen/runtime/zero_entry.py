@@ -1,0 +1,44 @@
+from __future__ import annotations
+
+"""LUMEN Zero entrypoint.
+
+Mirrors the production Railway worker bootstrap while replacing paid/credit-bound infrastructure
+with the zero-cost D1 persistence and public Scout adapters.
+"""
+
+import os
+
+# Hard policy: this entrypoint is always zero-cost. Search has a conservative daily frontier so
+# public providers are not hammered; existing evidence is reused by the normal LUMEN engines.
+os.environ["LUMEN_ZERO_COST_MODE"] = "true"
+os.environ["LUMEN_SCOUT_PROVIDER"] = "bing_rss_public"
+os.environ["LUMEN_SCOUT_API_KEY"] = "zero-cost-no-secret-required"
+os.environ.setdefault("LUMEN_SCOUT_MAX_QUERIES", "2")
+os.environ.setdefault("LUMEN_SCOUT_DAILY_BUDGET", "24")
+os.environ.setdefault("LUMEN_SCOUT_MAX_NEW_LEADS", "4")
+os.environ.setdefault("LUMEN_PUBLIC_PROCUREMENT_MAX_QUERIES", "1")
+os.environ.setdefault("LUMEN_PUBLIC_PROCUREMENT_DAILY_CAP", "8")
+os.environ.setdefault("LUMEN_PARTNER_DAILY_SEARCH_CAP", "8")
+os.environ.setdefault("LUMEN_DEEP_WORK_DAILY_SEARCH_CAP", "8")
+os.environ.setdefault("LUMEN_OUTBOUND_MAX_NEW_PER_CYCLE", "3")
+os.environ.setdefault("LUMEN_OUTBOUND_MAX_NEW_PER_DAY", "20")
+os.environ.setdefault("LUMEN_OUTBOUND_MAX_FOLLOWUPS_PER_CYCLE", "4")
+os.environ.setdefault("LUMEN_SOCIAL_CANARY_MAX_PER_CYCLE", "1")
+os.environ.setdefault("LUMEN_SOCIAL_CANARY_MAX_PER_DAY", "4")
+os.environ.setdefault("PYTHONHASHSEED", "0")
+
+# Install replacements before any production module captures app/scout functions.
+import d1_persistence_runtime  # noqa: F401,E402
+import zero_scout_runtime  # noqa: F401,E402
+
+# Preserve the exact non-persistence production bootstrap order previously used by Railway.
+import search_budget_atomic_runtime  # noqa: F401,E402
+import company_verification_scheduler_runtime  # noqa: F401,E402
+import company_identity_quality_runtime  # noqa: F401,E402
+import executive_secretary_log_bridge  # noqa: F401,E402
+import revenue_os_v3_runtime  # noqa: F401,E402
+import revenue_os_v31_alignment_runtime  # noqa: F401,E402
+import communication_greeting_fix_runtime  # noqa: F401,E402
+
+# worker_entry executes the complete production cycle at import time, matching the Railway start.
+import worker_entry  # noqa: F401,E402
