@@ -2,10 +2,9 @@ from __future__ import annotations
 
 """One-time, fail-closed import of sanitized Railway history into LUMEN Zero/D1.
 
-The archive is historical evidence only. It is deliberately stored under an isolated
-`legacy_recovery` namespace and is never merged into current companies, contacts,
-opportunities or outbound queues. Every recovered counterparty requires fresh
-verification before any future use.
+Historical evidence is isolated under `legacy_recovery`. It is never merged into
+current companies, contacts, opportunities or outbound queues. Fresh verification
+is required before any future use.
 """
 
 import base64
@@ -19,13 +18,21 @@ from typing import Any, Dict, List
 
 os.environ["LUMEN_ZERO_COST_MODE"] = "true"
 
-# Importing the adapter first patches app.load_state/save_state to use D1.
 import d1_persistence_runtime  # noqa: E402,F401
 import app as lumen_app  # noqa: E402
 
 ARCHIVE_DIR = Path(__file__).resolve().parents[1] / "recovery" / "railway_legacy_accounts_20260919_chunks"
 EXPECTED_SHA256 = "fd3a2342a601caf9454277229e7b69a77b5e30ae6015e6576bbf757552de85b1"
-EXPECTED_CHUNKS = 7
+EXPECTED_ENCODED_SHA256 = "bc803455a2fa8c5b62379430bfcd8be71c2c553c190b0faace89b283a78a072f"
+EXPECTED_PART_SHA256 = {
+    "part00.txt": "64c4d513967c8b717303d3d82ec1fb3f5735362c08f6085711c3e294b90e3d70",
+    "part01.txt": "c587b23cd149340342723c1a4d1758d6e060f8b02049d73e1aa68cc47fa9ffd4",
+    "part02.txt": "dccdaa132c4e7c3eecbf6418b0a106bdd07585b197af46f590eb9d6f7e563c43",
+    "part03.txt": "661aeb1d26931608ec906cefc1f8b1868b9d40ff5fead3fba3eac32187fd114e",
+    "part04.txt": "7b8c1e3afe15832095f17a0b7b3610067e1010f591b883349600a0678cdfc4ad",
+    "part05.txt": "30048fa5f5408d2313a2ea81a4ca472b272730ea75baa1396684b877b1fa6818",
+    "part06.txt": "639f44256f59b5d3bc2ef07a3ef86e6f3ed6a40941384bb7e91dc52be4066e84",
+}
 RECOVERY_KEY = "railway_20260919"
 SNAPSHOT_AT = "2026-09-19T14:45:58Z"
 
@@ -42,9 +49,20 @@ def stable_hash_without_recovery(state: Dict[str, Any]) -> str:
 
 def load_archive() -> Dict[str, Any]:
     parts = sorted(ARCHIVE_DIR.glob("part*.txt"))
-    if len(parts) != EXPECTED_CHUNKS:
+    if len(parts) != len(EXPECTED_PART_SHA256):
         raise RuntimeError(f"legacy archive chunk count mismatch: {len(parts)}")
-    encoded = "".join(part.read_text(encoding="utf-8").strip() for part in parts)
+    values = []
+    for part in parts:
+        value = part.read_text(encoding="utf-8").strip()
+        got = hashlib.sha256(value.encode("ascii")).hexdigest()
+        expected = EXPECTED_PART_SHA256.get(part.name)
+        if got != expected:
+            raise RuntimeError(f"legacy archive chunk checksum mismatch: {part.name} got={got}")
+        values.append(value)
+    encoded = "".join(values)
+    encoded_digest = hashlib.sha256(encoded.encode("ascii")).hexdigest()
+    if encoded_digest != EXPECTED_ENCODED_SHA256:
+        raise RuntimeError(f"legacy encoded archive checksum mismatch: {encoded_digest}")
     raw = zlib.decompress(base64.b64decode(encoded.encode("ascii"), validate=True))
     digest = hashlib.sha256(raw).hexdigest()
     if digest != EXPECTED_SHA256:
@@ -79,20 +97,17 @@ def queue_priority(account: Dict[str, Any]) -> float:
 
 
 def build_reverification_queue(accounts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    # One queue item per official domain. Keep every original account in the archive;
-    # deduplication only prevents wasting future verification work.
     grouped: Dict[str, List[Dict[str, Any]]] = {}
     for account in accounts:
         domain = str(account.get("official_domain") or "").strip().lower()
-        if not domain:
-            continue
-        grouped.setdefault(domain, []).append(account)
+        if domain:
+            grouped.setdefault(domain, []).append(account)
 
     queue: List[Dict[str, Any]] = []
     for domain, rows in grouped.items():
         suppressed = any(str(row.get("legacy_reason") or "") == "suppressed_or_optout" for row in rows)
         representative = max(rows, key=queue_priority)
-        item = {
+        queue.append({
             "official_domain": domain,
             "legacy_ids": [str(row.get("legacy_id") or "") for row in rows if row.get("legacy_id")],
             "type": representative.get("type"),
@@ -106,9 +121,7 @@ def build_reverification_queue(accounts: List[Dict[str, Any]]) -> List[Dict[str,
             "legacy_score": representative.get("legacy_score"),
             "legacy_reason": representative.get("legacy_reason"),
             "do_not_contact": bool(suppressed),
-        }
-        queue.append(item)
-
+        })
     queue.sort(key=lambda row: (bool(row.get("do_not_contact")), -float(row.get("priority") or 0.0), str(row.get("official_domain") or "")))
     return queue
 
@@ -135,7 +148,7 @@ def main() -> None:
     accounts = archive["accounts"]
     queue = build_reverification_queue(accounts)
     suppressed = sum(1 for row in queue if row.get("do_not_contact"))
-    current = {
+    root[RECOVERY_KEY] = {
         "schema_version": 1,
         "source": archive.get("source"),
         "snapshot_at": archive.get("snapshot_at") or SNAPSHOT_AT,
@@ -153,27 +166,20 @@ def main() -> None:
         "suppressed_do_not_contact_count": suppressed,
         "policy": {
             "preserve_opt_outs": True,
-            "fresh_company_ververification_required": True,
+            "fresh_company_reverification_required": True,
             "fresh_contact_reverification_required": True,
             "quality_gate_required": True,
             "no_legacy_verification_trust": True,
         },
     }
-    # Keep both spelling variants for backwards/forwards compatibility and audit clarity.
-    current["policy"]["fresh_company_reverification_required"] = True
-    root[RECOVERY_KEY] = current
 
-    # Safety invariant: the import is allowed to change only legacy_recovery.
-    after_hash = stable_hash_without_recovery(lumen_app.STATE)
-    if after_hash != before_hash:
+    if stable_hash_without_recovery(lumen_app.STATE) != before_hash:
         raise RuntimeError("active LUMEN state changed during legacy import; refusing to save")
-
     if not lumen_app.save_state():
         raise RuntimeError(f"D1 save failed: {lumen_app.DB_STATUS}")
-
-    # Reload from D1 and prove persistence plus isolation policy.
     if not lumen_app.load_state():
         raise RuntimeError("D1 verification reload failed")
+
     restored = (lumen_app.STATE.get("legacy_recovery") or {}).get(RECOVERY_KEY) or {}
     if len(restored.get("accounts") or []) != 580:
         raise RuntimeError("D1 verification failed: recovered account count is not 580")
@@ -182,19 +188,17 @@ def main() -> None:
     if int(restored.get("safe_for_outbound_count") or 0) != 0:
         raise RuntimeError("D1 verification failed: legacy accounts became outbound-safe")
 
-    print({
-        "legacy_recovery_import": {
-            "status": "imported_verified",
-            "accounts": 580,
-            "unique_domains": len(queue),
-            "pending_reverification": len(queue) - suppressed,
-            "suppressed_do_not_contact": suppressed,
-            "auto_promoted": 0,
-            "safe_for_outbound": 0,
-            "active_state_unchanged": True,
-            "archive_sha256": EXPECTED_SHA256,
-        }
-    }, flush=True)
+    print({"legacy_recovery_import": {
+        "status": "imported_verified",
+        "accounts": 580,
+        "unique_domains": len(queue),
+        "pending_reverification": len(queue) - suppressed,
+        "suppressed_do_not_contact": suppressed,
+        "auto_promoted": 0,
+        "safe_for_outbound": 0,
+        "active_state_unchanged": True,
+        "archive_sha256": EXPECTED_SHA256,
+    }}, flush=True)
 
 
 if __name__ == "__main__":
