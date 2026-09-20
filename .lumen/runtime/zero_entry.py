@@ -42,6 +42,9 @@ os.environ.setdefault("PYTHONHASHSEED", "0")
 
 # Install replacements before any production module captures app/scout/mail functions.
 import d1_persistence_runtime  # noqa: F401,E402
+# Signed Meta webhook payloads land in a dedicated D1 queue. Patch load_state now so every normal
+# LUMEN Zero cycle can ingest them through the existing Instagram Operator before business logic.
+import instagram_webhook_d1_bridge_runtime  # noqa: F401,E402
 import zero_scout_runtime  # noqa: F401,E402
 import zero_mail_runtime  # noqa: F401,E402
 
