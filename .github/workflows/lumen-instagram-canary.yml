@@ -1,10 +1,7 @@
 name: LUMEN Instagram Canary Publish
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/lumen-instagram-canary.yml"
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -42,7 +39,6 @@ jobs:
           mkdir -p .lumen/public
           python - <<'PY'
           from PIL import Image, ImageDraw, ImageFont
-          import os
 
           W, H = 1080, 1350
           img = Image.new("RGB", (W, H), (8, 20, 28))
