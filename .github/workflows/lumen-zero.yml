@@ -51,10 +51,15 @@ jobs:
       LUMEN_RESEND_API_KEY: ${{ secrets.LUMEN_RESEND_API_KEY }}
       LUMEN_RESEND_FROM: ${{ secrets.LUMEN_RESEND_FROM }}
 
+      # Instagram Login API. Identity can be discovered from the access token at runtime.
       LUMEN_INSTAGRAM_ACCESS_TOKEN: ${{ secrets.LUMEN_INSTAGRAM_ACCESS_TOKEN }}
       LUMEN_INSTAGRAM_APP_SECRET: ${{ secrets.LUMEN_INSTAGRAM_APP_SECRET }}
       LUMEN_INSTAGRAM_USER_ID: ${{ secrets.LUMEN_INSTAGRAM_USER_ID }}
       LUMEN_INSTAGRAM_USERNAME: ${{ secrets.LUMEN_INSTAGRAM_USERNAME }}
+      LUMEN_META_GRAPH_VERSION: "v26.0"
+      LUMEN_INSTAGRAM_GRAPH_VERSION: "v26.0"
+      LUMEN_SOCIAL_LIVE_OUTBOUND: ${{ secrets.LUMEN_SOCIAL_LIVE_OUTBOUND }}
+
       LUMEN_WHATSAPP_ACCESS_TOKEN: ${{ secrets.LUMEN_WHATSAPP_ACCESS_TOKEN }}
       LUMEN_WHATSAPP_PHONE_NUMBER_ID: ${{ secrets.LUMEN_WHATSAPP_PHONE_NUMBER_ID }}
       LUMEN_WHATSAPP_TO: ${{ secrets.LUMEN_WHATSAPP_TO }}
@@ -101,6 +106,50 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: .lumen/runtime/requirements.txt
+
+      - name: Instagram connectivity preflight (no publish)
+        if: steps.preflight.outputs.ready == 'true'
+        continue-on-error: true
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+
+          token = os.getenv("LUMEN_INSTAGRAM_ACCESS_TOKEN", "").strip()
+          if not token:
+              print("INSTAGRAM_PREFLIGHT auth=not_configured")
+              raise SystemExit(0)
+
+          version = os.getenv("LUMEN_INSTAGRAM_GRAPH_VERSION", "v26.0").strip() or "v26.0"
+          params = urllib.parse.urlencode({"fields": "id,username", "access_token": token})
+          url = f"https://graph.instagram.com/{version}/me?{params}"
+          req = urllib.request.Request(url, headers={"Accept": "application/json", "User-Agent": "LUMEN-B2B/1.0"})
+
+          try:
+              with urllib.request.urlopen(req, timeout=20) as resp:
+                  data = json.loads(resp.read(12000).decode("utf-8", errors="replace") or "{}")
+              user_id = str(data.get("id") or data.get("user_id") or "").strip()
+              username = str(data.get("username") or "").strip()
+              if not user_id:
+                  print("INSTAGRAM_PREFLIGHT auth=failed reason=identity_missing")
+                  raise SystemExit(1)
+              env_path = os.environ["GITHUB_ENV"]
+              with open(env_path, "a", encoding="utf-8") as fh:
+                  fh.write(f"LUMEN_INSTAGRAM_USER_ID={user_id}\n")
+                  if username:
+                      fh.write(f"LUMEN_INSTAGRAM_USERNAME={username}\n")
+              print("INSTAGRAM_PREFLIGHT auth=ok identity=resolved publish_attempted=false")
+          except urllib.error.HTTPError as exc:
+              print(f"INSTAGRAM_PREFLIGHT auth=failed http_status={exc.code} publish_attempted=false")
+              raise SystemExit(1)
+          except Exception as exc:
+              print(f"INSTAGRAM_PREFLIGHT auth=failed type={type(exc).__name__} publish_attempted=false")
+              raise SystemExit(1)
+          PY
 
       - name: Mail connectivity preflight (no send)
         if: steps.preflight.outputs.ready == 'true'
