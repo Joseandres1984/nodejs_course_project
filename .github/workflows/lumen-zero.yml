@@ -6,12 +6,11 @@ on:
     paths:
       - ".github/workflows/lumen-zero.yml"
   schedule:
-    # Preserve the previous 10-minute operating cadence, staggered away from the top of the hour.
     - cron: "7,17,27,37,47,57 * * * *"
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: lumen-zero-production
@@ -27,7 +26,6 @@ jobs:
       LUMEN_D1_DATABASE_ID: ${{ secrets.LUMEN_D1_DATABASE_ID }}
       LUMEN_D1_API_TOKEN: ${{ secrets.LUMEN_D1_API_TOKEN }}
 
-      # Existing email connector migrated from Railway.
       LUMEN_SMTP_HOST: ${{ secrets.LUMEN_SMTP_HOST }}
       LUMEN_SMTP_PORT: ${{ secrets.LUMEN_SMTP_PORT }}
       LUMEN_SMTP_USER: ${{ secrets.LUMEN_SMTP_USER }}
@@ -40,32 +38,36 @@ jobs:
       LUMEN_IMAP_USER: ${{ secrets.LUMEN_IMAP_USER }}
       LUMEN_IMAP_PASSWORD: ${{ secrets.LUMEN_IMAP_PASSWORD }}
       LUMEN_LIVE_OUTBOUND: ${{ secrets.LUMEN_LIVE_OUTBOUND }}
-      # Legacy outbound_engine.py reads this older name; mirror the same operator switch.
       LUMEN_OUTBOUND_LIVE: ${{ secrets.LUMEN_LIVE_OUTBOUND }}
       LUMEN_DISCLOSE_AUTOMATION: ${{ secrets.LUMEN_DISCLOSE_AUTOMATION }}
 
-      # Optional API mail providers; SMTP remains the zero-cost fallback.
       LUMEN_BREVO_API_KEY: ${{ secrets.LUMEN_BREVO_API_KEY }}
       LUMEN_BREVO_FROM_EMAIL: ${{ secrets.LUMEN_BREVO_FROM_EMAIL }}
       LUMEN_BREVO_FROM_NAME: ${{ secrets.LUMEN_BREVO_FROM_NAME }}
       LUMEN_RESEND_API_KEY: ${{ secrets.LUMEN_RESEND_API_KEY }}
       LUMEN_RESEND_FROM: ${{ secrets.LUMEN_RESEND_FROM }}
 
-      # Instagram Login API. Identity can be discovered from the access token at runtime.
+      # Instagram Login API. The token resolves account identity during preflight.
       LUMEN_INSTAGRAM_ACCESS_TOKEN: ${{ secrets.LUMEN_INSTAGRAM_ACCESS_TOKEN }}
       LUMEN_INSTAGRAM_APP_SECRET: ${{ secrets.LUMEN_INSTAGRAM_APP_SECRET }}
       LUMEN_INSTAGRAM_USER_ID: ${{ secrets.LUMEN_INSTAGRAM_USER_ID }}
       LUMEN_INSTAGRAM_USERNAME: ${{ secrets.LUMEN_INSTAGRAM_USERNAME }}
       LUMEN_META_GRAPH_VERSION: "v26.0"
       LUMEN_INSTAGRAM_GRAPH_VERSION: "v26.0"
-      LUMEN_SOCIAL_LIVE_OUTBOUND: ${{ secrets.LUMEN_SOCIAL_LIVE_OUTBOUND }}
+      # Publishing is live, but instagram_publish_control still blocks every post without its
+      # explicit immutable approval record and keeps the daily canary ceiling.
+      LUMEN_SOCIAL_LIVE_OUTBOUND: "true"
+      # Enables operator replies when a reply is explicitly dispatched; no automatic DM send is added.
+      LUMEN_INSTAGRAM_SEND_ENABLED: "true"
+      LUMEN_PUBLIC_BASE_URL: "https://lumen-zero-public.joseandresceol1-jac.workers.dev"
 
+      # WhatsApp remains intentionally unconfigured until business verification is available.
       LUMEN_WHATSAPP_ACCESS_TOKEN: ${{ secrets.LUMEN_WHATSAPP_ACCESS_TOKEN }}
       LUMEN_WHATSAPP_PHONE_NUMBER_ID: ${{ secrets.LUMEN_WHATSAPP_PHONE_NUMBER_ID }}
       LUMEN_WHATSAPP_TO: ${{ secrets.LUMEN_WHATSAPP_TO }}
       LUMEN_MP_ACCESS_TOKEN: ${{ secrets.LUMEN_MP_ACCESS_TOKEN }}
 
-      # Explicitly no paid search provider is exposed to this runtime.
+      # Zero-cost discovery only. The shared governor preserves the hard bounded search policy.
       LUMEN_SCOUT_PROVIDER: "bing_rss_public"
       LUMEN_SCOUT_API_KEY: "zero-cost-no-secret-required"
       LUMEN_SCOUT_MARKET: "Argentina"
@@ -82,10 +84,11 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: lumen-zero
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Syntax check zero-cost adapters
         working-directory: .lumen/runtime
-        run: python3 -m py_compile d1_persistence_runtime.py instagram_webhook_d1_bridge_runtime.py zero_scout_runtime.py zero_entry.py
+        run: python3 -m py_compile d1_persistence_runtime.py instagram_webhook_d1_bridge_runtime.py zero_public_inquiry_bridge_runtime.py zero_instagram_assets.py zero_scout_runtime.py zero_entry.py
 
       - name: D1 preflight
         id: preflight
@@ -137,8 +140,7 @@ jobs:
               if not user_id:
                   print("INSTAGRAM_PREFLIGHT auth=failed reason=identity_missing")
                   raise SystemExit(1)
-              env_path = os.environ["GITHUB_ENV"]
-              with open(env_path, "a", encoding="utf-8") as fh:
+              with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as fh:
                   fh.write(f"LUMEN_INSTAGRAM_USER_ID={user_id}\n")
                   if username:
                       fh.write(f"LUMEN_INSTAGRAM_USERNAME={username}\n")
@@ -170,7 +172,6 @@ jobs:
           smtp_password = os.getenv("LUMEN_SMTP_PASSWORD", "")
           smtp_from = os.getenv("LUMEN_SMTP_FROM", "").strip()
           smtp_port_raw = os.getenv("LUMEN_SMTP_PORT", "587").strip() or "587"
-
           imap_host = os.getenv("LUMEN_IMAP_HOST", "").strip()
           imap_user = os.getenv("LUMEN_IMAP_USER", "").strip()
           imap_password = os.getenv("LUMEN_IMAP_PASSWORD", "")
@@ -178,46 +179,35 @@ jobs:
 
           print("MAIL_PREFLIGHT outbound_live=enabled" if truthy("LUMEN_LIVE_OUTBOUND") else "MAIL_PREFLIGHT outbound_live=disabled")
           print("MAIL_PREFLIGHT disclosure=enabled" if truthy("LUMEN_DISCLOSE_AUTOMATION", "true") else "MAIL_PREFLIGHT disclosure=disabled")
-
           smtp_ok = False
           imap_ok = False
-
           if all([smtp_host, smtp_user, smtp_password, smtp_from]):
               try:
-                  smtp_port = int(smtp_port_raw)
                   context = ssl.create_default_context()
+                  smtp_port = int(smtp_port_raw)
                   if truthy("LUMEN_SMTP_SSL"):
                       server = smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=20, context=context)
                   else:
                       server = smtplib.SMTP(smtp_host, smtp_port, timeout=20)
-                      server.ehlo()
-                      server.starttls(context=context)
-                      server.ehlo()
-                  server.login(smtp_user, smtp_password)
-                  server.quit()
+                      server.ehlo(); server.starttls(context=context); server.ehlo()
+                  server.login(smtp_user, smtp_password); server.quit()
                   smtp_ok = True
                   print("MAIL_PREFLIGHT smtp=ok")
               except Exception as exc:
                   print(f"MAIL_PREFLIGHT smtp=failed type={type(exc).__name__}")
           else:
               print("MAIL_PREFLIGHT smtp=not_configured")
-
           if all([imap_host, imap_user, imap_password]):
               try:
                   imap_port = int(imap_port_raw)
-                  if truthy("LUMEN_IMAP_SSL", "true"):
-                      client = imaplib.IMAP4_SSL(imap_host, imap_port, timeout=20)
-                  else:
-                      client = imaplib.IMAP4(imap_host, imap_port, timeout=20)
-                  client.login(imap_user, imap_password)
-                  client.logout()
+                  client = imaplib.IMAP4_SSL(imap_host, imap_port, timeout=20) if truthy("LUMEN_IMAP_SSL", "true") else imaplib.IMAP4(imap_host, imap_port, timeout=20)
+                  client.login(imap_user, imap_password); client.logout()
                   imap_ok = True
                   print("MAIL_PREFLIGHT imap=ok")
               except Exception as exc:
                   print(f"MAIL_PREFLIGHT imap=failed type={type(exc).__name__}")
           else:
               print("MAIL_PREFLIGHT imap=not_configured")
-
           if not (smtp_ok and imap_ok):
               raise SystemExit(1)
           PY
@@ -225,6 +215,26 @@ jobs:
       - name: Install runtime dependencies
         if: steps.preflight.outputs.ready == 'true'
         run: python -m pip install --disable-pip-version-check -r .lumen/runtime/requirements.txt
+
+      - name: Materialize Instagram media for approved pipeline
+        if: steps.preflight.outputs.ready == 'true'
+        working-directory: .lumen/runtime
+        run: python zero_instagram_assets.py
+
+      - name: Publish generated Instagram media to zero-cost public branch
+        if: steps.preflight.outputs.ready == 'true'
+        shell: bash
+        run: |
+          git config user.name "LUMEN Automation"
+          git config user.email "93448743+Joseandres1984@users.noreply.github.com"
+          git add .lumen/public/instagram || true
+          if git diff --cached --quiet; then
+            echo "INSTAGRAM_MEDIA changed=false"
+          else
+            git commit -m "Refresh LUMEN Instagram media"
+            git push origin HEAD:lumen-zero
+            echo "INSTAGRAM_MEDIA changed=true"
+          fi
 
       - name: Run LUMEN Zero cycle
         if: steps.preflight.outputs.ready == 'true'
