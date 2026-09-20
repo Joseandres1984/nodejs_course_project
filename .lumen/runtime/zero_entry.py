@@ -34,9 +34,10 @@ os.environ.setdefault("LUMEN_SOCIAL_CANARY_MAX_PER_CYCLE", "1")
 os.environ.setdefault("LUMEN_SOCIAL_CANARY_MAX_PER_DAY", "4")
 os.environ.setdefault("PYTHONHASHSEED", "0")
 
-# Install replacements before any production module captures app/scout functions.
+# Install replacements before any production module captures app/scout/mail functions.
 import d1_persistence_runtime  # noqa: F401,E402
 import zero_scout_runtime  # noqa: F401,E402
+import zero_mail_runtime  # noqa: F401,E402
 
 # Preserve the exact non-persistence production bootstrap order previously used by Railway.
 import search_budget_atomic_runtime  # noqa: F401,E402
