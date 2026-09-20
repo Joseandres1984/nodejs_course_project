@@ -85,7 +85,7 @@ jobs:
 
       - name: Syntax check zero-cost adapters
         working-directory: .lumen/runtime
-        run: python3 -m py_compile d1_persistence_runtime.py zero_scout_runtime.py zero_entry.py
+        run: python3 -m py_compile d1_persistence_runtime.py instagram_webhook_d1_bridge_runtime.py zero_scout_runtime.py zero_entry.py
 
       - name: D1 preflight
         id: preflight
