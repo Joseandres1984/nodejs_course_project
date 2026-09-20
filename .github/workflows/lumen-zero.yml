@@ -97,3 +97,5 @@ jobs:
         if: steps.preflight.outputs.ready == 'true'
         working-directory: .lumen/runtime
         run: python zero_entry.py
+
+      # Marker used only to trigger a safe live activation check after D1 secrets are installed.
