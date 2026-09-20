@@ -1,0 +1,42 @@
+name: LUMEN Zero Scheduler Keepalive
+
+on:
+  schedule:
+    # GitHub can disable scheduled workflows in inactive public repositories after 60 days.
+    # Once a week, create a no-op activity commit only if the repository has been idle for 45 days.
+    - cron: "31 11 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: lumen-zero-keepalive
+  cancel-in-progress: true
+
+jobs:
+  keep-scheduler-active:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Refresh repository activity only when needed
+        shell: bash
+        run: |
+          set -euo pipefail
+          last_commit_epoch="$(git log -1 --format=%ct)"
+          now_epoch="$(date +%s)"
+          age_days="$(( (now_epoch - last_commit_epoch) / 86400 ))"
+          echo "Repository age since last commit: ${age_days} days"
+          if (( age_days < 45 )); then
+            echo "No keepalive commit required."
+            exit 0
+          fi
+          git config user.name "lumen-zero-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit --allow-empty -m "chore: keep LUMEN Zero scheduler active"
+          git push origin HEAD:main
