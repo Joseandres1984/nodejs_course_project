@@ -1,6 +1,10 @@
 name: LUMEN Zero Runtime
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/lumen-zero.yml"
   schedule:
     # Preserve the previous 10-minute operating cadence, staggered away from the top of the hour.
     - cron: "7,17,27,37,47,57 * * * *"
