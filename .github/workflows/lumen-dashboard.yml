@@ -61,16 +61,26 @@ jobs:
         if: steps.preflight.outputs.ready == 'true'
         shell: bash
         run: |
+          base='https://lumen-zero-dashboard.joseandresceol1-jac.workers.dev'
           for i in {1..12}; do
-            code=$(curl -sS -u "socio:$LUMEN_DASHBOARD_PASSWORD" -o /tmp/lumen-dashboard-health.json -w '%{http_code}' 'https://lumen-zero-dashboard.joseandresceol1-jac.workers.dev/health' || true)
-            if [[ "$code" == "200" ]]; then
-              echo "LUMEN_UNIFIED_DASHBOARD health=ok auth=required"
-              cat /tmp/lumen-dashboard-health.json
+            health_code=$(curl -sS -u "socio:$LUMEN_DASHBOARD_PASSWORD" -o /tmp/lumen-health.json -w '%{http_code}' "$base/health" || true)
+            full_code=$(curl -sS -u "socio:$LUMEN_DASHBOARD_PASSWORD" -o /tmp/lumen-full.html -w '%{http_code}' "$base/full" || true)
+            state_code=$(curl -sS -u "socio:$LUMEN_DASHBOARD_PASSWORD" -o /tmp/lumen-full-state.json -w '%{http_code}' "$base/api/full-state" || true)
+            if [[ "$health_code" == "200" && "$full_code" == "200" && "$state_code" == "200" ]]; then
+              python - <<'PY'
+          import json
+          from pathlib import Path
+          html = Path('/tmp/lumen-full.html').read_text(errors='replace')
+          data = json.loads(Path('/tmp/lumen-full-state.json').read_text())
+          assert 'Centro de Comando Completo' in html
+          assert int((data.get('meta') or {}).get('root_keys') or 0) > 0
+          print('LUMEN_FULL_COMMAND_CENTER routes=ok d1_state=ok secret_scrubbed_api=ok')
+          PY
               exit 0
             fi
             sleep 5
           done
-          echo "LUMEN_UNIFIED_DASHBOARD health=failed"
+          echo "LUMEN_UNIFIED_DASHBOARD verification=failed health=$health_code full=$full_code state=$state_code"
           exit 1
 
-# deploy trigger: full command center restoration 2026-09-20
+# deploy trigger: full command center restoration verified 2026-09-20
