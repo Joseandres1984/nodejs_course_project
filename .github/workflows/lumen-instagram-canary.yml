@@ -1,0 +1,187 @@
+name: LUMEN Instagram Canary Publish
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/lumen-instagram-canary.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: lumen-instagram-canary-publish
+  cancel-in-progress: false
+
+jobs:
+  publish-canary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      LUMEN_INSTAGRAM_ACCESS_TOKEN: ${{ secrets.LUMEN_INSTAGRAM_ACCESS_TOKEN }}
+      LUMEN_INSTAGRAM_GRAPH_VERSION: "v26.0"
+      CANARY_IMAGE_URL: "https://raw.githubusercontent.com/Joseandres1984/nodejs_course_project/main/.lumen/public/lumen-instagram-canary.jpg"
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Pillow
+        run: python -m pip install --disable-pip-version-check pillow
+
+      - name: Generate LUMEN canary artwork
+        shell: bash
+        run: |
+          mkdir -p .lumen/public
+          python - <<'PY'
+          from PIL import Image, ImageDraw, ImageFont
+          import os
+
+          W, H = 1080, 1350
+          img = Image.new("RGB", (W, H), (8, 20, 28))
+          d = ImageDraw.Draw(img)
+          d.rounded_rectangle((70, 70, 1010, 1280), radius=45, fill=(13, 32, 42))
+          d.rounded_rectangle((95, 95, 985, 240), radius=28, fill=(218, 255, 102))
+
+          def font(size, bold=False):
+              path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+              return ImageFont.truetype(path, size)
+
+          d.text((130, 132), "LUMEN B2B", font=font(70, True), fill=(8, 20, 28))
+          d.text((125, 365), "INTELIGENCIA", font=font(82, True), fill=(236, 241, 244))
+          d.text((125, 458), "COMERCIAL", font=font(82, True), fill=(236, 241, 244))
+          for i, line in enumerate([
+              "Detectamos oportunidades.",
+              "Conectamos demanda y oferta.",
+              "Convertimos información en acción.",
+          ]):
+              d.text((125, 650 + i * 68), line, font=font(38), fill=(206, 220, 228))
+          d.text((125, 1015), "Sistema B2B en evolución continua", font=font(42, True), fill=(218, 255, 102))
+          d.text((125, 1095), "Argentina · 2026", font=font(32), fill=(164, 183, 194))
+          d.text((125, 1195), "@lumen.b2b", font=font(30), fill=(164, 183, 194))
+          img.save(".lumen/public/lumen-instagram-canary.jpg", "JPEG", quality=88, optimize=True, progressive=True)
+          PY
+
+      - name: Publish artwork to public repo path
+        shell: bash
+        run: |
+          git config user.name "LUMEN Automation"
+          git config user.email "93448743+Joseandres1984@users.noreply.github.com"
+          git add .lumen/public/lumen-instagram-canary.jpg
+          if git diff --cached --quiet; then
+            echo "CANARY_ASSET unchanged=true"
+          else
+            git commit -m "Add LUMEN Instagram canary artwork"
+            git push origin HEAD:main
+          fi
+
+      - name: Wait for public artwork
+        shell: bash
+        run: |
+          for i in {1..12}; do
+            code=$(curl -L -sS -o /tmp/lumen-canary.jpg -w '%{http_code}' "$CANARY_IMAGE_URL" || true)
+            ctype=$(file -b --mime-type /tmp/lumen-canary.jpg 2>/dev/null || true)
+            if [[ "$code" == "200" && "$ctype" == "image/jpeg" ]]; then
+              echo "CANARY_ASSET public=true mime=image/jpeg"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "CANARY_ASSET public=false"
+          exit 1
+
+      - name: Publish one approved Instagram canary
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import time
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+
+          token = os.getenv("LUMEN_INSTAGRAM_ACCESS_TOKEN", "").strip()
+          version = os.getenv("LUMEN_INSTAGRAM_GRAPH_VERSION", "v26.0").strip() or "v26.0"
+          image_url = os.environ["CANARY_IMAGE_URL"]
+          if not token:
+              print("INSTAGRAM_CANARY published=false reason=token_not_configured")
+              raise SystemExit(1)
+
+          def request_json(url, data=None):
+              body = urllib.parse.urlencode(data).encode() if data is not None else None
+              req = urllib.request.Request(url, data=body, headers={"Accept": "application/json", "User-Agent": "LUMEN-B2B/1.0"})
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as resp:
+                      return json.loads(resp.read(30000).decode("utf-8", errors="replace") or "{}")
+              except urllib.error.HTTPError as exc:
+                  raw = exc.read(12000).decode("utf-8", errors="replace")
+                  try:
+                      payload = json.loads(raw or "{}")
+                      err = payload.get("error") or {}
+                      print(f"INSTAGRAM_CANARY api_error status={exc.code} code={err.get('code')} type={err.get('type')}")
+                  except Exception:
+                      print(f"INSTAGRAM_CANARY api_error status={exc.code}")
+                  raise
+
+          me = request_json(
+              f"https://graph.instagram.com/{version}/me?" + urllib.parse.urlencode({"fields": "id,username", "access_token": token})
+          )
+          user_id = str(me.get("id") or "").strip()
+          if not user_id:
+              print("INSTAGRAM_CANARY published=false reason=identity_missing")
+              raise SystemExit(1)
+
+          caption = (
+              "LUMEN B2B está online.\n\n"
+              "Estamos construyendo un sistema de inteligencia comercial para detectar oportunidades, "
+              "conectar demanda y oferta y convertir información en acción.\n\n"
+              "#LumenB2B #B2B #InteligenciaComercial #Negocios #Argentina"
+          )
+
+          media = request_json(
+              f"https://graph.instagram.com/{version}/{urllib.parse.quote(user_id)}/media",
+              {"image_url": image_url, "caption": caption, "access_token": token},
+          )
+          creation_id = str(media.get("id") or "").strip()
+          if not creation_id:
+              print("INSTAGRAM_CANARY published=false reason=container_missing")
+              raise SystemExit(1)
+
+          ready = False
+          for _ in range(18):
+              status = request_json(
+                  f"https://graph.instagram.com/{version}/{urllib.parse.quote(creation_id)}?" +
+                  urllib.parse.urlencode({"fields": "status_code,status", "access_token": token})
+              )
+              code = str(status.get("status_code") or "").upper()
+              if code == "FINISHED":
+                  ready = True
+                  break
+              if code in {"ERROR", "EXPIRED"}:
+                  print(f"INSTAGRAM_CANARY published=false reason=container_{code.lower()}")
+                  raise SystemExit(1)
+              time.sleep(5)
+
+          if not ready:
+              print("INSTAGRAM_CANARY published=false reason=container_timeout")
+              raise SystemExit(1)
+
+          published = request_json(
+              f"https://graph.instagram.com/{version}/{urllib.parse.quote(user_id)}/media_publish",
+              {"creation_id": creation_id, "access_token": token},
+          )
+          post_id = str(published.get("id") or "").strip()
+          if not post_id:
+              print("INSTAGRAM_CANARY published=false reason=publish_id_missing")
+              raise SystemExit(1)
+
+          print(f"INSTAGRAM_CANARY published=true post_id={post_id}")
+          PY
