@@ -49,12 +49,20 @@ import instagram_webhook_d1_bridge_runtime  # noqa: F401,E402
 import zero_scout_runtime  # noqa: F401,E402
 import zero_mail_runtime  # noqa: F401,E402
 import zero_public_inquiry_bridge_runtime  # noqa: F401,E402
+import zero_instagram_control_bridge_runtime  # noqa: F401,E402
 
 # Fold public Worker inquiries into the canonical service pipeline before the commercial cycle.
 try:
     zero_public_inquiry_bridge_runtime.ingest_pending()
 except Exception as exc:
     print({"zero_public_inquiry_bridge": {"status": "degraded_fail_open", "error": f"{type(exc).__name__}: {str(exc)[:300]}"}}, flush=True)
+
+# Apply authenticated Instagram approve/reject commands before the production publishing control
+# is imported. Every command is revalidated against the current immutable content fingerprint.
+try:
+    zero_instagram_control_bridge_runtime.consume_commands()
+except Exception as exc:
+    print({"zero_instagram_control_consume": {"status": "degraded_fail_open", "error": f"{type(exc).__name__}: {str(exc)[:300]}"}}, flush=True)
 
 # Preserve the exact non-persistence production bootstrap order previously used by Railway.
 import search_budget_atomic_runtime  # noqa: F401,E402
@@ -84,3 +92,10 @@ except Exception as exc:
 
 # worker_entry executes the complete production cycle at import time, matching the Railway start.
 import worker_entry  # noqa: F401,E402
+
+# Export the final post projection after the cycle so the secure Cloudflare console always shows
+# the canonical approval/publication state rather than a stale pre-cycle snapshot.
+try:
+    zero_instagram_control_bridge_runtime.export_posts()
+except Exception as exc:
+    print({"zero_instagram_control_export": {"status": "degraded_fail_open", "error": f"{type(exc).__name__}: {str(exc)[:300]}"}}, flush=True)
