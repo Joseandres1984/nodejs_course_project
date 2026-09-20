@@ -51,6 +51,10 @@ import search_budget_atomic_runtime  # noqa: F401,E402
 # production runs in GitHub Actions and persists the same counters in D1, so patch the claim layer
 # without changing the existing hard daily cap or any verification/outreach gate.
 import zero_search_budget_runtime  # noqa: F401,E402
+# Public RSS discovery can surface forums/classifieds. Install a source-quality gate before any
+# production layer captures Deep Work/Partner Network functions; rejected sources remain auditable
+# but cannot become counterparties or consume commercial execution capacity.
+import zero_discovery_quality_runtime  # noqa: F401,E402
 import company_verification_scheduler_runtime  # noqa: F401,E402
 import company_identity_quality_runtime  # noqa: F401,E402
 import executive_secretary_log_bridge  # noqa: F401,E402
