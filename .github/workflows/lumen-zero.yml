@@ -1,0 +1,97 @@
+name: LUMEN Zero Runtime
+
+on:
+  schedule:
+    # Preserve the previous 10-minute operating cadence, staggered away from the top of the hour.
+    - cron: "7,17,27,37,47,57 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lumen-zero-production
+  cancel-in-progress: false
+
+jobs:
+  lumen-cycle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      LUMEN_ZERO_COST_MODE: "true"
+      LUMEN_D1_ACCOUNT_ID: ${{ secrets.LUMEN_D1_ACCOUNT_ID }}
+      LUMEN_D1_DATABASE_ID: ${{ secrets.LUMEN_D1_DATABASE_ID }}
+      LUMEN_D1_API_TOKEN: ${{ secrets.LUMEN_D1_API_TOKEN }}
+
+      # Optional existing communication connectors. Empty secrets simply leave that lane unavailable.
+      LUMEN_BREVO_API_KEY: ${{ secrets.LUMEN_BREVO_API_KEY }}
+      LUMEN_BREVO_FROM_EMAIL: ${{ secrets.LUMEN_BREVO_FROM_EMAIL }}
+      LUMEN_BREVO_FROM_NAME: ${{ secrets.LUMEN_BREVO_FROM_NAME }}
+      LUMEN_RESEND_API_KEY: ${{ secrets.LUMEN_RESEND_API_KEY }}
+      LUMEN_RESEND_FROM: ${{ secrets.LUMEN_RESEND_FROM }}
+      LUMEN_IMAP_HOST: ${{ secrets.LUMEN_IMAP_HOST }}
+      LUMEN_IMAP_PORT: ${{ secrets.LUMEN_IMAP_PORT }}
+      LUMEN_IMAP_SSL: ${{ secrets.LUMEN_IMAP_SSL }}
+      LUMEN_IMAP_USER: ${{ secrets.LUMEN_IMAP_USER }}
+      LUMEN_IMAP_PASSWORD: ${{ secrets.LUMEN_IMAP_PASSWORD }}
+      LUMEN_INSTAGRAM_ACCESS_TOKEN: ${{ secrets.LUMEN_INSTAGRAM_ACCESS_TOKEN }}
+      LUMEN_INSTAGRAM_APP_SECRET: ${{ secrets.LUMEN_INSTAGRAM_APP_SECRET }}
+      LUMEN_INSTAGRAM_USER_ID: ${{ secrets.LUMEN_INSTAGRAM_USER_ID }}
+      LUMEN_INSTAGRAM_USERNAME: ${{ secrets.LUMEN_INSTAGRAM_USERNAME }}
+      LUMEN_WHATSAPP_ACCESS_TOKEN: ${{ secrets.LUMEN_WHATSAPP_ACCESS_TOKEN }}
+      LUMEN_WHATSAPP_PHONE_NUMBER_ID: ${{ secrets.LUMEN_WHATSAPP_PHONE_NUMBER_ID }}
+      LUMEN_WHATSAPP_TO: ${{ secrets.LUMEN_WHATSAPP_TO }}
+      LUMEN_MP_ACCESS_TOKEN: ${{ secrets.LUMEN_MP_ACCESS_TOKEN }}
+
+      # Explicitly no paid search provider is exposed to this runtime.
+      LUMEN_SCOUT_PROVIDER: "bing_rss_public"
+      LUMEN_SCOUT_API_KEY: "zero-cost-no-secret-required"
+      LUMEN_SCOUT_MARKET: "Argentina"
+      LUMEN_SCOUT_GL: "ar"
+      LUMEN_SCOUT_HL: "es"
+      LUMEN_SCOUT_MAX_QUERIES: "2"
+      LUMEN_SCOUT_DAILY_BUDGET: "24"
+      LUMEN_PUBLIC_PROCUREMENT_MAX_QUERIES: "1"
+      LUMEN_PUBLIC_PROCUREMENT_DAILY_CAP: "8"
+      PYTHONHASHSEED: "0"
+
+    steps:
+      - name: D1 preflight
+        id: preflight
+        shell: bash
+        run: |
+          if [[ -n "$LUMEN_D1_ACCOUNT_ID" && -n "$LUMEN_D1_DATABASE_ID" && -n "$LUMEN_D1_API_TOKEN" ]]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "LUMEN Zero persistence credentials are configured."
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "LUMEN Zero is installed but waiting for the three D1 secrets; cycle skipped safely."
+          fi
+
+      - name: Checkout LUMEN Zero
+        if: steps.preflight.outputs.ready == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: lumen-zero
+
+      - name: Set up Python
+        if: steps.preflight.outputs.ready == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: .lumen/runtime/requirements.txt
+
+      - name: Install runtime dependencies
+        if: steps.preflight.outputs.ready == 'true'
+        run: python -m pip install --disable-pip-version-check -r .lumen/runtime/requirements.txt
+
+      - name: Compile zero-cost adapters
+        if: steps.preflight.outputs.ready == 'true'
+        working-directory: .lumen/runtime
+        run: python -m py_compile d1_persistence_runtime.py zero_scout_runtime.py zero_entry.py
+
+      - name: Run LUMEN Zero cycle
+        if: steps.preflight.outputs.ready == 'true'
+        working-directory: .lumen/runtime
+        run: python zero_entry.py
