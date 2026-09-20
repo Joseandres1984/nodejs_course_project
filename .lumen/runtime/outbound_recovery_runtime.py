@@ -2,15 +2,18 @@ from __future__ import annotations
 
 import json
 import os
+import smtplib
+import ssl
 import urllib.error
 import urllib.request
 from datetime import timedelta
 from typing import Any, Dict
 
+import mail_connector
 import outbound_engine
-from https_mail_transport import transport_status
+from https_mail_transport import SMTP_PLATFORM_BLOCKED, transport_status
 
-VERSION = "1.2-outbound-recovery"
+VERSION = "1.3-outbound-recovery"
 MAX_RECOVERY_PER_CYCLE = 2
 MAX_RECOVERY_RETRIES = 2
 _ORIGINAL_TICK = outbound_engine.outbound_engine_tick
@@ -51,15 +54,66 @@ def _successful_recent_contact(state: Dict[str, Any], email: str) -> bool:
 outbound_engine._recently_contacted = _successful_recent_contact
 
 
+def _smtp_auth_probe() -> Dict[str, Any]:
+    """Authenticate to the configured SMTP server without sending a message."""
+    if SMTP_PLATFORM_BLOCKED:
+        return {"ok": False, "provider": "smtp", "reason": "smtp_platform_blocked"}
+    status = mail_connector.connector_status()
+    if not status.get("smtp_configured"):
+        return {"ok": False, "provider": "smtp", "reason": "smtp_not_configured"}
+
+    route = "smtp_ssl" if mail_connector.SMTP_SSL else "smtp_starttls"
+    server = None
+    try:
+        context = ssl.create_default_context()
+        if mail_connector.SMTP_SSL:
+            server = smtplib.SMTP_SSL(
+                mail_connector.SMTP_HOST,
+                mail_connector.SMTP_PORT,
+                timeout=20,
+                context=context,
+            )
+        else:
+            server = smtplib.SMTP(mail_connector.SMTP_HOST, mail_connector.SMTP_PORT, timeout=20)
+            server.ehlo()
+            server.starttls(context=context)
+            server.ehlo()
+        server.login(mail_connector.SMTP_USER, mail_connector.SMTP_PASSWORD)
+        server.quit()
+        server = None
+        return {"ok": True, "provider": "smtp", "route": route, "reason": None}
+    except Exception as exc:
+        if server is not None:
+            try:
+                server.close()
+            except Exception:
+                pass
+        return {
+            "ok": False,
+            "provider": "smtp",
+            "route": route,
+            "reason": f"{type(exc).__name__}: {str(exc)[:400]}",
+        }
+
+
 def _provider_api_probe() -> Dict[str, Any]:
-    """Read-only provider probe so failed IP auth does not consume delivery retries."""
+    """Read-only transport probe so provider/auth failures do not consume delivery retries."""
     transport = transport_status()
     provider = str(transport.get("provider") or "")
     if not transport.get("ready"):
+        # The zero-cost runtime can use authenticated SMTP directly. Validate it without sending,
+        # instead of requiring a paid/third-party HTTPS mail provider just to clear readiness.
+        if not SMTP_PLATFORM_BLOCKED and mail_connector.connector_status().get("smtp_configured"):
+            return _smtp_auth_probe()
         return {"ok": False, "provider": provider or None, "reason": transport.get("reason") or "transport_not_configured"}
     if provider != "brevo":
         # Resend/custom providers do not currently require a separate IP-allowlist probe here.
-        return {"ok": True, "provider": provider or None, "reason": None}
+        return {
+            "ok": True,
+            "provider": provider or None,
+            "route": transport.get("route"),
+            "reason": None,
+        }
 
     api_key = os.getenv("LUMEN_BREVO_API_KEY", "").strip()
     if not api_key:
@@ -73,7 +127,13 @@ def _provider_api_probe() -> Dict[str, Any]:
         with urllib.request.urlopen(req, timeout=15) as resp:
             raw = resp.read(4000).decode("utf-8", errors="replace")
             if 200 <= int(resp.status) < 300:
-                return {"ok": True, "provider": "brevo", "http_status": int(resp.status), "reason": None}
+                return {
+                    "ok": True,
+                    "provider": "brevo",
+                    "route": transport.get("route"),
+                    "http_status": int(resp.status),
+                    "reason": None,
+                }
             return {"ok": False, "provider": "brevo", "http_status": int(resp.status), "reason": raw[:500]}
     except urllib.error.HTTPError as exc:
         raw = exc.read(4000).decode("utf-8", errors="replace") if exc.fp else ""
@@ -122,9 +182,10 @@ def recovery_outbound_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     report = dict(_ORIGINAL_TICK(state) or {})
     report["recovery_runtime_version"] = VERSION
     report["failed_messages_requeued"] = recovered
-    report["transport_ready_for_recovery"] = bool(transport_status().get("ready"))
+    report["transport_ready_for_recovery"] = bool(probe.get("ok"))
     report["provider_api_probe_ok"] = bool(probe.get("ok"))
     report["provider_api_probe_provider"] = probe.get("provider")
+    report["provider_api_probe_route"] = probe.get("route")
     report["provider_api_probe_http_status"] = probe.get("http_status")
     report["provider_api_probe_reason"] = probe.get("reason")
     report["recent_contact_policy"] = "sent_or_delivered_only"
