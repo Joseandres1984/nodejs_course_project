@@ -38,6 +38,7 @@ os.environ.setdefault("LUMEN_OUTBOUND_MAX_NEW_PER_DAY", "20")
 os.environ.setdefault("LUMEN_OUTBOUND_MAX_FOLLOWUPS_PER_CYCLE", "4")
 os.environ.setdefault("LUMEN_SOCIAL_CANARY_MAX_PER_CYCLE", "1")
 os.environ.setdefault("LUMEN_SOCIAL_CANARY_MAX_PER_DAY", "4")
+os.environ.setdefault("LUMEN_PUBLIC_BASE_URL", "https://lumen-zero-public.joseandresceol1-jac.workers.dev")
 os.environ.setdefault("PYTHONHASHSEED", "0")
 
 # Install replacements before any production module captures app/scout/mail functions.
@@ -47,6 +48,13 @@ import d1_persistence_runtime  # noqa: F401,E402
 import instagram_webhook_d1_bridge_runtime  # noqa: F401,E402
 import zero_scout_runtime  # noqa: F401,E402
 import zero_mail_runtime  # noqa: F401,E402
+import zero_public_inquiry_bridge_runtime  # noqa: F401,E402
+
+# Fold public Worker inquiries into the canonical service pipeline before the commercial cycle.
+try:
+    zero_public_inquiry_bridge_runtime.ingest_pending()
+except Exception as exc:
+    print({"zero_public_inquiry_bridge": {"status": "degraded_fail_open", "error": f"{type(exc).__name__}: {str(exc)[:300]}"}}, flush=True)
 
 # Preserve the exact non-persistence production bootstrap order previously used by Railway.
 import search_budget_atomic_runtime  # noqa: F401,E402
@@ -64,6 +72,15 @@ import executive_secretary_log_bridge  # noqa: F401,E402
 import revenue_os_v3_runtime  # noqa: F401,E402
 import revenue_os_v31_alignment_runtime  # noqa: F401,E402
 import communication_greeting_fix_runtime  # noqa: F401,E402
+
+# Development-mode Instagram apps cannot reliably receive public webhooks without Meta business
+# verification. Poll the authorized account read-only each cycle as the zero-cost inbox fallback;
+# messages are deduplicated and passed through the same Instagram Operator as signed webhooks.
+try:
+    import instagram_conversation_poller  # noqa: E402
+    instagram_conversation_poller.poll_once()
+except Exception as exc:
+    print({"instagram_conversation_poller": {"status": "degraded_fail_open", "error": f"{type(exc).__name__}: {str(exc)[:300]}"}}, flush=True)
 
 # worker_entry executes the complete production cycle at import time, matching the Railway start.
 import worker_entry  # noqa: F401,E402
