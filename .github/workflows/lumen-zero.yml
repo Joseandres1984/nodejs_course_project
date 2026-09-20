@@ -66,7 +66,15 @@ jobs:
       LUMEN_WHATSAPP_ACCESS_TOKEN: ${{ secrets.LUMEN_WHATSAPP_ACCESS_TOKEN }}
       LUMEN_WHATSAPP_PHONE_NUMBER_ID: ${{ secrets.LUMEN_WHATSAPP_PHONE_NUMBER_ID }}
       LUMEN_WHATSAPP_TO: ${{ secrets.LUMEN_WHATSAPP_TO }}
+
+      # Argentine collection rails. Mercado Pago is the preferred dynamic ARS rail. The generic
+      # bank-transfer fallback never stores CBU/CVU/alias data in Git or D1; those values enter
+      # the process only as encrypted Actions secrets.
       LUMEN_MP_ACCESS_TOKEN: ${{ secrets.LUMEN_MP_ACCESS_TOKEN }}
+      LUMEN_ARG_BANK_ARS_VERIFIED: ${{ secrets.LUMEN_ARG_BANK_ARS_VERIFIED }}
+      LUMEN_ARG_BANK_ARS_DESTINATION_LABEL: ${{ secrets.LUMEN_ARG_BANK_ARS_DESTINATION_LABEL }}
+      LUMEN_ARG_BANK_ARS_INSTRUCTIONS: ${{ secrets.LUMEN_ARG_BANK_ARS_INSTRUCTIONS }}
+      LUMEN_ARG_BANK_ARS_AUTO_PREPARE: ${{ secrets.LUMEN_ARG_BANK_ARS_AUTO_PREPARE }}
 
       # Zero-cost discovery only. The shared governor preserves the hard bounded search policy.
       LUMEN_SCOUT_PROVIDER: "bing_rss_public"
@@ -89,7 +97,7 @@ jobs:
 
       - name: Syntax check zero-cost adapters
         working-directory: .lumen/runtime
-        run: python3 -m py_compile d1_persistence_runtime.py instagram_webhook_d1_bridge_runtime.py zero_public_inquiry_bridge_runtime.py zero_instagram_control_bridge_runtime.py zero_instagram_assets.py zero_watchdog_runtime.py zero_notification_runtime.py zero_scout_runtime.py zero_entry.py
+        run: python3 -m py_compile d1_persistence_runtime.py instagram_webhook_d1_bridge_runtime.py zero_public_inquiry_bridge_runtime.py zero_instagram_control_bridge_runtime.py zero_instagram_assets.py zero_watchdog_runtime.py zero_notification_runtime.py zero_scout_runtime.py payment_rails.py multicurrency_runtime.py mercadopago_checkout.py zero_entry.py
 
       - name: D1 preflight
         id: preflight
@@ -102,14 +110,6 @@ jobs:
             echo "ready=false" >> "$GITHUB_OUTPUT"
             echo "LUMEN Zero is installed but waiting for the three D1 secrets; business cycle skipped safely."
           fi
-
-      - name: Set up Python
-        if: steps.preflight.outputs.ready == 'true'
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-          cache-dependency-path: .lumen/runtime/requirements.txt
 
       - name: Instagram connectivity preflight (no publish)
         if: steps.preflight.outputs.ready == 'true'
