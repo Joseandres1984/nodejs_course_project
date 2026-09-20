@@ -8,6 +8,13 @@ with the zero-cost D1 persistence and public Scout adapters.
 
 import os
 
+# GitHub Actions expands missing optional repository secrets as empty strings. Production modules
+# expect missing variables (so their own defaults apply), not values such as LUMEN_IMAP_PORT="".
+# Normalize every empty LUMEN variable before importing any runtime module.
+for _key in list(os.environ):
+    if _key.startswith("LUMEN_") and not str(os.environ.get(_key) or "").strip():
+        os.environ.pop(_key, None)
+
 # Hard policy: this entrypoint is always zero-cost. Search has a conservative daily frontier so
 # public providers are not hammered; existing evidence is reused by the normal LUMEN engines.
 os.environ["LUMEN_ZERO_COST_MODE"] = "true"
