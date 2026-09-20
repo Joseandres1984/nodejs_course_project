@@ -100,6 +100,74 @@ jobs:
           cache: pip
           cache-dependency-path: .lumen/runtime/requirements.txt
 
+      - name: Mail connectivity preflight (no send)
+        if: steps.preflight.outputs.ready == 'true'
+        continue-on-error: true
+        shell: bash
+        run: |
+          python - <<'PY'
+          import imaplib
+          import os
+          import smtplib
+          import ssl
+
+          def truthy(name, default="false"):
+              return os.getenv(name, default).strip().lower() == "true"
+
+          smtp_host = os.getenv("LUMEN_SMTP_HOST", "").strip()
+          smtp_user = os.getenv("LUMEN_SMTP_USER", "").strip()
+          smtp_password = os.getenv("LUMEN_SMTP_PASSWORD", "")
+          smtp_from = os.getenv("LUMEN_SMTP_FROM", "").strip()
+          smtp_port_raw = os.getenv("LUMEN_SMTP_PORT", "587").strip() or "587"
+
+          imap_host = os.getenv("LUMEN_IMAP_HOST", "").strip()
+          imap_user = os.getenv("LUMEN_IMAP_USER", "").strip()
+          imap_password = os.getenv("LUMEN_IMAP_PASSWORD", "")
+          imap_port_raw = os.getenv("LUMEN_IMAP_PORT", "993").strip() or "993"
+
+          smtp_ok = False
+          imap_ok = False
+
+          if all([smtp_host, smtp_user, smtp_password, smtp_from]):
+              try:
+                  smtp_port = int(smtp_port_raw)
+                  context = ssl.create_default_context()
+                  if truthy("LUMEN_SMTP_SSL"):
+                      server = smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=20, context=context)
+                  else:
+                      server = smtplib.SMTP(smtp_host, smtp_port, timeout=20)
+                      server.ehlo()
+                      server.starttls(context=context)
+                      server.ehlo()
+                  server.login(smtp_user, smtp_password)
+                  server.quit()
+                  smtp_ok = True
+                  print("MAIL_PREFLIGHT smtp=ok")
+              except Exception as exc:
+                  print(f"MAIL_PREFLIGHT smtp=failed type={type(exc).__name__}")
+          else:
+              print("MAIL_PREFLIGHT smtp=not_configured")
+
+          if all([imap_host, imap_user, imap_password]):
+              try:
+                  imap_port = int(imap_port_raw)
+                  if truthy("LUMEN_IMAP_SSL", "true"):
+                      client = imaplib.IMAP4_SSL(imap_host, imap_port, timeout=20)
+                  else:
+                      client = imaplib.IMAP4(imap_host, imap_port, timeout=20)
+                  client.login(imap_user, imap_password)
+                  client.logout()
+                  imap_ok = True
+                  print("MAIL_PREFLIGHT imap=ok")
+              except Exception as exc:
+                  print(f"MAIL_PREFLIGHT imap=failed type={type(exc).__name__}")
+          else:
+              print("MAIL_PREFLIGHT imap=not_configured")
+
+          if not (smtp_ok and imap_ok):
+              raise SystemExit(1)
+          PY
+
       - name: Install runtime dependencies
         if: steps.preflight.outputs.ready == 'true'
         run: python -m pip install --disable-pip-version-check -r .lumen/runtime/requirements.txt
