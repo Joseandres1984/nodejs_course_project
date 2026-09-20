@@ -23,7 +23,7 @@ os.environ["LUMEN_ZERO_COST_MODE"] = "true"
 import d1_persistence_runtime  # noqa: E402,F401
 import app as lumen_app  # noqa: E402
 
-ARCHIVE_PATH = Path(__file__).resolve().parents[1] / "recovery" / "railway_legacy_accounts_20260919.zlib.b64"
+ARCHIVE_PATH = Path(__file__).resolve().parents[1] / "recovery" / "railway_legacy_accounts_20260919_v2.zlib.b64"
 EXPECTED_SHA256 = "fd3a2342a601caf9454277229e7b69a77b5e30ae6015e6576bbf757552de85b1"
 RECOVERY_KEY = "railway_20260919"
 SNAPSHOT_AT = "2026-09-19T14:45:58Z"
