@@ -47,6 +47,10 @@ import zero_mail_runtime  # noqa: F401,E402
 
 # Preserve the exact non-persistence production bootstrap order previously used by Railway.
 import search_budget_atomic_runtime  # noqa: F401,E402
+# PostgreSQL-backed atomic claims fail closed once Railway/Postgres is gone. LUMEN Zero serializes
+# production runs in GitHub Actions and persists the same counters in D1, so patch the claim layer
+# without changing the existing hard daily cap or any verification/outreach gate.
+import zero_search_budget_runtime  # noqa: F401,E402
 import company_verification_scheduler_runtime  # noqa: F401,E402
 import company_identity_quality_runtime  # noqa: F401,E402
 import executive_secretary_log_bridge  # noqa: F401,E402
