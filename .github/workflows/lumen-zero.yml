@@ -27,17 +27,28 @@ jobs:
       LUMEN_D1_DATABASE_ID: ${{ secrets.LUMEN_D1_DATABASE_ID }}
       LUMEN_D1_API_TOKEN: ${{ secrets.LUMEN_D1_API_TOKEN }}
 
-      # Optional existing communication connectors. Empty secrets simply leave that lane unavailable.
-      LUMEN_BREVO_API_KEY: ${{ secrets.LUMEN_BREVO_API_KEY }}
-      LUMEN_BREVO_FROM_EMAIL: ${{ secrets.LUMEN_BREVO_FROM_EMAIL }}
-      LUMEN_BREVO_FROM_NAME: ${{ secrets.LUMEN_BREVO_FROM_NAME }}
-      LUMEN_RESEND_API_KEY: ${{ secrets.LUMEN_RESEND_API_KEY }}
-      LUMEN_RESEND_FROM: ${{ secrets.LUMEN_RESEND_FROM }}
+      # Existing email connector migrated from Railway.
+      LUMEN_SMTP_HOST: ${{ secrets.LUMEN_SMTP_HOST }}
+      LUMEN_SMTP_PORT: ${{ secrets.LUMEN_SMTP_PORT }}
+      LUMEN_SMTP_USER: ${{ secrets.LUMEN_SMTP_USER }}
+      LUMEN_SMTP_PASSWORD: ${{ secrets.LUMEN_SMTP_PASSWORD }}
+      LUMEN_SMTP_FROM: ${{ secrets.LUMEN_SMTP_FROM }}
+      LUMEN_SMTP_SSL: ${{ secrets.LUMEN_SMTP_SSL }}
       LUMEN_IMAP_HOST: ${{ secrets.LUMEN_IMAP_HOST }}
       LUMEN_IMAP_PORT: ${{ secrets.LUMEN_IMAP_PORT }}
       LUMEN_IMAP_SSL: ${{ secrets.LUMEN_IMAP_SSL }}
       LUMEN_IMAP_USER: ${{ secrets.LUMEN_IMAP_USER }}
       LUMEN_IMAP_PASSWORD: ${{ secrets.LUMEN_IMAP_PASSWORD }}
+      LUMEN_LIVE_OUTBOUND: ${{ secrets.LUMEN_LIVE_OUTBOUND }}
+      LUMEN_DISCLOSE_AUTOMATION: ${{ secrets.LUMEN_DISCLOSE_AUTOMATION }}
+
+      # Optional API mail providers; SMTP remains the zero-cost fallback.
+      LUMEN_BREVO_API_KEY: ${{ secrets.LUMEN_BREVO_API_KEY }}
+      LUMEN_BREVO_FROM_EMAIL: ${{ secrets.LUMEN_BREVO_FROM_EMAIL }}
+      LUMEN_BREVO_FROM_NAME: ${{ secrets.LUMEN_BREVO_FROM_NAME }}
+      LUMEN_RESEND_API_KEY: ${{ secrets.LUMEN_RESEND_API_KEY }}
+      LUMEN_RESEND_FROM: ${{ secrets.LUMEN_RESEND_FROM }}
+
       LUMEN_INSTAGRAM_ACCESS_TOKEN: ${{ secrets.LUMEN_INSTAGRAM_ACCESS_TOKEN }}
       LUMEN_INSTAGRAM_APP_SECRET: ${{ secrets.LUMEN_INSTAGRAM_APP_SECRET }}
       LUMEN_INSTAGRAM_USER_ID: ${{ secrets.LUMEN_INSTAGRAM_USER_ID }}
@@ -97,5 +108,3 @@ jobs:
         if: steps.preflight.outputs.ready == 'true'
         working-directory: .lumen/runtime
         run: python zero_entry.py
-
-      # Marker used only to trigger a safe live activation check after D1 secrets are installed.
