@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Tuple
 
 import agent_network_runtime as _base
 
 
-VERSION = "1.5-a2a-seller-discovery"
+VERSION = "1.6-a2a-autonomous-seller-outreach"
 REPROBE_AFTER_HOURS = 72
+MACHINE_CATALOG_URL = "https://lumen-zero-a2a.joseandresceol1-jac.workers.dev/machine/catalog"
+SERVICE_CATALOG_URL = "https://lumen-zero-a2a.joseandresceol1-jac.workers.dev/seller/catalog"
 _ORIGINAL_REGISTRY_CARD_URL = _base._registry_card_url
 _ORIGINAL_AGENT_NETWORK_TICK = _base.agent_network_tick
 _ORIGINAL_HANDSHAKE_SAFE = _base._autonomous_handshake_safe
@@ -53,40 +56,32 @@ def _account_domain(account: Dict[str, Any]) -> str:
     return ""
 
 
-def _candidate_domains_accelerated(
-    state: Dict[str, Any], probed: Dict[str, Any]
-) -> List[Tuple[str, Dict[str, Any]]]:
+def _candidate_domains_accelerated(state: Dict[str, Any], probed: Dict[str, Any]) -> List[Tuple[str, Dict[str, Any]]]:
     rows: List[Tuple[str, Dict[str, Any], float]] = []
     seen: set[str] = set()
-
     for account in state.get("candidate_accounts", []) or []:
         if not isinstance(account, dict):
             continue
         if account.get("type") != "supplier" or not account.get("verified_company"):
             continue
-
         domain = _account_domain(account)
         if not domain or domain in seen:
             continue
         if domain in probed and not _eligible_again(probed.get(domain)):
             continue
-
         seen.add(domain)
         try:
             score = float(account.get("score") or account.get("outbound_score") or 0.0)
         except (TypeError, ValueError):
             score = 0.0
-
         contact_bonus = 25.0 if account.get("verified_contact") else 0.0
         official_bonus = 10.0 if account.get("official_domain") else 0.0
         rows.append((domain, account, score + contact_bonus + official_bonus))
-
     rows.sort(key=lambda row: row[2], reverse=True)
     return [(domain, account) for domain, account, _ in rows[: _base.MAX_PROBES_PER_TICK]]
 
 
 def _registry_card_url_current(row: Dict[str, Any]) -> str:
-    """Accept the registry's current manifestUrl field without weakening URL safety."""
     for key in ("manifestUrl", "manifest_url"):
         value = str(row.get(key) or "").strip()
         if value:
@@ -99,11 +94,7 @@ def _card_text(card: Dict[str, Any]) -> str:
         str(card.get("name") or ""),
         str(card.get("description") or ""),
         " ".join(
-            str(skill.get("name") or "")
-            + " "
-            + str(skill.get("description") or "")
-            + " "
-            + " ".join(skill.get("tags") or [])
+            str(skill.get("name") or "") + " " + str(skill.get("description") or "") + " " + " ".join(skill.get("tags") or [])
             for skill in card.get("skills", []) or []
             if isinstance(skill, dict)
         ),
@@ -119,15 +110,16 @@ def _buyer_intent_score(card: Dict[str, Any]) -> int:
     text = _card_text(card)
     score = 0
     for token, points in (
-        ("procurement", 25),
-        ("buyer", 25),
-        ("buying", 20),
-        ("rfq", 20),
-        ("sourcing", 15),
+        ("procurement", 30),
+        ("buyer", 30),
+        ("buying", 25),
+        ("rfq", 25),
+        ("sourcing", 20),
         ("purchase", 15),
         ("supplier discovery", 15),
-        ("x402", 10),
-        ("payment", 5),
+        ("mcp", 10),
+        ("x402", 15),
+        ("payment", 8),
     ):
         if token in text:
             score += points
@@ -135,18 +127,57 @@ def _buyer_intent_score(card: Dict[str, Any]) -> int:
 
 
 def _seller_only_handshake_safe(card: Dict[str, Any]) -> Tuple[bool, str]:
-    """Allow discovery/handshake with payment-capable peers without granting spend authority.
-
-    The base handshake is informational and non-binding: it never invokes a remote payment,
-    checkout, wallet or contract method. Therefore a remote Agent Card mentioning payments/x402
-    is useful seller-side information, not by itself a reason to block a capability handshake.
-    Authenticated calls remain blocked, and every buyer-side financial action remains forbidden.
-    """
     if card.get("securityRequirements") or card.get("securitySchemes"):
         return False, "auth_required"
     if _remote_payment_capable(card):
         return True, "seller_only_payment_capable_peer"
     return _ORIGINAL_HANDSHAKE_SAFE(card)
+
+
+def _seller_handshake(card: Dict[str, Any], source_domain: str, account: Dict[str, Any] | None = None, discovery_source: str = "verified_supplier_domain") -> Tuple[Dict[str, Any] | None, str]:
+    safe, safe_reason = _seller_only_handshake_safe(card)
+    if not safe:
+        return None, safe_reason
+    interface = next((x for x in card.get("supportedInterfaces", []) if x.get("protocolBinding") == "JSONRPC"), None)
+    if not interface:
+        return None, "no_jsonrpc_interface"
+
+    account = account or {}
+    version = str(interface.get("protocolVersion") or card.get("protocolVersion") or "1.0")
+    legacy = version.startswith("0.3")
+    context_id = str(uuid.uuid4())
+    message_id = str(uuid.uuid4())
+    text = (
+        "Hello. We are LUMEN B2B, a seller-side sourcing and commercial-intelligence agent. "
+        "We offer machine-consumable B2B services for procurement, supplier verification, quotation review, tender discovery, sourcing, buyer signals and export research. "
+        "Our current Machine Store starts at USD 5 per focused request, while larger fixed-scope services start at USD 59. "
+        f"Machine catalog: {MACHINE_CATALOG_URL} . Full service catalog: {SERVICE_CATALOG_URL} . "
+        "If your agent has a current procurement, sourcing, RFQ, supplier-verification or market-research need, it can inspect the catalogs and request a non-binding quote through LUMEN's A2A endpoint. "
+        "No purchase or payment is authorized by this message, and LUMEN has no autonomous outgoing-spend authority."
+    )
+    metadata = {
+        "sender": "LUMEN B2B Agent",
+        "purpose": "seller_capability_offer",
+        "discoverySource": discovery_source,
+        "machineCatalogUrl": MACHINE_CATALOG_URL,
+        "serviceCatalogUrl": SERVICE_CATALOG_URL,
+        "machinePriceFloorUsd": "5",
+        "servicePriceFloorUsd": "59",
+        "sellerMode": "receive_revenue_only",
+        "bindingActionsHumanGated": True,
+        "lumenAutonomousSpend": False,
+    }
+    if account:
+        metadata["supplierCompany"] = str(account.get("company_name") or account.get("name_hint") or "")[:180]
+
+    if legacy:
+        message = {"messageId": message_id, "contextId": context_id, "role": "user", "parts": [{"kind": "text", "text": text}], "metadata": metadata}
+        method = "message/send"
+    else:
+        message = {"messageId": message_id, "contextId": context_id, "role": "ROLE_USER", "parts": [{"text": text, "mediaType": "text/plain"}], "metadata": metadata}
+        method = "SendMessage"
+    payload = {"jsonrpc": "2.0", "id": str(uuid.uuid4()), "method": method, "params": {"message": message}}
+    return _base._safe_post_json(interface["url"], source_domain, payload, version)
 
 
 def _safe_diagnostic_row(row: Dict[str, Any]) -> Dict[str, Any]:
@@ -216,6 +247,8 @@ def _agent_network_tick_with_diagnostics(state: Dict[str, Any]) -> Dict[str, Any
             for x in handshake_rows[-5:]
         ],
         "seller_mode": True,
+        "autonomous_nonbinding_offer": True,
+        "machine_catalog_url": MACHINE_CATALOG_URL,
         "payment_capable_peer_discovery_allowed": True,
         "remote_payment_capability_does_not_grant_spend_authority": True,
         "paid_remote_execution_blocked": True,
@@ -226,18 +259,22 @@ def _agent_network_tick_with_diagnostics(state: Dict[str, Any]) -> Dict[str, Any
     }
     network["seller_mode"] = {
         "status": "active",
-        "mode": "receive_revenue_only",
+        "mode": "discover_offer_quote_receive_revenue",
         "seller_targets": seller_targets[-20:],
         "seller_targets_total": len(seller_targets),
         "remote_payment_capable_total": payment_capable,
+        "machine_catalog_url": MACHINE_CATALOG_URL,
+        "service_catalog_url": SERVICE_CATALOG_URL,
+        "autonomous_nonbinding_offer": True,
         "autonomous_spend": False,
         "autonomous_purchase": False,
         "binding_acceptance": False,
-        "objective": "discover machine buyers and sell productized LUMEN services without buyer-side spend authority",
+        "objective": "find machine buyers and sell productized LUMEN services while preserving zero outgoing-spend authority",
     }
     guardrails = network.setdefault("guardrails", {})
     guardrails.update({
         "seller_mode": True,
+        "autonomous_nonbinding_offer": True,
         "payment_capable_peer_discovery_allowed": True,
         "paid_remote_execution_blocked": True,
         "autonomous_purchase": False,
@@ -250,30 +287,23 @@ def _agent_network_tick_with_diagnostics(state: Dict[str, Any]) -> Dict[str, Any
     return network
 
 
-# Seller Mode keeps the proven high-intent procurement query while removing one overly broad
-# discovery blocker: a peer may advertise x402/payment capability and still receive our harmless,
-# non-binding capability handshake. LUMEN never invokes those financial methods and never spends.
 _base._candidate_domains = _candidate_domains_accelerated
 _base._registry_card_url = _registry_card_url_current
 _base._autonomous_handshake_safe = _seller_only_handshake_safe
-_base.REGISTRY_QUERIES = ("procurement",)
+_base._handshake = _seller_handshake
+_base.REGISTRY_QUERIES = ("procurement", "sourcing", "buyer", "x402")
 _base.agent_network_tick = _agent_network_tick_with_diagnostics
 
 print({
     "agent_network_accelerator_runtime": {
         "version": VERSION,
         "status": "active",
-        "official_domain_enabled": True,
-        "email_domain_fallback_enabled": True,
-        "verified_contact_priority": True,
-        "registry_keyword_mode": "procurement_seller_mode",
+        "seller_mode": True,
+        "autonomous_nonbinding_offer": True,
+        "machine_catalog": MACHINE_CATALOG_URL,
+        "registry_keyword_mode": "rotating_high_intent",
         "registry_manifest_url_compat": True,
         "handshake_diagnostics": True,
-        "seller_mode": True,
-        "payment_capable_peer_discovery_allowed": True,
-        "paid_remote_execution_blocked": True,
-        "autonomous_spend": False,
-        "registry_queries_per_tick_changed": False,
         "reprobe_after_hours": REPROBE_AFTER_HOURS,
         "probe_cap_changed": False,
         "handshake_cap_changed": False,
