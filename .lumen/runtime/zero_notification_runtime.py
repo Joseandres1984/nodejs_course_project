@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-"""Owner notification fallback for LUMEN Zero.
+"""Internal owner notifications for LUMEN Zero.
 
-WhatsApp remains optional because Meta business verification is unavailable. IMPORTANT/CRITICAL
-internal owner events therefore get a bounded Gmail SMTP fallback. These messages go only to the
-configured LUMEN mailbox, never to prospects, and do not alter commercial outbound authority.
+WhatsApp is intentionally retired from the Zero runtime. IMPORTANT/CRITICAL owner events are sent
+through the already-configured internal email route, while INFO events remain visible in the Command
+Center. This module does not alter commercial outbound authority.
 """
 
 import smtplib
@@ -14,9 +14,8 @@ from typing import Any, Dict
 import mail_connector
 import notification_router
 
-VERSION = "1.0-zero-owner-email-fallback"
+VERSION = "2.0-owner-email-primary"
 MAX_EMAILS_PER_TICK = 3
-_original_tick = notification_router.notification_router_tick
 
 
 def _send_owner(event: Dict[str, Any]) -> Dict[str, Any]:
@@ -51,49 +50,87 @@ def _send_owner(event: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def zero_notification_router_tick(state: Dict[str, Any]) -> Dict[str, Any]:
-    report = dict(_original_tick(state) or {})
-    wa_ready = bool(((report.get("status") or {}).get("delivery_ready")))
+    # Reuse the existing evidence-backed event discovery, but bypass the WhatsApp transport entirely.
+    discovered = notification_router._discover(state)
     email_sent = email_failed = 0
-    # Use email as the active internal notification route only while WhatsApp is unavailable.
-    # Keep events queued, so a future authorized WhatsApp connector can still deliver them once.
-    if not wa_ready:
-        for event in state.get("notification_events", []) or []:
-            if email_sent >= MAX_EMAILS_PER_TICK:
-                break
-            if str(event.get("severity") or "").upper() not in {"IMPORTANT", "CRITICAL"}:
-                continue
-            if event.get("owner_email_sent_at"):
-                continue
-            if event.get("delivery_status") not in {"queued", "retry"}:
-                continue
-            result = _send_owner(event)
-            event["owner_email_attempts"] = int(event.get("owner_email_attempts") or 0) + 1
-            event["owner_email_last_attempt_at"] = notification_router.utcnow()
-            if result.get("ok"):
-                event["owner_email_sent_at"] = notification_router.utcnow()
-                event.pop("owner_email_last_error", None)
-                email_sent += 1
-            else:
-                event["owner_email_last_error"] = result.get("error")
-                email_failed += 1
-    report["channel"] = "whatsapp" if wa_ready else "email_fallback"
-    report["owner_email_fallback"] = {
-        "version": VERSION,
-        "active": not wa_ready,
-        "configured": bool(mail_connector.SMTP_HOST and mail_connector.SMTP_USER and mail_connector.SMTP_PASSWORD),
+    configured = bool(mail_connector.SMTP_HOST and mail_connector.SMTP_USER and mail_connector.SMTP_PASSWORD)
+
+    for event in state.get("notification_events", []) or []:
+        if email_sent >= MAX_EMAILS_PER_TICK:
+            break
+        if str(event.get("severity") or "").upper() not in {"IMPORTANT", "CRITICAL"}:
+            continue
+        if event.get("owner_email_sent_at"):
+            continue
+        if event.get("delivery_status") not in {"queued", "retry", "email_pending"}:
+            continue
+        result = _send_owner(event)
+        event["owner_email_attempts"] = int(event.get("owner_email_attempts") or 0) + 1
+        event["owner_email_last_attempt_at"] = notification_router.utcnow()
+        if result.get("ok"):
+            event["owner_email_sent_at"] = notification_router.utcnow()
+            event["delivery_status"] = "email_sent"
+            event.pop("owner_email_last_error", None)
+            event.pop("last_error", None)
+            email_sent += 1
+        else:
+            event["owner_email_last_error"] = result.get("error")
+            event["delivery_status"] = "email_pending"
+            email_failed += 1
+
+    events = state.get("notification_events", []) or []
+    report = {
+        "updated_at": notification_router.utcnow(),
+        "channel": "email_internal",
+        "status": {
+            "delivery_ready": configured,
+            "email_configured": configured,
+            "whatsapp_retired": True,
+            "command_center_url": notification_router.COMMAND_CENTER_URL,
+            "secrets_exposed": False,
+        },
+        "discovered": discovered,
+        "events_total": len(events),
+        "queued_for_email": sum(
+            1 for x in events
+            if str(x.get("severity") or "").upper() in {"IMPORTANT", "CRITICAL"}
+            and not x.get("owner_email_sent_at")
+            and x.get("delivery_status") in {"queued", "retry", "email_pending"}
+        ),
+        "sent_total": sum(1 for x in events if x.get("owner_email_sent_at")),
         "sent_this_tick": email_sent,
         "failed_this_tick": email_failed,
-        "max_per_tick": MAX_EMAILS_PER_TICK,
-        "recipient_exposed": False,
-        "commercial_outbound_authority_changed": False,
+        "recent": list(reversed(events[-12:])),
+        "policy": {
+            "INFO": "solo Command Center",
+            "IMPORTANT": "email interno",
+            "CRITICAL": "email interno prioritario + Command Center",
+            "max_email_per_tick": MAX_EMAILS_PER_TICK,
+            "deduplication": "un evento estable se notifica una sola vez",
+            "whatsapp": "retired_by_owner_decision",
+        },
+        "owner_email_fallback": {
+            "version": VERSION,
+            "active": True,
+            "configured": configured,
+            "sent_this_tick": email_sent,
+            "failed_this_tick": email_failed,
+            "max_per_tick": MAX_EMAILS_PER_TICK,
+            "recipient_exposed": False,
+            "commercial_outbound_authority_changed": False,
+        },
     }
-    policy = dict(report.get("policy") or {})
-    policy["IMPORTANT"] = "email interno mientras WhatsApp no esté disponible"
-    policy["CRITICAL"] = "email interno prioritario + Command Center mientras WhatsApp no esté disponible"
-    report["policy"] = policy
     state["notification_router"] = report
     return report
 
 
 notification_router.notification_router_tick = zero_notification_router_tick
-print({"zero_notification_runtime": {"status": "installed", "version": VERSION, "recipient_exposed": False}}, flush=True)
+print({
+    "zero_notification_runtime": {
+        "status": "installed",
+        "version": VERSION,
+        "primary_channel": "email_internal",
+        "whatsapp_retired": True,
+        "recipient_exposed": False,
+    }
+}, flush=True)
