@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Tuple
 import agent_network_runtime as _base
 
 
-VERSION = "1.2-a2a-discovery-accelerator"
+VERSION = "1.3-a2a-discovery-accelerator"
 REPROBE_AFTER_HOURS = 72
 _ORIGINAL_REGISTRY_CARD_URL = _base._registry_card_url
 
@@ -29,8 +29,6 @@ def _eligible_again(probed_row: Any) -> bool:
     if not isinstance(probed_row, dict):
         return True
     status = str(probed_row.get("status") or "")
-    # Successful discovery should not be repeatedly probed. Failed/not-found domains
-    # may become A2A-capable later, so allow a bounded refresh after 72 hours.
     if status == "agent_card_found":
         return False
     ts = _parse_ts(probed_row.get("ts"))
@@ -77,9 +75,6 @@ def _candidate_domains_accelerated(
         except (TypeError, ValueError):
             score = 0.0
 
-        # Prefer suppliers whose company and commercial contact are already verified,
-        # then use the existing account score. This changes selection quality only;
-        # the base runtime still enforces its original per-cycle probe/handshake caps.
         contact_bonus = 25.0 if account.get("verified_contact") else 0.0
         official_bonus = 10.0 if account.get("official_domain") else 0.0
         rows.append((domain, account, score + contact_bonus + official_bonus))
@@ -89,13 +84,7 @@ def _candidate_domains_accelerated(
 
 
 def _registry_card_url_current(row: Dict[str, Any]) -> str:
-    """Accept the registry's current manifestUrl field without weakening URL safety.
-
-    URL scheme/host/public-IP and same-domain interface checks remain enforced later by
-    agent_network_runtime._safe_get_json and _validate_card. GitHub blob URLs are intentionally
-    not rewritten to raw content here; if a registry entry does not expose JSON directly it simply
-    fails closed and another candidate can be evaluated.
-    """
+    """Accept the registry's current manifestUrl field without weakening URL safety."""
     for key in ("manifestUrl", "manifest_url"):
         value = str(row.get(key) or "").strip()
         if value:
@@ -103,21 +92,13 @@ def _registry_card_url_current(row: Dict[str, Any]) -> str:
     return _ORIGINAL_REGISTRY_CARD_URL(row)
 
 
-# Monkey-patch only candidate selection, registry card-field compatibility and registry keywords.
-# Network caps, SSRF protections, auth/payment blocks and binding-action guardrails remain unchanged.
+# Bootstrap on the registry query proven to return commercial/procurement agents. Keeping a single
+# high-intent term avoids wasting the one public-registry query permitted per cycle on low-yield
+# wording while LUMEN has no peers yet. Seen-domain memory still prevents repeated handshakes.
+# Once peers exist, the base network can continue probing verified supplier domains as before.
 _base._candidate_domains = _candidate_domains_accelerated
 _base._registry_card_url = _registry_card_url_current
-_base.REGISTRY_QUERIES = (
-    "procurement",
-    "sourcing",
-    "supplier",
-    "manufacturing",
-    "logistics",
-    "commerce",
-    "business",
-    "RFQ",
-    "trade",
-)
+_base.REGISTRY_QUERIES = ("procurement",)
 
 print({
     "agent_network_accelerator_runtime": {
@@ -126,8 +107,9 @@ print({
         "official_domain_enabled": True,
         "email_domain_fallback_enabled": True,
         "verified_contact_priority": True,
-        "registry_keyword_mode": "single_high_intent_terms",
+        "registry_keyword_mode": "procurement_bootstrap",
         "registry_manifest_url_compat": True,
+        "registry_queries_per_tick_changed": False,
         "reprobe_after_hours": REPROBE_AFTER_HOURS,
         "probe_cap_changed": False,
         "handshake_cap_changed": False,
