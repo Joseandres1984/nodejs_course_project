@@ -36,28 +36,24 @@ async function normalizeResponse(upstream, origin, {rewriteBody=true}={}) {
   headers.set("x-lumen-public-gateway", "unified");
 
   const type = headers.get("content-type") || "";
-  if (rewriteBody && type.includes("text/html")) {
-    const text = rewriteHtml(await upstream.text(), origin);
-    return new Response(text, {status:upstream.status, headers});
-  }
-  if (rewriteBody && type.includes("application/json")) {
+  if (rewriteBody && (type.includes("text/html") || type.includes("application/json"))) {
     const text = rewriteHtml(await upstream.text(), origin);
     return new Response(text, {status:upstream.status, headers});
   }
   return new Response(upstream.body, {status:upstream.status, headers});
 }
 
-async function proxy(request, base, targetPath, origin, rewriteBody=true) {
-  const incoming = new URL(request.url);
-  const target = new URL(targetPath + incoming.search, base);
-  const init = {
-    method: request.method,
-    headers: new Headers(request.headers),
-    redirect: "manual",
-  };
+async function proxyBinding(request, binding, targetPath, origin, rewriteBody=true) {
+  if (!binding || typeof binding.fetch !== "function") {
+    return Response.json({ok:false,error:"internal_service_unavailable"},{status:503});
+  }
+  const target = new URL(request.url);
+  target.pathname = targetPath;
+  const headers = new Headers(request.headers);
+  headers.set("x-lumen-public-origin", origin);
+  const init = {method:request.method,headers,redirect:"manual"};
   if (!["GET","HEAD"].includes(request.method)) init.body = request.body;
-  init.headers.set("x-lumen-public-origin", origin);
-  const upstream = await fetch(new Request(target.toString(), init));
+  const upstream = await binding.fetch(new Request(target.toString(), init));
   return normalizeResponse(upstream, origin, {rewriteBody});
 }
 
@@ -67,26 +63,26 @@ export default {
     const path = url.pathname.replace(/\/+$/, "") || "/";
     const origin = url.origin;
 
-    // One human-facing storefront. Conversion remains an internal service.
+    // One human-facing storefront. Conversion remains an internal service binding.
     if (request.method === "GET" && (path === "/store" || path === "/catalog")) {
-      return proxy(request, CONVERSION_BASE, "/catalog", origin, true);
+      return proxyBinding(request, env.CONVERSION, "/catalog", origin, true);
     }
     if (request.method === "GET" && path === "/store.json") {
-      return proxy(request, CONVERSION_BASE, "/catalog.json", origin, true);
+      return proxyBinding(request, env.CONVERSION, "/catalog.json", origin, true);
     }
     if (/^\/offer\/[a-z0-9-]+$/.test(path) && request.method === "GET") {
-      return proxy(request, CONVERSION_BASE, path, origin, true);
+      return proxyBinding(request, env.CONVERSION, path, origin, true);
     }
     if (/^\/go\/[a-z0-9-]+$/.test(path) && request.method === "GET") {
-      return proxy(request, CONVERSION_BASE, path, origin, false);
+      return proxyBinding(request, env.CONVERSION, path, origin, false);
     }
     if (/^\/intent\/[a-z0-9-]+$/.test(path) && request.method === "POST") {
-      return proxy(request, CONVERSION_BASE, path, origin, true);
+      return proxyBinding(request, env.CONVERSION, path, origin, true);
     }
 
-    // x402 stays behind the same visible public hostname.
+    // x402 remains internal; the buyer sees and retries the public URL.
     if (/^\/buy\/[a-z0-9-]+$/.test(path) && ["GET","POST"].includes(request.method)) {
-      return proxy(request, X402_BASE, path, origin, false);
+      return proxyBinding(request, env.X402, path, origin, false);
     }
 
     const response = await core.fetch(request, env, ctx);
