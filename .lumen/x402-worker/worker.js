@@ -4,10 +4,10 @@ import { HTTPFacilitatorClient } from "@x402/core/server";
 import { registerExactEvmScheme as registerServerEvmScheme } from "@x402/evm/exact/server";
 
 const SERVICE = "lumen-zero-x402";
-const VERSION = "1.0-x402-base-usdc";
+const VERSION = "1.1-x402-base-usdc-mainnet";
 const PAY_TO = "0x04285DE6A083CEb28fb0C254a2ed0F5fdB2eeD28";
 const NETWORK = "eip155:8453";
-const FACILITATOR = "https://x402.org/facilitator";
+const FACILITATOR = "https://facilitator.xpay.sh";
 
 const PRODUCTS = {
   "supplier-snapshot": { id:"MP-SUPPLIER-SNAPSHOT", name:"Supplier Snapshot", price_usd:5, service_id:"SRV-SUPPLIERCHECK" },
@@ -166,12 +166,13 @@ app.get("/", (c) => c.json({
   network:"Base",
   networkId:NETWORK,
   asset:"USDC",
+  facilitator:FACILITATOR,
   outgoingSpendEnabled:false,
 }));
 
 app.get("/health", async (c) => {
   await ensureSchema(c.env);
-  return c.json({ ok:true, service:SERVICE, version:VERSION, x402:"LIVE", network:NETWORK, asset:"USDC", recipientConfigured:true, outgoingSpendEnabled:false });
+  return c.json({ ok:true, service:SERVICE, version:VERSION, x402:"LIVE", network:NETWORK, asset:"USDC", facilitator:FACILITATOR, recipientConfigured:true, outgoingSpendEnabled:false });
 });
 
 app.get("/catalog", (c) => c.json(publicCatalog(new URL(c.req.url).origin)));
@@ -301,6 +302,7 @@ app.get("/stats", async (c) => {
     revenueRule:"Counted only after x402 middleware verifies and settles payment before the paid handler executes.",
     network:"Base",
     asset:"USDC",
+    facilitator:FACILITATOR,
     recipient:PAY_TO,
   });
 });
