@@ -11,7 +11,7 @@ import search_budget_governor as governor
 import scout_connector
 from app import STATE, load_state
 
-VERSION = "1.4-first-cash-revenue-sprint"
+VERSION = "1.5-demand-gap-first-cash"
 _ORIGINAL_SUMMARY = governor.summary
 
 
@@ -55,15 +55,18 @@ def build_budget_plan(state: Dict[str, Any]) -> Dict[str, Any]:
     total = int(governor.TOTAL_DAILY_CAP)
     s = _signals(state)
 
-    # Reallocate the existing envelope only. Never increase the provider/cost cap here.
-    # During First Cash, conversion evidence gets priority over broad exploration, but the
-    # general lane retains 30% so identity/contact verification cannot be starved.
-    if s["first_cash_active"] and s["market_opportunities"] > 0 and s["requirements_ready_for_rfq"] == 0:
+    # Reallocate the existing free envelope only. Never increase provider/cost cap. When verified
+    # buyers exist but zero have verified demand, discovery of a real need is the upstream blocker;
+    # reserve 20/24 queries for demand and preserve 4 for identity/contact/general verification.
+    if s["verified_buyers"] > 0 and s["buyers_with_demand"] == 0:
+        demand_ratio = 0.83
+        reason = "Hay compradores verificados pero 0 con demanda confirmada; reservar 20/24 búsquedas gratuitas para demanda pública y compras, manteniendo 4 para verificación/general."
+    elif s["first_cash_active"] and s["market_opportunities"] > 0 and s["requirements_ready_for_rfq"] == 0:
         demand_ratio = 0.70
-        reason = "Revenue Sprint 2.0: First Cash activo y 0 requisitos listos para RFQ; priorizar evidencia de demanda/requisitos sin eliminar verificación de identidad y contacto."
-    elif s["verified_buyers"] == 0 or s["buyers_with_demand"] == 0:
+        reason = "First Cash activo y 0 requisitos listos para RFQ; priorizar evidencia de demanda/requisitos sin eliminar verificación de identidad y contacto."
+    elif s["verified_buyers"] == 0:
         demand_ratio = 0.65
-        reason = "Falta demanda/comprador verificado; proteger más capacidad para demanda de alta intención."
+        reason = "Faltan compradores verificados; mantener búsqueda de demanda pero preservar capacidad general para construir el lado comprador."
     elif s["market_opportunities"] > 0 and s["requirements_ready_for_rfq"] == 0:
         demand_ratio = 0.60
         reason = "Hay oportunidades verificadas pero ninguna lista para RFQ; priorizar demanda pública y evidencia de requisitos reales para destrabar cotizaciones."
