@@ -6,6 +6,7 @@ The edge Worker acknowledges non-binding A2A messages immediately and stores the
 bridge runs inside the normal LUMEN Zero cycle, applies the existing A2A commercial classifier,
 creates only unverified research work, and routes priced seller requests into the canonical service
 CRM. External-agent claims remain untrusted until normal verification. Binding actions stay gated.
+Deployment canaries are consumed for transport verification but never enter commercial truth.
 """
 
 import json
@@ -17,7 +18,7 @@ import app as lumen_app
 import d1_persistence_runtime as d1
 from a2a_inbound_bridge_runtime import process_inbound_record
 
-VERSION = "1.1-zero-a2a-machine-store-bridge"
+VERSION = "1.2-zero-a2a-machine-store-truth-bridge"
 MAX_BATCH = 20
 CANONICAL_SERVICE_IDS = {
     "SRV-QUOTECHECK",
@@ -26,6 +27,14 @@ CANONICAL_SERVICE_IDS = {
     "SRV-SOURCING-EXPRESS",
     "SRV-B2B-PROSPECTING",
     "SRV-EXPORT-SCOUT",
+}
+CANARY_PURPOSES = {
+    "technical_machine_order_canary",
+    "technical_quote_canary",
+    "technical_nonbinding_handshake",
+}
+CANARY_SOURCES = {
+    "lumen_deployment_canary",
 }
 
 
@@ -46,6 +55,12 @@ def _metadata(raw: Any) -> Dict[str, Any]:
         return value if isinstance(value, dict) else {}
     except Exception:
         return {}
+
+
+def _is_technical_canary(metadata: Dict[str, Any]) -> bool:
+    purpose = str(metadata.get("purpose") or "").strip().lower()
+    source = str(metadata.get("source") or "").strip().lower()
+    return purpose in CANARY_PURPOSES or source in CANARY_SOURCES
 
 
 def _safe_url(metadata: Dict[str, Any]) -> str:
@@ -84,7 +99,7 @@ def _float(value: Any) -> float | None:
 
 
 def _ensure_research_lead(row: Dict[str, Any], outcome: Dict[str, Any], metadata: Dict[str, Any]) -> str | None:
-    if outcome.get("status") != "candidate_unverified":
+    if _is_technical_canary(metadata) or outcome.get("status") != "candidate_unverified":
         return None
     inbound_id = str(row.get("id") or "")
     leads = lumen_app.STATE.setdefault("research_leads", [])
@@ -126,7 +141,7 @@ def _ensure_research_lead(row: Dict[str, Any], outcome: Dict[str, Any], metadata
 
 def _ensure_service_inquiry(row: Dict[str, Any], outcome: Dict[str, Any], metadata: Dict[str, Any]) -> str | None:
     """Promote a priced A2A seller request into the existing service CRM, never into a binding deal."""
-    if bool(int(row.get("binding_intent") or 0)):
+    if _is_technical_canary(metadata) or bool(int(row.get("binding_intent") or 0)):
         return None
     service_id = str(metadata.get("lumen_service_id") or metadata.get("serviceId") or metadata.get("service_id") or "").strip()
     if service_id not in CANONICAL_SERVICE_IDS:
@@ -194,6 +209,7 @@ def _task_json(raw: Any, outcome: Dict[str, Any], lead_id: str | None, inquiry_i
             task = {}
     except Exception:
         task = {}
+    technical_canary = _is_technical_canary(metadata)
     task_meta = task.setdefault("metadata", {})
     if not isinstance(task_meta, dict):
         task_meta = {}
@@ -211,12 +227,16 @@ def _task_json(raw: Any, outcome: Dict[str, Any], lead_id: str | None, inquiry_i
         "machineItemId": metadata.get("lumen_item_id"),
         "quotedAmountUsd": _float(metadata.get("lumen_quote_usd")),
         "quoteId": metadata.get("lumen_quote_id"),
-        "verificationRequired": True,
+        "technicalCanary": technical_canary,
+        "commercialMetricsExcluded": technical_canary,
+        "verificationRequired": not technical_canary,
         "bindingActionsHumanGated": True,
         "bridgeVersion": VERSION,
     })
     current_status = task.setdefault("status", {})
-    if outcome.get("status") in {"needs_clarification", "human_gate_required", "handshake_or_noncommercial", "unclassified_nonbinding"}:
+    if technical_canary:
+        current_status["state"] = "TASK_STATE_COMPLETED"
+    elif outcome.get("status") in {"needs_clarification", "human_gate_required", "handshake_or_noncommercial", "unclassified_nonbinding"}:
         current_status["state"] = "TASK_STATE_INPUT_REQUIRED"
     elif outcome.get("status") == "candidate_unverified" or inquiry_id:
         current_status["state"] = "TASK_STATE_WORKING"
@@ -230,6 +250,7 @@ def ingest_pending() -> Dict[str, Any]:
         "status": "ok",
         "pending_seen": 0,
         "processed": 0,
+        "technical_canaries_ignored": 0,
         "research_leads_created": 0,
         "service_inquiries_created": 0,
         "clarifications": 0,
@@ -256,6 +277,24 @@ def ingest_pending() -> Dict[str, Any]:
         for row in pending:
             try:
                 metadata = _metadata(row.get("remote_metadata"))
+                if _is_technical_canary(metadata):
+                    outcome = {
+                        "status": "technical_canary_ignored",
+                        "priority": "none",
+                        "priority_score": 0,
+                        "missing_fields": [],
+                        "opportunity_id": None,
+                    }
+                    completed.append({
+                        "id": str(row.get("id") or ""),
+                        "bridge_status": "technical_canary_ignored",
+                        "opportunity_id": "",
+                        "task_json": _task_json(row.get("task_json"), outcome, None, None, metadata),
+                    })
+                    report["technical_canaries_ignored"] += 1
+                    report["processed"] += 1
+                    continue
+
                 record = {
                     "id": row.get("id"),
                     "received_at": row.get("received_at"),
