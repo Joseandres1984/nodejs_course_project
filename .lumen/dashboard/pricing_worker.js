@@ -67,7 +67,7 @@ const PRICING_SECTION = `<section class="page" id="services">
 
 const PRICING_SCRIPT = `<script id="lumenPricingScript">
 (() => {
-  const A2A='https://lumen-zero-a2a.joseandresceol1-jac.workers.dev';
+  const A2A='https://lumen-zero-a2a.lumen-b2b.workers.dev';
   const escPrice = (v) => String(v ?? '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
   const usdPrice = (v) => 'USD ' + Number(v || 0).toLocaleString('es-AR',{maximumFractionDigits:2});
   const text = (id,value) => { const el=document.getElementById(id); if(el) el.textContent=value; };

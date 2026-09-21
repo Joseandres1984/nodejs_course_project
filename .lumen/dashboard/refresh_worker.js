@@ -20,7 +20,7 @@ function servicesSection() {
   return `<section class="page" id="services">
     <div class="card lumenServiceIntro">
       <div><div class="klabel">Oferta comercial vigente</div><h2>Qué vende LUMEN</h2><p class="note">Seis servicios de entrada con precio de lanzamiento y alcance acotado. El precio final de casos más amplios se confirma antes de contratar.</p></div>
-      <div><a class="link" href="https://lumen-zero-public.joseandresceol1-jac.workers.dev/services" target="_blank" rel="noreferrer">Ver página pública de servicios ↗</a></div>
+      <div><a class="link" href="https://lumen-zero-public.lumen-b2b.workers.dev/services" target="_blank" rel="noreferrer">Ver página pública de servicios ↗</a></div>
     </div>
     <div class="lumenServiceGrid section">${cards}</div>
     <div class="grid g2 section">

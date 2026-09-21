@@ -19,7 +19,7 @@ from PIL import Image, ImageDraw, ImageFont
 import d1_persistence_runtime  # patches app persistence
 from app import STATE, load_state, save_state
 
-PUBLIC_BASE_URL = (os.getenv("LUMEN_PUBLIC_BASE_URL") or "https://lumen-zero-public.joseandresceol1-jac.workers.dev").rstrip("/")
+PUBLIC_BASE_URL = (os.getenv("LUMEN_PUBLIC_BASE_URL") or "https://lumen-zero-public.lumen-b2b.workers.dev").rstrip("/")
 OUT_DIR = Path(__file__).resolve().parent.parent / "public" / "instagram"
 
 

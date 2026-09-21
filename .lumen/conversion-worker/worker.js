@@ -1,6 +1,6 @@
 const SERVICE = "lumen-zero-conversion";
 const VERSION = "1.1-conversion-loop-crm";
-const X402_BASE = "https://lumen-zero-x402.joseandresceol1-jac.workers.dev";
+const X402_BASE = "https://lumen-zero-x402.lumen-b2b.workers.dev";
 
 const PRODUCTS = {
   "supplier-snapshot": { id:"MP-SUPPLIER-SNAPSHOT", name:"Supplier Snapshot", price_usd:5, service_id:"SRV-SUPPLIERCHECK", promise:"Validación rápida de un proveedor con señales públicas útiles para decidir el próximo paso." },

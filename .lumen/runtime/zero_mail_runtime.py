@@ -30,7 +30,7 @@ _probe_cache: Dict[str, Any] | None = None
 _original_transport_status = https_mail_transport.transport_status
 _original_https_send_pending = https_mail_transport.https_send_pending
 _original_https_distribution_tick = https_mail_transport.https_distribution_tick
-_PUBLIC_BASE = (os.getenv("LUMEN_PUBLIC_BASE_URL") or "https://lumen-zero-public.joseandresceol1-jac.workers.dev").strip().rstrip("/")
+_PUBLIC_BASE = (os.getenv("LUMEN_PUBLIC_BASE_URL") or "https://lumen-zero-public.lumen-b2b.workers.dev").strip().rstrip("/")
 _LEGACY_PUBLIC_BASES = {
     "https://lumen-web-production-5755.up.railway.app",
 }

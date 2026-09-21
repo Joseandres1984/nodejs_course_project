@@ -38,9 +38,9 @@ os.environ.setdefault("LUMEN_OUTBOUND_MAX_NEW_PER_DAY", "20")
 os.environ.setdefault("LUMEN_OUTBOUND_MAX_FOLLOWUPS_PER_CYCLE", "4")
 os.environ.setdefault("LUMEN_SOCIAL_CANARY_MAX_PER_CYCLE", "1")
 os.environ.setdefault("LUMEN_SOCIAL_CANARY_MAX_PER_DAY", "4")
-os.environ.setdefault("LUMEN_PUBLIC_BASE_URL", "https://lumen-zero-public.joseandresceol1-jac.workers.dev")
-os.environ.setdefault("LUMEN_A2A_BASE_URL", "https://lumen-zero-a2a.joseandresceol1-jac.workers.dev")
-os.environ.setdefault("LUMEN_COMMAND_CENTER_URL", "https://lumen-zero-dashboard.joseandresceol1-jac.workers.dev")
+os.environ.setdefault("LUMEN_PUBLIC_BASE_URL", "https://lumen-zero-public.lumen-b2b.workers.dev")
+os.environ.setdefault("LUMEN_A2A_BASE_URL", "https://lumen-zero-a2a.lumen-b2b.workers.dev")
+os.environ.setdefault("LUMEN_COMMAND_CENTER_URL", "https://lumen-zero-dashboard.lumen-b2b.workers.dev")
 # Shadow intelligence only enriches already-permitted public catalog crawls; it adds no provider
 # spend and cannot authorize outreach, payments or binding actions.
 os.environ.setdefault("LUMEN_MARKET_INTELLIGENCE_SHADOW_ENABLED", "true")

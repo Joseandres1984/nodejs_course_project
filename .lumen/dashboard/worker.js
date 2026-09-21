@@ -1,5 +1,5 @@
 const STATE_KEY = "global";
-const PUBLIC_WEB = "https://lumen-zero-public.joseandresceol1-jac.workers.dev";
+const PUBLIC_WEB = "https://lumen-zero-public.lumen-b2b.workers.dev";
 const INSTAGRAM_URL = "https://www.instagram.com/lumen.b2b/";
 const CATALOG_VERSION = "2026-09-21";
 const SERVICE_CATALOG = [

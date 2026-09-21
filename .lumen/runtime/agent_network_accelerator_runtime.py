@@ -9,8 +9,8 @@ import agent_network_runtime as _base
 
 VERSION = "1.6-a2a-autonomous-seller-outreach"
 REPROBE_AFTER_HOURS = 72
-MACHINE_CATALOG_URL = "https://lumen-zero-a2a.joseandresceol1-jac.workers.dev/machine/catalog"
-SERVICE_CATALOG_URL = "https://lumen-zero-a2a.joseandresceol1-jac.workers.dev/seller/catalog"
+MACHINE_CATALOG_URL = "https://lumen-zero-a2a.lumen-b2b.workers.dev/machine/catalog"
+SERVICE_CATALOG_URL = "https://lumen-zero-a2a.lumen-b2b.workers.dev/seller/catalog"
 _ORIGINAL_REGISTRY_CARD_URL = _base._registry_card_url
 _ORIGINAL_AGENT_NETWORK_TICK = _base.agent_network_tick
 _ORIGINAL_HANDSHAKE_SAFE = _base._autonomous_handshake_safe

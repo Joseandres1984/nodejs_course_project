@@ -5,7 +5,7 @@ from typing import Any, Dict, List
 from urllib.parse import urlencode
 
 VERSION = "1.1-conversion-loop-live"
-CONVERSION_BASE_URL = "https://lumen-zero-conversion.joseandresceol1-jac.workers.dev"
+CONVERSION_BASE_URL = "https://lumen-zero-conversion.lumen-b2b.workers.dev"
 
 PRODUCTS = [
     {"id": "MP-SUPPLIER-SNAPSHOT", "slug": "supplier-snapshot", "name": "Supplier Snapshot", "price_usd": 5, "service_id": "SRV-SUPPLIERCHECK"},
