@@ -1,5 +1,5 @@
 name = "lumen-zero-dashboard"
-main = "recovery_worker.js"
+main = "refresh_worker.js"
 compatibility_date = "2026-09-20"
 workers_dev = true
 
