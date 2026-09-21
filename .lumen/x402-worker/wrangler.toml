@@ -6,7 +6,7 @@ workers_dev = true
 [vars]
 X402_PAY_TO = "0x04285DE6A083CEb28fb0C254a2ed0F5fdB2eeD28"
 X402_NETWORK = "eip155:8453"
-X402_FACILITATOR = "https://x402.org/facilitator"
+X402_FACILITATOR = "https://facilitator.xpay.sh"
 
 [[d1_databases]]
 binding = "DB"
