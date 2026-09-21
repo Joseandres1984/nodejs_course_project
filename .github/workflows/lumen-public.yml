@@ -90,11 +90,21 @@ jobs:
           echo "PUBLIC_GATEWAY_LOCATION=$location"
           if [[ "$location" != "$base/buy/supplier-snapshot"* ]]; then failed=1; fi
 
-          code=$(curl -sS -o /tmp/lumen-buy.body -D /tmp/lumen-buy.headers -w '%{http_code}' "$base/buy/supplier-snapshot?technical_canary=1" || true)
-          echo "PUBLIC_X402_HTTP=$code"
-          if [[ "$code" != "402" ]] || ! grep -Eiq '^payment-required:|^x-payment-required:' /tmp/lumen-buy.headers; then
-            echo "x402 gateway challenge failed"
+          x402_ok=0
+          for i in {1..12}; do
+            code=$(curl -sS -o /tmp/lumen-buy.body -D /tmp/lumen-buy.headers -w '%{http_code}' "$base/buy/supplier-snapshot?technical_canary=1&attempt=$i&deploy=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" || true)
+            echo "PUBLIC_X402_ATTEMPT=$i HTTP=$code"
+            if [[ "$code" == "402" ]] && grep -Eiq '^payment-required:|^x-payment-required:' /tmp/lumen-buy.headers; then
+              x402_ok=1
+              break
+            fi
+            if [[ "$code" == "500" ]]; then cat /tmp/lumen-buy.body || true; fi
+            sleep 4
+          done
+          if [[ "$x402_ok" != "1" ]]; then
+            echo "x402 gateway challenge failed after retries"
             cat /tmp/lumen-buy.headers || true
+            cat /tmp/lumen-buy.body || true
             failed=1
           fi
 
@@ -104,4 +114,4 @@ jobs:
           fi
           echo "LUMEN_UNIFIED_PUBLIC_GATEWAY=success"
 
-# deploy trigger: gateway diagnostics 2026-09-21
+# deploy trigger: unified gateway retry-safe x402 2026-09-21
