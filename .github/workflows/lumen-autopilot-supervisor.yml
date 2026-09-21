@@ -1,6 +1,10 @@
 name: LUMEN Autopilot Supervisor
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/lumen-autopilot-supervisor.yml"
   workflow_run:
     workflows: ["LUMEN Zero Runtime"]
     types: [completed]
