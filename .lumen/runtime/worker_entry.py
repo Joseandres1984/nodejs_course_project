@@ -41,6 +41,10 @@ import procurement_document_enrichment_runtime  # noqa: F401
 import procurement_lineage_runtime  # noqa: F401
 import external_market_truth_runtime  # noqa: F401
 import service_revenue_runtime  # noqa: F401
+# Machine Store requests already carry a LUMEN-generated fixed catalog quote. Preserve that
+# non-binding price through the canonical CRM without re-opening human repricing; payment and
+# binding-close evidence remain mandatory and outgoing spend remains disabled.
+import a2a_machine_revenue_alignment_runtime  # noqa: F401
 import canonical_priority_cleanup  # noqa: F401
 import instagram_graph_transport_runtime  # noqa: F401
 import instagram_publish_control  # noqa: F401
@@ -74,6 +78,8 @@ try:
                 "service_inquiries": service_revenue.get("service_inquiries"),
                 "realized_service_revenue_usd": service_revenue.get("realized_service_revenue_usd"),
                 "commission_business_preserved": service_revenue.get("commission_business_preserved"),
+                "machine_price_autonomy": service_revenue.get("machine_price_autonomy"),
+                "a2a_machine_store": service_revenue.get("a2a_machine_store"),
                 "persisted": service_revenue.get("persisted"),
             }
         }, flush=True)
@@ -173,7 +179,7 @@ except Exception as exc:
 
 # Agent Network is intentionally bounded and fail-open. It probes only already verified supplier
 # domains for public A2A Agent Cards, blocks private-network/cross-domain targets and sends at most
-# one non-binding capability handshake per cycle. It cannot purchase, pay, contract or accept terms.
+# one non-binding seller offer per cycle. It cannot purchase, pay, contract or accept terms.
 try:
     from app import STATE, load_state, save_state
     from agent_network_runtime import agent_network_tick
