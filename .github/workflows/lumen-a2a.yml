@@ -187,4 +187,4 @@ jobs:
           echo "Registry action: ${{ steps.registry.outputs.action }}"
           echo "Registry final HTTP: ${{ steps.registry.outputs.http_status }}"
 
-# deploy trigger: machine store + recurring revenue + seller autonomy 2026-09-21
+# redeploy trigger after Machine Store regression fix 2026-09-21
