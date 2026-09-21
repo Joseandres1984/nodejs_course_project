@@ -1,0 +1,174 @@
+name: LUMEN Brand Domain Migration
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/lumen-brand-domain-migration.yml"
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: lumen-brand-domain-migration
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.LUMEN_D1_ACCOUNT_ID }}
+      OLD_SUBDOMAIN: "joseandresceol1-jac"
+      NEW_SUBDOMAIN: "lumen-b2b"
+      OLD_SUFFIX: "joseandresceol1-jac.workers.dev"
+      NEW_SUFFIX: "lumen-b2b.workers.dev"
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ github.token }}
+
+      - name: Preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          echo "Target workers.dev subdomain: $NEW_SUBDOMAIN"
+
+      - name: Change Cloudflare account workers.dev subdomain
+        shell: bash
+        run: |
+          set -euo pipefail
+          auth=(-H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json")
+          endpoint="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain"
+
+          curl -fsS "${auth[@]}" "$endpoint" -o /tmp/current.json
+          python3 - <<'PY'
+          import json
+          data=json.load(open('/tmp/current.json'))
+          print({'cloudflare_subdomain_before': (data.get('result') or {}).get('subdomain')})
+          PY
+
+          current=$(python3 - <<'PY'
+          import json
+          print((json.load(open('/tmp/current.json')).get('result') or {}).get('subdomain') or '')
+          PY
+          )
+
+          if [[ "$current" != "$NEW_SUBDOMAIN" ]]; then
+            code=$(curl -sS -o /tmp/update.json -w '%{http_code}' -X PUT "${auth[@]}" \
+              --data "{\"subdomain\":\"$NEW_SUBDOMAIN\"}" "$endpoint")
+            cat /tmp/update.json; echo
+            [[ "$code" =~ ^2 ]]
+            python3 - <<'PY'
+          import json
+          data=json.load(open('/tmp/update.json'))
+          assert data.get('success') is True, data
+          assert (data.get('result') or {}).get('subdomain') == 'lumen-b2b', data
+          print({'cloudflare_subdomain_changed': True, 'new_subdomain': 'lumen-b2b'})
+          PY
+          else
+            echo "Cloudflare already uses $NEW_SUBDOMAIN"
+          fi
+
+          curl -fsS "${auth[@]}" "$endpoint" -o /tmp/verify.json
+          python3 - <<'PY'
+          import json
+          data=json.load(open('/tmp/verify.json'))
+          assert (data.get('result') or {}).get('subdomain') == 'lumen-b2b', data
+          print({'cloudflare_subdomain_verified': 'lumen-b2b'})
+          PY
+
+      - name: Replace old workers.dev references on main and lumen-zero
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "LUMEN Automation"
+          git config user.email "93448743+Joseandres1984@users.noreply.github.com"
+
+          migrate_branch() {
+            branch="$1"
+            git fetch origin "$branch"
+            git checkout -B "$branch" "origin/$branch"
+            python3 - <<'PY'
+          from pathlib import Path
+          old_suffix='joseandresceol1-jac.workers.dev'
+          new_suffix='lumen-b2b.workers.dev'
+          old_sub='joseandresceol1-jac'
+          new_sub='lumen-b2b'
+          changed=[]
+          for p in Path('.').rglob('*'):
+              if not p.is_file() or '.git' in p.parts:
+                  continue
+              try:
+                  raw=p.read_bytes()
+                  text=raw.decode('utf-8')
+              except Exception:
+                  continue
+              updated=text.replace(old_suffix,new_suffix).replace(old_sub,new_sub)
+              if updated != text:
+                  p.write_text(updated,encoding='utf-8')
+                  changed.append(str(p))
+          print({'references_updated':len(changed),'files':changed[:80]})
+          PY
+            git add -A
+            if git diff --cached --quiet; then
+              echo "No stale workers.dev references on $branch"
+            else
+              git commit -m "Use branded LUMEN workers.dev subdomain"
+              git push origin "HEAD:$branch"
+            fi
+          }
+
+          migrate_branch main
+          migrate_branch lumen-zero
+
+      - name: Dispatch LUMEN redeploys
+        shell: bash
+        run: |
+          set -euo pipefail
+          for wf in \
+            lumen-public.yml \
+            lumen-dashboard.yml \
+            lumen-a2a.yml \
+            lumen-x402.yml \
+            lumen-conversion.yml \
+            lumen-instagram-webhook.yml \
+            lumen-instagram-control.yml \
+            lumen-zero.yml
+          do
+            echo "Dispatching $wf"
+            gh workflow run "$wf" --repo "$GITHUB_REPOSITORY" --ref main || true
+          done
+
+      - name: Verify branded endpoints
+        shell: bash
+        run: |
+          set -euo pipefail
+          endpoints=(
+            "https://lumen-zero-public.lumen-b2b.workers.dev"
+            "https://lumen-zero-dashboard.lumen-b2b.workers.dev"
+            "https://lumen-zero-a2a.lumen-b2b.workers.dev/health"
+            "https://lumen-zero-x402.lumen-b2b.workers.dev/health"
+            "https://lumen-zero-conversion.lumen-b2b.workers.dev/health"
+          )
+          for url in "${endpoints[@]}"; do
+            ok=0
+            for i in {1..15}; do
+              code=$(curl -A 'LUMEN-Domain-Migration/1.0' -sS -o /tmp/body -w '%{http_code}' "$url?brand_check=$GITHUB_RUN_ID-$i" || true)
+              echo "$url -> $code"
+              if [[ "$code" =~ ^2|^3 ]]; then ok=1; break; fi
+              sleep 4
+            done
+            [[ "$ok" == "1" ]]
+          done
+          echo "Branded workers.dev endpoints are reachable."
