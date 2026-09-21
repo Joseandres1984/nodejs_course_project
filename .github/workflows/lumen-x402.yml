@@ -1,0 +1,113 @@
+name: LUMEN x402 Checkout
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/lumen-x402.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lumen-x402-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy-x402:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.LUMEN_D1_ACCOUNT_ID }}
+      X402_BASE_URL: https://lumen-zero-x402.joseandresceol1-jac.workers.dev
+      X402_EXPECTED_RECIPIENT: 0x04285DE6A083CEb28fb0C254a2ed0F5fdB2eeD28
+    steps:
+      - name: Checkout LUMEN Zero
+        uses: actions/checkout@v4
+        with:
+          ref: lumen-zero
+
+      - name: Deployment preflight
+        shell: bash
+        run: |
+          if [[ -z "$CLOUDFLARE_API_TOKEN" || -z "$CLOUDFLARE_ACCOUNT_ID" ]]; then
+            echo "Missing Cloudflare deployment credentials."
+            exit 1
+          fi
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: .lumen/x402-worker/package.json
+
+      - name: Install x402 dependencies
+        working-directory: .lumen/x402-worker
+        run: npm install --no-audit --no-fund
+
+      - name: Validate Worker syntax
+        working-directory: .lumen/x402-worker
+        run: node --check worker.js
+
+      - name: Deploy x402 Worker
+        working-directory: .lumen/x402-worker
+        run: npx wrangler deploy
+
+      - name: Verify public health and catalog
+        shell: bash
+        run: |
+          for i in {1..12}; do
+            health=$(curl -sS -o /tmp/x402-health.json -w '%{http_code}' "$X402_BASE_URL/health" || true)
+            catalog=$(curl -sS -o /tmp/x402-catalog.json -w '%{http_code}' "$X402_BASE_URL/catalog" || true)
+            stats=$(curl -sS -o /tmp/x402-stats.json -w '%{http_code}' "$X402_BASE_URL/stats" || true)
+            if [[ "$health" == "200" && "$catalog" == "200" && "$stats" == "200" ]]; then
+              jq -e --arg recipient "$X402_EXPECTED_RECIPIENT" '.ok == true and .x402 == "LIVE" and .network == "eip155:8453" and .asset == "USDC" and .recipientConfigured == true and .outgoingSpendEnabled == false' /tmp/x402-health.json >/dev/null
+              jq -e --arg recipient "$X402_EXPECTED_RECIPIENT" '.settlement.recipient == $recipient and .settlement.networkId == "eip155:8453" and .settlement.asset == "USDC" and .settlement.outgoingSpendEnabled == false and (.products|length) == 6' /tmp/x402-catalog.json >/dev/null
+              jq -e --arg recipient "$X402_EXPECTED_RECIPIENT" '.recipient == $recipient and .network == "Base" and .asset == "USDC" and .realizedRevenueUsd >= 0' /tmp/x402-stats.json >/dev/null
+              break
+            fi
+            sleep 5
+          done
+          [[ "$health" == "200" && "$catalog" == "200" && "$stats" == "200" ]]
+
+      - name: Verify real x402 payment challenge without spending
+        shell: bash
+        run: |
+          code=$(curl -sS -D /tmp/x402-headers.txt -o /tmp/x402-body.txt -w '%{http_code}' "$X402_BASE_URL/buy/supplier-snapshot" || true)
+          echo "UNPAID_X402_HTTP=$code"
+          cat /tmp/x402-headers.txt
+          cat /tmp/x402-body.txt || true
+          [[ "$code" == "402" ]]
+          grep -qi '^payment-required:' /tmp/x402-headers.txt
+          python3 - <<'PY'
+          import base64, json, re
+          h=open('/tmp/x402-headers.txt',encoding='utf-8',errors='ignore').read()
+          m=re.search(r'(?im)^payment-required:\s*(\S+)\s*$',h)
+          assert m, 'missing PAYMENT-REQUIRED header'
+          raw=m.group(1)
+          raw += '=' * (-len(raw) % 4)
+          data=json.loads(base64.b64decode(raw))
+          assert data.get('x402Version') == 2, data
+          accepts=data.get('accepts') or []
+          assert accepts, data
+          req=accepts[0]
+          assert req.get('scheme') == 'exact', req
+          assert req.get('network') == 'eip155:8453', req
+          assert req.get('payTo','').lower() == '0x04285de6a083ceb28fb0c254a2ed0f5fdb2eed28'.lower(), req
+          print({'x402_challenge':'ok','network':req.get('network'),'amount':req.get('amount'),'asset':req.get('asset'),'payTo':req.get('payTo')})
+          PY
+
+      - name: Deployment summary
+        if: always()
+        shell: bash
+        run: |
+          echo "LUMEN x402: $X402_BASE_URL"
+          echo "Catalog: $X402_BASE_URL/catalog"
+          echo "Stats: $X402_BASE_URL/stats"
+          echo "Receiver: $X402_EXPECTED_RECIPIENT"
+          echo "Network: Base / eip155:8453"
+          echo "Asset: USDC"
+          echo "Outgoing spend: disabled"
