@@ -3,6 +3,14 @@ main = "gateway.js"
 compatibility_date = "2026-09-20"
 workers_dev = true
 
+[[services]]
+binding = "CONVERSION"
+service = "lumen-zero-conversion"
+
+[[services]]
+binding = "X402"
+service = "lumen-zero-x402"
+
 [[d1_databases]]
 binding = "DB"
 database_name = "lumen-zero"
