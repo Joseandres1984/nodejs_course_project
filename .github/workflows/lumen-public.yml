@@ -54,46 +54,54 @@ jobs:
         if: steps.preflight.outputs.ready == 'true'
         shell: bash
         run: |
-          set -euo pipefail
+          set -u -o pipefail
           base='https://lumen-zero-public.lumen-b2b.workers.dev'
+          failed=0
+
           for i in {1..12}; do
             code=$(curl -sS -o /tmp/lumen-public-health.json -w '%{http_code}' "$base/health" || true)
+            echo "HEALTH_HTTP=$code"
             if [[ "$code" == "200" ]]; then
               cat /tmp/lumen-public-health.json
               break
             fi
-            if [[ "$i" == "12" ]]; then
-              echo "Public health check did not return 200 in time."
-              exit 1
-            fi
+            if [[ "$i" == "12" ]]; then failed=1; fi
             sleep 5
           done
 
-          # Existing campaign links must remain live.
           for token in D1A6FA819E21 4F11F08D4303; do
             code=$(curl -sS -L -o /tmp/lumen-campaign.html -w '%{http_code}' "$base/c/$token" || true)
-            [[ "$code" == "200" ]]
-            grep -q 'LUMEN' /tmp/lumen-campaign.html
+            echo "CAMPAIGN_${token}_HTTP=$code"
+            if [[ "$code" != "200" ]] || ! grep -q 'LUMEN' /tmp/lumen-campaign.html; then failed=1; fi
           done
 
-          # Human storefront must stay under the one public hostname.
           code=$(curl -sS -o /tmp/lumen-store.html -w '%{http_code}' "$base/store?src=deployment_canary&technical_canary=1" || true)
-          [[ "$code" == "200" ]]
-          grep -q 'LUMEN' /tmp/lumen-store.html
-          grep -q 'Supplier Snapshot' /tmp/lumen-store.html
+          echo "STORE_HTTP=$code"
+          if [[ "$code" != "200" ]]; then
+            cat /tmp/lumen-store.html || true
+            failed=1
+          elif ! grep -q 'LUMEN' /tmp/lumen-store.html || ! grep -q 'Supplier Snapshot' /tmp/lumen-store.html; then
+            echo "Storefront body missing expected content"
+            failed=1
+          fi
 
-          # Starting checkout must redirect back to this same public hostname, never expose an internal Worker.
           curl -sS -o /dev/null -D /tmp/lumen-go.headers "$base/go/supplier-snapshot?src=deployment_canary&technical_canary=1" || true
           location=$(awk 'BEGIN{IGNORECASE=1} /^location:/{gsub("\r",""); sub(/^location:[[:space:]]*/,""); print; exit}' /tmp/lumen-go.headers)
           echo "PUBLIC_GATEWAY_LOCATION=$location"
-          [[ "$location" == "$base/buy/supplier-snapshot"* ]]
+          if [[ "$location" != "$base/buy/supplier-snapshot"* ]]; then failed=1; fi
 
-          # Real x402 challenge through public gateway, without paying or spending funds.
           code=$(curl -sS -o /tmp/lumen-buy.body -D /tmp/lumen-buy.headers -w '%{http_code}' "$base/buy/supplier-snapshot?technical_canary=1" || true)
           echo "PUBLIC_X402_HTTP=$code"
-          [[ "$code" == "402" ]]
-          grep -Eiq '^payment-required:|^x-payment-required:' /tmp/lumen-buy.headers
+          if [[ "$code" != "402" ]] || ! grep -Eiq '^payment-required:|^x-payment-required:' /tmp/lumen-buy.headers; then
+            echo "x402 gateway challenge failed"
+            cat /tmp/lumen-buy.headers || true
+            failed=1
+          fi
 
+          if [[ "$failed" != "0" ]]; then
+            echo "LUMEN_UNIFIED_PUBLIC_GATEWAY=failure"
+            exit 1
+          fi
           echo "LUMEN_UNIFIED_PUBLIC_GATEWAY=success"
 
-# deploy trigger: unified public gateway 2026-09-21
+# deploy trigger: gateway diagnostics 2026-09-21
