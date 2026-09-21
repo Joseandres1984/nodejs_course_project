@@ -2,18 +2,19 @@ from __future__ import annotations
 
 """Intraday pacing for LUMEN's zero-cost public-search envelope.
 
-The hard provider cap remains 24/day. This module only limits how much of that already-free
-envelope can be consumed at each part of the Argentina day so Autopilot cannot burn the whole
-allowance early in the morning. No paid provider, quota increase, or verification relaxation.
+The provider envelope is configured by the zero-cost runtime. This module limits how much of
+that already-free envelope can be consumed at each part of the Argentina day so Autopilot does
+not burn the whole allowance early. Pacing scales proportionally with the configured daily cap;
+it never creates paid spend, adds provider quota, or relaxes verification gates.
 """
 
 from datetime import datetime
-from typing import Any, Dict
+from typing import Any, Dict, Tuple
 
 import scout_connector
 import search_budget_governor as governor
 
-VERSION = "1.0-zero-cost-intraday-pacing"
+VERSION = "1.1-zero-cost-scaled-intraday-pacing"
 
 _ORIGINAL_GENERAL_BUDGET = governor.general_budget
 _ORIGINAL_DEMAND_BUDGET = governor.demand_budget
@@ -27,19 +28,26 @@ def _i(value: Any, default: int = 0) -> int:
         return default
 
 
+def _milestones(total: int | None = None) -> Tuple[int, int, int, int]:
+    """Return cumulative unlocks preserving the original 4/10/17/24 pacing ratios."""
+    cap = max(1, int(total if total is not None else governor.TOTAL_DAILY_CAP))
+    first = max(1, min(cap, int(round(cap * (4 / 24)))))
+    second = max(first, min(cap, int(round(cap * (10 / 24)))))
+    third = max(second, min(cap, int(round(cap * (17 / 24)))))
+    return first, second, third, cap
+
+
 def pace_cap_now() -> int:
     """Maximum cumulative provider queries unlocked by current Argentina local hour."""
     hour = datetime.now(governor.LOCAL_TZ).hour
-    total = int(governor.TOTAL_DAILY_CAP)
-    # Preserve the 24/day hard cap while spreading it over four six-hour windows.
-    # 00-05: 4 total, 06-11: 10, 12-17: 17, 18-23: full 24.
+    first, second, third, full = _milestones()
     if hour < 6:
-        return min(total, 4)
+        return first
     if hour < 12:
-        return min(total, 10)
+        return second
     if hour < 18:
-        return min(total, 17)
-    return total
+        return third
+    return full
 
 
 def next_unlock_local() -> str:
@@ -51,6 +59,16 @@ def next_unlock_local() -> str:
     if hour < 18:
         return "18:00"
     return "00:00"
+
+
+def _schedule_labels() -> list[str]:
+    first, second, third, full = _milestones()
+    return [
+        f"00:00→{first}",
+        f"06:00→{second}",
+        f"12:00→{third}",
+        f"18:00→{full}",
+    ]
 
 
 def _actual_used(state: Dict[str, Any]) -> int:
@@ -97,9 +115,9 @@ def paced_summary(state: Dict[str, Any]) -> Dict[str, Any]:
         "used_now": min(int(governor.TOTAL_DAILY_CAP), used),
         "available_now": max(0, min(int(governor.TOTAL_DAILY_CAP) - used, unlocked - used)),
         "next_unlock_local": next_unlock_local(),
-        "schedule": ["00:00→4", "06:00→10", "12:00→17", "18:00→24"],
+        "schedule": _schedule_labels(),
         "cost_usd": 0,
-        "rule": "pace_free_queries_without_increasing_daily_cap",
+        "rule": "pace_free_queries_proportionally_without_increasing_configured_daily_cap",
     }
     return base
 
@@ -116,6 +134,7 @@ print({
         "status": "active",
         "daily_hard_cap_unchanged": int(governor.TOTAL_DAILY_CAP),
         "unlocked_cap_now": pace_cap_now(),
+        "unlock_schedule": _schedule_labels(),
         "next_unlock_local": next_unlock_local(),
         "timezone": governor.TZ_NAME,
         "paid_spend": False,
