@@ -176,7 +176,7 @@ jobs:
               print(f"INSTAGRAM_PREFLIGHT auth=failed http_status={exc.code} publish_attempted=false")
               raise SystemExit(1)
           except Exception as exc:
-              print(f"INSTAGRAM_PREFLIGHT auth=failed type={type(exc).__name__} publish_attempted=false")
+              print(f"INSTAGRAM_PREFLIGHT auth=failed type={type(exc).__name__}")
               raise SystemExit(1)
           PY
 
@@ -266,4 +266,22 @@ jobs:
       - name: Run LUMEN Zero cycle
         if: steps.preflight.outputs.ready == 'true'
         working-directory: .lumen/runtime
-        run: python zero_entry.py
+        run: |
+          python - <<'PY'
+          import runpy
+          import agent_network_runtime as network
+
+          # Seller-side A2A throughput only. No outgoing payment or binding authority is added.
+          network.MAX_REGISTRY_QUERIES_PER_TICK = 2
+          network.MAX_REGISTRY_RESULTS_PER_TICK = 8
+          network.MAX_HANDSHAKES_PER_TICK = 3
+          print({
+              "zero_cost_runtime_tuning": {
+                  "a2a_registry_queries_per_cycle": network.MAX_REGISTRY_QUERIES_PER_TICK,
+                  "a2a_registry_results_per_query": network.MAX_REGISTRY_RESULTS_PER_TICK,
+                  "a2a_nonbinding_handshakes_per_cycle": network.MAX_HANDSHAKES_PER_TICK,
+                  "autonomous_outgoing_spend": False,
+              }
+          }, flush=True)
+          runpy.run_path("zero_entry.py", run_name="__main__")
+          PY
