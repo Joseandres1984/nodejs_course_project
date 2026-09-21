@@ -1,5 +1,5 @@
 const SERVICE = "lumen-zero-a2a";
-const VERSION = "2.0-zero-a2a-machine-store";
+const VERSION = "2.1-zero-a2a-machine-store-truth";
 const PROTOCOL_VERSION = "1.0";
 const RATE_LIMIT_PER_HOUR = 30;
 const MAX_BODY_BYTES = 65536;
@@ -293,9 +293,17 @@ async function listTasks(payload,env) {
   return json({jsonrpc:"2.0",id,result:{tasks}});
 }
 async function storeStats(env) {
-  const orders=await env.DB.prepare("SELECT COUNT(*) AS n, COALESCE(SUM(amount_usd),0) AS quoted FROM lumen_machine_orders").first();
-  const quotes=await env.DB.prepare("SELECT COUNT(*) AS n FROM lumen_a2a_quotes").first();
-  return {orders:Number(orders?.n||0),quotedPipelineUsd:Number(orders?.quoted||0),quotes:Number(quotes?.n||0),realizedRevenueUsd:null,realizedRevenueRule:"Only canonical settled transactions count as realized revenue."};
+  const realOrderFilter = "remote_metadata IS NULL OR (remote_metadata NOT LIKE '%technical_machine_order_canary%' AND remote_metadata NOT LIKE '%lumen_deployment_canary%')";
+  const orders=await env.DB.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(amount_usd),0) AS quoted FROM lumen_machine_orders WHERE ${realOrderFilter}`).first();
+  const quotes=await env.DB.prepare("SELECT COUNT(*) AS n FROM lumen_a2a_quotes WHERE remote_metadata IS NULL OR (remote_metadata NOT LIKE '%technical_quote_canary%' AND remote_metadata NOT LIKE '%technical_machine_order_canary%' AND remote_metadata NOT LIKE '%lumen_deployment_canary%')").first();
+  return {
+    orders:Number(orders?.n||0),
+    quotedPipelineUsd:Number(orders?.quoted||0),
+    quotes:Number(quotes?.n||0),
+    technicalCanariesExcluded:true,
+    realizedRevenueUsd:null,
+    realizedRevenueRule:"Only canonical settled transactions count as realized revenue. Deployment canaries are excluded from commercial metrics."
+  };
 }
 
 export default {
