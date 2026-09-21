@@ -176,6 +176,11 @@ try:
 except Exception as exc:
     print({"demand_inventory_reuse": {"status": "degraded_fail_closed", "error": f"{type(exc).__name__}: {str(exc)[:300]}", "searches_used": 0, "outbound_gate_relaxed": False}}, flush=True)
 
+# Install the last revenue-lane guard after Conversion Autonomy has installed its normal hysteresis.
+# A verified-buyer / zero-demand gap is an upstream prerequisite and may preempt stale lane memory;
+# no search, evidence, outbound or binding-action gate is relaxed by this guard.
+import revenue_lane_upstream_guard_runtime  # noqa: F401,E402
+
 # worker_entry executes the complete production cycle at import time, matching the Railway start.
 import worker_entry  # noqa: F401,E402
 
