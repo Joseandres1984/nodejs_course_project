@@ -60,6 +60,7 @@ jobs:
       # Enables operator replies when a reply is explicitly dispatched; no automatic DM send is added.
       LUMEN_INSTAGRAM_SEND_ENABLED: "true"
       LUMEN_PUBLIC_BASE_URL: "https://lumen-zero-public.joseandresceol1-jac.workers.dev"
+      LUMEN_A2A_BASE_URL: "https://lumen-zero-a2a.joseandresceol1-jac.workers.dev"
       LUMEN_COMMAND_CENTER_URL: "https://lumen-zero-dashboard.joseandresceol1-jac.workers.dev"
 
       # WhatsApp remains intentionally unconfigured until business verification is available.
@@ -97,7 +98,7 @@ jobs:
 
       - name: Syntax check zero-cost adapters
         working-directory: .lumen/runtime
-        run: python3 -m py_compile d1_persistence_runtime.py instagram_webhook_d1_bridge_runtime.py zero_public_inquiry_bridge_runtime.py zero_instagram_control_bridge_runtime.py zero_instagram_assets.py zero_watchdog_runtime.py zero_notification_runtime.py zero_scout_runtime.py zero_mail_runtime.py payment_rails.py multicurrency_runtime.py mercadopago_checkout.py zero_entry.py
+        run: python3 -m py_compile d1_persistence_runtime.py instagram_webhook_d1_bridge_runtime.py zero_public_inquiry_bridge_runtime.py zero_a2a_inbound_bridge_runtime.py zero_instagram_control_bridge_runtime.py zero_instagram_assets.py zero_watchdog_runtime.py zero_notification_runtime.py zero_scout_runtime.py zero_mail_runtime.py payment_rails.py multicurrency_runtime.py mercadopago_checkout.py zero_entry.py
 
       - name: D1 preflight
         id: preflight
