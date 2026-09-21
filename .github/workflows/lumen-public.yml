@@ -50,17 +50,34 @@ jobs:
         working-directory: .lumen/public-worker
         run: npx --yes wrangler@4 deploy
 
-      - name: Verify public health
+      - name: Verify public health and campaign links
         if: steps.preflight.outputs.ready == 'true'
         shell: bash
         run: |
+          base='https://lumen-zero-public.joseandresceol1-jac.workers.dev'
           for i in {1..12}; do
-            code=$(curl -sS -o /tmp/lumen-public-health.json -w '%{http_code}' 'https://lumen-zero-public.joseandresceol1-jac.workers.dev/health' || true)
+            code=$(curl -sS -o /tmp/lumen-public-health.json -w '%{http_code}' "$base/health" || true)
             if [[ "$code" == "200" ]]; then
               cat /tmp/lumen-public-health.json
-              exit 0
+              break
+            fi
+            if [[ "$i" == "12" ]]; then
+              echo "Public health check did not return 200 in time."
+              exit 1
             fi
             sleep 5
           done
-          echo "Public health check did not return 200 in time."
-          exit 1
+
+          # These two tokens are already present in real outbound emails. A deploy must
+          # fail closed if either link stops resolving through to a live landing page.
+          for token in D1A6FA819E21 4F11F08D4303; do
+            code=$(curl -sS -L -o /tmp/lumen-campaign.html -w '%{http_code}' "$base/c/$token" || true)
+            if [[ "$code" != "200" ]]; then
+              echo "Campaign link $token failed with HTTP $code"
+              exit 1
+            fi
+            if ! grep -q 'LUMEN' /tmp/lumen-campaign.html; then
+              echo "Campaign link $token did not render a LUMEN landing page"
+              exit 1
+            fi
+          done
