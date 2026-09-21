@@ -3,18 +3,17 @@ from __future__ import annotations
 """Canonical operational truth auditor for LUMEN Zero.
 
 Builds one end-of-cycle snapshot from primary persisted evidence instead of trusting every module's
-own cached counters. It also repairs only safe projection counters (business_funnel) so dashboards
-and executive summaries read the same cumulative truth. Raw module snapshots are preserved for
-forensics and per-cycle diagnostics.
+own cached counters. It repairs only safe cumulative projections so dashboards, learning and
+executive summaries can converge on the same truth while raw module snapshots remain auditable.
 """
 
 from datetime import datetime, timezone
-from typing import Any, Dict, Iterable, List, Set
+from typing import Any, Dict, List, Set
 
 import app
 import canonical_revenue_truth_runtime
 
-VERSION = "1.0-canonical-operational-truth"
+VERSION = "1.1-canonical-operational-truth"
 SENT_STATUSES = {"sent", "provider_accepted", "delivered", "delivered_verified", "replied"}
 DELIVERED_STATUSES = {"delivered", "delivered_verified", "replied"}
 REALIZED_PAYMENT_STATUSES = {"paid", "settled", "received", "realized", "completed", "succeeded"}
@@ -104,16 +103,17 @@ def _payment_truth(state: Dict[str, Any]) -> Dict[str, Any]:
     ready = sorted({_s(x).upper() for x in multicurrency.get("ready_currencies", []) or [] if _s(x)})
     tx = []
     total_usd = 0.0
-    for row in _rows(state, "transactions"):
-        status = _norm(row.get("status") or row.get("payment_status"))
-        if status not in REALIZED_PAYMENT_STATUSES:
-            continue
-        amount = _f(row.get("company_profit_usd") or row.get("profit_usd") or row.get("amount_usd"))
-        if amount <= 0 and _s(row.get("currency")).upper() == "USD":
-            amount = _f(row.get("company_profit") or row.get("profit") or row.get("amount"))
-        if amount > 0:
-            total_usd += amount
-            tx.append(_s(row.get("id")) or f"tx:{len(tx)+1}")
+    for key in ("transactions", "service_revenue_transactions"):
+        for row in _rows(state, key):
+            status = _norm(row.get("status") or row.get("payment_status"))
+            if status not in REALIZED_PAYMENT_STATUSES:
+                continue
+            amount = _f(row.get("amount_received_usd") or row.get("company_profit_usd") or row.get("profit_usd") or row.get("amount_usd") or row.get("revenue_usd"))
+            if amount <= 0 and _s(row.get("currency")).upper() == "USD":
+                amount = _f(row.get("company_profit") or row.get("profit") or row.get("amount"))
+            if amount > 0:
+                total_usd += amount
+                tx.append(_s(row.get("id")) or f"{key}:{len(tx)+1}")
     return {
         "ready_currencies": ready,
         "setup_required_currencies": [x for x in ("ARS", "USD", "EUR") if x not in ready],
@@ -125,6 +125,26 @@ def _payment_truth(state: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _service_truth(state: Dict[str, Any]) -> Dict[str, Any]:
+    rows = _rows(state, "service_sales_pipeline")
+    if rows:
+        stages = [_norm(x.get("stage")) for x in rows]
+        real_contacted = sum(
+            1 for x in rows
+            if _norm(x.get("contact_truth")) in {"provider_accepted", "replied"}
+            or _norm(x.get("stage")) in {"contacted", "replied", "diagnosis", "proposal_ready", "followup", "won"}
+        )
+        realized = 0.0
+        for tx in _rows(state, "service_revenue_transactions"):
+            if _norm(tx.get("status")) in {"paid", "settled", "completed"}:
+                realized += max(0.0, _f(tx.get("amount_received_usd") or tx.get("revenue_usd")))
+        return {
+            "pipeline_total": len(rows),
+            "outreach_prepared": sum(1 for s in stages if s == "outreach_prepared"),
+            "real_contacted": real_contacted,
+            "won": sum(1 for s in stages if s == "won"),
+            "realized_service_revenue_usd": round(realized, 2),
+            "source": "service_sales_pipeline_plus_service_revenue_transactions",
+        }
     snap = state.get("service_growth_pipeline", {}) or {}
     return {
         "pipeline_total": int(snap.get("pipeline_total") or 0),
@@ -132,7 +152,7 @@ def _service_truth(state: Dict[str, Any]) -> Dict[str, Any]:
         "real_contacted": int(snap.get("real_contacted") or 0),
         "won": int(snap.get("won") or 0),
         "realized_service_revenue_usd": _f(snap.get("realized_service_revenue_usd")),
-        "source": "service_growth_pipeline_cumulative_snapshot",
+        "source": "service_growth_pipeline_snapshot_fallback",
     }
 
 
@@ -143,6 +163,29 @@ def _append_issue(issues: List[Dict[str, Any]], code: str, reported: Any, canoni
         same = reported == canonical
     if not same:
         issues.append({"code": code, "reported": reported, "canonical": canonical, "scope": scope})
+
+
+def _project_instagram_truth(state: Dict[str, Any], instagram: Dict[str, Any]) -> None:
+    published = int(instagram.get("published_cumulative") or 0)
+
+    control = state.setdefault("instagram_publish_control", {})
+    control["published_total"] = published
+    control["canonical_truth_source"] = instagram.get("source")
+    control["canonical_truth_updated_at"] = _now()
+
+    creative = state.setdefault("creative_distribution", {})
+    creative["external_verified_published"] = max(int(creative.get("external_verified_published") or 0), published)
+    creative["instagram_external_verified_published"] = published
+    creative["canonical_truth_updated_at"] = _now()
+
+    campaigns = state.get("acquisition_campaigns")
+    if isinstance(campaigns, dict):
+        editorial = campaigns.get("instagram_editorial")
+        if isinstance(editorial, dict):
+            learning = editorial.setdefault("learning", {})
+            learning["published_total"] = published
+            learning["published_total_source"] = "canonical_distribution_receipts"
+            learning["canonical_truth_updated_at"] = _now()
 
 
 def run_once(state: Dict[str, Any] | None = None) -> Dict[str, Any]:
@@ -200,8 +243,6 @@ def run_once(state: Dict[str, Any] | None = None) -> Dict[str, Any]:
     publish_snap = state.get("instagram_publish_control", {}) or {}
     _append_issue(issues, "instagram_publish_total", publish_snap.get("published_total"), counts["instagram_published_cumulative"])
 
-    # Safe compatibility projection: these fields are explicitly cumulative business truth and are
-    # recomputed from primary evidence. Per-cycle module counters remain untouched.
     funnel.update({
         "research_leads": counts["research_leads"],
         "candidate_accounts": counts["candidate_accounts"],
@@ -220,6 +261,7 @@ def run_once(state: Dict[str, Any] | None = None) -> Dict[str, Any]:
         "canonical_truth_updated_at": _now(),
     })
     state["business_funnel"] = funnel
+    _project_instagram_truth(state, instagram)
 
     status = "consistent" if not issues else "reconciled"
     report = {
@@ -242,6 +284,7 @@ def run_once(state: Dict[str, Any] | None = None) -> Dict[str, Any]:
             "issues": issues[:50],
             "raw_module_snapshots_preserved": True,
             "per_cycle_counters_are_not_compared_to_cumulative_counters": True,
+            "safe_projection_repairs_applied": True,
         },
         "governance": {
             "source_of_truth": "primary_persisted_evidence_plus_canonical_revenue_lineage",
