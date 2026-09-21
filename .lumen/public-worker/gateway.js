@@ -26,7 +26,8 @@ function rewriteHtml(text, origin) {
     .replaceAll(CONVERSION_BASE, origin)
     .replaceAll(X402_BASE, origin)
     .replaceAll('href="/catalog"', 'href="/store"')
-    .replaceAll('<a href="/services">Servicios</a>', '<a href="/services">Servicios</a><a href="/store">Comprar</a>');
+    .replaceAll('<a href="/services">Servicios</a>', '<a href="/services">Servicios</a><a href="/store">Comprar</a>')
+    .replaceAll('<a class="cta" href="/services">Ver servicios</a>', '<a class="cta" href="/services">Ver servicios</a> <a class="cta" href="/store">Comprar intelligence</a>');
 }
 
 async function normalizeResponse(upstream, origin, {rewriteBody=true}={}) {
@@ -43,12 +44,12 @@ async function normalizeResponse(upstream, origin, {rewriteBody=true}={}) {
   return new Response(upstream.body, {status:upstream.status, headers});
 }
 
-async function proxyBinding(request, binding, targetPath, origin, rewriteBody=true) {
+async function proxyBinding(request, binding, serviceBase, targetPath, origin, rewriteBody=true) {
   if (!binding || typeof binding.fetch !== "function") {
     return Response.json({ok:false,error:"internal_service_unavailable"},{status:503});
   }
-  const target = new URL(request.url);
-  target.pathname = targetPath;
+  const incoming = new URL(request.url);
+  const target = new URL(targetPath + incoming.search, serviceBase);
   const headers = new Headers(request.headers);
   headers.set("x-lumen-public-origin", origin);
   const init = {method:request.method,headers,redirect:"manual"};
@@ -65,24 +66,24 @@ export default {
 
     // One human-facing storefront. Conversion remains an internal service binding.
     if (request.method === "GET" && (path === "/store" || path === "/catalog")) {
-      return proxyBinding(request, env.CONVERSION, "/catalog", origin, true);
+      return proxyBinding(request, env.CONVERSION, CONVERSION_BASE, "/catalog", origin, true);
     }
     if (request.method === "GET" && path === "/store.json") {
-      return proxyBinding(request, env.CONVERSION, "/catalog.json", origin, true);
+      return proxyBinding(request, env.CONVERSION, CONVERSION_BASE, "/catalog.json", origin, true);
     }
     if (/^\/offer\/[a-z0-9-]+$/.test(path) && request.method === "GET") {
-      return proxyBinding(request, env.CONVERSION, path, origin, true);
+      return proxyBinding(request, env.CONVERSION, CONVERSION_BASE, path, origin, true);
     }
     if (/^\/go\/[a-z0-9-]+$/.test(path) && request.method === "GET") {
-      return proxyBinding(request, env.CONVERSION, path, origin, false);
+      return proxyBinding(request, env.CONVERSION, CONVERSION_BASE, path, origin, false);
     }
     if (/^\/intent\/[a-z0-9-]+$/.test(path) && request.method === "POST") {
-      return proxyBinding(request, env.CONVERSION, path, origin, true);
+      return proxyBinding(request, env.CONVERSION, CONVERSION_BASE, path, origin, true);
     }
 
     // x402 remains internal; the buyer sees and retries the public URL.
     if (/^\/buy\/[a-z0-9-]+$/.test(path) && ["GET","POST"].includes(request.method)) {
-      return proxyBinding(request, env.X402, path, origin, false);
+      return proxyBinding(request, env.X402, X402_BASE, path, origin, false);
     }
 
     const response = await core.fetch(request, env, ctx);
