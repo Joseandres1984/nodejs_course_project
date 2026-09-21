@@ -25,6 +25,7 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.LUMEN_D1_ACCOUNT_ID }}
       LUMEN_DASHBOARD_PASSWORD: ${{ secrets.LUMEN_DASHBOARD_PASSWORD }}
       CONTROL_URL: https://lumen-instagram-control.joseandresceol1-jac.workers.dev
+      EXPECTED_CONTROL_VERSION: "1.2-d1-projection-diagnostic"
     steps:
       - name: Checkout LUMEN Zero
         uses: actions/checkout@v4
@@ -65,19 +66,20 @@ jobs:
         shell: bash
         run: printf '%s' "$LUMEN_DASHBOARD_PASSWORD" | npx --yes wrangler@4 secret put LUMEN_DASHBOARD_PASSWORD
 
-      - name: Verify authenticated health
+      - name: Verify exact deployed control version
         if: steps.preflight.outputs.ready == 'true'
         shell: bash
         run: |
-          for i in {1..12}; do
+          for i in {1..18}; do
             code=$(curl -sS -u "socio:$LUMEN_DASHBOARD_PASSWORD" -o /tmp/lumen-instagram-control-health.json -w '%{http_code}' "$CONTROL_URL/health" || true)
-            if [[ "$code" == "200" ]] && jq -e '.ok == true and .storage == "cloudflare-d1"' /tmp/lumen-instagram-control-health.json >/dev/null; then
-              echo "INSTAGRAM_CONTROL health=ok auth=required"
+            if [[ "$code" == "200" ]] && jq -e --arg v "$EXPECTED_CONTROL_VERSION" '.ok == true and .storage == "cloudflare-d1" and .version == $v' /tmp/lumen-instagram-control-health.json >/dev/null; then
+              echo "INSTAGRAM_CONTROL health=ok version=$EXPECTED_CONTROL_VERSION auth=required"
               exit 0
             fi
+            echo "INSTAGRAM_CONTROL waiting_for_current_version attempt=$i http=$code"
             sleep 5
           done
-          echo "INSTAGRAM_CONTROL health=failed"
+          echo "INSTAGRAM_CONTROL exact_version_check=failed expected=$EXPECTED_CONTROL_VERSION"
           cat /tmp/lumen-instagram-control-health.json 2>/dev/null || true
           exit 1
 
@@ -99,12 +101,17 @@ jobs:
         if: steps.preflight.outputs.ready == 'true'
         shell: bash
         run: |
-          code=$(curl -sS -u "socio:$LUMEN_DASHBOARD_PASSWORD" -o /tmp/lumen-instagram-projection.json -w '%{http_code}' "$CONTROL_URL/health/projection" || true)
-          cat /tmp/lumen-instagram-projection.json
-          echo
-          if [[ "$code" != "200" ]]; then
-            echo "INSTAGRAM_CONTROL projection_diagnostic=failed http=$code"
-            exit 1
-          fi
-          jq -e '.ok == true' /tmp/lumen-instagram-projection.json >/dev/null
-          echo "INSTAGRAM_CONTROL projection_diagnostic=ok"
+          for i in {1..12}; do
+            code=$(curl -sS -u "socio:$LUMEN_DASHBOARD_PASSWORD" -o /tmp/lumen-instagram-projection.json -w '%{http_code}' "$CONTROL_URL/health/projection" || true)
+            if [[ "$code" == "200" ]] && jq -e '.ok == true' /tmp/lumen-instagram-projection.json >/dev/null 2>&1; then
+              cat /tmp/lumen-instagram-projection.json
+              echo
+              echo "INSTAGRAM_CONTROL projection_diagnostic=ok"
+              exit 0
+            fi
+            echo "INSTAGRAM_CONTROL waiting_for_projection attempt=$i http=$code"
+            sleep 5
+          done
+          echo "INSTAGRAM_CONTROL projection_diagnostic=failed"
+          cat /tmp/lumen-instagram-projection.json 2>/dev/null || true
+          exit 1
