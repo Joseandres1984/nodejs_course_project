@@ -3,16 +3,19 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 from canonical_revenue_truth_runtime import canonical_revenue_truth_tick
-VERSION = "1.2-continuous-revenue-drive-canonical"
+VERSION = "1.3-continuous-revenue-drive-demand-first"
 def _now()->str: return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 def _safe_dict(v:Any)->Dict[str,Any]: return v if isinstance(v,dict) else {}
 def _score_actions(state:Dict[str,Any],truth:Dict[str,Any])->List[Dict[str,Any]]:
     funnel=_safe_dict(state.get("business_funnel")); readiness=_safe_dict(state.get("external_market_readiness")); acquisition=_safe_dict(state.get("acquisition_campaigns")); distribution=_safe_dict(state.get("distribution_operator")); c=truth.get("counts",{}) or {}; actions=[]
     def add(p,l,a,r,m): actions.append({"priority":p,"lane":l,"action":a,"reason":r,"success_metric":m,"binding":False})
-    copps=int(c.get("canonical_opportunities") or 0); closing=int(c.get("closing_eligible_deals") or 0); ready=int(c.get("canonical_close_ready") or 0); demand=int(c.get("buyers_with_verified_demand") or 0); offers=int(c.get("canonical_real_offers") or 0); vb=int(funnel.get("verified_buyers") or 0); vc=int(funnel.get("verified_commercial_channels") or 0); ve=int(funnel.get("verified_corporate_emails") or 0); eligible=int(readiness.get("eligible_external_prospects") or 0); clicks=int(acquisition.get("clicks") or 0); leads=int(acquisition.get("leads") or 0)
+    copps=int(c.get("canonical_opportunities") or 0); closing=int(c.get("closing_eligible_deals") or 0); ready=int(c.get("canonical_close_ready") or 0); demand=int(c.get("buyers_with_verified_demand") or 0); offers=int(c.get("canonical_real_offers") or 0); vb=int(c.get("verified_buyers") or funnel.get("verified_buyers") or 0); vc=int(funnel.get("verified_commercial_channels") or 0); ve=int(funnel.get("verified_corporate_emails") or 0); eligible=int(readiness.get("eligible_external_prospects") or 0); clicks=int(acquisition.get("clicks") or 0); leads=int(acquisition.get("leads") or 0)
     if closing>0 and ready<=0: add(100,"closing","Advance the strongest canonical deal toward a safe close-ready state using only non-binding preparation.","At least one evidence-backed deal is genuinely on the closing path.","canonical_close_ready > 0")
     if copps>0 and offers<=0: add(100,"quote_creation","Turn canonical opportunities into comparable supplier RFQs and real quotes.","Evidence-backed opportunities exist but no canonical-linked supplier offer is registered.","canonical_real_offers > 0")
     if copps<=0 and demand>0: add(100,"opportunity_building","Convert the strongest verified demand signals into canonical evidence-backed opportunities.",f"{demand} verified-demand buyer(s) exist but canonical opportunities remain at zero.","canonical_opportunities > 0")
+    # Upstream prerequisite: verified companies without a verified need are not opportunities. This
+    # action intentionally outranks more outreach/contact work until at least one demand signal exists.
+    if vb>0 and demand<=0: add(100,"demand_discovery","Find exact public purchase/requirement evidence for verified buyers using stored evidence first and bounded public search next.",f"{vb} verified buyer(s) exist but none has verified public demand; no canonical opportunity can exist yet.","buyers_with_verified_demand > 0")
     if eligible<=0 and vb>0: add(92,"verification_contact","Repair prospect eligibility by verifying company identity and corporate contact channels.","Verified buyers exist but there are no currently eligible external prospects.","eligible_external_prospects > 0")
     if vc<vb: add(88,"verification_contact","Enrich missing corporate contact channels for verified buyers using public evidence.","Verified commercial channels trail verified buyers.","verified_commercial_channels >= verified_buyers")
     if ve<vb: add(84,"verification_contact","Prefer verified corporate email/form discovery for buyers lacking a usable channel.","Verified corporate emails trail verified buyers.","verified_corporate_emails increases")
@@ -20,8 +23,7 @@ def _score_actions(state:Dict[str,Any],truth:Dict[str,Any])->List[Dict[str,Any]]
     if int(distribution.get("awaiting_connector") or 0)>0: add(60,"distribution","Keep connector-dependent jobs prepared while active capacity stays on owned-channel conversion work.","Some jobs require connector authorization.","owned_live/clicks/leads increase")
     actions.sort(key=lambda x:(-int(x["priority"]),str(x["lane"])))
     canonical_lane=str(truth.get("recommended_lane") or "")
-    if canonical_lane:
-        actions.sort(key=lambda x:(0 if x.get("lane")==canonical_lane else 1,-int(x["priority"])))
+    if canonical_lane: actions.sort(key=lambda x:(0 if x.get("lane")==canonical_lane else 1,-int(x["priority"])))
     return actions[:12]
 def continuous_revenue_drive_tick(state:Dict[str,Any])->Dict[str,Any]:
     truth=canonical_revenue_truth_tick(state); actions=_score_actions(state,truth); scout=_safe_dict(state.get("scout")); gov=_safe_dict(scout.get("search_budget_governor")); remaining=int(gov.get("effective_total_remaining") or scout.get("budget_remaining_total") or 0); exhausted=bool(scout.get("budget_exhausted")) or remaining<=0; mode="SEARCH_PLUS_CONVERSION" if not exhausted else "CONVERSION_WITHOUT_IDLE"
@@ -40,7 +42,4 @@ def _install()->None:
         crd=continuous_revenue_drive_tick(state); print({"continuous_revenue_drive":crd}); return original(state)
     wrapped._continuous_revenue_drive_wrapped=True; wrapped._continuous_revenue_drive_original=original; executive_secretary.secretary_tick=wrapped; print({"continuous_revenue_drive_install":{"status":"active","version":VERSION}})
 _install()
-
-# Install the unified monetization director after Continuous Revenue Drive so its
-# four-lane priorities persist on top of the canonical revenue truth every cycle.
 import money_engine_runtime  # noqa: E402,F401
