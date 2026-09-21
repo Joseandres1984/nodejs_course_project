@@ -4,15 +4,16 @@ from __future__ import annotations
 
 Public/human custom projects still require human price confirmation. Only requests created by the
 trusted A2A bridge with a LUMEN-generated quote id and a known machine product/plan keep their
-already-published non-binding catalog price automatically. This patch never marks a sale won,
-never verifies a payment, and never grants outgoing-spend or binding authority.
+already-published non-binding catalog price automatically. Deployment canaries are removed from
+commercial truth before the pipeline is rebuilt. This patch never marks a sale won, never verifies
+a payment, and never grants outgoing-spend or binding authority.
 """
 
 from typing import Any, Dict, List
 
 import service_revenue_runtime as _service
 
-VERSION = "1.0-a2a-machine-fixed-quote-alignment"
+VERSION = "1.1-a2a-machine-fixed-quote-truth-alignment"
 _ORIGINAL_BUILD_PIPELINE = _service._build_pipeline
 _ORIGINAL_TICK = _service.service_revenue_tick
 
@@ -22,6 +23,75 @@ def _f(value: Any) -> float:
         return max(0.0, float(value))
     except (TypeError, ValueError):
         return 0.0
+
+
+def _canary_text(row: Dict[str, Any]) -> str:
+    return " ".join(
+        str(row.get(key) or "")
+        for key in ("company", "name", "need", "title", "snippet", "summary", "counterparty_hint", "source_kind")
+    ).lower()
+
+
+def _is_deployment_canary(row: Dict[str, Any]) -> bool:
+    text = _canary_text(row)
+    return "lumen deployment canary" in text or "technical deployment canary" in text or "technical_machine_order_canary" in text
+
+
+def _purge_deployment_canaries(state: Dict[str, Any]) -> Dict[str, int]:
+    removed_inquiry_ids: set[str] = set()
+    inquiries = []
+    removed_inquiries = 0
+    for row in state.get("service_inquiries", []) or []:
+        if isinstance(row, dict) and str(row.get("source") or "").startswith("a2a_") and _is_deployment_canary(row):
+            removed_inquiries += 1
+            if row.get("id"):
+                removed_inquiry_ids.add(str(row.get("id")))
+            continue
+        inquiries.append(row)
+    state["service_inquiries"] = inquiries
+
+    leads = []
+    removed_leads = 0
+    for row in state.get("research_leads", []) or []:
+        if isinstance(row, dict) and str(row.get("source") or "") == "a2a_inbound" and _is_deployment_canary(row):
+            removed_leads += 1
+            continue
+        leads.append(row)
+    state["research_leads"] = leads
+
+    pipeline = []
+    removed_pipeline = 0
+    for row in state.get("service_sales_pipeline", []) or []:
+        if isinstance(row, dict) and (str(row.get("source_id") or "") in removed_inquiry_ids or _is_deployment_canary(row)):
+            removed_pipeline += 1
+            continue
+        pipeline.append(row)
+    state["service_sales_pipeline"] = pipeline
+
+    network = state.get("agent_network") if isinstance(state.get("agent_network"), dict) else {}
+    removed_network = 0
+    for key in ("opportunities", "clarification_queue", "conversations"):
+        kept = []
+        for row in network.get(key, []) or []:
+            if isinstance(row, dict) and _is_deployment_canary(row):
+                removed_network += 1
+                continue
+            kept.append(row)
+        if key in network:
+            network[key] = kept
+
+    report = {
+        "service_inquiries": removed_inquiries,
+        "research_leads": removed_leads,
+        "service_pipeline": removed_pipeline,
+        "agent_network_rows": removed_network,
+    }
+    state["a2a_canary_truth_cleanup"] = {
+        "status": "clean",
+        "removed": report,
+        "commercial_canaries_retained": False,
+    }
+    return report
 
 
 def _machine_inquiries(state: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
@@ -87,6 +157,7 @@ def _build_pipeline_with_machine_quotes(state: Dict[str, Any], opportunities: Li
 
 
 def _tick_with_machine_alignment(state: Dict[str, Any]) -> Dict[str, Any]:
+    cleanup = _purge_deployment_canaries(state)
     summary = dict(_ORIGINAL_TICK(state) or {})
     machine_rows = [
         row for row in state.get("service_sales_pipeline", []) or []
@@ -98,6 +169,8 @@ def _tick_with_machine_alignment(state: Dict[str, Any]) -> Dict[str, Any]:
         "pipeline_rows": len(machine_rows),
         "fixed_price_rows": len(fixed),
         "fixed_quote_without_human_repricing": True,
+        "technical_canaries_excluded": True,
+        "canary_cleanup": cleanup,
         "payment_verification_required": True,
         "binding_close_evidence_required": True,
         "autonomous_outgoing_spend": False,
@@ -116,6 +189,7 @@ print({
         "status": "active",
         "machine_fixed_price_preserved": True,
         "human_repricing_required": False,
+        "technical_canaries_excluded": True,
         "payment_verification_required": True,
         "binding_close_evidence_required": True,
         "autonomous_outgoing_spend": False,
