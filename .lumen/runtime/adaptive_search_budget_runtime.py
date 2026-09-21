@@ -3,15 +3,20 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Dict
 
+# Install the shared intraday pacing layer before demand/procurement modules capture budget
+# functions. The 24/day hard cap is unchanged; pacing only prevents Autopilot from consuming the
+# full free allowance too early in the Argentina day.
+import search_budget_governor as governor
+import search_budget_pacing_runtime  # noqa: F401
+
 import demand_hunter
 import demand_hunter_runtime
 import demand_intelligence
 import public_procurement_hunter
-import search_budget_governor as governor
 import scout_connector
 from app import STATE, load_state
 
-VERSION = "1.5-demand-gap-first-cash"
+VERSION = "1.6-demand-gap-first-cash-paced"
 _ORIGINAL_SUMMARY = governor.summary
 
 
@@ -103,6 +108,7 @@ def build_budget_plan(state: Dict[str, Any]) -> Dict[str, Any]:
             "dependent_runtime_caps_synchronized": True,
             "legacy_overage_reconciliation_reopens_budget": False,
             "general_lane_preserved_for_verification": True,
+            "intraday_pacing_enabled": True,
         },
     }
 
@@ -147,6 +153,7 @@ def adaptive_summary(state: Dict[str, Any]) -> Dict[str, Any]:
         "procurement_can_use_full_demand_pool": True,
         "accounting_reconciled": bool(reconciliation.get("reconciled")),
         "legacy_overage_absorbed": int(reconciliation.get("legacy_overage_absorbed") or 0),
+        "intraday_pacing_enabled": True,
     }
     return base
 
@@ -163,6 +170,7 @@ try:
             "accounting_reconciled": bool(_RECON.get("reconciled")),
             "legacy_overage_absorbed": int(_RECON.get("legacy_overage_absorbed") or 0),
             "procurement_can_use_full_demand_pool": True,
+            "intraday_pacing_enabled": True,
         }
     }, flush=True)
 except Exception as exc:
