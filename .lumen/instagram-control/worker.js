@@ -36,6 +36,24 @@ async function ensureSchema(env) {
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS lumen_instagram_control_commands (id TEXT PRIMARY KEY, job_id TEXT NOT NULL, fingerprint TEXT NOT NULL, action TEXT NOT NULL, created_at TEXT NOT NULL, processed INTEGER NOT NULL DEFAULT 0, processed_at TEXT, result TEXT)").run();
   await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_lumen_instagram_control_commands_pending ON lumen_instagram_control_commands(processed, created_at)").run();
 }
+async function commandWriteCanary(env) {
+  await ensureSchema(env);
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS lumen_instagram_control_canary (id TEXT PRIMARY KEY, created_at TEXT NOT NULL)").run();
+  const id=`canary-${crypto.randomUUID()}`;
+  const createdAt=new Date().toISOString();
+  let write=false, read=false, deleted=false;
+  try {
+    await env.DB.prepare("INSERT INTO lumen_instagram_control_canary(id,created_at) VALUES(?,?)").bind(id,createdAt).run();
+    write=true;
+    const row=await env.DB.prepare("SELECT id,created_at FROM lumen_instagram_control_canary WHERE id=? LIMIT 1").bind(id).first();
+    read=Boolean(row && constantTimeEqual(String(row.id||""),id) && String(row.created_at||"")===createdAt);
+  } finally {
+    await env.DB.prepare("DELETE FROM lumen_instagram_control_canary WHERE id=?").bind(id).run();
+    const left=await env.DB.prepare("SELECT id FROM lumen_instagram_control_canary WHERE id=? LIMIT 1").bind(id).first();
+    deleted=!left;
+  }
+  return {ok:Boolean(write&&read&&deleted),service:"lumen-instagram-control",storage:"cloudflare-d1",d1_write:write,d1_read:read,d1_delete:deleted,command_queue_schema:true};
+}
 function label(row) {
   if(String(row.state_status||"").toUpperCase()==="PUBLISHED" || String(row.approval_status||"").toUpperCase()==="PUBLISHED") return "Publicado";
   const a=String(row.approval_status||"").toUpperCase();
@@ -89,14 +107,22 @@ async function command(request, env) {
   if(!row) return text("job_not_found",404);
   if(!constantTimeEqual(String(row.fingerprint||""),fingerprint)) return text("content_changed_reload",409);
   await env.DB.prepare("INSERT INTO lumen_instagram_control_commands(id,job_id,fingerprint,action,created_at,processed) VALUES(?,?,?,?,?,0)").bind(crypto.randomUUID(),jobId,fingerprint,action,new Date().toISOString()).run();
-  return new Response(null,{status:303,headers:{location:`/?result=${encodeURIComponent(action==="approve"?"Aprobación registrada. LUMEN la procesará en el próximo ciclo.":"Descarte registrado. LUMEN lo procesará en el próximo ciclo.")}`}});
+  return new Response(null,{status:303,headers:{location:`/?result=${encodeURIComponent(action==="approve"?"Aprobación registrada en D1. LUMEN la procesará en el próximo ciclo.":"Descarte registrado en D1. LUMEN lo procesará en el próximo ciclo.")}`}});
 }
 export default {
   async fetch(request, env) {
     if(!String(env.LUMEN_DASHBOARD_PASSWORD||"")) return text("control_not_configured",503);
     if(!authorized(request,env)) return unauthorized();
     const url=new URL(request.url);
-    if(request.method==="GET" && url.pathname==="/health") return Response.json({ok:true,service:"lumen-instagram-control",auth:true,storage:"cloudflare-d1"},{headers:{"cache-control":"no-store"}});
+    if(request.method==="GET" && url.pathname==="/health") return Response.json({ok:true,service:"lumen-instagram-control",auth:true,storage:"cloudflare-d1",version:"1.1-d1-write-canary"},{headers:{"cache-control":"no-store"}});
+    if(request.method==="POST" && url.pathname==="/health/command-write") {
+      try {
+        const result=await commandWriteCanary(env);
+        return Response.json(result,{status:result.ok?200:503,headers:{"cache-control":"no-store"}});
+      } catch(err) {
+        return Response.json({ok:false,service:"lumen-instagram-control",d1_write:false,d1_read:false,d1_delete:false,error:String(err?.name||"Error")},{status:503,headers:{"cache-control":"no-store"}});
+      }
+    }
     if(request.method==="GET" && url.pathname==="/") return renderConsole(env,url.searchParams.get("result")||"");
     if(request.method==="POST" && url.pathname==="/command") return command(request,env);
     return text("not_found",404);
