@@ -39,6 +39,7 @@ os.environ.setdefault("LUMEN_OUTBOUND_MAX_FOLLOWUPS_PER_CYCLE", "4")
 os.environ.setdefault("LUMEN_SOCIAL_CANARY_MAX_PER_CYCLE", "1")
 os.environ.setdefault("LUMEN_SOCIAL_CANARY_MAX_PER_DAY", "4")
 os.environ.setdefault("LUMEN_PUBLIC_BASE_URL", "https://lumen-zero-public.joseandresceol1-jac.workers.dev")
+os.environ.setdefault("LUMEN_A2A_BASE_URL", "https://lumen-zero-a2a.joseandresceol1-jac.workers.dev")
 os.environ.setdefault("LUMEN_COMMAND_CENTER_URL", "https://lumen-zero-dashboard.joseandresceol1-jac.workers.dev")
 # Shadow intelligence only enriches already-permitted public catalog crawls; it adds no provider
 # spend and cannot authorize outreach, payments or binding actions.
@@ -56,6 +57,7 @@ import zero_mail_runtime  # noqa: F401,E402
 import zero_watchdog_runtime  # noqa: F401,E402
 import zero_notification_runtime  # noqa: F401,E402
 import zero_public_inquiry_bridge_runtime  # noqa: F401,E402
+import zero_a2a_inbound_bridge_runtime  # noqa: F401,E402
 import zero_instagram_control_bridge_runtime  # noqa: F401,E402
 
 # Fold public Worker inquiries into the canonical service pipeline before the commercial cycle.
@@ -63,6 +65,13 @@ try:
     zero_public_inquiry_bridge_runtime.ingest_pending()
 except Exception as exc:
     print({"zero_public_inquiry_bridge": {"status": "degraded_fail_open", "error": f"{type(exc).__name__}: {str(exc)[:300]}"}}, flush=True)
+
+# Fold public A2A messages into the canonical research/verification pipeline. External-agent claims
+# remain untrusted until the normal company/evidence gates verify them.
+try:
+    zero_a2a_inbound_bridge_runtime.ingest_pending()
+except Exception as exc:
+    print({"zero_a2a_inbound_bridge": {"status": "degraded_fail_open", "error": f"{type(exc).__name__}: {str(exc)[:300]}"}}, flush=True)
 
 # Apply authenticated Instagram approve/reject commands before the production publishing control
 # is imported. Every command is revalidated against the current immutable content fingerprint.
@@ -81,6 +90,24 @@ import zero_search_budget_runtime  # noqa: F401,E402
 # production layer captures Deep Work/Partner Network functions; rejected sources remain auditable
 # but cannot become counterparties or consume commercial execution capacity.
 import zero_discovery_quality_runtime  # noqa: F401,E402
+
+# First-cash demand priority: reserve the beginning of each zero-cost cycle for one official/public
+# procurement query before broader demand modules can consume the shared daily pool. The shared hard
+# cap remains unchanged and the local public-procurement daily cap still applies. Disable a second
+# procurement pass inside this same process so MAX_QUERIES_PER_TICK is preserved exactly.
+try:
+    import app as _lumen_pre  # noqa: E402
+    import adaptive_search_budget_runtime as _adaptive_budget  # noqa: E402
+    import public_procurement_hunter as _public_procurement  # noqa: E402
+    if _lumen_pre.load_state():
+        _adaptive_budget.apply_adaptive_search_budget(_lumen_pre.STATE)
+        _pre_stats = _public_procurement.public_procurement_tick(_lumen_pre.STATE)
+        _lumen_pre.STATE["zero_first_cash_procurement"] = {**dict(_pre_stats or {}), "pre_worker_priority": True}
+        _lumen_pre.save_state()
+        _public_procurement.MAX_QUERIES_PER_TICK = 0
+        print({"zero_first_cash_procurement": _lumen_pre.STATE.get("zero_first_cash_procurement")}, flush=True)
+except Exception as exc:
+    print({"zero_first_cash_procurement": {"status": "degraded_fail_open", "error": f"{type(exc).__name__}: {str(exc)[:300]}"}}, flush=True)
 
 # Railway history stays isolated in D1. This bridge processes only a tiny bounded batch each cycle,
 # collects fresh same-domain public evidence, preserves legacy opt-outs/cooldowns, and may create a
