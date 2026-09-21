@@ -22,6 +22,8 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.LUMEN_D1_ACCOUNT_ID }}
       A2A_BASE_URL: https://lumen-zero-a2a.joseandresceol1-jac.workers.dev
+      X402_CHECKOUT_URL: https://lumen-zero-x402.joseandresceol1-jac.workers.dev
+      X402_EXPECTED_RECIPIENT: "0x04285DE6A083CEb28fb0C254a2ed0F5fdB2eeD28"
     steps:
       - name: Checkout LUMEN Zero
         uses: actions/checkout@v4
@@ -54,7 +56,7 @@ jobs:
         working-directory: .lumen/a2a-worker
         run: npx --yes wrangler@4 deploy
 
-      - name: Verify health, catalogs and payment truth
+      - name: Verify health, catalogs and live receiving configuration
         shell: bash
         run: |
           for i in {1..12}; do
@@ -64,15 +66,20 @@ jobs:
             machine=$(curl -sS -o /tmp/a2a-machine.json -w '%{http_code}' "$A2A_BASE_URL/machine/catalog" || true)
             payments=$(curl -sS -o /tmp/a2a-payments.json -w '%{http_code}' "$A2A_BASE_URL/payments/status" || true)
             stats=$(curl -sS -o /tmp/a2a-stats.json -w '%{http_code}' "$A2A_BASE_URL/machine/stats" || true)
-            if [[ "$health" == "200" && "$card" == "200" && "$services" == "200" && "$machine" == "200" && "$payments" == "200" && "$stats" == "200" ]]; then
+            checkout=$(curl -sS -o /tmp/x402-health.json -w '%{http_code}' "$X402_CHECKOUT_URL/health" || true)
+            xstats=$(curl -sS -o /tmp/x402-stats.json -w '%{http_code}' "$X402_CHECKOUT_URL/stats" || true)
+            if [[ "$health" == "200" && "$card" == "200" && "$services" == "200" && "$machine" == "200" && "$payments" == "200" && "$stats" == "200" && "$checkout" == "200" && "$xstats" == "200" ]]; then
               python3 - <<'PY'
-          import json
+          import json, os
           health=json.load(open('/tmp/a2a-health.json'))
           card=json.load(open('/tmp/a2a-card.json'))
           catalog=json.load(open('/tmp/a2a-services.json'))
           machine=json.load(open('/tmp/a2a-machine.json'))
           payments=json.load(open('/tmp/a2a-payments.json'))
           stats=json.load(open('/tmp/a2a-stats.json'))
+          checkout=json.load(open('/tmp/x402-health.json'))
+          xstats=json.load(open('/tmp/x402-stats.json'))
+          expected=os.environ['X402_EXPECTED_RECIPIENT']
           assert health.get('sellerMode') == 'receive_revenue_only'
           assert health.get('lumenAutonomousSpend') is False
           assert health.get('machineProducts') == 6
@@ -103,16 +110,29 @@ jobs:
           assert payments.get('autonomousPurchase') is False
           assert payments.get('autonomousOutgoingPayment') is False
           assert payments.get('chargeCreatedByCatalogOrQuote') is False
-          assert payments.get('x402',{}).get('status') in {'READY','SETUP_REQUIRED'}
+          x402=payments.get('x402',{})
+          assert x402.get('status') == 'READY', x402
+          assert x402.get('recipientConfigured') is True, x402
+          assert x402.get('network') == 'eip155:8453', x402
+          assert x402.get('facilitator') == 'https://facilitator.xpay.sh', x402
           assert stats.get('realizedRevenueUsd') is None
-          print({'machine_store':{'products':len(product_prices),'plans':len(plan_prices),'x402':payments.get('x402',{}).get('status'),'orders':stats.get('orders'),'quoted_pipeline_usd':stats.get('quotedPipelineUsd')}})
+          assert checkout.get('ok') is True
+          assert checkout.get('x402') == 'LIVE'
+          assert checkout.get('network') == 'eip155:8453'
+          assert checkout.get('asset') == 'USDC'
+          assert checkout.get('resourceServerInitialized') is True
+          assert checkout.get('outgoingSpendEnabled') is False
+          assert xstats.get('recipient') == expected
+          assert xstats.get('asset') == 'USDC'
+          assert xstats.get('network') == 'Base'
+          print({'machine_store':{'products':len(product_prices),'plans':len(plan_prices),'x402':x402.get('status'),'checkout':'LIVE','settled_payments':xstats.get('payments'),'realized_revenue_usd':xstats.get('realizedRevenueUsd')}})
           PY
               exit 0
             fi
             sleep 5
           done
           echo "A2A Machine Store production verification failed."
-          for f in /tmp/a2a-health.json /tmp/a2a-card.json /tmp/a2a-services.json /tmp/a2a-machine.json /tmp/a2a-payments.json /tmp/a2a-stats.json; do cat "$f" 2>/dev/null || true; echo; done
+          for f in /tmp/a2a-health.json /tmp/a2a-card.json /tmp/a2a-services.json /tmp/a2a-machine.json /tmp/a2a-payments.json /tmp/a2a-stats.json /tmp/x402-health.json /tmp/x402-stats.json; do cat "$f" 2>/dev/null || true; echo; done
           exit 1
 
       - name: Verify quote RPCs and machine order round trip
@@ -135,6 +155,33 @@ jobs:
           [[ "$code" == "200" ]]
           jq -e '.result.task.status.message.parts[1].data.commercialItem.itemId == "MP-SUPPLIER-SNAPSHOT" and .result.task.status.message.parts[1].data.commercialItem.priceUsd == 5 and .result.task.status.message.parts[1].data.lumenAutonomousSpend == false' /tmp/a2a-machine-order.json >/dev/null
           echo "A2A_MACHINE_ORDER_CANARY=success product=MP-SUPPLIER-SNAPSHOT quote_usd=5 charge_created=false"
+
+      - name: Verify x402 checkout challenge is live without spending
+        shell: bash
+        run: |
+          success=0
+          for i in {1..10}; do
+            code=$(curl -sS -D /tmp/x402-headers.txt -o /tmp/x402-body.json -w '%{http_code}' "$X402_CHECKOUT_URL/buy/supplier-snapshot?source=a2a-deploy-${GITHUB_RUN_ID}-${i}" || true)
+            if [[ "$code" == "402" ]]; then success=1; break; fi
+            sleep 4
+          done
+          [[ "$success" == "1" ]]
+          python3 - <<'PY'
+          import base64,json,os
+          lines=open('/tmp/x402-headers.txt',encoding='utf-8',errors='ignore').read().splitlines()
+          line=next((x for x in lines if x.lower().startswith('payment-required:')),None)
+          assert line
+          raw=line.split(':',1)[1].strip(); raw += '=' * (-len(raw)%4)
+          data=json.loads(base64.b64decode(raw))
+          req=(data.get('accepts') or [])[0]
+          assert data.get('x402Version') == 2
+          assert req.get('scheme') == 'exact'
+          assert req.get('network') == 'eip155:8453'
+          assert req.get('payTo','').lower() == os.environ['X402_EXPECTED_RECIPIENT'].lower()
+          assert int(req.get('amount') or 0) == 5000000
+          assert (req.get('extra') or {}).get('assetTransferMethod') == 'eip3009'
+          print({'a2a_x402_checkout':'ready','amount_atomic':req.get('amount'),'recipient':req.get('payTo')})
+          PY
 
       - name: Register or refresh Global A2A Registry
         id: registry
@@ -184,7 +231,9 @@ jobs:
           echo "Machine Store: $A2A_BASE_URL/machine/catalog"
           echo "Service catalog: $A2A_BASE_URL/seller/catalog"
           echo "Payments status: $A2A_BASE_URL/payments/status"
+          echo "x402 checkout: $X402_CHECKOUT_URL"
+          echo "x402 receiver: $X402_EXPECTED_RECIPIENT"
           echo "Registry action: ${{ steps.registry.outputs.action }}"
           echo "Registry final HTTP: ${{ steps.registry.outputs.http_status }}"
 
-# redeploy trigger after Machine Store regression fix 2026-09-21
+# x402 receiving activation redeploy 2026-09-21
