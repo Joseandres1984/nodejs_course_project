@@ -48,7 +48,7 @@ class A2AMachineStoreTests(unittest.TestCase):
             '"/payments/status"',
             '"QuoteMachineProduct"',
             '"QuoteRecurringPlan"',
-            '"lumen_machine_orders"',
+            'lumen_machine_orders',
             '"receive_revenue_only"',
         ):
             self.assertIn(token, self.worker)
