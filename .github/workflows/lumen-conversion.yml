@@ -68,18 +68,21 @@ jobs:
           python - <<'PY'
           import json, os, urllib.request
           base=os.environ["CONVERSION_BASE_URL"]
+          def get(path):
+              req=urllib.request.Request(base+path,headers={"Accept":"application/json","User-Agent":"LUMEN-ConversionDeploy/1.0"})
+              with urllib.request.urlopen(req,timeout=30) as r:
+                  return json.loads(r.read().decode())
           for path in ("/health","/catalog.json","/stats"):
-              with urllib.request.urlopen(base+path, timeout=30) as r:
-                  data=json.loads(r.read().decode())
+              data=get(path)
               assert data.get("ok") is True, (path,data)
-          catalog=json.loads(urllib.request.urlopen(base+"/catalog.json",timeout=30).read().decode())
+          catalog=get("/catalog.json")
           assert len(catalog.get("products",[])) == 6
           assert catalog.get("paidMediaSpend") is False
-          stats=json.loads(urllib.request.urlopen(base+"/stats",timeout=30).read().decode())
+          stats=get("/stats")
           assert stats.get("revenueRule") == "Only x402 receipts with status settled_verified count as realized revenue"
           print("CONVERSION_LIVE health=ok products=6 revenue_truth=settled_only")
           PY
-          curl -fsS "$BASE/offer/supplier-snapshot?src=technical-canary&medium=deploy&campaign=deploy-canary&technical_canary=1" >/dev/null
-          LOCATION=$(curl -sS -D - -o /dev/null "$BASE/go/supplier-snapshot?src=technical-canary&medium=deploy&campaign=deploy-canary&technical_canary=1" | awk 'BEGIN{IGNORECASE=1} /^location:/{sub(/\r$/,""); print substr($0,index($0,$2))}' | tail -1)
+          curl -fsS -A "LUMEN-ConversionDeploy/1.0" "$BASE/offer/supplier-snapshot?src=technical-canary&medium=deploy&campaign=deploy-canary&technical_canary=1" >/dev/null
+          LOCATION=$(curl -sS -A "LUMEN-ConversionDeploy/1.0" -D - -o /dev/null "$BASE/go/supplier-snapshot?src=technical-canary&medium=deploy&campaign=deploy-canary&technical_canary=1" | awk 'BEGIN{IGNORECASE=1} /^location:/{sub(/\r$/,""); print substr($0,index($0,$2))}' | tail -1)
           echo "$LOCATION" | grep -F "$X402/buy/supplier-snapshot" >/dev/null
           echo "CONVERSION_CANARY offer=200 checkout_redirect=302 payment_attempted=false"
