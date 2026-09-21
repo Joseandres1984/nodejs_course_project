@@ -2,14 +2,8 @@ const SERVICE = "lumen-zero-conversion";
 const VERSION = "1.1-conversion-loop-crm";
 const X402_BASE = "https://lumen-zero-x402.lumen-b2b.workers.dev";
 
-const PRODUCTS = {
-  "supplier-snapshot": { id:"MP-SUPPLIER-SNAPSHOT", name:"Supplier Snapshot", price_usd:5, service_id:"SRV-SUPPLIERCHECK", promise:"Validación rápida de un proveedor con señales públicas útiles para decidir el próximo paso." },
-  "quote-sanity": { id:"MP-QUOTE-SANITY", name:"Quote Sanity Check", price_usd:7, service_id:"SRV-QUOTECHECK", promise:"Chequeo rápido de coherencia de una cotización para detectar señales que merecen revisión." },
-  "tender-scan": { id:"MP-TENDER-SCAN", name:"Tender Quick Scan", price_usd:9, service_id:"SRV-TENDER-HUNTER", promise:"Escaneo breve de oportunidades y señales públicas de licitación relevantes para tu necesidad." },
-  "sourcing-5": { id:"MP-SOURCING-5", name:"Supplier Shortlist 5", price_usd:15, service_id:"SRV-SOURCING-EXPRESS", promise:"Shortlist de hasta cinco proveedores candidatos para acelerar una búsqueda concreta." },
-  "buyer-signals": { id:"MP-BUYER-SIGNALS", name:"Buyer Signal Scan", price_usd:19, service_id:"SRV-B2B-PROSPECTING", promise:"Búsqueda de señales públicas de compradores potenciales para una oferta B2B definida." },
-  "export-pulse": { id:"MP-EXPORT-PULSE", name:"Export Market Pulse", price_usd:25, service_id:"SRV-EXPORT-SCOUT", promise:"Pulso rápido de mercado para explorar señales y posibles caminos de exportación." },
-};
+const PRODUCT_CONTRACT_VERSION = "2026-09-21-v1";
+const PRODUCTS = {"supplier-snapshot":{"id":"MP-SUPPLIER-SNAPSHOT","name":"Supplier Snapshot","price_usd":5,"service_id":"SRV-SUPPLIERCHECK","promise":"Validación rápida de un proveedor con señales públicas para decidir si vale la pena profundizar.","requires":["Nombre o URL del proveedor","País y producto/servicio ofrecido","Qué querés verificar"],"deliverables":["Resumen de identidad y presencia pública","Señales comerciales y alertas visibles","Conclusión breve y próximo paso sugerido"],"not_included":["Informe crediticio","Due diligence legal","Inspección física"],"details_placeholder":"Proveedor/URL, país, producto y qué querés verificar."},"quote-sanity":{"id":"MP-QUOTE-SANITY","name":"Quote Sanity Check","price_usd":7,"service_id":"SRV-QUOTECHECK","promise":"Chequeo rápido de coherencia de una cotización para detectar desvíos o puntos que merecen revisión.","requires":["Precio y condiciones de la cotización","Producto/especificación y cantidad","Moneda y país si se conocen"],"deliverables":["Chequeo de coherencia","Principales alertas o preguntas","Referencias públicas rápidas cuando existan"],"not_included":["Valuación certificada","Garantía de mejor precio"],"details_placeholder":"Pegá los datos de la cotización: producto, especificación, cantidad, precio, moneda y condiciones."},"tender-scan":{"id":"MP-TENDER-SCAN","name":"Tender Quick Scan","price_usd":9,"service_id":"SRV-TENDER-HUNTER","promise":"Escaneo breve de oportunidades públicas de licitación compatibles con una oferta definida.","requires":["Qué vendés","País/región objetivo","Sector o palabras clave"],"deliverables":["Hasta 5 oportunidades/señales relevantes","Fecha, comprador y enlace público","Comentario breve de encaje"],"not_included":["Presentación de oferta","Garantía de adjudicación"],"details_placeholder":"Qué vendés, mercados/sectores objetivo y palabras clave."},"sourcing-5":{"id":"MP-SOURCING-5","name":"Supplier Shortlist 5","price_usd":15,"service_id":"SRV-SOURCING-EXPRESS","promise":"Shortlist de hasta cinco proveedores candidatos para una necesidad concreta.","requires":["Producto y especificación","Cantidad aproximada","País de entrega y restricciones"],"deliverables":["Hasta 5 proveedores candidatos","Links y evidencia pública de encaje","Observaciones para priorizar contactos"],"not_included":["Garantía de stock/precio","Compra o negociación vinculante"],"details_placeholder":"Producto, especificación, cantidad, país de entrega y requisitos obligatorios."},"buyer-signals":{"id":"MP-BUYER-SIGNALS","name":"Buyer Signal Scan","price_usd":19,"service_id":"SRV-B2B-PROSPECTING","promise":"Búsqueda rápida de señales públicas de empresas que podrían comprar una oferta B2B definida.","requires":["Qué vendés","Cliente ideal","Geografía objetivo"],"deliverables":["Hasta 10 empresas/señales candidatas","Motivo de encaje","Canal corporativo público cuando esté disponible"],"not_included":["Garantía de respuesta o venta","Datos personales obtenidos por vías no públicas"],"details_placeholder":"Qué vendés, quién debería comprarlo y en qué mercado querés buscar."},"export-pulse":{"id":"MP-EXPORT-PULSE","name":"Export Market Pulse","price_usd":25,"service_id":"SRV-EXPORT-SCOUT","promise":"Pulso rápido para explorar mercados y señales públicas antes de invertir en una investigación exportadora completa.","requires":["Producto","País de origen","Mercados de interés o tipo de comprador"],"deliverables":["Hasta 3 mercados/señales priorizadas","Actores comerciales públicos relevantes","Barreras visibles y próximo paso"],"not_included":["Asesoramiento aduanero/legal","Garantía de acceso al mercado"],"details_placeholder":"Producto, país de origen, capacidad/certificaciones y mercados o compradores de interés."}};
 
 function clean(value, limit=180) {
   return String(value ?? "").trim().replace(/\s+/g," ").slice(0,limit);
@@ -89,9 +83,9 @@ function page(title, body) {
 }
 function offerHtml(slug, p, attr) {
   const query = qs(attr);
-  const go = `/go/${encodeURIComponent(slug)}${query?`?${query}`:""}`;
   const intent = `/intent/${encodeURIComponent(slug)}${query?`?${query}`:""}`;
-  return page(p.name,`<main class="card"><div style="color:#8ea1c7;font-weight:700;margin-bottom:14px">MICROSERVICIO · ENTREGA POR SOLICITUD</div><h1>${html(p.name)}</h1><p class="sub">${html(p.promise)}</p><div class="price">USD ${p.price_usd}</div><div class="actions"><a class="btn" href="${html(go)}">Comprar ahora</a><a class="btn secondary" href="#consulta">Consultar antes</a></div><div id="consulta"><form method="post" action="${html(intent)}"><input name="email" type="email" required maxlength="180" placeholder="Email corporativo"><input name="company" maxlength="180" placeholder="Empresa (opcional)"><textarea name="details" maxlength="1800" placeholder="¿Qué necesitás resolver?"></textarea><button class="btn" type="submit">Enviar consulta</button></form></div><div class="truth">El checkout x402 solicita USDC sobre Base. Una visita, consulta o inicio de checkout no se contabiliza como venta. LUMEN registra ingreso solamente cuando existe evidencia de settlement exitoso.</div></main>`);
+  const li = (items) => `<ul>${items.map((x)=>`<li>${html(x)}</li>`).join("")}</ul>`;
+  return page(p.name,`<main class="card"><div style="color:#8ea1c7;font-weight:700;margin-bottom:14px">MICROSERVICIO · ALCANCE DEFINIDO</div><h1>${html(p.name)}</h1><p class="sub">${html(p.promise)}</p><div class="price">USD ${p.price_usd}</div><h2>Qué necesitamos</h2>${li(p.requires)}<h2>Qué recibís</h2>${li(p.deliverables)}<h2>No incluye</h2>${li(p.not_included)}<div id="consulta" style="margin-top:28px"><h2>Antes de pagar</h2><p class="sub">Necesitamos el requerimiento para poder ejecutar el trabajo. El checkout se habilita después de guardar estos datos.</p><form method="post" action="${html(intent)}"><input name="email" type="email" required maxlength="180" placeholder="Email para recibir el resultado"><input name="company" maxlength="180" placeholder="Empresa (opcional)"><textarea name="details" maxlength="1800" minlength="8" required placeholder="${html(p.details_placeholder)}"></textarea><div class="actions"><button class="btn" type="submit" name="next" value="checkout">Guardar y continuar al pago</button><button class="btn secondary" type="submit" name="next" value="consult">Sólo consultar</button></div></form></div><div class="truth">El checkout usa USDC sobre Base mediante x402. Completar el requerimiento no genera un cargo. LUMEN registra ingreso solamente después de settlement exitoso.</div></main>`);
 }
 function catalogHtml(attr) {
   const cards = Object.entries(PRODUCTS).map(([slug,p]) => {
@@ -140,7 +134,7 @@ export default {
     try {
       if (request.method === "GET" && path === "/health") {
         await ensureSchema(env);
-        return Response.json({ok:true,service:SERVICE,version:VERSION,x402:X402_BASE,paidSpend:false,crmBridge:true},{headers});
+        return Response.json({ok:true,service:SERVICE,version:VERSION,x402:X402_BASE,paidSpend:false,crmBridge:true,productContractVersion:PRODUCT_CONTRACT_VERSION,requirementsBeforeHumanCheckout:true},{headers});
       }
       if (request.method === "GET" && (path === "/" || path === "/catalog")) {
         if (path === "/catalog") await recordEvent(env,"catalog_visit",sid,null,attr);
@@ -165,7 +159,12 @@ export default {
       if (request.method === "GET" && goMatch) {
         const slug=goMatch[1]; const p=PRODUCTS[slug];
         if (!p) return new Response("Not found",{status:404,headers});
-        const eventId=await recordEvent(env,"checkout_started",sid,slug,attr,{destination:`${X402_BASE}/buy/${slug}`});
+        await ensureSchema(env);
+        if (!attr.technical_canary) {
+          const requirement=await env.DB.prepare("SELECT id FROM lumen_conversion_leads WHERE session_id=? AND product_slug=? AND technical_canary=0 AND LENGTH(TRIM(COALESCE(details,'')))>=8 ORDER BY created_at DESC LIMIT 1").bind(sid,slug).first();
+          if (!requirement) { const q=qs(attr); headers.set("location",`/offer/${slug}${q?`?${q}`:""}`); return new Response(null,{status:303,headers}); }
+        }
+        const eventId=await recordEvent(env,"checkout_started",sid,slug,attr,{destination:`${X402_BASE}/buy/${slug}`,requirementsCaptured:true});
         const target=new URL(`${X402_BASE}/buy/${slug}`);
         target.searchParams.set("conversion_event",eventId);
         target.searchParams.set("conversion_session",sid);
@@ -184,16 +183,18 @@ export default {
         const email=clean(form.get("email"),180).toLowerCase();
         const company=clean(form.get("company"),180);
         const details=clean(form.get("details"),1800);
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return new Response("Email inválido",{status:400,headers});
+        const next=clean(form.get("next"),20) === "checkout" ? "checkout" : "consult";
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || details.length < 8) return new Response("Necesitamos un email válido y un requerimiento claro.",{status:400,headers});
         await ensureSchema(env);
         const leadId=`CL-${crypto.randomUUID().replaceAll("-","").slice(0,20).toUpperCase()}`;
         await env.DB.prepare("INSERT INTO lumen_conversion_leads (id,created_at,session_id,product_id,product_slug,email,company,details,source,medium,campaign,creative,status,technical_canary) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
           .bind(leadId,new Date().toISOString(),sid,p.id,slug,email,company,details,attr.source,attr.medium,attr.campaign,attr.creative,"new",attr.technical_canary).run();
         const crm=await syncLeadToCrm(env,{leadId,p,slug,email,company,details,attr});
-        await recordEvent(env,"qualified_intent",sid,slug,attr,{lead_id:leadId,crm});
+        await recordEvent(env,"qualified_intent",sid,slug,attr,{lead_id:leadId,crm,next});
         const q=qs(attr); const go=`/go/${slug}${q?`?${q}`:""}`;
+        if (next === "checkout") { await recordEvent(env,"requirements_captured",sid,slug,attr,{lead_id:leadId}); headers.set("location",go); return new Response(null,{status:303,headers}); }
         headers.set("content-type","text/html; charset=utf-8");
-        return new Response(page("Consulta recibida",`<main class="card"><h1>Consulta recibida.</h1><p class="sub">LUMEN registró tu interés en ${html(p.name)} y lo envió al flujo comercial. Si ya querés avanzar, podés iniciar el checkout ahora.</p><div class="actions"><a class="btn" href="${html(go)}">Comprar por USD ${p.price_usd}</a><a class="btn secondary" href="/catalog">Ver catálogo</a></div></main>`),{status:200,headers});
+        return new Response(page("Consulta recibida",`<main class="card"><h1>Consulta recibida.</h1><p class="sub">LUMEN guardó el requerimiento de ${html(p.name)}. No se realizó ningún cargo.</p><div class="actions"><a class="btn" href="${html(go)}">Continuar al pago · USD ${p.price_usd}</a><a class="btn secondary" href="/catalog">Ver catálogo</a></div></main>`),{status:200,headers});
       }
       return new Response("Not found",{status:404,headers});
     } catch (error) {
