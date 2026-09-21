@@ -6,6 +6,8 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/lumen-instagram-control.yml"
+  schedule:
+    - cron: "23 */6 * * *"
 
 permissions:
   contents: read
@@ -22,6 +24,7 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.LUMEN_D1_ACCOUNT_ID }}
       LUMEN_DASHBOARD_PASSWORD: ${{ secrets.LUMEN_DASHBOARD_PASSWORD }}
+      CONTROL_URL: https://lumen-instagram-control.joseandresceol1-jac.workers.dev
     steps:
       - name: Checkout LUMEN Zero
         uses: actions/checkout@v4
@@ -46,6 +49,11 @@ jobs:
         with:
           node-version: '24'
 
+      - name: Validate control Worker syntax
+        if: steps.preflight.outputs.ready == 'true'
+        working-directory: .lumen/instagram-control
+        run: node --check worker.js
+
       - name: Deploy control Worker
         if: steps.preflight.outputs.ready == 'true'
         working-directory: .lumen/instagram-control
@@ -62,12 +70,27 @@ jobs:
         shell: bash
         run: |
           for i in {1..12}; do
-            code=$(curl -sS -u "socio:$LUMEN_DASHBOARD_PASSWORD" -o /tmp/lumen-instagram-control-health.json -w '%{http_code}' 'https://lumen-instagram-control.joseandresceol1-jac.workers.dev/health' || true)
-            if [[ "$code" == "200" ]]; then
+            code=$(curl -sS -u "socio:$LUMEN_DASHBOARD_PASSWORD" -o /tmp/lumen-instagram-control-health.json -w '%{http_code}' "$CONTROL_URL/health" || true)
+            if [[ "$code" == "200" ]] && jq -e '.ok == true and .storage == "cloudflare-d1"' /tmp/lumen-instagram-control-health.json >/dev/null; then
               echo "INSTAGRAM_CONTROL health=ok auth=required"
               exit 0
             fi
             sleep 5
           done
           echo "INSTAGRAM_CONTROL health=failed"
+          cat /tmp/lumen-instagram-control-health.json 2>/dev/null || true
           exit 1
+
+      - name: Verify D1 command queue read write delete
+        if: steps.preflight.outputs.ready == 'true'
+        shell: bash
+        run: |
+          code=$(curl -sS -u "socio:$LUMEN_DASHBOARD_PASSWORD" -X POST -o /tmp/lumen-instagram-control-canary.json -w '%{http_code}' "$CONTROL_URL/health/command-write" || true)
+          cat /tmp/lumen-instagram-control-canary.json
+          echo
+          if [[ "$code" != "200" ]]; then
+            echo "INSTAGRAM_CONTROL d1_canary=failed http=$code"
+            exit 1
+          fi
+          jq -e '.ok == true and .d1_write == true and .d1_read == true and .d1_delete == true and .command_queue_schema == true' /tmp/lumen-instagram-control-canary.json >/dev/null
+          echo "INSTAGRAM_CONTROL d1_canary=ok write=ok read=ok delete=ok"
