@@ -22,8 +22,25 @@ function rewriteLocation(raw, origin) {
   return raw;
 }
 
+function humanCheckout(text, origin) {
+  let out = String(text)
+    .replaceAll("<title>Payment Required</title>", "<title>LUMEN Checkout</title>")
+    .replaceAll(">Payment Required<", ">LUMEN Checkout<")
+    .replaceAll("Select a wallet", "Elegir billetera")
+    .replaceAll("Connect wallet", "Conectar y pagar")
+    .replaceAll("USD Coin", "USDC")
+    .replace(/LUMEN ([^.<]{1,120}) machine-intelligence purchase\. To access this content, please pay \$([0-9.]+) USDC\./g,
+      '<strong>$1</strong><br><span style="display:inline-block;margin-top:.55rem;color:#4b5563">Pago seguro de USD $2 en USDC sobre Base.</span>');
+
+  if (out.includes("LUMEN Checkout") && !out.includes("Volver a LUMEN")) {
+    const footer = `<div style="max-width:620px;margin:18px auto 40px;padding:0 18px;text-align:center;font-family:system-ui,-apple-system,sans-serif"><a href="${origin}/store" style="display:inline-block;padding:11px 16px;border-radius:12px;text-decoration:none;color:#111827;background:#fff;border:1px solid #d1d5db;font-weight:650">← Volver a LUMEN</a><div style="margin-top:12px;font-size:13px;color:#6b7280">Pago protegido por x402 · USDC · Base</div></div>`;
+    out = out.includes("</body>") ? out.replace("</body>", `${footer}</body>`) : `${out}${footer}`;
+  }
+  return out;
+}
+
 function rewriteText(text, origin) {
-  return String(text)
+  const rewritten = String(text)
     .replaceAll(`${CONVERSION_BASE}/catalog`, `${origin}/store`)
     .replaceAll(`${CONVERSION_INTERNAL}/catalog`, `${origin}/store`)
     .replaceAll(CONVERSION_BASE, origin)
@@ -33,6 +50,7 @@ function rewriteText(text, origin) {
     .replaceAll('href="/catalog"', 'href="/store"')
     .replaceAll('<a href="/services">Servicios</a>', '<a href="/services">Servicios</a><a href="/store">Comprar</a>')
     .replaceAll('<a class="cta" href="/services">Ver servicios</a>', '<a class="cta" href="/services">Ver servicios</a> <a class="cta" href="/store">Comprar intelligence</a>');
+  return humanCheckout(rewritten, origin);
 }
 
 function base64ToUtf8(raw) {
