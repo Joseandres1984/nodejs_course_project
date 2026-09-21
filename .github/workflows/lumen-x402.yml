@@ -21,8 +21,8 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.LUMEN_D1_ACCOUNT_ID }}
-      X402_BASE_URL: https://lumen-zero-x402.joseandresceol1-jac.workers.dev
-      X402_EXPECTED_RECIPIENT: 0x04285DE6A083CEb28fb0C254a2ed0F5fdB2eeD28
+      X402_BASE_URL: "https://lumen-zero-x402.joseandresceol1-jac.workers.dev"
+      X402_EXPECTED_RECIPIENT: "0x04285DE6A083CEb28fb0C254a2ed0F5fdB2eeD28"
     steps:
       - name: Checkout LUMEN Zero
         uses: actions/checkout@v4
@@ -40,7 +40,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: "24"
           cache: npm
           cache-dependency-path: .lumen/x402-worker/package.json
 
@@ -64,7 +64,7 @@ jobs:
             catalog=$(curl -sS -o /tmp/x402-catalog.json -w '%{http_code}' "$X402_BASE_URL/catalog" || true)
             stats=$(curl -sS -o /tmp/x402-stats.json -w '%{http_code}' "$X402_BASE_URL/stats" || true)
             if [[ "$health" == "200" && "$catalog" == "200" && "$stats" == "200" ]]; then
-              jq -e --arg recipient "$X402_EXPECTED_RECIPIENT" '.ok == true and .x402 == "LIVE" and .network == "eip155:8453" and .asset == "USDC" and .recipientConfigured == true and .outgoingSpendEnabled == false' /tmp/x402-health.json >/dev/null
+              jq -e '.ok == true and .x402 == "LIVE" and .network == "eip155:8453" and .asset == "USDC" and .recipientConfigured == true and .outgoingSpendEnabled == false' /tmp/x402-health.json >/dev/null
               jq -e --arg recipient "$X402_EXPECTED_RECIPIENT" '.settlement.recipient == $recipient and .settlement.networkId == "eip155:8453" and .settlement.asset == "USDC" and .settlement.outgoingSpendEnabled == false and (.products|length) == 6' /tmp/x402-catalog.json >/dev/null
               jq -e --arg recipient "$X402_EXPECTED_RECIPIENT" '.recipient == $recipient and .network == "Base" and .asset == "USDC" and .realizedRevenueUsd >= 0' /tmp/x402-stats.json >/dev/null
               break
@@ -82,23 +82,7 @@ jobs:
           cat /tmp/x402-body.txt || true
           [[ "$code" == "402" ]]
           grep -qi '^payment-required:' /tmp/x402-headers.txt
-          python3 - <<'PY'
-          import base64, json, re
-          h=open('/tmp/x402-headers.txt',encoding='utf-8',errors='ignore').read()
-          m=re.search(r'(?im)^payment-required:\s*(\S+)\s*$',h)
-          assert m, 'missing PAYMENT-REQUIRED header'
-          raw=m.group(1)
-          raw += '=' * (-len(raw) % 4)
-          data=json.loads(base64.b64decode(raw))
-          assert data.get('x402Version') == 2, data
-          accepts=data.get('accepts') or []
-          assert accepts, data
-          req=accepts[0]
-          assert req.get('scheme') == 'exact', req
-          assert req.get('network') == 'eip155:8453', req
-          assert req.get('payTo','').lower() == '0x04285de6a083ceb28fb0c254a2ed0f5fdb2eed28'.lower(), req
-          print({'x402_challenge':'ok','network':req.get('network'),'amount':req.get('amount'),'asset':req.get('asset'),'payTo':req.get('payTo')})
-          PY
+          python3 -c 'import base64,json,re; h=open("/tmp/x402-headers.txt",encoding="utf-8",errors="ignore").read(); m=re.search(r"(?im)^payment-required:\\s*(\\S+)\\s*$",h); assert m, "missing PAYMENT-REQUIRED header"; raw=m.group(1); raw += "=" * (-len(raw) % 4); data=json.loads(base64.b64decode(raw)); assert data.get("x402Version") == 2, data; req=(data.get("accepts") or [])[0]; assert req.get("scheme") == "exact", req; assert req.get("network") == "eip155:8453", req; assert req.get("payTo","").lower() == "0x04285de6a083ceb28fb0c254a2ed0f5fdb2eed28", req; print({"x402_challenge":"ok","network":req.get("network"),"amount":req.get("amount"),"asset":req.get("asset"),"payTo":req.get("payTo")})'
 
       - name: Deployment summary
         if: always()
