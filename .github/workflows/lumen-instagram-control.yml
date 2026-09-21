@@ -94,3 +94,12 @@ jobs:
           fi
           jq -e '.ok == true and .d1_write == true and .d1_read == true and .d1_delete == true and .command_queue_schema == true' /tmp/lumen-instagram-control-canary.json >/dev/null
           echo "INSTAGRAM_CONTROL d1_canary=ok write=ok read=ok delete=ok"
+
+      - name: Diagnose approved post projection
+        if: steps.preflight.outputs.ready == 'true'
+        working-directory: .lumen/instagram-control
+        shell: bash
+        run: |
+          echo "INSTAGRAM_CONTROL projection_diagnostic=start"
+          npx --yes wrangler@4 d1 execute lumen-zero --remote --command "SELECT job_id, substr(fingerprint,1,16) AS fingerprint_prefix, state_status, approval_status, CASE WHEN last_error IS NULL OR last_error='' THEN NULL ELSE substr(last_error,1,120) END AS last_error FROM lumen_instagram_control_posts WHERE job_id IN ('DIST-3ADEE9154FA8','DIST-90AC7FE4D0F0','DIST-C9C06F669D70') ORDER BY job_id;"
+          echo "INSTAGRAM_CONTROL projection_diagnostic=end"
