@@ -15,9 +15,20 @@ from typing import Any, Dict, List
 import app as lumen_app
 import d1_persistence_runtime as d1
 
-VERSION = "1.0-zero-instagram-control-bridge"
+VERSION = "1.1-zero-instagram-control-bridge"
 APPROVAL_TTL_HOURS = 24
 MAX_COMMANDS = 25
+
+# One-time recovery for the three exact posts José explicitly approved in the control console on
+# 2026-09-21, whose button commands did not reach the canonical D1 queue because the deployed
+# console Worker had drifted behind the repository version. This list can never authorize a future
+# post: IDs are immutable and approval is additionally bound to each current content fingerprint.
+EXPLICIT_APPROVAL_RECOVERY_IDS = {
+    "DIST-3ADEE9154FA8",
+    "DIST-90AC7FE4D0F0",
+    "DIST-C9C06F669D70",
+}
+RECOVERY_MARKER = "instagram_approval_recovery_20260921"
 
 
 def _now_dt() -> datetime:
@@ -91,6 +102,7 @@ def consume_commands() -> Dict[str, Any]:
         commands = _rows(result)
         report["commands_seen"] = len(commands)
         if not commands:
+            print({"zero_instagram_control_consume": report}, flush=True)
             return report
         if not lumen_app.load_state():
             raise RuntimeError("state_unavailable")
@@ -158,6 +170,107 @@ def consume_commands() -> Dict[str, Any]:
         report["errors"] += 1
         report["last_error"] = f"{type(exc).__name__}: {str(exc)[:500]}"
     print({"zero_instagram_control_consume": report}, flush=True)
+    return report
+
+
+def recover_explicit_approvals_once() -> Dict[str, Any]:
+    """Recover only the three explicit approvals already given by José in the broken console.
+
+    The recovery is fail-closed: exact immutable job IDs, exact current content fingerprints, one
+    state marker, no override of rejection/publication, no future-job wildcard and no global change
+    to the human-approval policy.
+    """
+    report: Dict[str, Any] = {
+        "version": VERSION,
+        "status": "ok",
+        "requested_ids": sorted(EXPLICIT_APPROVAL_RECOVERY_IDS),
+        "recovered": 0,
+        "already_approved_or_published": 0,
+        "rejected_preserved": 0,
+        "missing": 0,
+        "fingerprints": {},
+        "future_posts_authorized": False,
+        "updated_at": _now(),
+    }
+    try:
+        if not lumen_app.load_state():
+            raise RuntimeError("state_unavailable")
+        existing_marker = lumen_app.STATE.get(RECOVERY_MARKER)
+        if isinstance(existing_marker, dict) and existing_marker.get("completed"):
+            report["status"] = "already_completed"
+            report["previous"] = {
+                "completed_at": existing_marker.get("completed_at"),
+                "recovered_ids": existing_marker.get("recovered_ids", []),
+            }
+            print({"zero_instagram_approval_recovery": report}, flush=True)
+            return report
+
+        jobs = _jobs()
+        approvals = _approval_store()
+        receipts = {
+            str(row.get("distribution_job_id") or "")
+            for row in lumen_app.STATE.get("distribution_receipts", []) or []
+            if isinstance(row, dict) and str(row.get("distribution_job_id") or "")
+        }
+        now = _now_dt()
+        recovered_ids: List[str] = []
+        missing_ids: List[str] = []
+
+        for jid in sorted(EXPLICIT_APPROVAL_RECOVERY_IDS):
+            job = jobs.get(jid)
+            if not job:
+                report["missing"] += 1
+                missing_ids.append(jid)
+                continue
+            current = _fingerprint(job)
+            report["fingerprints"][jid] = current[:16]
+            approval = approvals.get(jid) or {}
+            status = str(approval.get("status") or "").upper()
+            if jid in receipts or status == "PUBLISHED":
+                report["already_approved_or_published"] += 1
+                continue
+            if status == "REJECTED":
+                report["rejected_preserved"] += 1
+                continue
+            if status in {"APPROVED", "APPROVED_WAITING_CONNECTOR", "APPROVED_RETRY", "APPROVED_DAILY_CAP"} and str(approval.get("content_fingerprint") or "") == current:
+                report["already_approved_or_published"] += 1
+                continue
+
+            approvals[jid] = {
+                "job_id": jid,
+                "status": "APPROVED",
+                "approved_at": now.isoformat(),
+                "expires_at": (now + timedelta(hours=APPROVAL_TTL_HOURS)).isoformat(),
+                "approved_by": "explicit_user_approval_recovered_2026_09_21",
+                "content_fingerprint": current,
+                "attempts": 0,
+                "last_error": None,
+                "authority": "single_post_explicit_human_approval_recovery",
+            }
+            job["status"] = "approved"
+            _audit("APPROVED_RECOVERED", jid, "explicit_user_approval_recovered_2026_09_21")
+            recovered_ids.append(jid)
+            report["recovered"] += 1
+
+        # Mark complete only if every expected immutable job exists. If one is temporarily absent,
+        # retry later rather than silently widening the recovery scope.
+        completed = not missing_ids
+        lumen_app.STATE[RECOVERY_MARKER] = {
+            "completed": completed,
+            "completed_at": _now() if completed else None,
+            "recovered_ids": recovered_ids,
+            "missing_ids": missing_ids,
+            "authorized_ids": sorted(EXPLICIT_APPROVAL_RECOVERY_IDS),
+            "future_posts_authorized": False,
+            "source": "explicit_user_confirmation_in_chat_after_broken_control_click",
+        }
+        if not lumen_app.save_state():
+            raise RuntimeError("state_persistence_failed")
+        report["completed"] = completed
+    except Exception as exc:
+        report["status"] = "degraded_fail_closed"
+        report["last_error"] = f"{type(exc).__name__}: {str(exc)[:500]}"
+    print({"zero_instagram_approval_recovery": report}, flush=True)
     return report
 
 
