@@ -1,5 +1,5 @@
 name: LUMEN Zero Runtime
-# Trigger production cycle after Instagram approval-path repair (2026-09-21)
+# Zero-cost production cycle: faster cadence + expanded free research budget (2026-09-21)
 
 on:
   push:
@@ -7,7 +7,9 @@ on:
     paths:
       - ".github/workflows/lumen-zero.yml"
   schedule:
-    - cron: "7,17,27,37,47,57 * * * *"
+    # GitHub's minimum supported scheduled interval is 5 minutes.
+    # Offset from minute 0 to reduce peak scheduler contention.
+    - cron: "3,8,13,18,23,28,33,38,43,48,53,58 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -86,10 +88,10 @@ jobs:
       LUMEN_SCOUT_MARKET: "Argentina"
       LUMEN_SCOUT_GL: "ar"
       LUMEN_SCOUT_HL: "es"
-      LUMEN_SCOUT_MAX_QUERIES: "2"
-      LUMEN_SCOUT_DAILY_BUDGET: "24"
-      LUMEN_PUBLIC_PROCUREMENT_MAX_QUERIES: "2"
-      LUMEN_PUBLIC_PROCUREMENT_DAILY_CAP: "8"
+      LUMEN_SCOUT_MAX_QUERIES: "4"
+      LUMEN_SCOUT_DAILY_BUDGET: "48"
+      LUMEN_PUBLIC_PROCUREMENT_MAX_QUERIES: "4"
+      LUMEN_PUBLIC_PROCUREMENT_DAILY_CAP: "16"
       PYTHONHASHSEED: "0"
 
     steps:
