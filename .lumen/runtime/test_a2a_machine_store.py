@@ -20,6 +20,8 @@ class A2AMachineStoreTests(unittest.TestCase):
         self.worker = (root / ".lumen" / "a2a-worker" / "worker.js").read_text(encoding="utf-8")
         self.bridge = (root / ".lumen" / "runtime" / "zero_a2a_inbound_bridge_runtime.py").read_text(encoding="utf-8")
         self.accelerator = (root / ".lumen" / "runtime" / "agent_network_accelerator_runtime.py").read_text(encoding="utf-8")
+        self.alignment = (root / ".lumen" / "runtime" / "a2a_machine_revenue_alignment_runtime.py").read_text(encoding="utf-8")
+        self.entry = (root / ".lumen" / "runtime" / "worker_entry.py").read_text(encoding="utf-8")
 
     def test_machine_store_has_six_low_cost_products(self) -> None:
         products = [m.groupdict() for m in PRODUCT_RE.finditer(self.worker)]
@@ -50,6 +52,7 @@ class A2AMachineStoreTests(unittest.TestCase):
             '"QuoteRecurringPlan"',
             'lumen_machine_orders',
             '"receive_revenue_only"',
+            'technicalCanariesExcluded:true',
         ):
             self.assertIn(token, self.worker)
 
@@ -65,6 +68,14 @@ class A2AMachineStoreTests(unittest.TestCase):
         self.assertIn('"source": "a2a_machine_store"', self.bridge)
         self.assertIn('"quoted_amount_usd"', self.bridge)
         self.assertIn('"charge_created": False', self.bridge)
+
+    def test_fixed_machine_quote_survives_crm_without_human_repricing(self) -> None:
+        self.assertIn('fixed_machine_catalog_quote_nonbinding', self.alignment)
+        self.assertIn('"price_requires_human_confirmation": False', self.alignment)
+        self.assertIn('quote_id.startswith("A2AQ-")', self.alignment)
+        self.assertIn('payment_verification_required', self.alignment)
+        self.assertIn('binding_close_evidence_required', self.alignment)
+        self.assertIn('import a2a_machine_revenue_alignment_runtime', self.entry)
 
 
 if __name__ == "__main__":
