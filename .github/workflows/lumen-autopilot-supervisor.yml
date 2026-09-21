@@ -70,7 +70,7 @@ jobs:
             fi
           fi
 
-          gh workflow run "$workflow" --ref main
+          gh workflow run "$workflow" --ref main -R "$REPO"
           echo "LUMEN_AUTOPILOT dispatch=triggered source=$EVENT_NAME"
 
       - name: Confirm queued successor
