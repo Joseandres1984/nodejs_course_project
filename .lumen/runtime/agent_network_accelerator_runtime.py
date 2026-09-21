@@ -6,8 +6,9 @@ from typing import Any, Dict, List, Tuple
 import agent_network_runtime as _base
 
 
-VERSION = "1.1-a2a-discovery-accelerator"
+VERSION = "1.2-a2a-discovery-accelerator"
 REPROBE_AFTER_HOURS = 72
+_ORIGINAL_REGISTRY_CARD_URL = _base._registry_card_url
 
 
 def _utcnow() -> datetime:
@@ -87,10 +88,25 @@ def _candidate_domains_accelerated(
     return [(domain, account) for domain, account, _ in rows[: _base.MAX_PROBES_PER_TICK]]
 
 
-# Monkey-patch only candidate selection and registry keywords. The registry search endpoint is
-# keyword/tag based, so single high-intent terms recover more relevant agents than compound phrases.
+def _registry_card_url_current(row: Dict[str, Any]) -> str:
+    """Accept the registry's current manifestUrl field without weakening URL safety.
+
+    URL scheme/host/public-IP and same-domain interface checks remain enforced later by
+    agent_network_runtime._safe_get_json and _validate_card. GitHub blob URLs are intentionally
+    not rewritten to raw content here; if a registry entry does not expose JSON directly it simply
+    fails closed and another candidate can be evaluated.
+    """
+    for key in ("manifestUrl", "manifest_url"):
+        value = str(row.get(key) or "").strip()
+        if value:
+            return value
+    return _ORIGINAL_REGISTRY_CARD_URL(row)
+
+
+# Monkey-patch only candidate selection, registry card-field compatibility and registry keywords.
 # Network caps, SSRF protections, auth/payment blocks and binding-action guardrails remain unchanged.
 _base._candidate_domains = _candidate_domains_accelerated
+_base._registry_card_url = _registry_card_url_current
 _base.REGISTRY_QUERIES = (
     "procurement",
     "sourcing",
@@ -111,6 +127,7 @@ print({
         "email_domain_fallback_enabled": True,
         "verified_contact_priority": True,
         "registry_keyword_mode": "single_high_intent_terms",
+        "registry_manifest_url_compat": True,
         "reprobe_after_hours": REPROBE_AFTER_HOURS,
         "probe_cap_changed": False,
         "handshake_cap_changed": False,
