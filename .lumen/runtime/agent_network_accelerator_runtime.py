@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Tuple
 import agent_network_runtime as _base
 
 
-VERSION = "1.0-a2a-discovery-accelerator"
+VERSION = "1.1-a2a-discovery-accelerator"
 REPROBE_AFTER_HOURS = 72
 
 
@@ -87,19 +87,20 @@ def _candidate_domains_accelerated(
     return [(domain, account) for domain, account, _ in rows[: _base.MAX_PROBES_PER_TICK]]
 
 
-# Monkey-patch only the candidate selector used by agent_network_tick. Network caps,
-# SSRF protections, auth/payment blocks and binding-action guardrails remain unchanged.
+# Monkey-patch only candidate selection and registry keywords. The registry search endpoint is
+# keyword/tag based, so single high-intent terms recover more relevant agents than compound phrases.
+# Network caps, SSRF protections, auth/payment blocks and binding-action guardrails remain unchanged.
 _base._candidate_domains = _candidate_domains_accelerated
 _base.REGISTRY_QUERIES = (
-    "industrial procurement",
-    "B2B sourcing",
-    "industrial supplier",
-    "RFQ procurement",
-    "manufacturing sourcing",
-    "supply chain logistics",
-    "buyer procurement",
-    "supplier discovery",
-    "global trade sourcing",
+    "procurement",
+    "sourcing",
+    "supplier",
+    "manufacturing",
+    "logistics",
+    "commerce",
+    "business",
+    "RFQ",
+    "trade",
 )
 
 print({
@@ -109,6 +110,7 @@ print({
         "official_domain_enabled": True,
         "email_domain_fallback_enabled": True,
         "verified_contact_priority": True,
+        "registry_keyword_mode": "single_high_intent_terms",
         "reprobe_after_hours": REPROBE_AFTER_HOURS,
         "probe_cap_changed": False,
         "handshake_cap_changed": False,
