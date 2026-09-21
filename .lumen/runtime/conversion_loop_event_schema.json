@@ -1,0 +1,12 @@
+{
+  "version": "1.0",
+  "event_types": ["visit", "intent", "checkout_started", "settled", "repeat_purchase"],
+  "required_attribution": ["source", "medium", "campaign", "product_id"],
+  "optional_attribution": ["agent_id", "message_id", "creative_id", "account_id"],
+  "truth_rules": {
+    "visit_is_not_lead": true,
+    "intent_is_not_sale": true,
+    "checkout_started_is_not_revenue": true,
+    "revenue_requires_settlement_evidence": true
+  }
+}
