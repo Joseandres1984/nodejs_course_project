@@ -97,9 +97,14 @@ jobs:
 
       - name: Diagnose approved post projection
         if: steps.preflight.outputs.ready == 'true'
-        working-directory: .lumen/instagram-control
         shell: bash
         run: |
-          echo "INSTAGRAM_CONTROL projection_diagnostic=start"
-          npx --yes wrangler@4 d1 execute lumen-zero --remote --command "SELECT job_id, substr(fingerprint,1,16) AS fingerprint_prefix, state_status, approval_status, CASE WHEN last_error IS NULL OR last_error='' THEN NULL ELSE substr(last_error,1,120) END AS last_error FROM lumen_instagram_control_posts WHERE job_id IN ('DIST-3ADEE9154FA8','DIST-90AC7FE4D0F0','DIST-C9C06F669D70') ORDER BY job_id;"
-          echo "INSTAGRAM_CONTROL projection_diagnostic=end"
+          code=$(curl -sS -u "socio:$LUMEN_DASHBOARD_PASSWORD" -o /tmp/lumen-instagram-projection.json -w '%{http_code}' "$CONTROL_URL/health/projection" || true)
+          cat /tmp/lumen-instagram-projection.json
+          echo
+          if [[ "$code" != "200" ]]; then
+            echo "INSTAGRAM_CONTROL projection_diagnostic=failed http=$code"
+            exit 1
+          fi
+          jq -e '.ok == true' /tmp/lumen-instagram-projection.json >/dev/null
+          echo "INSTAGRAM_CONTROL projection_diagnostic=ok"
