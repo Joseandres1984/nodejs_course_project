@@ -81,8 +81,8 @@ jobs:
         shell: bash
         run: |
           manifest="$A2A_BASE_URL/.well-known/agent-card.json"
-          payload=$(jq -cn --arg manifest "$manifest" '{manifestUrl:$manifest}')
-          code=$(curl -sS -o /tmp/a2a-registry.json -w '%{http_code}' -X POST 'https://api.a2a-registry.org/public/ingest' -H 'accept: application/json' -H 'content-type: application/json' --data "$payload" || true)
+          payload=$(jq -cn --arg manifest "$manifest" '{wellKnownURI:$manifest}')
+          code=$(curl -sS -o /tmp/a2a-registry.json -w '%{http_code}' -X POST 'https://a2aregistry.org/api/agents/register' -H 'accept: application/json' -H 'content-type: application/json' --data "$payload" || true)
           echo "http_status=$code" >> "$GITHUB_OUTPUT"
           echo "A2A_REGISTRY_HTTP=$code"
           cat /tmp/a2a-registry.json 2>/dev/null || true
