@@ -65,33 +65,54 @@ jobs:
           for i in {1..12}; do
             health_code=$(curl -sS -u "socio:$LUMEN_DASHBOARD_PASSWORD" -o /tmp/lumen-health.json -w '%{http_code}' "$base/health" || true)
             full_code=$(curl -sS -u "socio:$LUMEN_DASHBOARD_PASSWORD" -o /tmp/lumen-full.html -w '%{http_code}' "$base/full" || true)
+            data_code=$(curl -sS -u "socio:$LUMEN_DASHBOARD_PASSWORD" -o /tmp/lumen-data.json -w '%{http_code}' "$base/api/data" || true)
             state_code=$(curl -sS -u "socio:$LUMEN_DASHBOARD_PASSWORD" -o /tmp/lumen-full-state.json -w '%{http_code}' "$base/api/full-state" || true)
             recovery_code=$(curl -sS -u "socio:$LUMEN_DASHBOARD_PASSWORD" -o /tmp/lumen-recovery-state.json -w '%{http_code}' "$base/api/recovery-state" || true)
-            if [[ "$health_code" == "200" && "$full_code" == "200" && "$state_code" == "200" && "$recovery_code" == "200" ]]; then
+            if [[ "$health_code" == "200" && "$full_code" == "200" && "$data_code" == "200" && "$state_code" == "200" && "$recovery_code" == "200" ]]; then
               python - <<'PY'
           import json
           from pathlib import Path
+
           html = Path('/tmp/lumen-full.html').read_text(errors='replace')
+          runtime = json.loads(Path('/tmp/lumen-data.json').read_text())
           data = json.loads(Path('/tmp/lumen-full-state.json').read_text())
           recovery = json.loads(Path('/tmp/lumen-recovery-state.json').read_text())
+
           assert 'Centro de Comando Completo' in html
           assert 'Recuperación Railway' in html
           assert 'Servicios y precios' in html
           assert 'Desde USD 59' in html
-          assert 'Desde USD 249' in html
+          assert 'USD 249' in html
           assert 'LUMEN ahora' in html
+
+          catalog = runtime.get('catalog') or {}
+          services = catalog.get('services') or []
+          prices = {str(x.get('id')): int(x.get('from_usd') or 0) for x in services}
+          expected = {
+              'SRV-QUOTECHECK': 59,
+              'SRV-SUPPLIERCHECK': 79,
+              'SRV-TENDER-HUNTER': 99,
+              'SRV-SOURCING-EXPRESS': 149,
+              'SRV-B2B-PROSPECTING': 199,
+              'SRV-EXPORT-SCOUT': 249,
+          }
+          assert prices == expected, (prices, expected)
+          assert int(catalog.get('floor_usd') or 0) == 59
+          assert int(catalog.get('ceiling_usd') or 0) == 249
+          assert float(catalog.get('average_usd') or 0) == 139.0
+
           assert int((data.get('meta') or {}).get('root_keys') or 0) > 0
           assert recovery.get('available') is True
           assert int((recovery.get('historical') or {}).get('accounts') or 0) == 580
           assert int((recovery.get('policy') or {}).get('auto_promoted') or 0) == 0
           assert int((recovery.get('policy') or {}).get('safe_for_outbound') or 0) == 0
-          print('LUMEN_FULL_COMMAND_CENTER routes=ok pricing=ok owner_summary=ok d1_state=ok railway_recovery=ok accounts=580 safe_for_outbound=0')
+          print('LUMEN_FULL_COMMAND_CENTER routes=ok pricing=6/6 owner_summary=ok d1_state=ok railway_recovery=ok accounts=580 safe_for_outbound=0')
           PY
               exit 0
             fi
             sleep 5
           done
-          echo "LUMEN_UNIFIED_DASHBOARD verification=failed health=$health_code full=$full_code state=$state_code recovery=$recovery_code"
+          echo "LUMEN_UNIFIED_DASHBOARD verification=failed health=$health_code full=$full_code data=$data_code state=$state_code recovery=$recovery_code"
           exit 1
 
-# deploy trigger: full pricing + owner results fix 2026-09-21
+# deploy trigger: verify dynamic catalog + full pricing/results 2026-09-21
