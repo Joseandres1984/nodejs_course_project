@@ -1,5 +1,5 @@
 name = "lumen-zero-x402"
-main = "worker-v2.js"
+main = "entry.js"
 compatibility_date = "2026-09-20"
 workers_dev = true
 
