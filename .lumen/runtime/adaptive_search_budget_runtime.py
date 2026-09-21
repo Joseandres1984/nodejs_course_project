@@ -4,8 +4,8 @@ from datetime import datetime, timezone
 from typing import Any, Dict
 
 # Install the shared intraday pacing layer before demand/procurement modules capture budget
-# functions. The 24/day hard cap is unchanged; pacing only prevents Autopilot from consuming the
-# full free allowance too early in the Argentina day.
+# functions. The configured zero-cost hard cap is preserved; pacing only prevents Autopilot from
+# consuming the full free allowance too early in the Argentina day.
 import search_budget_governor as governor
 import search_budget_pacing_runtime  # noqa: F401
 
@@ -16,7 +16,7 @@ import public_procurement_hunter
 import scout_connector
 from app import STATE, load_state
 
-VERSION = "1.6-demand-gap-first-cash-paced"
+VERSION = "1.7-demand-gap-first-cash-dynamic-budget"
 _ORIGINAL_SUMMARY = governor.summary
 
 
@@ -59,13 +59,15 @@ def _signals(state: Dict[str, Any]) -> Dict[str, Any]:
 def build_budget_plan(state: Dict[str, Any]) -> Dict[str, Any]:
     total = int(governor.TOTAL_DAILY_CAP)
     s = _signals(state)
+    demand_gap_reason = False
 
-    # Reallocate the existing free envelope only. Never increase provider/cost cap. When verified
-    # buyers exist but zero have verified demand, discovery of a real need is the upstream blocker;
-    # reserve 20/24 queries for demand and preserve 4 for identity/contact/general verification.
+    # Reallocate only the configured free envelope. Never increase provider/cost authority. When
+    # verified buyers exist but zero have verified demand, discovery of a real need is the upstream
+    # blocker; reserve about 83% for demand while preserving the remainder for verification/general.
     if s["verified_buyers"] > 0 and s["buyers_with_demand"] == 0:
         demand_ratio = 0.83
-        reason = "Hay compradores verificados pero 0 con demanda confirmada; reservar 20/24 búsquedas gratuitas para demanda pública y compras, manteniendo 4 para verificación/general."
+        reason = ""
+        demand_gap_reason = True
     elif s["first_cash_active"] and s["market_opportunities"] > 0 and s["requirements_ready_for_rfq"] == 0:
         demand_ratio = 0.70
         reason = "First Cash activo y 0 requisitos listos para RFQ; priorizar evidencia de demanda/requisitos sin eliminar verificación de identidad y contacto."
@@ -91,6 +93,11 @@ def build_budget_plan(state: Dict[str, Any]) -> Dict[str, Any]:
     min_lane = max(2, int(round(total * 0.15)))
     demand = max(min_lane, min(total - min_lane, int(round(total * demand_ratio))))
     general = total - demand
+    if demand_gap_reason:
+        reason = (
+            f"Hay compradores verificados pero 0 con demanda confirmada; reservar {demand}/{total} "
+            f"búsquedas gratuitas para demanda pública y compras, manteniendo {general} para verificación/general."
+        )
     return {
         "version": VERSION,
         "status": "active",
