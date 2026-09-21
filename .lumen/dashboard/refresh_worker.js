@@ -52,45 +52,62 @@ function patchRefresh(html) {
     'demand_gap': 'falta demanda verificada'
   };
 
+  let cleaning = false;
   function cleanOperationalTruth() {
-    const channels = document.getElementById('channels');
-    if (channels) {
-      [...channels.querySelectorAll('.statusline')].forEach((row) => {
-        const label = row.querySelector('span');
-        const value = row.querySelector('strong');
-        if (!label) return;
-        const key = (label.textContent || '').trim();
-        if (key === 'WhatsApp') {
-          row.remove();
-          return;
-        }
-        if (key === 'Pagos' && value) {
-          label.textContent = 'Cobros';
-          value.innerHTML = '<span class="chip ok">ARS · USD · EUR READY</span>';
-        }
-      });
-      if (![...channels.querySelectorAll('.statusline span')].some((x) => (x.textContent || '').trim() === 'Alertas internas')) {
-        channels.insertAdjacentHTML('beforeend','<div class="statusline"><span>Alertas internas</span><strong><span class="chip ok">EMAIL + PANEL</span></strong></div>');
-      }
-    }
-
-    const priority = document.getElementById('priority');
-    if (priority) {
-      [...priority.querySelectorAll('strong')].forEach((node) => {
-        let text = (node.textContent || '').trim();
-        if (laneMap[text]) text = laneMap[text];
-        const normalized = text.toLowerCase();
-        for (const [from, to] of Object.entries(phraseMap)) {
-          if (normalized === from || normalized.includes(from)) {
-            text = normalized === from ? to : text.replace(new RegExp(from, 'ig'), to);
+    if (cleaning) return;
+    cleaning = true;
+    try {
+      const channels = document.getElementById('channels');
+      if (channels) {
+        [...channels.querySelectorAll('.statusline')].forEach((row) => {
+          const label = row.querySelector('span');
+          const value = row.querySelector('strong');
+          if (!label) return;
+          const key = (label.textContent || '').trim();
+          if (key === 'WhatsApp') {
+            row.remove();
+            return;
           }
+          if (key === 'Pagos' && value) {
+            if (label.textContent !== 'Cobros') label.textContent = 'Cobros';
+            const desired = '<span class="chip ok">ARS · USD · EUR READY</span>';
+            if (value.innerHTML !== desired) value.innerHTML = desired;
+          }
+        });
+        if (![...channels.querySelectorAll('.statusline span')].some((x) => (x.textContent || '').trim() === 'Alertas internas')) {
+          channels.insertAdjacentHTML('beforeend','<div class="statusline"><span>Alertas internas</span><strong><span class="chip ok">EMAIL + PANEL</span></strong></div>');
         }
-        node.textContent = text;
-      });
+      }
+
+      const priority = document.getElementById('priority');
+      if (priority) {
+        [...priority.querySelectorAll('strong')].forEach((node) => {
+          const current = (node.textContent || '').trim();
+          let text = current;
+          if (laneMap[text]) text = laneMap[text];
+          const normalized = text.toLowerCase();
+          for (const [from, to] of Object.entries(phraseMap)) {
+            if (normalized === from || normalized.includes(from)) {
+              text = normalized === from ? to : text.replace(new RegExp(from, 'ig'), to);
+            }
+          }
+          if (text !== current) node.textContent = text;
+        });
+      }
+    } finally {
+      cleaning = false;
     }
   }
 
-  const observer = new MutationObserver(cleanOperationalTruth);
+  let observerScheduled = false;
+  const observer = new MutationObserver(() => {
+    if (observerScheduled) return;
+    observerScheduled = true;
+    requestAnimationFrame(() => {
+      observerScheduled = false;
+      cleanOperationalTruth();
+    });
+  });
   observer.observe(document.body, {subtree:true, childList:true, characterData:true});
   cleanOperationalTruth();
 
