@@ -111,6 +111,14 @@ jobs:
             echo "LUMEN Zero is installed but waiting for the three D1 secrets; business cycle skipped safely."
           fi
 
+      - name: Set up Python
+        if: steps.preflight.outputs.ready == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: .lumen/runtime/requirements.txt
+
       - name: Instagram connectivity preflight (no publish)
         if: steps.preflight.outputs.ready == 'true'
         continue-on-error: true
