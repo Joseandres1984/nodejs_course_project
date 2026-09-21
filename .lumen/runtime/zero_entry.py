@@ -167,6 +167,15 @@ except Exception as exc:
     print({"instagram_approval_pre_worker_gate": {"status": "failed_closed", "error": f"{type(exc).__name__}: {str(exc)[:300]}", "future_posts_authorized": False}}, flush=True)
     raise
 
+# Before spending another public-search query, re-evaluate exact buyer-bound evidence already in D1.
+# This uses zero searches and may only promote a verified buyer when the existing 75-point demand
+# threshold, strong-intent language, public URL and exact account lineage all remain satisfied.
+try:
+    import demand_inventory_reuse_runtime  # noqa: F401,E402
+    demand_inventory_reuse_runtime.run_once()
+except Exception as exc:
+    print({"demand_inventory_reuse": {"status": "degraded_fail_closed", "error": f"{type(exc).__name__}: {str(exc)[:300]}", "searches_used": 0, "outbound_gate_relaxed": False}}, flush=True)
+
 # worker_entry executes the complete production cycle at import time, matching the Railway start.
 import worker_entry  # noqa: F401,E402
 
@@ -188,3 +197,12 @@ try:
     zero_instagram_control_bridge_runtime.export_posts()
 except Exception as exc:
     print({"zero_instagram_control_export": {"status": "degraded_fail_open", "error": f"{type(exc).__name__}: {str(exc)[:300]}"}}, flush=True)
+
+# Last writer of every successful Zero cycle: reconcile cumulative business truth from primary D1
+# evidence after all connectors and publishing have finished. Raw per-cycle module snapshots stay
+# intact for diagnostics; the canonical projection is what dashboards/executive summaries should use.
+try:
+    import operational_truth_auditor_runtime  # noqa: F401,E402
+    operational_truth_auditor_runtime.run_once()
+except Exception as exc:
+    print({"operational_truth_auditor": {"status": "degraded_fail_closed", "error": f"{type(exc).__name__}: {str(exc)[:300]}", "canonical_projection_written": False}}, flush=True)
