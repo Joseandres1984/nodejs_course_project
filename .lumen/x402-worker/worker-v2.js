@@ -4,7 +4,7 @@ import { x402ResourceServer, HTTPFacilitatorClient } from "@x402/core/server";
 import { ExactEvmScheme } from "@x402/evm/exact/server";
 
 const SERVICE = "lumen-zero-x402";
-const VERSION = "1.3-x402-conversion-attribution";
+const VERSION = "1.4-x402-human-paywall";
 const PAY_TO = "0x04285DE6A083CEb28fb0C254a2ed0F5fdB2eeD28";
 const NETWORK = "eip155:8453";
 const FACILITATOR = "https://facilitator.xpay.sh";
@@ -93,7 +93,11 @@ for (const [slug, product] of Object.entries(PRODUCTS)) {
     mimeType: "application/json",
   };
 }
-const x402Gate = paymentMiddleware(paidRoutes, resourceServer);
+const x402Gate = paymentMiddleware(
+  paidRoutes,
+  resourceServer,
+  { appName:"LUMEN", testnet:false },
+);
 
 app.use("*", async (c, next) => {
   if (c.req.method === "OPTIONS") {
@@ -109,7 +113,7 @@ app.use("*", async (c, next) => {
   c.header("x-content-type-options", "nosniff");
 });
 
-// Lazy initialization is required on Workers: x402 v2.23 must load facilitator
+// Lazy initialization is required on Workers: x402 must load facilitator
 // capabilities before constructing payment requirements, while network I/O must
 // happen inside a request rather than at module startup.
 app.use("/buy/*", async (c, next) => {
@@ -250,7 +254,7 @@ app.get("/health", async (c) => {
     ok:true, service:SERVICE, version:VERSION, x402:"LIVE",
     network:NETWORK, asset:"USDC", facilitator:FACILITATOR,
     recipientConfigured:true, resourceServerInitialized:true, outgoingSpendEnabled:false,
-    conversionAttribution:true,
+    conversionAttribution:true, humanPaywall:true,
   });
 });
 app.get("/catalog", (c) => c.json(publicCatalog(new URL(c.req.url).origin)));
