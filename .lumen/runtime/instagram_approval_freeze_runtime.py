@@ -213,6 +213,8 @@ def _recover_three_verified_approvals(bridge: Any) -> Dict[str, Any]:
 def _patch_bridge(module: Any) -> None:
     if getattr(module, "_EDITORIAL_APPROVAL_FREEZE_V2", False):
         return
+    if not hasattr(module, "recover_explicit_approvals_once"):
+        return
     module._fingerprint = editorial_fingerprint
     original_recovery = module.recover_explicit_approvals_once
 
@@ -231,6 +233,8 @@ def _patch_bridge(module: Any) -> None:
 
 def _patch_publish_control(module: Any) -> None:
     if getattr(module, "_EDITORIAL_APPROVAL_FREEZE_V2", False):
+        return
+    if not hasattr(module, "_approval_store") or not hasattr(module, "social_distribution"):
         return
 
     module._content_fingerprint = editorial_fingerprint
@@ -296,21 +300,29 @@ _ORIGINAL_IMPORT = builtins.__import__
 _IN_HOOK = False
 
 
+def _patch_loaded_targets() -> None:
+    bridge = sys.modules.get("zero_instagram_control_bridge_runtime")
+    if bridge is not None and hasattr(bridge, "recover_explicit_approvals_once"):
+        _patch_bridge(bridge)
+    control = sys.modules.get("instagram_publish_control")
+    if control is not None and hasattr(control, "_approval_store"):
+        _patch_publish_control(control)
+
+
 def _lumen_import(name: str, globals=None, locals=None, fromlist=(), level=0):
     global _IN_HOOK
-    module = _ORIGINAL_IMPORT(name, globals, locals, fromlist, level)
     if _IN_HOOK:
-        return module
+        return _ORIGINAL_IMPORT(name, globals, locals, fromlist, level)
+
+    # Mark the whole underlying import as in-progress. Nested imports may expose a module in
+    # sys.modules before its body has finished; never patch such a partially initialized module.
+    _IN_HOOK = True
     try:
-        _IN_HOOK = True
-        bridge = sys.modules.get("zero_instagram_control_bridge_runtime")
-        if bridge is not None:
-            _patch_bridge(bridge)
-        control = sys.modules.get("instagram_publish_control")
-        if control is not None:
-            _patch_publish_control(control)
+        module = _ORIGINAL_IMPORT(name, globals, locals, fromlist, level)
     finally:
         _IN_HOOK = False
+
+    _patch_loaded_targets()
     return module
 
 
