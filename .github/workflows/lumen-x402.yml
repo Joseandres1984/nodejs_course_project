@@ -24,7 +24,7 @@ jobs:
       X402_BASE_URL: "https://lumen-zero-x402.joseandresceol1-jac.workers.dev"
       X402_EXPECTED_RECIPIENT: "0x04285DE6A083CEb28fb0C254a2ed0F5fdB2eeD28"
       X402_FACILITATOR: "https://facilitator.xpay.sh"
-      X402_EXPECTED_VERSION: "1.2-x402-base-usdc-lazy-settlement-truth"
+      X402_EXPECTED_VERSION: "1.3-x402-conversion-attribution"
     steps:
       - name: Checkout LUMEN Zero
         uses: actions/checkout@v4
@@ -44,8 +44,6 @@ jobs:
         run: |
           curl -fsS "$X402_FACILITATOR/health" -o /tmp/facilitator-health.json
           curl -fsS "$X402_FACILITATOR/supported" -o /tmp/facilitator-supported.json
-          cat /tmp/facilitator-health.json; echo
-          cat /tmp/facilitator-supported.json; echo
           python3 - <<'PY'
           import json
           supported=json.load(open('/tmp/facilitator-supported.json'))
@@ -75,7 +73,7 @@ jobs:
         working-directory: .lumen/x402-worker
         run: npx wrangler deploy
 
-      - name: Wait for v1.2 edge propagation and verify public truth
+      - name: Wait for v1.3 edge propagation and verify public truth
         shell: bash
         run: |
           ready=0
@@ -88,7 +86,6 @@ jobs:
             if [[ "$health" == "200" && "$catalog" == "200" && "$stats" == "200" ]]; then
               hv=$(jq -r '.version // ""' /tmp/x402-health.json 2>/dev/null || true)
               cv=$(jq -r '.version // ""' /tmp/x402-catalog.json 2>/dev/null || true)
-              echo "health_version=$hv catalog_version=$cv"
               if [[ "$hv" == "$X402_EXPECTED_VERSION" && "$cv" == "$X402_EXPECTED_VERSION" ]]; then
                 ready=1
                 break
@@ -96,22 +93,20 @@ jobs:
             fi
             sleep 4
           done
-          echo "health:"; cat /tmp/x402-health.json; echo
-          echo "catalog:"; cat /tmp/x402-catalog.json; echo
-          echo "stats:"; cat /tmp/x402-stats.json; echo
           [[ "$ready" == "1" ]]
           python3 - <<'PY'
           import json, os
           health=json.load(open('/tmp/x402-health.json'))
           catalog=json.load(open('/tmp/x402-catalog.json'))
           stats=json.load(open('/tmp/x402-stats.json'))
-          recipient='0x04285DE6A083CEb28fb0C254a2ed0F5fdB2eeD28'
-          facilitator='https://facilitator.xpay.sh'
+          recipient=os.environ['X402_EXPECTED_RECIPIENT']
+          facilitator=os.environ['X402_FACILITATOR']
           version=os.environ['X402_EXPECTED_VERSION']
           assert health.get('ok') is True and health.get('version') == version, health
           assert health.get('x402') == 'LIVE' and health.get('resourceServerInitialized') is True, health
           assert health.get('network') == 'eip155:8453' and health.get('asset') == 'USDC', health
           assert health.get('facilitator') == facilitator and health.get('outgoingSpendEnabled') is False, health
+          assert health.get('conversionAttribution') is True, health
           assert catalog.get('version') == version, catalog
           settlement=catalog.get('settlement') or {}
           assert settlement.get('recipient') == recipient, settlement
@@ -119,47 +114,43 @@ jobs:
           assert settlement.get('facilitator') == facilitator and settlement.get('outgoingSpendEnabled') is False, settlement
           assert len(catalog.get('products') or []) == 6, catalog
           assert stats.get('recipient') == recipient and stats.get('network') == 'Base' and stats.get('asset') == 'USDC', stats
-          assert stats.get('facilitator') == facilitator, stats
+          assert stats.get('facilitator') == facilitator and stats.get('conversionAttribution') is True, stats
           assert float(stats.get('realizedRevenueUsd') or 0) >= 0, stats
-          print({'public_checkout':'v1.2-ready','products':6,'realizedRevenueUsd':stats.get('realizedRevenueUsd')})
+          print({'public_checkout':'v1.3-ready','products':6,'conversionAttribution':True,'realizedRevenueUsd':stats.get('realizedRevenueUsd')})
           PY
 
-      - name: Verify real x402 payment challenge without spending
+      - name: Verify attributed x402 challenge without spending
         shell: bash
         run: |
           success=0
           for i in {1..12}; do
             nonce="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-challenge-${i}-$(date +%s)"
-            code=$(curl -sS -D /tmp/x402-headers.txt -o /tmp/x402-body.txt -w '%{http_code}' "$X402_BASE_URL/buy/supplier-snapshot?deploy=$nonce" || true)
+            url="$X402_BASE_URL/buy/supplier-snapshot?conversion_event=CE-DEPLOY-CANARY&conversion_session=SID-DEPLOY-CANARY&campaign=deploy-canary&source=technical-canary&medium=deploy&creative=deploy-canary&deploy=$nonce"
+            code=$(curl -sS -D /tmp/x402-headers.txt -o /tmp/x402-body.txt -w '%{http_code}' "$url" || true)
             echo "challenge_attempt=$i http=$code"
             if [[ "$code" == "402" ]]; then
               success=1
               break
             fi
-            cat /tmp/x402-body.txt || true
             sleep 4
           done
-          cat /tmp/x402-headers.txt
-          cat /tmp/x402-body.txt || true
           [[ "$success" == "1" ]]
           python3 - <<'PY'
           import base64, json
           headers=open('/tmp/x402-headers.txt',encoding='utf-8',errors='ignore').read().splitlines()
           line=next((x for x in headers if x.lower().startswith('payment-required:')),None)
           assert line, 'missing PAYMENT-REQUIRED header'
-          raw=line.split(':',1)[1].strip()
-          raw += '=' * (-len(raw) % 4)
+          raw=line.split(':',1)[1].strip(); raw += '=' * (-len(raw) % 4)
           data=json.loads(base64.b64decode(raw))
           assert data.get('x402Version') == 2, data
-          accepts=data.get('accepts') or []
-          assert accepts, data
+          accepts=data.get('accepts') or []; assert accepts, data
           req=accepts[0]
           assert req.get('scheme') == 'exact', req
           assert req.get('network') == 'eip155:8453', req
           assert req.get('payTo','').lower() == '0x04285de6a083ceb28fb0c254a2ed0f5fdb2eed28', req
           assert int(req.get('amount') or 0) == 5000000, req
           assert (req.get('extra') or {}).get('assetTransferMethod') == 'eip3009', req
-          print({'x402_challenge':'ok','network':req.get('network'),'amount_atomic':req.get('amount'),'asset':req.get('asset'),'payTo':req.get('payTo')})
+          print({'x402_challenge':'ok','attribution_query_preserved':True,'payment_attempted':False,'network':req.get('network'),'amount_atomic':req.get('amount'),'payTo':req.get('payTo')})
           PY
 
       - name: Deployment summary
@@ -173,4 +164,5 @@ jobs:
           echo "Facilitator: $X402_FACILITATOR"
           echo "Network: Base / eip155:8453"
           echo "Asset: USDC"
+          echo "Conversion attribution: enabled"
           echo "Outgoing spend: disabled"
