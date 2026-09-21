@@ -66,11 +66,11 @@ jobs:
               cat /tmp/a2a-health.json
               echo
               python3 - <<'PY'
-import json
-with open('/tmp/a2a-card.json', encoding='utf-8') as f:
-    card=json.load(f)
-print({'a2a_agent_card': {'name': card.get('name'), 'protocolVersion': card.get('protocolVersion'), 'skills': len(card.get('skills') or []), 'url': card.get('url')}})
-PY
+          import json
+          with open('/tmp/a2a-card.json', encoding='utf-8') as f:
+              card=json.load(f)
+          print({'a2a_agent_card': {'name': card.get('name'), 'protocolVersion': card.get('protocolVersion'), 'skills': len(card.get('skills') or []), 'url': card.get('url')}})
+          PY
               exit 0
             fi
             sleep 5
