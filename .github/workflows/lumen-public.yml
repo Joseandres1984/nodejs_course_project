@@ -108,10 +108,34 @@ jobs:
             failed=1
           fi
 
+          iphone_ua='Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 Version/26.0 Mobile/15E148 Safari/604.1'
+          checkout_ok=0
+          for i in {1..8}; do
+            code=$(curl -sS -A "$iphone_ua" -H 'Accept: text/html,application/xhtml+xml' -o /tmp/lumen-checkout.html -w '%{http_code}' "$base/buy/supplier-snapshot?technical_canary=1&ui_attempt=$i" || true)
+            echo "LUMEN_CHECKOUT_UI_ATTEMPT=$i HTTP=$code"
+            if [[ "$code" == "402" ]] \
+              && grep -q 'LUMEN Checkout' /tmp/lumen-checkout.html \
+              && grep -q 'Elegir billetera' /tmp/lumen-checkout.html \
+              && grep -q 'Conectar y pagar' /tmp/lumen-checkout.html \
+              && grep -q 'Volver a LUMEN' /tmp/lumen-checkout.html \
+              && grep -q 'USDC' /tmp/lumen-checkout.html \
+              && grep -q 'Base' /tmp/lumen-checkout.html; then
+              checkout_ok=1
+              break
+            fi
+            sleep 3
+          done
+          if [[ "$checkout_ok" != "1" ]]; then
+            echo "Branded Spanish checkout validation failed"
+            head -120 /tmp/lumen-checkout.html || true
+            failed=1
+          fi
+
           if [[ "$failed" != "0" ]]; then
             echo "LUMEN_UNIFIED_PUBLIC_GATEWAY=failure"
             exit 1
           fi
+          echo "LUMEN_CHECKOUT_UI=success"
           echo "LUMEN_UNIFIED_PUBLIC_GATEWAY=success"
 
-# deploy trigger: unified gateway retry-safe x402 2026-09-21
+# deploy trigger: branded Spanish human checkout 2026-09-21
