@@ -1,6 +1,60 @@
 import base from "./recovery_worker.js";
 
+function friendlyCopy(html) {
+  const replacements = [
+    ['data-tab="overview">Resumen</button>', 'data-tab="overview">Hoy</button>'],
+    ['data-tab="commercial">Comercial</button>', 'data-tab="commercial">Ventas</button>'],
+    ['data-tab="scout">Scout</button>', 'data-tab="scout">Búsqueda</button>'],
+    ['data-tab="infra">Sistema</button>', 'data-tab="infra">Técnico</button>'],
+    ['data-tab="activity">Actividad</button>', 'data-tab="activity">Historial</button>'],
+    ['>Ingresos realizados</div>', '>Ingresos cobrados</div>'],
+    ['>Pipeline</div>', '>Valor en oportunidades</div>'],
+    ['>Valor esperado</div>', '>Valor probable</div>'],
+    ['>Ganancia potencial</div>', '>Ganancia estimada</div>'],
+    ['>Watchdog</div>', '>Salud del sistema</div>'],
+    ['>Agentes</div>', '>Agentes activos</div>'],
+    ['>Elegibles outbound</div>', '>Listos para contactar</div>'],
+    ['>Cierres pendientes</div>', '>Requieren tu decisión</div>'],
+    ['>Ganancia registrada</div>', '>Ingresos cobrados</div>'],
+    ['>Outbound enviado</div>', '>Contactos enviados</div>'],
+    ['>Inbound</div>', '>Respuestas recibidas</div>'],
+    ['<h2>Deals</h2>', '<h2>Negocios en curso</h2>'],
+    ['<h2>Aprobaciones humanas</h2>', '<h2>Requieren tu aprobación</h2>'],
+    ['<h2>Ofertas / cotizaciones</h2>', '<h2>Cotizaciones / propuestas</h2>'],
+    ['<h2>Salida comercial</h2>', '<h2>Últimos contactos</h2>'],
+    ['>Research leads</div>', '>Hallazgos de investigación</div>'],
+    ['>Verificadas</div>', '>Empresas verificadas</div>'],
+    ['<h2>Presupuesto de búsqueda</h2>', '<h2>Búsquedas gratuitas del día</h2>'],
+    ['<h2>Leads recientes de investigación</h2>', '<h2>Hallazgos recientes</h2>'],
+    ['>Inbox</div>', '>Mensajes recibidos</div>'],
+    ['>Publicaciones preparadas</div>', '>Publicaciones en control</div>'],
+    ['<h2>Consultas públicas recientes</h2>', '<h2>Consultas recibidas</h2>'],
+    ['<h2>Infraestructura</h2>', '<h2>Estado técnico</h2>'],
+    ['<h2>Gobernanza</h2>', '<h2>Qué necesita tu aprobación</h2>'],
+    ['<h2>Diario de ciclos</h2>', '<h2>Ejecuciones de LUMEN</h2>'],
+    ['<h2>Pendientes priorizados</h2>', '<h2>Qué falta resolver</h2>'],
+    ['<h2>Actividad</h2>', '<h2>Historial reciente</h2>'],
+  ];
+  for (const [from, to] of replacements) html = html.replaceAll(from, to);
+
+  if (!html.includes('id="lumenBudgetExplain"')) {
+    html = html.replace(
+      '<div id="searchBudget"></div>',
+      '<div id="searchBudget"></div><div class="lumenExplain" id="lumenBudgetExplain"><b>No es dinero ni crédito.</b> Es un límite interno de consultas públicas gratuitas para mantener el costo en $0. El tope actual es 24 por día, se reparte automáticamente entre búsqueda de demanda y verificación/general, se libera por tramos durante el día y se reinicia a las 00:00 de Argentina. Cuando se agota, LUMEN sigue trabajando con D1, documentos, dominios y evidencia ya guardada.</div>'
+    );
+  }
+  if (!html.includes('id="lumenGovernanceExplain"')) {
+    html = html.replace(
+      '<div id="governance"></div>',
+      '<div id="governance"></div><div class="lumenExplain" id="lumenGovernanceExplain"><b>En simple:</b> LUMEN investiga, verifica, aprende, prioriza y prepara trabajo por sí solo. Vos intervenís únicamente para compromisos vinculantes: contratos, dinero, publicidad paga, conectores nuevos y cada publicación de Instagram.</div>'
+    );
+  }
+  return html;
+}
+
 function patchRefresh(html) {
+  html = friendlyCopy(html);
+
   if (!html.includes('id="lumenRefreshBtn"')) {
     const status = '<span id="lumenRefreshStatus" style="margin-left:8px;font-size:11px;color:#8fa7b3;white-space:normal"></span>';
     html = html.replace(
@@ -19,6 +73,7 @@ function patchRefresh(html) {
 
   if (!html.includes('id="lumenMobileTruthPatch"')) {
     html = html.replace('</head>', `<style id="lumenMobileTruthPatch">
+.lumenExplain{margin-top:12px;padding:11px 12px;border:1px solid #294655;border-radius:11px;background:#08131a;color:#a9bfca;line-height:1.5;font-size:12px}.lumenExplain b{color:#eef5f7}
 @media(max-width:760px){
   .g2{grid-template-columns:1fr!important}
   .statusline{align-items:flex-start;overflow-wrap:anywhere}
@@ -40,16 +95,24 @@ function patchRefresh(html) {
   const normalLabel = 'Actualizar datos';
 
   const laneMap = {
-    demand_discovery: 'Descubrir demanda',
-    verification_contact: 'Verificar contactos',
+    demand_discovery: 'Descubrir demanda real',
+    verification_contact: 'Verificar empresas y contactos',
     closing: 'Cierre comercial',
-    sourcing: 'Sourcing',
+    sourcing: 'Buscar proveedores',
     outreach: 'Contacto comercial'
   };
   const phraseMap = {
-    'evidence first and bounded public search next.': 'Primero evidencia; luego búsqueda pública acotada.',
-    'no_eligible_external_prospects': 'sin prospectos externos elegibles',
+    'evidence first and bounded public search next.': 'Primero usa evidencia guardada; después búsqueda pública acotada.',
+    'no_eligible_external_prospects': 'sin empresas listas para contactar ahora',
     'demand_gap': 'falta demanda verificada'
+  };
+  const labelMap = {
+    'Proveedor': 'Motor de búsqueda',
+    'Tope diario': 'Máximo gratis por día',
+    'General usado': 'Verificación/general usado',
+    'Demanda usado': 'Búsqueda de demanda usada',
+    'Restante': 'Disponible hoy',
+    'Railway': 'Railway histórico'
   };
 
   let cleaning = false;
@@ -57,26 +120,33 @@ function patchRefresh(html) {
     if (cleaning) return;
     cleaning = true;
     try {
-      const channels = document.getElementById('channels');
-      if (channels) {
-        [...channels.querySelectorAll('.statusline')].forEach((row) => {
-          const label = row.querySelector('span');
-          const value = row.querySelector('strong');
-          if (!label) return;
-          const key = (label.textContent || '').trim();
-          if (key === 'WhatsApp') {
-            row.remove();
-            return;
-          }
-          if (key === 'Pagos' && value) {
-            if (label.textContent !== 'Cobros') label.textContent = 'Cobros';
-            const desired = '<span class="chip ok">ARS · USD · EUR READY</span>';
-            if (value.innerHTML !== desired) value.innerHTML = desired;
-          }
-        });
-        if (![...channels.querySelectorAll('.statusline span')].some((x) => (x.textContent || '').trim() === 'Alertas internas')) {
-          channels.insertAdjacentHTML('beforeend','<div class="statusline"><span>Alertas internas</span><strong><span class="chip ok">EMAIL + PANEL</span></strong></div>');
+      // WhatsApp fue retirado por decisión del dueño. Eliminar cualquier proyección vieja del panel,
+      // sin importar en qué tarjeta haya quedado almacenada.
+      [...document.querySelectorAll('.statusline')].forEach((row) => {
+        const label = row.querySelector('span');
+        const value = row.querySelector('strong');
+        if (!label) return;
+        const key = (label.textContent || '').trim();
+        if (key === 'WhatsApp') {
+          row.remove();
+          return;
         }
+        if (labelMap[key] && label.textContent !== labelMap[key]) label.textContent = labelMap[key];
+        if (key === 'Pagos' && value) {
+          label.textContent = 'Cobros';
+          const desired = '<span class="chip ok">ARS · USD · EUR LISTOS</span>';
+          if (value.innerHTML !== desired) value.innerHTML = desired;
+        }
+        if (key === 'Railway' && value) {
+          label.textContent = 'Railway histórico';
+          const desired = '<span class="chip">fuera del núcleo actual</span>';
+          if (value.innerHTML !== desired) value.innerHTML = desired;
+        }
+      });
+
+      const channels = document.getElementById('channels');
+      if (channels && ![...channels.querySelectorAll('.statusline span')].some((x) => (x.textContent || '').trim() === 'Alertas internas')) {
+        channels.insertAdjacentHTML('beforeend','<div class="statusline"><span>Alertas internas</span><strong><span class="chip ok">EMAIL + PANEL</span></strong></div>');
       }
 
       const priority = document.getElementById('priority');
@@ -93,6 +163,21 @@ function patchRefresh(html) {
           }
           if (text !== current) node.textContent = text;
         });
+      }
+
+      // "sent" significa aceptado por el transporte, no entrega demostrada.
+      const outbox = document.getElementById('outbox');
+      if (outbox) {
+        [...outbox.querySelectorAll('td')].forEach((cell) => {
+          if ((cell.textContent || '').trim().toLowerCase() === 'sent') {
+            cell.textContent = 'enviado · entrega no verificada';
+          }
+        });
+      }
+
+      const inquiries = document.querySelector('#inquiriesTable .empty');
+      if (inquiries && inquiries.textContent !== 'Todavía no entró ninguna consulta por la web.') {
+        inquiries.textContent = 'Todavía no entró ninguna consulta por la web.';
       }
     } finally {
       cleaning = false;
