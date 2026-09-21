@@ -1,0 +1,81 @@
+name: LUMEN A2A Gateway
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/lumen-a2a.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lumen-a2a-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy-a2a:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.LUMEN_D1_ACCOUNT_ID }}
+    steps:
+      - name: Checkout LUMEN Zero
+        uses: actions/checkout@v4
+        with:
+          ref: lumen-zero
+
+      - name: Validate A2A bridge syntax
+        run: python3 -m py_compile .lumen/runtime/zero_a2a_inbound_bridge_runtime.py .lumen/runtime/zero_entry.py
+
+      - name: Deployment preflight
+        id: preflight
+        shell: bash
+        run: |
+          if [[ -n "$CLOUDFLARE_API_TOKEN" && -n "$CLOUDFLARE_ACCOUNT_ID" ]]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "Missing Cloudflare deployment credentials."
+            exit 1
+          fi
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Validate A2A Worker syntax
+        working-directory: .lumen/a2a-worker
+        run: node --check worker.js
+
+      - name: Deploy A2A Worker
+        working-directory: .lumen/a2a-worker
+        run: npx --yes wrangler@4 deploy
+
+      - name: Verify A2A health and Agent Card
+        shell: bash
+        run: |
+          BASE='https://lumen-zero-a2a.joseandresceol1-jac.workers.dev'
+          for i in {1..12}; do
+            health=$(curl -sS -o /tmp/a2a-health.json -w '%{http_code}' "$BASE/health" || true)
+            card=$(curl -sS -o /tmp/a2a-card.json -w '%{http_code}' "$BASE/.well-known/agent-card.json" || true)
+            if [[ "$health" == "200" && "$card" == "200" ]] && grep -q 'LUMEN B2B Agent' /tmp/a2a-card.json && grep -q '/a2a/v1' /tmp/a2a-card.json; then
+              cat /tmp/a2a-health.json
+              echo
+              python3 - <<'PY'
+import json
+with open('/tmp/a2a-card.json', encoding='utf-8') as f:
+    card=json.load(f)
+print({'a2a_agent_card': {'name': card.get('name'), 'protocolVersion': card.get('protocolVersion'), 'skills': len(card.get('skills') or []), 'url': card.get('url')}})
+PY
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "A2A health/card verification failed."
+          cat /tmp/a2a-health.json 2>/dev/null || true
+          cat /tmp/a2a-card.json 2>/dev/null || true
+          exit 1
