@@ -58,7 +58,7 @@ jobs:
           ready=0
           for i in {1..15}; do
             code=$(curl -sS -o /tmp/conversion-health.json -w '%{http_code}' "$BASE/health?deploy=${GITHUB_RUN_ID}-${i}" || true)
-            if [[ "$code" == "200" ]] && [[ "$(jq -r '.version // ""' /tmp/conversion-health.json 2>/dev/null || true)" == "1.0-conversion-loop-live" ]]; then
+            if [[ "$code" == "200" ]] && [[ "$(jq -r '.version // ""' /tmp/conversion-health.json 2>/dev/null || true)" == "1.1-conversion-loop-crm" ]]; then
               ready=1
               break
             fi
@@ -69,7 +69,7 @@ jobs:
           import json, os, urllib.request
           base=os.environ["CONVERSION_BASE_URL"]
           def get(path):
-              req=urllib.request.Request(base+path,headers={"Accept":"application/json","User-Agent":"LUMEN-ConversionDeploy/1.0"})
+              req=urllib.request.Request(base+path,headers={"Accept":"application/json","User-Agent":"LUMEN-ConversionDeploy/1.1"})
               with urllib.request.urlopen(req,timeout=30) as r:
                   return json.loads(r.read().decode())
           for path in ("/health","/catalog.json","/stats"):
@@ -78,11 +78,25 @@ jobs:
           catalog=get("/catalog.json")
           assert len(catalog.get("products",[])) == 6
           assert catalog.get("paidMediaSpend") is False
+          assert catalog.get("crmBridge") is True
           stats=get("/stats")
           assert stats.get("revenueRule") == "Only x402 receipts with status settled_verified count as realized revenue"
-          print("CONVERSION_LIVE health=ok products=6 revenue_truth=settled_only")
+          assert (stats.get("crmTruth") or {}).get("qualifiedIntentCreatesCanonicalInquiry") is True
+          print("CONVERSION_LIVE health=ok products=6 crm_bridge=ok revenue_truth=settled_only")
           PY
-          curl -fsS -A "LUMEN-ConversionDeploy/1.0" "$BASE/offer/supplier-snapshot?src=technical-canary&medium=deploy&campaign=deploy-canary&technical_canary=1" >/dev/null
-          LOCATION=$(curl -sS -A "LUMEN-ConversionDeploy/1.0" -D - -o /dev/null "$BASE/go/supplier-snapshot?src=technical-canary&medium=deploy&campaign=deploy-canary&technical_canary=1" | awk 'BEGIN{IGNORECASE=1} /^location:/{sub(/\r$/,""); print substr($0,index($0,$2))}' | tail -1)
+          CANARY_Q="src=technical-canary&medium=deploy&campaign=deploy-canary&technical_canary=1"
+          curl -fsS -A "LUMEN-ConversionDeploy/1.1" "$BASE/offer/supplier-snapshot?$CANARY_Q" >/dev/null
+          curl -fsS -A "LUMEN-ConversionDeploy/1.1" -X POST \
+            -F 'email=technical-canary@example.invalid' \
+            -F 'company=LUMEN Deployment Canary' \
+            -F 'details=Technical deployment canary only; must not enter canonical CRM.' \
+            "$BASE/intent/supplier-snapshot?$CANARY_Q" >/dev/null
+          LOCATION=$(curl -sS -A "LUMEN-ConversionDeploy/1.1" -D - -o /dev/null "$BASE/go/supplier-snapshot?$CANARY_Q" | awk 'BEGIN{IGNORECASE=1} /^location:/{sub(/\r$/,""); print substr($0,index($0,$2))}' | tail -1)
           echo "$LOCATION" | grep -F "$X402/buy/supplier-snapshot" >/dev/null
-          echo "CONVERSION_CANARY offer=200 checkout_redirect=302 payment_attempted=false"
+          python - <<'PY'
+          import json, os, urllib.request
+          req=urllib.request.Request(os.environ["CONVERSION_BASE_URL"]+"/stats",headers={"Accept":"application/json","User-Agent":"LUMEN-ConversionDeploy/1.1"})
+          stats=json.loads(urllib.request.urlopen(req,timeout=30).read().decode())
+          assert stats.get("qualifiedLeads",0) == stats.get("crmSyncedLeads",0), "Only real leads should be CRM-synced; technical canary is excluded from aggregates"
+          print("CONVERSION_CANARY offer=200 intent=200 checkout_redirect=302 crm_pollution=false payment_attempted=false")
+          PY
