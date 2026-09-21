@@ -95,6 +95,20 @@ async function proxyBinding(request, binding, requestBase, targetPath, origin, r
   return normalizeResponse(upstream, origin, {rewriteBody});
 }
 
+async function warmX402(binding, origin) {
+  if (!binding || typeof binding.fetch !== "function") return false;
+  for (let i=0;i<2;i++) {
+    try {
+      const response = await binding.fetch(new Request(`${origin}/health`, {
+        method:"GET",
+        headers:{"x-lumen-public-origin":origin,"user-agent":"LUMEN-Public-Gateway/1.0"},
+      }));
+      if (response.ok) return true;
+    } catch (_) {}
+  }
+  return false;
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -102,12 +116,14 @@ export default {
     const origin = url.origin;
 
     if (request.method === "GET" && (path === "/store" || path === "/catalog")) {
+      if (ctx?.waitUntil) ctx.waitUntil(warmX402(env.X402, origin));
       return proxyBinding(request, env.CONVERSION, CONVERSION_INTERNAL, "/catalog", origin, true);
     }
     if (request.method === "GET" && path === "/store.json") {
       return proxyBinding(request, env.CONVERSION, CONVERSION_INTERNAL, "/catalog.json", origin, true);
     }
     if (/^\/offer\/[a-z0-9-]+$/.test(path) && request.method === "GET") {
+      if (ctx?.waitUntil) ctx.waitUntil(warmX402(env.X402, origin));
       return proxyBinding(request, env.CONVERSION, CONVERSION_INTERNAL, path, origin, true);
     }
     if (/^\/go\/[a-z0-9-]+$/.test(path) && request.method === "GET") {
@@ -119,6 +135,7 @@ export default {
 
     // Service Binding handles transport, while x402 sees the real public resource URL.
     if (/^\/buy\/[a-z0-9-]+$/.test(path) && ["GET","POST"].includes(request.method)) {
+      await warmX402(env.X402, origin);
       return proxyBinding(request, env.X402, origin, path, origin, true);
     }
 
