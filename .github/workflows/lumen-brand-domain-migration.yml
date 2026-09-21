@@ -44,7 +44,7 @@ jobs:
           test -n "$CLOUDFLARE_ACCOUNT_ID"
           echo "Target workers.dev subdomain: $NEW_SUBDOMAIN"
 
-      - name: Change Cloudflare account workers.dev subdomain
+      - name: Change Cloudflare account workers.dev subdomain with rollback
         shell: bash
         run: |
           set -euo pipefail
@@ -52,30 +52,54 @@ jobs:
           endpoint="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain"
 
           curl -fsS "${auth[@]}" "$endpoint" -o /tmp/current.json
-          python3 - <<'PY'
-          import json
-          data=json.load(open('/tmp/current.json'))
-          print({'cloudflare_subdomain_before': (data.get('result') or {}).get('subdomain')})
-          PY
-
           current=$(python3 - <<'PY'
           import json
-          print((json.load(open('/tmp/current.json')).get('result') or {}).get('subdomain') or '')
+          data=json.load(open('/tmp/current.json'))
+          value=(data.get('result') or {}).get('subdomain') or ''
+          print(value)
           PY
           )
+          echo "Current workers.dev subdomain: $current"
 
           if [[ "$current" != "$NEW_SUBDOMAIN" ]]; then
-            code=$(curl -sS -o /tmp/update.json -w '%{http_code}' -X PUT "${auth[@]}" \
-              --data "{\"subdomain\":\"$NEW_SUBDOMAIN\"}" "$endpoint")
-            cat /tmp/update.json; echo
-            [[ "$code" =~ ^2 ]]
-            python3 - <<'PY'
+            test -n "$current"
+
+            delete_code=$(curl -sS -o /tmp/delete.json -w '%{http_code}' -X DELETE "${auth[@]}" "$endpoint")
+            cat /tmp/delete.json; echo
+            [[ "$delete_code" =~ ^2 ]]
+
+            created=0
+            for i in {1..8}; do
+              create_code=$(curl -sS -o /tmp/create.json -w '%{http_code}' -X PUT "${auth[@]}" \
+                --data "{\"subdomain\":\"$NEW_SUBDOMAIN\"}" "$endpoint" || true)
+              echo "create attempt=$i http=$create_code"
+              cat /tmp/create.json; echo
+              if [[ "$create_code" =~ ^2 ]] && python3 - <<'PY'
           import json
-          data=json.load(open('/tmp/update.json'))
-          assert data.get('success') is True, data
-          assert (data.get('result') or {}).get('subdomain') == 'lumen-b2b', data
-          print({'cloudflare_subdomain_changed': True, 'new_subdomain': 'lumen-b2b'})
+          data=json.load(open('/tmp/create.json'))
+          raise SystemExit(0 if data.get('success') is True and (data.get('result') or {}).get('subdomain') == 'lumen-b2b' else 1)
           PY
+              then
+                created=1
+                break
+              fi
+              sleep 2
+            done
+
+            if [[ "$created" != "1" ]]; then
+              echo "Target unavailable or rejected. Restoring previous workers.dev subdomain."
+              restored=0
+              for i in {1..8}; do
+                restore_code=$(curl -sS -o /tmp/restore.json -w '%{http_code}' -X PUT "${auth[@]}" \
+                  --data "{\"subdomain\":\"$current\"}" "$endpoint" || true)
+                if [[ "$restore_code" =~ ^2 ]]; then restored=1; break; fi
+                sleep 2
+              done
+              cat /tmp/restore.json || true; echo
+              [[ "$restored" == "1" ]]
+              echo "Rollback completed; repository references were not changed."
+              exit 1
+            fi
           else
             echo "Cloudflare already uses $NEW_SUBDOMAIN"
           fi
@@ -163,7 +187,7 @@ jobs:
           )
           for url in "${endpoints[@]}"; do
             ok=0
-            for i in {1..15}; do
+            for i in {1..20}; do
               code=$(curl -A 'LUMEN-Domain-Migration/1.0' -sS -o /tmp/body -w '%{http_code}' "$url?brand_check=$GITHUB_RUN_ID-$i" || true)
               echo "$url -> $code"
               if [[ "$code" =~ ^2|^3 ]]; then ok=1; break; fi
