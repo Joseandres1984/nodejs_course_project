@@ -75,7 +75,7 @@ jobs:
           cat /tmp/a2a-card.json 2>/dev/null || true
           exit 1
 
-      - name: Register in Global A2A Registry
+      - name: Register or refresh Global A2A Registry
         id: registry
         continue-on-error: true
         shell: bash
@@ -83,10 +83,26 @@ jobs:
           manifest="$A2A_BASE_URL/.well-known/agent-card.json"
           payload=$(jq -cn --arg manifest "$manifest" '{wellKnownURI:$manifest}')
           code=$(curl -sS -o /tmp/a2a-registry.json -w '%{http_code}' -X POST 'https://a2aregistry.org/api/agents/register' -H 'accept: application/json' -H 'content-type: application/json' --data "$payload" || true)
-          echo "http_status=$code" >> "$GITHUB_OUTPUT"
-          echo "A2A_REGISTRY_HTTP=$code"
+          echo "A2A_REGISTRY_REGISTER_HTTP=$code"
           cat /tmp/a2a-registry.json 2>/dev/null || true
-          if [[ "$code" =~ ^2[0-9][0-9]$ || "$code" == "409" ]]; then
+
+          final_code="$code"
+          action="registered"
+          if [[ "$code" == "409" ]]; then
+            agent_id=$(jq -r '.detail // ""' /tmp/a2a-registry.json | sed -n 's/.*id=\([^)]*\).*/\1/p')
+            if [[ -n "$agent_id" ]]; then
+              update_code=$(curl -sS -o /tmp/a2a-registry-update.json -w '%{http_code}' -X PUT "https://a2aregistry.org/api/agents/$agent_id" -H 'accept: application/json' -H 'content-type: application/json' --data "$payload" || true)
+              echo "A2A_REGISTRY_UPDATE_HTTP=$update_code id=$agent_id"
+              cat /tmp/a2a-registry-update.json 2>/dev/null || true
+              final_code="$update_code"
+              action="refreshed_existing"
+            else
+              action="already_registered_id_unresolved"
+            fi
+          fi
+          echo "http_status=$final_code" >> "$GITHUB_OUTPUT"
+          echo "action=$action" >> "$GITHUB_OUTPUT"
+          if [[ "$final_code" =~ ^2[0-9][0-9]$ || "$code" == "409" ]]; then
             exit 0
           fi
           exit 1
@@ -109,4 +125,5 @@ jobs:
         run: |
           echo "A2A gateway: $A2A_BASE_URL"
           echo "Agent Card: $A2A_BASE_URL/.well-known/agent-card.json"
-          echo "Registry ingest HTTP: ${{ steps.registry.outputs.http_status }}"
+          echo "Registry action: ${{ steps.registry.outputs.action }}"
+          echo "Registry final HTTP: ${{ steps.registry.outputs.http_status }}"
