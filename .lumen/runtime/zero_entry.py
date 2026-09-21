@@ -58,6 +58,11 @@ import zero_watchdog_runtime  # noqa: F401,E402
 import zero_notification_runtime  # noqa: F401,E402
 import zero_public_inquiry_bridge_runtime  # noqa: F401,E402
 import zero_a2a_inbound_bridge_runtime  # noqa: F401,E402
+# Install the editorial approval identity before importing the D1 control bridge. This makes the
+# import hook deterministic under GitHub Actions instead of relying on Python's sitecustomize path.
+# Transport-only URL/hosting changes can no longer invalidate a reviewed post, while any visible
+# copy/media change still fails closed and requires a fresh human approval.
+import instagram_approval_freeze_runtime  # noqa: F401,E402
 import zero_instagram_control_bridge_runtime  # noqa: F401,E402
 
 # Fold public Worker inquiries into the canonical service pipeline before the commercial cycle.
@@ -74,16 +79,15 @@ except Exception as exc:
     print({"zero_a2a_inbound_bridge": {"status": "degraded_fail_open", "error": f"{type(exc).__name__}: {str(exc)[:300]}"}}, flush=True)
 
 # Apply authenticated Instagram approve/reject commands before the production publishing control
-# is imported. Every command is revalidated against the current immutable content fingerprint.
+# is imported. Every command is revalidated against the current immutable editorial fingerprint.
 try:
     zero_instagram_control_bridge_runtime.consume_commands()
 except Exception as exc:
     print({"zero_instagram_control_consume": {"status": "degraded_fail_open", "error": f"{type(exc).__name__}: {str(exc)[:300]}"}}, flush=True)
 
 # One-time repair for the three exact posts José already approved in the Cloudflare console on
-# 2026-09-21. The broken/stale console deployment did not persist those commands into the canonical
-# D1 queue. The recovery module is fail-closed: immutable IDs + current content fingerprints only,
-# no rejected/published override and no authority for any future post.
+# 2026-09-21. The recovery module is fail-closed: exact IDs + processed explicit approvals + current
+# editorial fingerprints only, no rejected/published override and no authority for future posts.
 try:
     zero_instagram_control_bridge_runtime.recover_explicit_approvals_once()
 except Exception as exc:
