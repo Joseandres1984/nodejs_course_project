@@ -152,6 +152,21 @@ try:
 except Exception as exc:
     print({"instagram_conversation_poller": {"status": "degraded_fail_open", "error": f"{type(exc).__name__}: {str(exc)[:300]}"}}, flush=True)
 
+# Load and patch the Instagram publish control before worker_entry can import/use it. The previous
+# lazy hook could only patch it after the outer worker import returned, which let the legacy
+# fingerprint invalidate editorial-v2 approvals during startup. Fail closed here: publication must
+# never proceed through an unpatched approval validator.
+try:
+    import instagram_publish_control  # noqa: F401,E402
+    instagram_approval_freeze_runtime._patch_publish_control(instagram_publish_control)
+    import instagram_approval_finalize_runtime  # noqa: F401,E402
+    _instagram_finalize = instagram_approval_finalize_runtime.run_once()
+    if str((_instagram_finalize or {}).get("status") or "").startswith("degraded"):
+        raise RuntimeError(str((_instagram_finalize or {}).get("last_error") or "instagram_approval_finalize_failed"))
+except Exception as exc:
+    print({"instagram_approval_pre_worker_gate": {"status": "failed_closed", "error": f"{type(exc).__name__}: {str(exc)[:300]}", "future_posts_authorized": False}}, flush=True)
+    raise
+
 # worker_entry executes the complete production cycle at import time, matching the Railway start.
 import worker_entry  # noqa: F401,E402
 
