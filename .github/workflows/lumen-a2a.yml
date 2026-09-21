@@ -21,6 +21,7 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.LUMEN_D1_ACCOUNT_ID }}
+      A2A_BASE_URL: https://lumen-zero-a2a.joseandresceol1-jac.workers.dev
     steps:
       - name: Checkout LUMEN Zero
         uses: actions/checkout@v4
@@ -58,19 +59,13 @@ jobs:
       - name: Verify A2A health and Agent Card
         shell: bash
         run: |
-          BASE='https://lumen-zero-a2a.joseandresceol1-jac.workers.dev'
           for i in {1..12}; do
-            health=$(curl -sS -o /tmp/a2a-health.json -w '%{http_code}' "$BASE/health" || true)
-            card=$(curl -sS -o /tmp/a2a-card.json -w '%{http_code}' "$BASE/.well-known/agent-card.json" || true)
+            health=$(curl -sS -o /tmp/a2a-health.json -w '%{http_code}' "$A2A_BASE_URL/health" || true)
+            card=$(curl -sS -o /tmp/a2a-card.json -w '%{http_code}' "$A2A_BASE_URL/.well-known/agent-card.json" || true)
             if [[ "$health" == "200" && "$card" == "200" ]] && grep -q 'LUMEN B2B Agent' /tmp/a2a-card.json && grep -q '/a2a/v1' /tmp/a2a-card.json; then
               cat /tmp/a2a-health.json
               echo
-              python3 - <<'PY'
-          import json
-          with open('/tmp/a2a-card.json', encoding='utf-8') as f:
-              card=json.load(f)
-          print({'a2a_agent_card': {'name': card.get('name'), 'protocolVersion': card.get('protocolVersion'), 'skills': len(card.get('skills') or []), 'url': card.get('url')}})
-          PY
+              python3 -c "import json; c=json.load(open('/tmp/a2a-card.json')); print({'a2a_agent_card':{'name':c.get('name'),'protocolVersion':c.get('protocolVersion'),'skills':len(c.get('skills') or []),'url':c.get('url')}})"
               exit 0
             fi
             sleep 5
@@ -79,3 +74,39 @@ jobs:
           cat /tmp/a2a-health.json 2>/dev/null || true
           cat /tmp/a2a-card.json 2>/dev/null || true
           exit 1
+
+      - name: Register in Global A2A Registry
+        id: registry
+        continue-on-error: true
+        shell: bash
+        run: |
+          manifest="$A2A_BASE_URL/.well-known/agent-card.json"
+          payload=$(jq -cn --arg manifest "$manifest" '{manifestUrl:$manifest}')
+          code=$(curl -sS -o /tmp/a2a-registry.json -w '%{http_code}' -X POST 'https://api.a2a-registry.org/public/ingest' -H 'accept: application/json' -H 'content-type: application/json' --data "$payload" || true)
+          echo "http_status=$code" >> "$GITHUB_OUTPUT"
+          echo "A2A_REGISTRY_HTTP=$code"
+          cat /tmp/a2a-registry.json 2>/dev/null || true
+          if [[ "$code" =~ ^2[0-9][0-9]$ || "$code" == "409" ]]; then
+            exit 0
+          fi
+          exit 1
+
+      - name: Verify real A2A SendMessage round trip
+        shell: bash
+        run: |
+          context="deploy-canary-${GITHUB_RUN_ID}"
+          message="deploy-canary-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          payload=$(jq -cn --arg context "$context" --arg message "$message" '{jsonrpc:"2.0",id:"deploy-canary",method:"SendMessage",params:{message:{messageId:$message,contextId:$context,role:"ROLE_USER",parts:[{text:"LUMEN deployment capability handshake test. This is a non-binding technical canary only; no purchase, payment, contract, RFQ, commercial offer or acceptance is requested.",mediaType:"text/plain"}],metadata:{source:"lumen_deployment_canary",organization:"LUMEN B2B",purpose:"technical_nonbinding_handshake"}}}}')
+          code=$(curl -sS -o /tmp/a2a-canary.json -w '%{http_code}' -X POST "$A2A_BASE_URL/a2a/v1" -H 'accept: application/json' -H 'content-type: application/json' -H 'A2A-Version: 1.0' --data "$payload")
+          cat /tmp/a2a-canary.json
+          [[ "$code" == "200" ]]
+          jq -e '.jsonrpc == "2.0" and .result.task.id != null and .result.task.metadata.nonbinding == true and .result.task.metadata.bindingActionsHumanGated == true' /tmp/a2a-canary.json >/dev/null
+          echo "A2A_CANARY=success context=$context"
+
+      - name: A2A deploy summary
+        if: always()
+        shell: bash
+        run: |
+          echo "A2A gateway: $A2A_BASE_URL"
+          echo "Agent Card: $A2A_BASE_URL/.well-known/agent-card.json"
+          echo "Registry ingest HTTP: ${{ steps.registry.outputs.http_status }}"
