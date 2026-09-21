@@ -61,6 +61,7 @@ jobs:
       LUMEN_PUBLIC_BASE_URL: "https://lumen-zero-public.joseandresceol1-jac.workers.dev"
       LUMEN_A2A_BASE_URL: "https://lumen-zero-a2a.joseandresceol1-jac.workers.dev"
       LUMEN_COMMAND_CENTER_URL: "https://lumen-zero-dashboard.joseandresceol1-jac.workers.dev"
+      LUMEN_CONVERSION_BASE_URL: "https://lumen-zero-conversion.joseandresceol1-jac.workers.dev"
 
       LUMEN_WHATSAPP_ACCESS_TOKEN: ${{ secrets.LUMEN_WHATSAPP_ACCESS_TOKEN }}
       LUMEN_WHATSAPP_PHONE_NUMBER_ID: ${{ secrets.LUMEN_WHATSAPP_PHONE_NUMBER_ID }}
@@ -103,7 +104,7 @@ jobs:
 
       - name: Syntax check zero-cost adapters
         working-directory: .lumen/runtime
-        run: python3 -m py_compile d1_persistence_runtime.py instagram_webhook_d1_bridge_runtime.py zero_public_inquiry_bridge_runtime.py zero_a2a_inbound_bridge_runtime.py zero_instagram_control_bridge_runtime.py zero_instagram_assets.py zero_watchdog_runtime.py zero_notification_runtime.py zero_scout_runtime.py zero_mail_runtime.py payment_rails.py multicurrency_runtime.py mercadopago_checkout.py service_revenue_live_alignment_runtime.py zero_entry.py
+        run: python3 -m py_compile d1_persistence_runtime.py instagram_webhook_d1_bridge_runtime.py zero_public_inquiry_bridge_runtime.py zero_a2a_inbound_bridge_runtime.py zero_instagram_control_bridge_runtime.py zero_instagram_assets.py zero_watchdog_runtime.py zero_notification_runtime.py zero_scout_runtime.py zero_mail_runtime.py payment_rails.py multicurrency_runtime.py mercadopago_checkout.py service_revenue_live_alignment_runtime.py conversion_loop_runtime.py conversion_loop_learning_runtime.py conversion_loop_bridge_runtime.py zero_entry.py
 
       - name: D1 preflight
         id: preflight
@@ -270,6 +271,7 @@ jobs:
           python - <<'PY'
           import runpy
           import agent_network_runtime as network
+          import conversion_loop_bridge_runtime  # installs campaign→offer→measurement bridge
 
           # Seller-side A2A throughput only. No outgoing payment or binding authority is added.
           network.MAX_REGISTRY_QUERIES_PER_TICK = 2
