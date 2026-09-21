@@ -65,8 +65,8 @@ jobs:
         if: steps.preflight.outputs.ready == 'true'
         shell: bash
         run: |
-          base='https://lumen-zero-dashboard.joseandresceol1-jac.workers.dev'
-          a2a='https://lumen-zero-a2a.joseandresceol1-jac.workers.dev'
+          base='https://lumen-zero-dashboard.lumen-b2b.workers.dev'
+          a2a='https://lumen-zero-a2a.lumen-b2b.workers.dev'
           for i in {1..12}; do
             health_code=$(curl -sS -u "socio:$LUMEN_DASHBOARD_PASSWORD" -o /tmp/lumen-health.json -w '%{http_code}' "$base/health" || true)
             full_code=$(curl -sS -u "socio:$LUMEN_DASHBOARD_PASSWORD" -o /tmp/lumen-full.html -w '%{http_code}' "$base/full" || true)

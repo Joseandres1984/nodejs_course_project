@@ -24,7 +24,7 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.LUMEN_D1_ACCOUNT_ID }}
       LUMEN_DASHBOARD_PASSWORD: ${{ secrets.LUMEN_DASHBOARD_PASSWORD }}
-      CONTROL_URL: https://lumen-instagram-control.joseandresceol1-jac.workers.dev
+      CONTROL_URL: https://lumen-instagram-control.lumen-b2b.workers.dev
       EXPECTED_CONTROL_VERSION: "1.2-d1-projection-diagnostic"
     steps:
       - name: Checkout LUMEN Zero

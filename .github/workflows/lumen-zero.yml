@@ -58,10 +58,10 @@ jobs:
       LUMEN_INSTAGRAM_GRAPH_VERSION: "v26.0"
       LUMEN_SOCIAL_LIVE_OUTBOUND: "true"
       LUMEN_INSTAGRAM_SEND_ENABLED: "true"
-      LUMEN_PUBLIC_BASE_URL: "https://lumen-zero-public.joseandresceol1-jac.workers.dev"
-      LUMEN_A2A_BASE_URL: "https://lumen-zero-a2a.joseandresceol1-jac.workers.dev"
-      LUMEN_COMMAND_CENTER_URL: "https://lumen-zero-dashboard.joseandresceol1-jac.workers.dev"
-      LUMEN_CONVERSION_BASE_URL: "https://lumen-zero-conversion.joseandresceol1-jac.workers.dev"
+      LUMEN_PUBLIC_BASE_URL: "https://lumen-zero-public.lumen-b2b.workers.dev"
+      LUMEN_A2A_BASE_URL: "https://lumen-zero-a2a.lumen-b2b.workers.dev"
+      LUMEN_COMMAND_CENTER_URL: "https://lumen-zero-dashboard.lumen-b2b.workers.dev"
+      LUMEN_CONVERSION_BASE_URL: "https://lumen-zero-conversion.lumen-b2b.workers.dev"
 
       LUMEN_WHATSAPP_ACCESS_TOKEN: ${{ secrets.LUMEN_WHATSAPP_ACCESS_TOKEN }}
       LUMEN_WHATSAPP_PHONE_NUMBER_ID: ${{ secrets.LUMEN_WHATSAPP_PHONE_NUMBER_ID }}

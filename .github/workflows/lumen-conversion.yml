@@ -21,7 +21,7 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.LUMEN_D1_ACCOUNT_ID }}
-      CONVERSION_BASE_URL: "https://lumen-zero-conversion.joseandresceol1-jac.workers.dev"
+      CONVERSION_BASE_URL: "https://lumen-zero-conversion.lumen-b2b.workers.dev"
     steps:
       - name: Checkout LUMEN Zero
         uses: actions/checkout@v4
@@ -54,7 +54,7 @@ jobs:
         run: |
           set -euo pipefail
           BASE="$CONVERSION_BASE_URL"
-          X402="https://lumen-zero-x402.joseandresceol1-jac.workers.dev"
+          X402="https://lumen-zero-x402.lumen-b2b.workers.dev"
           ready=0
           for i in {1..15}; do
             code=$(curl -sS -o /tmp/conversion-health.json -w '%{http_code}' "$BASE/health?deploy=${GITHUB_RUN_ID}-${i}" || true)

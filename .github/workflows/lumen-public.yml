@@ -54,7 +54,7 @@ jobs:
         if: steps.preflight.outputs.ready == 'true'
         shell: bash
         run: |
-          base='https://lumen-zero-public.joseandresceol1-jac.workers.dev'
+          base='https://lumen-zero-public.lumen-b2b.workers.dev'
           for i in {1..12}; do
             code=$(curl -sS -o /tmp/lumen-public-health.json -w '%{http_code}' "$base/health" || true)
             if [[ "$code" == "200" ]]; then
