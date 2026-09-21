@@ -1,0 +1,67 @@
+name: LUMEN Brand Source Migration
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/lumen-brand-source-migration.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  migrate-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout lumen-zero
+        uses: actions/checkout@v4
+        with:
+          ref: lumen-zero
+          fetch-depth: 0
+          token: ${{ github.token }}
+
+      - name: Replace stale workers.dev hostname outside workflows
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          old='joseandresceol1-jac.workers.dev'
+          new='lumen-b2b.workers.dev'
+          changed=[]
+          for p in Path('.').rglob('*'):
+              if not p.is_file() or '.git' in p.parts or ('.github' in p.parts and 'workflows' in p.parts):
+                  continue
+              try:
+                  text=p.read_text(encoding='utf-8')
+              except Exception:
+                  continue
+              updated=text.replace(old,new)
+              if updated != text:
+                  p.write_text(updated,encoding='utf-8')
+                  changed.append(str(p))
+          print({'changed_count':len(changed),'files':changed})
+          PY
+
+          git config user.name "LUMEN Automation"
+          git config user.email "93448743+Joseandres1984@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No stale source references found."
+          else
+            git commit -m "Use branded workers.dev hostname in LUMEN source"
+            git push origin HEAD:lumen-zero
+          fi
+
+      - name: Verify source is clean
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -RIl --exclude-dir=.git --exclude-dir=workflows 'joseandresceol1-jac.workers.dev' .lumen 2>/dev/null | grep -q .; then
+            echo "Stale hostname remains in LUMEN source:"
+            grep -RIl --exclude-dir=.git --exclude-dir=workflows 'joseandresceol1-jac.workers.dev' .lumen || true
+            exit 1
+          fi
+          echo "LUMEN source hostname migration clean."
