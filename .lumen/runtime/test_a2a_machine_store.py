@@ -77,6 +77,14 @@ class A2AMachineStoreTests(unittest.TestCase):
         self.assertIn('binding_close_evidence_required', self.alignment)
         self.assertIn('import a2a_machine_revenue_alignment_runtime', self.entry)
 
+    def test_deployment_canaries_never_become_commercial_truth(self) -> None:
+        self.assertIn('def _is_technical_canary', self.bridge)
+        self.assertIn('technical_canary_ignored', self.bridge)
+        self.assertIn('commercialMetricsExcluded', self.bridge)
+        self.assertIn('def _purge_deployment_canaries', self.alignment)
+        self.assertIn('technical_canaries_excluded', self.alignment)
+        self.assertIn('commercial_canaries_retained', self.alignment)
+
 
 if __name__ == "__main__":
     unittest.main()
