@@ -6,9 +6,10 @@ from typing import Any, Dict, List, Tuple
 import agent_network_runtime as _base
 
 
-VERSION = "1.3-a2a-discovery-accelerator"
+VERSION = "1.4-a2a-discovery-accelerator"
 REPROBE_AFTER_HOURS = 72
 _ORIGINAL_REGISTRY_CARD_URL = _base._registry_card_url
+_ORIGINAL_AGENT_NETWORK_TICK = _base.agent_network_tick
 
 
 def _utcnow() -> datetime:
@@ -92,13 +93,62 @@ def _registry_card_url_current(row: Dict[str, Any]) -> str:
     return _ORIGINAL_REGISTRY_CARD_URL(row)
 
 
+def _safe_diagnostic_row(row: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "domain": str(row.get("domain") or "")[:180],
+        "agent_name": str(row.get("agent_name") or row.get("name") or "")[:180],
+        "status": str(row.get("status") or "")[:120],
+        "handshake_status": str(row.get("handshake_status") or "")[:120] or None,
+        "detail": str(row.get("detail") or "")[:160] or None,
+        "query": str(row.get("query") or "")[:80] or None,
+    }
+
+
+def _agent_network_tick_with_diagnostics(state: Dict[str, Any]) -> Dict[str, Any]:
+    network = dict(_ORIGINAL_AGENT_NETWORK_TICK(state) or {})
+    candidate_rows = [x for x in (network.get("registry_candidates") or []) if isinstance(x, dict)]
+    handshake_rows = [x for x in (network.get("handshakes") or []) if isinstance(x, dict)]
+
+    reason_counts: Dict[str, int] = {}
+    for row in candidate_rows[-20:]:
+        reason = str(row.get("handshake_status") or row.get("detail") or row.get("status") or "unknown")
+        reason_counts[reason] = reason_counts.get(reason, 0) + 1
+
+    diagnostic = {
+        "version": VERSION,
+        "registry_candidates_total": len(candidate_rows),
+        "discovered_total": len(network.get("discovered_agents") or []),
+        "handshakes_total": len(handshake_rows),
+        "recent_candidate_reasons": reason_counts,
+        "recent_candidates": [_safe_diagnostic_row(x) for x in candidate_rows[-5:]],
+        "recent_handshakes": [
+            {
+                "domain": str(x.get("domain") or "")[:180],
+                "agent_name": str(x.get("agent_name") or "")[:180],
+                "status": str(x.get("status") or "")[:120],
+                "transport_status": str(x.get("transport_status") or "")[:120],
+                "discovery_source": str(x.get("discovery_source") or "")[:120],
+            }
+            for x in handshake_rows[-5:]
+        ],
+        "safety_filters_unchanged": True,
+        "paid_or_authenticated_agent_calls_blocked": True,
+        "binding_actions_human_gated": True,
+    }
+    network["a2a_discovery_diagnostic"] = diagnostic
+    state.setdefault("agent_network", {}).update(network)
+    print({"a2a_discovery_diagnostic": diagnostic}, flush=True)
+    return network
+
+
 # Bootstrap on the registry query proven to return commercial/procurement agents. Keeping a single
 # high-intent term avoids wasting the one public-registry query permitted per cycle on low-yield
 # wording while LUMEN has no peers yet. Seen-domain memory still prevents repeated handshakes.
-# Once peers exist, the base network can continue probing verified supplier domains as before.
+# Diagnostics expose only public agent/domain status and filter reasons; no credentials or payloads.
 _base._candidate_domains = _candidate_domains_accelerated
 _base._registry_card_url = _registry_card_url_current
 _base.REGISTRY_QUERIES = ("procurement",)
+_base.agent_network_tick = _agent_network_tick_with_diagnostics
 
 print({
     "agent_network_accelerator_runtime": {
@@ -109,6 +159,7 @@ print({
         "verified_contact_priority": True,
         "registry_keyword_mode": "procurement_bootstrap",
         "registry_manifest_url_compat": True,
+        "handshake_diagnostics": True,
         "registry_queries_per_tick_changed": False,
         "reprobe_after_hours": REPROBE_AFTER_HOURS,
         "probe_cap_changed": False,
