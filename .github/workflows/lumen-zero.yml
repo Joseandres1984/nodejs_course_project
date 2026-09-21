@@ -1,4 +1,5 @@
 name: LUMEN Zero Runtime
+# Trigger production cycle after Instagram approval-path repair (2026-09-21)
 
 on:
   push:
