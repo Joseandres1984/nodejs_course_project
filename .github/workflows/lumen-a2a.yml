@@ -85,7 +85,6 @@ jobs:
           code=$(curl -sS -o /tmp/a2a-registry.json -w '%{http_code}' -X POST 'https://a2aregistry.org/api/agents/register' -H 'accept: application/json' -H 'content-type: application/json' --data "$payload" || true)
           echo "A2A_REGISTRY_REGISTER_HTTP=$code"
           cat /tmp/a2a-registry.json 2>/dev/null || true
-
           final_code="$code"
           action="registered"
           if [[ "$code" == "409" ]]; then
@@ -102,9 +101,7 @@ jobs:
           fi
           echo "http_status=$final_code" >> "$GITHUB_OUTPUT"
           echo "action=$action" >> "$GITHUB_OUTPUT"
-          if [[ "$final_code" =~ ^2[0-9][0-9]$ || "$code" == "409" ]]; then
-            exit 0
-          fi
+          if [[ "$final_code" =~ ^2[0-9][0-9]$ || "$code" == "409" ]]; then exit 0; fi
           exit 1
 
       - name: Diagnose public A2A discovery API
@@ -116,37 +113,16 @@ jobs:
           code_open=$(curl -sS -o /tmp/a2a-search-open.json -w '%{http_code}' 'https://api.a2a-registry.org/public/agents?q=procurement' || true)
           echo "A2A_DISCOVERY_TARGET_HTTP=$code_target"
           echo "A2A_DISCOVERY_OPEN_HTTP=$code_open"
-          python3 - <<'PY'
-import json
-for label, path in [('target','/tmp/a2a-search-target.json'),('open','/tmp/a2a-search-open.json')]:
-    try:
-        data=json.load(open(path,encoding='utf-8'))
-    except Exception as exc:
-        print({'a2a_discovery_probe':{'mode':label,'parse_error':type(exc).__name__}})
-        continue
-    def rows(v):
-        if isinstance(v,list): return v
-        if not isinstance(v,dict): return []
-        for key in ('agents','items','results','data'):
-            x=v.get(key)
-            if isinstance(x,list): return x
-            if isinstance(x,dict):
-                for nested in ('agents','items','results'):
-                    y=x.get(nested)
-                    if isinstance(y,list): return y
-        return []
-    r=rows(data)
-    print({'a2a_discovery_probe':{
-        'mode':label,
-        'root_type':type(data).__name__,
-        'root_keys':list(data.keys())[:20] if isinstance(data,dict) else [],
-        'rows':len(r),
-        'first_keys':list(r[0].keys())[:30] if r and isinstance(r[0],dict) else [],
-        'first_identifier':(r[0].get('identifier') or r[0].get('id') or r[0].get('name')) if r and isinstance(r[0],dict) else None,
-        'first_manifest':(r[0].get('wellKnownURI') or r[0].get('well_known_uri') or r[0].get('agentCardUrl') or r[0].get('agent_card_url') or r[0].get('manifest_url') or r[0].get('manifestUrl')) if r and isinstance(r[0],dict) else None,
-    }})
-PY
-          [[ "$code_target" == "200" || "$code_open" == "200" ]]
+          echo "TARGET_ROOT_TYPE=$(jq -r 'type' /tmp/a2a-search-target.json 2>/dev/null || echo invalid)"
+          echo "TARGET_KEYS=$(jq -c 'if type==\"object\" then keys else [] end' /tmp/a2a-search-target.json 2>/dev/null || echo '[]')"
+          echo "TARGET_BODY=$(jq -c '.' /tmp/a2a-search-target.json 2>/dev/null | head -c 5000 || true)"
+          echo
+          echo "OPEN_ROOT_TYPE=$(jq -r 'type' /tmp/a2a-search-open.json 2>/dev/null || echo invalid)"
+          echo "OPEN_KEYS=$(jq -c 'if type==\"object\" then keys else [] end' /tmp/a2a-search-open.json 2>/dev/null || echo '[]')"
+          echo "OPEN_BODY=$(jq -c '.' /tmp/a2a-search-open.json 2>/dev/null | head -c 5000 || true)"
+          echo
+          if [[ "$code_target" == "200" || "$code_open" == "200" ]]; then exit 0; fi
+          exit 1
 
       - name: Verify real A2A SendMessage round trip
         shell: bash
