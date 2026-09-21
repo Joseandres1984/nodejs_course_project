@@ -1,0 +1,85 @@
+name: LUMEN Autopilot Supervisor
+
+on:
+  workflow_run:
+    workflows: ["LUMEN Zero Runtime"]
+    types: [completed]
+  schedule:
+    # Independent free backstop. Normal operation is event-driven from workflow_run.
+    - cron: "3,23,43 * * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: lumen-autopilot-supervisor
+  cancel-in-progress: false
+
+jobs:
+  keep-lumen-running:
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.head_branch == 'main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    steps:
+      - name: Hold target cadence after completed runtime
+        if: ${{ github.event_name == 'workflow_run' }}
+        shell: bash
+        run: |
+          # A normal LUMEN cycle currently takes about 4 minutes. Waiting 5 minutes
+          # here targets roughly a 9-10 minute start-to-start cadence without
+          # keeping the production runtime itself resident.
+          sleep 300
+
+      - name: Ensure an autonomous successor exists
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+
+          workflow='lumen-zero.yml'
+          queued=$(gh api "repos/$REPO/actions/workflows/$workflow/runs?status=queued&per_page=20" --jq '.total_count // 0')
+          running=$(gh api "repos/$REPO/actions/workflows/$workflow/runs?status=in_progress&per_page=20" --jq '.total_count // 0')
+
+          if (( queued > 0 || running > 0 )); then
+            echo "LUMEN_AUTOPILOT successor=already_present queued=$queued running=$running"
+            exit 0
+          fi
+
+          if [[ "$EVENT_NAME" == "schedule" ]]; then
+            latest=$(gh api "repos/$REPO/actions/workflows/$workflow/runs?per_page=1" --jq '.workflow_runs[0].created_at // ""')
+            if [[ -n "$latest" ]]; then
+              age=$(python - "$latest" <<'PY'
+          import datetime as dt
+          import sys
+          raw = sys.argv[1]
+          then = dt.datetime.fromisoformat(raw.replace('Z', '+00:00'))
+          now = dt.datetime.now(dt.timezone.utc)
+          print(max(0, int((now - then).total_seconds())))
+          PY
+              )
+              if (( age < 900 )); then
+                echo "LUMEN_AUTOPILOT backstop=healthy latest_age_seconds=$age dispatch=false"
+                exit 0
+              fi
+              echo "LUMEN_AUTOPILOT backstop=stale latest_age_seconds=$age recovery_dispatch=true"
+            fi
+          fi
+
+          gh workflow run "$workflow" --ref main
+          echo "LUMEN_AUTOPILOT dispatch=triggered source=$EVENT_NAME"
+
+      - name: Confirm queued successor
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          sleep 3
+          queued=$(gh api "repos/$REPO/actions/workflows/lumen-zero.yml/runs?status=queued&per_page=20" --jq '.total_count // 0')
+          running=$(gh api "repos/$REPO/actions/workflows/lumen-zero.yml/runs?status=in_progress&per_page=20" --jq '.total_count // 0')
+          echo "LUMEN_AUTOPILOT verification queued=$queued running=$running"
