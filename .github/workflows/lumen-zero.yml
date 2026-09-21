@@ -69,6 +69,17 @@ jobs:
       LUMEN_ARG_BANK_ARS_INSTRUCTIONS: ${{ secrets.LUMEN_ARG_BANK_ARS_INSTRUCTIONS }}
       LUMEN_ARG_BANK_ARS_AUTO_PREPARE: ${{ secrets.LUMEN_ARG_BANK_ARS_AUTO_PREPARE }}
 
+      LUMEN_PAYONEER_INSTRUCTIONS: ${{ secrets.LUMEN_PAYONEER_INSTRUCTIONS }}
+      LUMEN_PAYONEER_DESTINATION_LABEL: "Payoneer USD receiving account"
+      LUMEN_PAYONEER_VERIFIED: "true"
+      LUMEN_PAYONEER_ENABLED: "true"
+      LUMEN_PAYONEER_AUTO_PREPARE: "false"
+      LUMEN_PREX_EUR_IBAN_INSTRUCTIONS: ${{ secrets.LUMEN_PREX_EUR_IBAN_INSTRUCTIONS }}
+      LUMEN_PREX_EUR_IBAN_DESTINATION_LABEL: "Prex EUR vIBAN / SEPA"
+      LUMEN_PREX_EUR_IBAN_VERIFIED: "true"
+      LUMEN_PREX_EUR_IBAN_ENABLED: "true"
+      LUMEN_PREX_EUR_IBAN_AUTO_PREPARE: "false"
+
       LUMEN_SCOUT_PROVIDER: "bing_rss_public"
       LUMEN_SCOUT_API_KEY: "zero-cost-no-secret-required"
       LUMEN_SCOUT_MARKET: "Argentina"
@@ -102,6 +113,18 @@ jobs:
             echo "ready=false" >> "$GITHUB_OUTPUT"
             echo "LUMEN Zero is installed but waiting for the three D1 secrets; business cycle skipped safely."
           fi
+
+      - name: Payment rail preflight (no secret output)
+        if: steps.preflight.outputs.ready == 'true'
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          payoneer = bool(os.getenv("LUMEN_PAYONEER_INSTRUCTIONS", "").strip())
+          prex_eur = bool(os.getenv("LUMEN_PREX_EUR_IBAN_INSTRUCTIONS", "").strip())
+          mp = bool(os.getenv("LUMEN_MP_ACCESS_TOKEN", "").strip())
+          print(f"PAYMENT_RAIL_PREFLIGHT ars_mercadopago={'ready' if mp else 'setup_required'} usd_payoneer={'ready' if payoneer else 'setup_required'} eur_prex={'ready' if prex_eur else 'setup_required'}")
+          PY
 
       - name: Set up Python
         if: steps.preflight.outputs.ready == 'true'
