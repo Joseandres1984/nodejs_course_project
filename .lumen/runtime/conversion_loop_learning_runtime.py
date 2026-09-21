@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Dict
 
-VERSION = "1.0-conversion-loop-learning"
+VERSION = "1.1-conversion-loop-learning"
 
 
 def utcnow() -> str:
@@ -18,14 +18,18 @@ def _i(v: Any) -> int:
 
 
 def tick(state: Dict[str, Any]) -> Dict[str, Any]:
-    campaigns = state.get("acquisition_campaigns", {}) or {}
+    events = state.get("acquisition_events", []) or []
+    leads_rows = state.get("acquisition_leads", []) or []
     distribution = state.get("distribution_operator", {}) or {}
     payments = state.get("canonical_revenue_truth", {}) or state.get("operational_truth", {}) or {}
-    funnel = distribution.get("funnel", {}) or {}
-    clicks = _i(campaigns.get("clicks")) + _i(funnel.get("clicks"))
-    leads = _i(campaigns.get("leads")) + _i(funnel.get("leads"))
-    settled = _i((payments.get("payments", {}) or {}).get("settled_orders"))
-    revenue = float((payments.get("revenue", {}) or {}).get("realized_revenue_evidence_usd") or 0.0)
+    funnel = distribution.get("funnel", {}) if isinstance(distribution, dict) else {}
+    funnel = funnel or {}
+    clicks = sum(1 for x in events if isinstance(x, dict) and x.get("event") == "click") + _i(funnel.get("clicks"))
+    leads = len([x for x in leads_rows if isinstance(x, dict)]) + _i(funnel.get("leads"))
+    payment_block = payments.get("payments", {}) if isinstance(payments, dict) else {}
+    revenue_block = payments.get("revenue", {}) if isinstance(payments, dict) else {}
+    settled = _i((payment_block or {}).get("settled_orders"))
+    revenue = float((revenue_block or {}).get("realized_revenue_evidence_usd") or 0.0)
     status = "learning" if clicks or leads or settled else "cold_start_collecting_evidence"
     out = {
         "version": VERSION,
