@@ -15,7 +15,7 @@ from typing import Any, Dict, List
 import app as lumen_app
 import d1_persistence_runtime as d1
 
-VERSION = "1.1-zero-instagram-control-bridge"
+VERSION = "1.2-zero-instagram-control-bridge"
 APPROVAL_TTL_HOURS = 24
 MAX_COMMANDS = 25
 
@@ -174,12 +174,7 @@ def consume_commands() -> Dict[str, Any]:
 
 
 def recover_explicit_approvals_once() -> Dict[str, Any]:
-    """Recover only the three explicit approvals already given by José in the broken console.
-
-    The recovery is fail-closed: exact immutable job IDs, exact current content fingerprints, one
-    state marker, no override of rejection/publication, no future-job wildcard and no global change
-    to the human-approval policy.
-    """
+    """Recover only the three explicit approvals already given by José in the broken console."""
     report: Dict[str, Any] = {
         "version": VERSION,
         "status": "ok",
@@ -252,8 +247,6 @@ def recover_explicit_approvals_once() -> Dict[str, Any]:
             recovered_ids.append(jid)
             report["recovered"] += 1
 
-        # Mark complete only if every expected immutable job exists. If one is temporarily absent,
-        # retry later rather than silently widening the recovery scope.
         completed = not missing_ids
         lumen_app.STATE[RECOVERY_MARKER] = {
             "completed": completed,
@@ -274,10 +267,51 @@ def recover_explicit_approvals_once() -> Dict[str, Any]:
     return report
 
 
+def _publish_approved_before_export() -> Dict[str, Any]:
+    """Deterministically flush already-approved posts after the complete worker cycle.
+
+    This calls the existing human-approval publisher; it does not create approvals, alter content,
+    widen connector authority, bypass fingerprints, or authorize future posts.
+    """
+    report: Dict[str, Any] = {
+        "version": VERSION,
+        "status": "ok",
+        "publish_control_called": False,
+        "published_this_tick": 0,
+        "published_total": 0,
+        "valid_approvals": 0,
+        "future_posts_authorized": False,
+        "updated_at": _now(),
+    }
+    try:
+        if not lumen_app.load_state():
+            raise RuntimeError("state_unavailable")
+        import instagram_publish_control
+        control = dict(instagram_publish_control.instagram_publish_control_tick(lumen_app.STATE) or {})
+        report["publish_control_called"] = True
+        report["published_this_tick"] = int(control.get("published_this_tick") or 0)
+        report["published_total"] = int(control.get("published_total") or 0)
+        report["valid_approvals"] = int(control.get("valid_approvals") or 0)
+        report["publish_attempts_this_tick"] = int(control.get("publish_attempts_this_tick") or 0)
+        report["waiting_connector"] = int(control.get("waiting_connector") or 0)
+        report["connector_configured"] = bool(control.get("connector_configured"))
+        report["approval_required_per_post"] = bool(control.get("approval_required_per_post", True))
+        report["control_status"] = control.get("status")
+        if not lumen_app.save_state():
+            raise RuntimeError("state_persistence_failed_after_publish")
+    except Exception as exc:
+        report["status"] = "degraded_fail_closed"
+        report["last_error"] = f"{type(exc).__name__}: {str(exc)[:500]}"
+    print({"zero_instagram_publish_flush": report}, flush=True)
+    return report
+
+
 def export_posts() -> Dict[str, Any]:
     report = {"version": VERSION, "status": "ok", "posts_exported": 0, "errors": 0, "updated_at": _now()}
     try:
         _ensure_schema()
+        publish_flush = _publish_approved_before_export()
+        report["publish_flush"] = publish_flush
         if not lumen_app.load_state():
             raise RuntimeError("state_unavailable")
         approvals = _approval_store()
@@ -312,6 +346,7 @@ def export_posts() -> Dict[str, Any]:
         if batch:
             d1._request({"batch": batch})
         report["posts_exported"] = len(batch)
+        report["published_receipts"] = len(receipts)
         lumen_app.STATE["zero_instagram_control_export"] = report
         lumen_app.save_state()
     except Exception as exc:
