@@ -1,0 +1,192 @@
+name: LUMEN Offer Contracts
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/lumen-offer-contracts.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: lumen-offer-contracts
+  cancel-in-progress: true
+
+jobs:
+  clarify-offers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.LUMEN_D1_ACCOUNT_ID }}
+      PUBLIC_BASE: "https://lumen-zero-public.lumen-b2b.workers.dev"
+    steps:
+      - name: Checkout LUMEN Zero
+        uses: actions/checkout@v4
+        with:
+          ref: lumen-zero
+          fetch-depth: 0
+          token: ${{ github.token }}
+
+      - name: Apply canonical service contracts
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import json, re
+
+          contracts=json.loads(Path('.lumen/contracts/service-contracts.json').read_text())
+          version=contracts['version']
+
+          public_path=Path('.lumen/public-worker/worker.js')
+          text=public_path.read_text()
+          services=[]
+          for s in contracts['services']:
+              item=dict(s)
+              item['desc']=item['description']
+              services.append(item)
+          js_services=json.dumps(services,ensure_ascii=False,separators=(',',':'))
+          block=f'const SERVICE_CONTRACT_VERSION = {json.dumps(version)};\nconst SERVICES = {js_services};'
+          text,n=re.subn(r'(?:const SERVICE_CONTRACT_VERSION = .*?;\n)?const SERVICES = \[\n.*?\n\];',lambda m:block,text,count=1,flags=re.S)
+          assert n==1,'services block'
+
+          services_fn='''function services(received=false, selectedService="") {
+            const selected = SERVICE_IDS.has(selectedService) ? selectedService : "";
+            const list = (items) => `<ul>${items.map((x)=>`<li>${esc(x)}</li>`).join("")}</ul>`;
+            const cards = SERVICES.map((s)=>`<article class="card"><div class="eyebrow">Servicio completo</div><h3>${esc(s.name)}</h3><div class="price">Desde USD ${s.from_usd}</div><p>${esc(s.desc)}</p><p><b>Alcance inicial</b><br><span class="small">${esc(s.scope)}</span></p><p><b>Qué necesitás enviarnos</b></p>${list(s.client_inputs)}<p><b>Qué entregamos</b></p>${list(s.deliverables)}<p><b>No incluye</b></p>${list(s.not_included)}<p><a class="cta" href="/services?service=${encodeURIComponent(s.id)}#case">Preparar este caso</a></p></article>`).join("");
+            const options = SERVICES.map((s)=>`<option value="${s.id}" ${selected===s.id?"selected":""}>${esc(s.name)} · desde USD ${s.from_usd}</option>`).join("");
+            return shell("LUMEN | Servicios", `<main><section class="hero"><div class="eyebrow">Servicios completos</div><h1>Qué hacemos, qué necesitamos y qué recibís.</h1><p class="lead">Cada servicio tiene un alcance explícito. Primero recibimos el caso, confirmamos que podemos ejecutarlo y definimos alcance; recién después corresponde contratar y pagar. No vendemos resultados garantizados ni certificaciones que no podemos emitir.</p></section>${received?'<div class="notice">Consulta recibida. El caso quedó registrado para evaluación. No se realizó ningún cargo.</div>':""}<section class="grid">${cards}</section><section class="section" id="case"><div class="box"><div class="eyebrow">Preparar el caso</div><h2>Decinos exactamente qué necesitás</h2><form method="post" action="/api/services/inquiry"><label>Servicio</label><select name="service_id" required>${options}</select><label>Email de contacto</label><input type="email" name="email" maxlength="180" required autocomplete="email"><label>Requerimiento principal</label><textarea name="need" maxlength="1200" minlength="12" required placeholder="Explicá la decisión que necesitás tomar y los datos principales del caso."></textarea><label>País / mercado / zona <span class="small">(si aplica)</span></label><input name="geography" maxlength="180" placeholder="Ej.: Argentina, Brasil, Unión Europea"><label>Links o referencias <span class="small">(opcional)</span></label><textarea name="links" maxlength="600" placeholder="URLs de proveedor, producto, licitación o documentación pública."></textarea><label>Fecha objetivo <span class="small">(opcional)</span></label><input name="deadline" maxlength="80" placeholder="Ej.: antes del 30/09"><label>Empresa <span class="small">(opcional)</span></label><input name="company" maxlength="180" autocomplete="organization"><label>Nombre <span class="small">(opcional)</span></label><input name="name" maxlength="120" autocomplete="name"><label class="hp">Sitio web<input name="website" tabindex="-1" autocomplete="off"></label><p><button type="submit">Enviar caso para evaluación</button></p></form><p class="small">Este formulario no genera un cobro. Si el caso requiere archivos que no pueden pegarse como texto o enlace, coordinaremos su recepción antes de iniciar el trabajo.</p></div></section></main>`);
+          }'''
+          text,n=re.subn(r'function services\(received=false\) \{\n.*?\n\}\nfunction intelligence',lambda m:services_fn+'\nfunction intelligence',text,count=1,flags=re.S)
+          assert n==1,'services function'
+
+          inquiry_fn=r'''async function handleInquiry(request, env) {
+            const form = await request.formData();
+            if (clean(form.get("website"),200)) return redirect("/services?result=received");
+            const serviceId=clean(form.get("service_id"),80), email=clean(form.get("email"),180).toLowerCase(), company=clean(form.get("company"),180), name=clean(form.get("name"),120), need=clean(form.get("need"),1200);
+            const geography=clean(form.get("geography"),180), links=clean(form.get("links"),600), deadline=clean(form.get("deadline"),80);
+            if (!SERVICE_IDS.has(serviceId) || need.length < 12 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return html(shell("Solicitud inválida","<main><section class='hero'><h1>Revisá los datos.</h1><p class='lead'>Necesitamos un email válido, un servicio y una descripción clara del requerimiento.</p></section></main>"),400);
+            const compiled=clean([`[REQUERIMIENTO] ${need}`,geography?`[GEOGRAFIA] ${geography}`:"",links?`[REFERENCIAS] ${links}`:"",deadline?`[FECHA OBJETIVO] ${deadline}`:""].filter(Boolean).join(" | "),MAX_NEED);
+            await saveInquiry(env,{serviceId,email,company,name,need:compiled,source:"lumen_zero_public_worker"});
+            return redirect(`/services?result=received&service=${encodeURIComponent(serviceId)}#case`);
+          }'''
+          text,n=re.subn(r'async function handleInquiry\(request, env\) \{\n.*?\n\}\nasync function handleCampaignSubmit',lambda m:inquiry_fn+'\nasync function handleCampaignSubmit',text,count=1,flags=re.S)
+          assert n==1,'inquiry function'
+
+          old='if (method==="GET" && url.pathname==="/services") return html(services(url.searchParams.get("result")==="received"));'
+          new='if (method==="GET" && url.pathname==="/services") return html(services(url.searchParams.get("result")==="received", clean(url.searchParams.get("service"),80)));'
+          assert old in text
+          text=text.replace(old,new,1)
+          pricing='if (method==="GET" && url.pathname==="/api/services/pricing") return json({currency:"USD",from_usd:59,pricing_mode:"launch_scope_controlled",services:SERVICES,binding:false,payment_created:false});'
+          catalog='if (method==="GET" && url.pathname==="/api/services/catalog") return json({ok:true,contract_version:SERVICE_CONTRACT_VERSION,currency:"USD",services:SERVICES,payment_created:false});\n    '+pricing
+          assert pricing in text
+          text=text.replace(pricing,catalog,1)
+          public_path.write_text(text)
+
+          conversion_path=Path('.lumen/conversion-worker/worker.js')
+          text=conversion_path.read_text()
+          products=contracts['microproducts']
+          js_products=json.dumps(products,ensure_ascii=False,separators=(',',':'))
+          block=f'const PRODUCT_CONTRACT_VERSION = {json.dumps(version)};\nconst PRODUCTS = {js_products};'
+          text,n=re.subn(r'(?:const PRODUCT_CONTRACT_VERSION = .*?;\n)?const PRODUCTS = \{\n.*?\n\};',lambda m:block,text,count=1,flags=re.S)
+          assert n==1,'products block'
+
+          offer_fn='''function offerHtml(slug, p, attr) {
+            const query = qs(attr);
+            const intent = `/intent/${encodeURIComponent(slug)}${query?`?${query}`:""}`;
+            const li = (items) => `<ul>${items.map((x)=>`<li>${html(x)}</li>`).join("")}</ul>`;
+            return page(p.name,`<main class="card"><div style="color:#8ea1c7;font-weight:700;margin-bottom:14px">MICROSERVICIO · ALCANCE DEFINIDO</div><h1>${html(p.name)}</h1><p class="sub">${html(p.promise)}</p><div class="price">USD ${p.price_usd}</div><h2>Qué necesitamos</h2>${li(p.requires)}<h2>Qué recibís</h2>${li(p.deliverables)}<h2>No incluye</h2>${li(p.not_included)}<div id="consulta" style="margin-top:28px"><h2>Antes de pagar</h2><p class="sub">Necesitamos el requerimiento para poder ejecutar el trabajo. El checkout se habilita después de guardar estos datos.</p><form method="post" action="${html(intent)}"><input name="email" type="email" required maxlength="180" placeholder="Email para recibir el resultado"><input name="company" maxlength="180" placeholder="Empresa (opcional)"><textarea name="details" maxlength="1800" minlength="8" required placeholder="${html(p.details_placeholder)}"></textarea><div class="actions"><button class="btn" type="submit" name="next" value="checkout">Guardar y continuar al pago</button><button class="btn secondary" type="submit" name="next" value="consult">Sólo consultar</button></div></form></div><div class="truth">El checkout usa USDC sobre Base mediante x402. Completar el requerimiento no genera un cargo. LUMEN registra ingreso solamente después de settlement exitoso.</div></main>`);
+          }'''
+          text,n=re.subn(r'function offerHtml\(slug, p, attr\) \{\n.*?\n\}\nfunction catalogHtml',lambda m:offer_fn+'\nfunction catalogHtml',text,count=1,flags=re.S)
+          assert n==1,'offer function'
+
+          old='        const eventId=await recordEvent(env,"checkout_started",sid,slug,attr,{destination:`${X402_BASE}/buy/${slug}`});'
+          new='''        await ensureSchema(env);
+                  if (!attr.technical_canary) {
+                    const requirement=await env.DB.prepare("SELECT id FROM lumen_conversion_leads WHERE session_id=? AND product_slug=? AND technical_canary=0 AND LENGTH(TRIM(COALESCE(details,'')))>=8 ORDER BY created_at DESC LIMIT 1").bind(sid,slug).first();
+                    if (!requirement) { const q=qs(attr); headers.set("location",`/offer/${slug}${q?`?${q}`:""}`); return new Response(null,{status:303,headers}); }
+                  }
+                  const eventId=await recordEvent(env,"checkout_started",sid,slug,attr,{destination:`${X402_BASE}/buy/${slug}`,requirementsCaptured:true});'''
+          assert old in text
+          text=text.replace(old,new,1)
+
+          old=r'''        const details=clean(form.get("details"),1800);
+                  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return new Response("Email inválido",{status:400,headers});'''
+          new=r'''        const details=clean(form.get("details"),1800);
+                  const next=clean(form.get("next"),20) === "checkout" ? "checkout" : "consult";
+                  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || details.length < 8) return new Response("Necesitamos un email válido y un requerimiento claro.",{status:400,headers});'''
+          assert old in text
+          text=text.replace(old,new,1)
+
+          old='''        await recordEvent(env,"qualified_intent",sid,slug,attr,{lead_id:leadId,crm});
+                  const q=qs(attr); const go=`/go/${slug}${q?`?${q}`:""}`;
+                  headers.set("content-type","text/html; charset=utf-8");
+                  return new Response(page("Consulta recibida",`<main class="card"><h1>Consulta recibida.</h1><p class="sub">LUMEN registró tu interés en ${html(p.name)} y lo envió al flujo comercial. Si ya querés avanzar, podés iniciar el checkout ahora.</p><div class="actions"><a class="btn" href="${html(go)}">Comprar por USD ${p.price_usd}</a><a class="btn secondary" href="/catalog">Ver catálogo</a></div></main>`),{status:200,headers});'''
+          new='''        await recordEvent(env,"qualified_intent",sid,slug,attr,{lead_id:leadId,crm,next});
+                  const q=qs(attr); const go=`/go/${slug}${q?`?${q}`:""}`;
+                  if (next === "checkout") { await recordEvent(env,"requirements_captured",sid,slug,attr,{lead_id:leadId}); headers.set("location",go); return new Response(null,{status:303,headers}); }
+                  headers.set("content-type","text/html; charset=utf-8");
+                  return new Response(page("Consulta recibida",`<main class="card"><h1>Consulta recibida.</h1><p class="sub">LUMEN guardó el requerimiento de ${html(p.name)}. No se realizó ningún cargo.</p><div class="actions"><a class="btn" href="${html(go)}">Continuar al pago · USD ${p.price_usd}</a><a class="btn secondary" href="/catalog">Ver catálogo</a></div></main>`),{status:200,headers});'''
+          assert old in text
+          text=text.replace(old,new,1)
+
+          health='return Response.json({ok:true,service:SERVICE,version:VERSION,x402:X402_BASE,paidSpend:false,crmBridge:true},{headers});'
+          assert health in text
+          text=text.replace(health,'return Response.json({ok:true,service:SERVICE,version:VERSION,x402:X402_BASE,paidSpend:false,crmBridge:true,productContractVersion:PRODUCT_CONTRACT_VERSION,requirementsBeforeHumanCheckout:true},{headers});',1)
+          conversion_path.write_text(text)
+          print('contracts applied')
+          PY
+
+      - name: Validate syntax
+        run: |
+          node --check .lumen/public-worker/worker.js
+          node --check .lumen/public-worker/gateway.js
+          node --check .lumen/conversion-worker/worker.js
+
+      - name: Commit contracts to lumen-zero
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .lumen/public-worker/worker.js .lumen/conversion-worker/worker.js
+          git commit -m "Clarify LUMEN offers and require prepayment briefs"
+          git push origin HEAD:lumen-zero
+
+      - name: Deploy Conversion Loop
+        working-directory: .lumen/conversion-worker
+        run: npx --yes wrangler@4 deploy
+
+      - name: Deploy Public Web
+        working-directory: .lumen/public-worker
+        run: npx --yes wrangler@4 deploy
+
+      - name: Validate public contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="$PUBLIC_BASE"
+          for i in {1..12}; do
+            code=$(curl -sS -o /tmp/services.html -w '%{http_code}' "$base/services?service=SRV-SOURCING-EXPRESS" || true)
+            if [[ "$code" == "200" ]] && grep -q "Qué necesitás enviarnos" /tmp/services.html && grep -q "Qué entregamos" /tmp/services.html; then break; fi
+            sleep 4
+          done
+          grep -q "No incluye" /tmp/services.html
+          grep -q "hasta 10 candidatos" /tmp/services.html
+          curl -fsS "$base/api/services/catalog" -o /tmp/services.json
+          python3 - <<'PY'
+          import json
+          x=json.load(open('/tmp/services.json'))
+          assert x['contract_version']=='2026-09-21-v1' and len(x['services'])==6
+          assert all(s['client_inputs'] and s['deliverables'] and s['not_included'] for s in x['services'])
+          PY
+          curl -fsS "$base/offer/supplier-snapshot?technical_canary=1" -o /tmp/offer.html
+          grep -q "Antes de pagar" /tmp/offer.html
+          grep -q "Qué recibís" /tmp/offer.html
+          grep -q "Guardar y continuar al pago" /tmp/offer.html
+          curl -sS -D /tmp/gate.headers -o /dev/null "$base/go/supplier-snapshot?src=requirement-test" || true
+          status=$(awk 'NR==1{print $2}' /tmp/gate.headers)
+          location=$(awk 'BEGIN{IGNORECASE=1} /^location:/{gsub("\r",""); sub(/^location:[[:space:]]*/,""); print; exit}' /tmp/gate.headers)
+          echo "REQUIREMENT_GATE=$status $location"
+          [[ "$status" == "303" ]]
+          [[ "$location" == /offer/supplier-snapshot* || "$location" == "$base/offer/supplier-snapshot"* ]]
+          echo "LUMEN_OFFER_CONTRACTS=success"
