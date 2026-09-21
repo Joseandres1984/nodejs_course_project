@@ -1,0 +1,59 @@
+name: LUMEN Conversion Loop
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-conversion:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout LUMEN Zero
+        uses: actions/checkout@v4
+        with:
+          ref: lumen-zero
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Validate Worker syntax
+        working-directory: .lumen/conversion-worker
+        run: node --check worker.js
+
+      - name: Deploy conversion Worker
+        working-directory: .lumen/conversion-worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx --yes wrangler@4 deploy
+
+      - name: Verify live conversion loop without spending
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE="https://lumen-zero-conversion.joseandresceol1-jac.workers.dev"
+          X402="https://lumen-zero-x402.joseandresceol1-jac.workers.dev"
+          python - <<'PY'
+          import json, urllib.request
+          base="https://lumen-zero-conversion.joseandresceol1-jac.workers.dev"
+          for path in ("/health","/catalog.json","/stats"):
+              with urllib.request.urlopen(base+path, timeout=30) as r:
+                  data=json.loads(r.read().decode())
+              assert data.get("ok") is True, (path,data)
+          with urllib.request.urlopen(base+"/catalog.json", timeout=30) as r:
+              catalog=json.loads(r.read().decode())
+          assert len(catalog.get("products",[])) == 6
+          assert catalog.get("paidMediaSpend") is False
+          stats=json.loads(urllib.request.urlopen(base+"/stats",timeout=30).read().decode())
+          assert stats.get("revenueRule") == "Only x402 receipts with status settled_verified count as realized revenue"
+          print("CONVERSION_LIVE health=ok products=6 revenue_truth=settled_only")
+          PY
+          curl -fsS "$BASE/offer/supplier-snapshot?src=technical-canary&medium=deploy&campaign=deploy-canary&technical_canary=1" >/dev/null
+          LOCATION=$(curl -sS -D - -o /dev/null "$BASE/go/supplier-snapshot?src=technical-canary&medium=deploy&campaign=deploy-canary&technical_canary=1" | awk 'BEGIN{IGNORECASE=1} /^location:/{sub(/\r$/,""); print substr($0,index($0,$2))}' | tail -1)
+          echo "$LOCATION" | grep -F "$X402/buy/supplier-snapshot" >/dev/null
+          echo "CONVERSION_CANARY offer=200 checkout_redirect=302 payment_attempted=false"
