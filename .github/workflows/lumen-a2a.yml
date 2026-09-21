@@ -28,8 +28,8 @@ jobs:
         with:
           ref: lumen-zero
 
-      - name: Validate A2A bridge syntax
-        run: python3 -m py_compile .lumen/runtime/zero_a2a_inbound_bridge_runtime.py .lumen/runtime/zero_entry.py
+      - name: Validate A2A bridge and seller discovery syntax
+        run: python3 -m py_compile .lumen/runtime/zero_a2a_inbound_bridge_runtime.py .lumen/runtime/agent_network_runtime.py .lumen/runtime/agent_network_accelerator_runtime.py .lumen/runtime/zero_entry.py
 
       - name: Deployment preflight
         id: preflight
@@ -56,24 +56,60 @@ jobs:
         working-directory: .lumen/a2a-worker
         run: npx --yes wrangler@4 deploy
 
-      - name: Verify A2A health and Agent Card
+      - name: Verify A2A health, Agent Card and seller catalog
         shell: bash
         run: |
           for i in {1..12}; do
             health=$(curl -sS -o /tmp/a2a-health.json -w '%{http_code}' "$A2A_BASE_URL/health" || true)
             card=$(curl -sS -o /tmp/a2a-card.json -w '%{http_code}' "$A2A_BASE_URL/.well-known/agent-card.json" || true)
-            if [[ "$health" == "200" && "$card" == "200" ]] && grep -q 'LUMEN B2B Agent' /tmp/a2a-card.json && grep -q '/a2a/v1' /tmp/a2a-card.json; then
-              cat /tmp/a2a-health.json
-              echo
-              python3 -c "import json; c=json.load(open('/tmp/a2a-card.json')); print({'a2a_agent_card':{'name':c.get('name'),'protocolVersion':c.get('protocolVersion'),'skills':len(c.get('skills') or []),'url':c.get('url')}})"
+            catalog=$(curl -sS -o /tmp/a2a-catalog.json -w '%{http_code}' "$A2A_BASE_URL/seller/catalog" || true)
+            if [[ "$health" == "200" && "$card" == "200" && "$catalog" == "200" ]]; then
+              python3 - <<'PY'
+          import json
+          health=json.load(open('/tmp/a2a-health.json'))
+          card=json.load(open('/tmp/a2a-card.json'))
+          catalog=json.load(open('/tmp/a2a-catalog.json'))
+          assert health.get('sellerMode') == 'receive_revenue_only'
+          assert health.get('lumenAutonomousSpend') is False
+          assert card.get('name') == 'LUMEN B2B Agent'
+          assert card.get('metadata',{}).get('sellerMode') == 'receive_revenue_only'
+          assert card.get('metadata',{}).get('autonomousSpend') is False
+          services=catalog.get('services') or []
+          prices={x.get('id'):int(x.get('from_usd') or 0) for x in services}
+          assert prices == {
+              'SRV-QUOTECHECK':59,
+              'SRV-SUPPLIERCHECK':79,
+              'SRV-TENDER-HUNTER':99,
+              'SRV-SOURCING-EXPRESS':149,
+              'SRV-B2B-PROSPECTING':199,
+              'SRV-EXPORT-SCOUT':249,
+          }, prices
+          assert catalog.get('settlement',{}).get('automaticBuyerSideSpend') is False
+          print({'a2a_seller_catalog':{'services':len(services),'floor_usd':catalog.get('pricing',{}).get('floor_usd'),'ceiling_usd':catalog.get('pricing',{}).get('ceiling_usd'),'sellerMode':catalog.get('sellerMode')}})
+          PY
               exit 0
             fi
             sleep 5
           done
-          echo "A2A health/card verification failed."
+          echo "A2A health/card/catalog verification failed."
           cat /tmp/a2a-health.json 2>/dev/null || true
           cat /tmp/a2a-card.json 2>/dev/null || true
+          cat /tmp/a2a-catalog.json 2>/dev/null || true
           exit 1
+
+      - name: Verify machine-readable catalog and quote RPC
+        shell: bash
+        run: |
+          catalog_payload='{"jsonrpc":"2.0","id":"catalog-canary","method":"GetServiceCatalog","params":{}}'
+          catalog_code=$(curl -sS -o /tmp/a2a-rpc-catalog.json -w '%{http_code}' -X POST "$A2A_BASE_URL/a2a/v1" -H 'accept: application/json' -H 'content-type: application/json' -H 'A2A-Version: 1.0' --data "$catalog_payload")
+          [[ "$catalog_code" == "200" ]]
+          jq -e '.result.catalog.services|length == 6' /tmp/a2a-rpc-catalog.json >/dev/null
+
+          quote_payload='{"jsonrpc":"2.0","id":"quote-canary","method":"QuoteService","params":{"serviceId":"SRV-QUOTECHECK","contextId":"deploy-quote-canary","metadata":{"purpose":"technical_quote_canary"}}}'
+          quote_code=$(curl -sS -o /tmp/a2a-rpc-quote.json -w '%{http_code}' -X POST "$A2A_BASE_URL/a2a/v1" -H 'accept: application/json' -H 'content-type: application/json' -H 'A2A-Version: 1.0' --data "$quote_payload")
+          [[ "$quote_code" == "200" ]]
+          jq -e '.result.quote.serviceId == "SRV-QUOTECHECK" and .result.quote.amount == 59 and .result.quote.currency == "USD" and .result.quote.chargeCreated == false and .result.quote.lumenAutonomousSpend == false' /tmp/a2a-rpc-quote.json >/dev/null
+          echo "A2A_SELLER_RPC catalog=6 quote=ok amount_usd=59 charge_created=false autonomous_spend=false"
 
       - name: Register or refresh Global A2A Registry
         id: registry
@@ -133,8 +169,8 @@ jobs:
           code=$(curl -sS -o /tmp/a2a-canary.json -w '%{http_code}' -X POST "$A2A_BASE_URL/a2a/v1" -H 'accept: application/json' -H 'content-type: application/json' -H 'A2A-Version: 1.0' --data "$payload")
           cat /tmp/a2a-canary.json
           [[ "$code" == "200" ]]
-          jq -e '.jsonrpc == "2.0" and .result.task.id != null and .result.task.metadata.nonbinding == true and .result.task.metadata.bindingActionsHumanGated == true' /tmp/a2a-canary.json >/dev/null
-          echo "A2A_CANARY=success context=$context"
+          jq -e '.jsonrpc == "2.0" and .result.task.id != null and .result.task.metadata.nonbinding == true and .result.task.metadata.bindingActionsHumanGated == true and .result.task.metadata.lumenAutonomousSpend == false' /tmp/a2a-canary.json >/dev/null
+          echo "A2A_CANARY=success context=$context seller_mode=receive_revenue_only"
 
       - name: A2A deploy summary
         if: always()
@@ -142,5 +178,8 @@ jobs:
         run: |
           echo "A2A gateway: $A2A_BASE_URL"
           echo "Agent Card: $A2A_BASE_URL/.well-known/agent-card.json"
+          echo "Seller catalog: $A2A_BASE_URL/seller/catalog"
           echo "Registry action: ${{ steps.registry.outputs.action }}"
           echo "Registry final HTTP: ${{ steps.registry.outputs.http_status }}"
+
+# deploy trigger: seller mode + machine-readable pricing 2026-09-21
