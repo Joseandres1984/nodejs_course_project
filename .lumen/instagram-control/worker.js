@@ -1,4 +1,5 @@
 const USER = "socio";
+const RECOVERY_IDS = ["DIST-3ADEE9154FA8","DIST-90AC7FE4D0F0","DIST-C9C06F669D70"];
 
 function text(body, status = 200, extra = {}) {
   return new Response(body, { status, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff", ...extra } });
@@ -53,6 +54,26 @@ async function commandWriteCanary(env) {
     deleted=!left;
   }
   return {ok:Boolean(write&&read&&deleted),service:"lumen-instagram-control",storage:"cloudflare-d1",d1_write:write,d1_read:read,d1_delete:deleted,command_queue_schema:true};
+}
+async function projectionDiagnostic(env) {
+  await ensureSchema(env);
+  const posts=await env.DB.prepare("SELECT job_id,fingerprint,state_status,approval_status,last_error,updated_at FROM lumen_instagram_control_posts WHERE job_id IN (?,?,?) ORDER BY job_id").bind(...RECOVERY_IDS).all();
+  const commands=await env.DB.prepare("SELECT job_id,action,processed,result,created_at,processed_at FROM lumen_instagram_control_commands WHERE job_id IN (?,?,?) ORDER BY created_at DESC LIMIT 30").bind(...RECOVERY_IDS).all();
+  return {
+    ok:true,
+    posts:(posts.results||[]).map((r)=>({
+      job_id:String(r.job_id||""),
+      fingerprint_prefix:String(r.fingerprint||"").slice(0,16),
+      state_status:String(r.state_status||""),
+      approval_status:String(r.approval_status||""),
+      last_error:String(r.last_error||"").slice(0,160)||null,
+      updated_at:String(r.updated_at||"")
+    })),
+    commands:(commands.results||[]).map((r)=>({
+      job_id:String(r.job_id||""), action:String(r.action||""), processed:Number(r.processed||0), result:String(r.result||"")||null,
+      created_at:String(r.created_at||""), processed_at:String(r.processed_at||"")||null
+    }))
+  };
 }
 function label(row) {
   if(String(row.state_status||"").toUpperCase()==="PUBLISHED" || String(row.approval_status||"").toUpperCase()==="PUBLISHED") return "Publicado";
@@ -114,7 +135,7 @@ export default {
     if(!String(env.LUMEN_DASHBOARD_PASSWORD||"")) return text("control_not_configured",503);
     if(!authorized(request,env)) return unauthorized();
     const url=new URL(request.url);
-    if(request.method==="GET" && url.pathname==="/health") return Response.json({ok:true,service:"lumen-instagram-control",auth:true,storage:"cloudflare-d1",version:"1.1-d1-write-canary"},{headers:{"cache-control":"no-store"}});
+    if(request.method==="GET" && url.pathname==="/health") return Response.json({ok:true,service:"lumen-instagram-control",auth:true,storage:"cloudflare-d1",version:"1.2-d1-projection-diagnostic"},{headers:{"cache-control":"no-store"}});
     if(request.method==="POST" && url.pathname==="/health/command-write") {
       try {
         const result=await commandWriteCanary(env);
@@ -122,6 +143,10 @@ export default {
       } catch(err) {
         return Response.json({ok:false,service:"lumen-instagram-control",d1_write:false,d1_read:false,d1_delete:false,error:String(err?.name||"Error")},{status:503,headers:{"cache-control":"no-store"}});
       }
+    }
+    if(request.method==="GET" && url.pathname==="/health/projection") {
+      try { return Response.json(await projectionDiagnostic(env),{headers:{"cache-control":"no-store"}}); }
+      catch(err) { return Response.json({ok:false,error:String(err?.name||"Error")},{status:503,headers:{"cache-control":"no-store"}}); }
     }
     if(request.method==="GET" && url.pathname==="/") return renderConsole(env,url.searchParams.get("result")||"");
     if(request.method==="POST" && url.pathname==="/command") return command(request,env);
