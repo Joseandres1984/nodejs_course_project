@@ -97,16 +97,53 @@ async function proxyBinding(request, binding, requestBase, targetPath, origin, r
 
 async function warmX402(binding, origin) {
   if (!binding || typeof binding.fetch !== "function") return false;
-  for (let i=0;i<2;i++) {
-    try {
-      const response = await binding.fetch(new Request(`${origin}/health`, {
-        method:"GET",
-        headers:{"x-lumen-public-origin":origin,"user-agent":"LUMEN-Public-Gateway/1.0"},
-      }));
-      if (response.ok) return true;
-    } catch (_) {}
+  try {
+    const response = await binding.fetch(new Request(`${origin}/health`, {
+      method:"GET",
+      headers:{"x-lumen-public-origin":origin,"user-agent":"LUMEN-Public-Gateway/1.0"},
+    }));
+    return response.ok;
+  } catch (_) {
+    return false;
   }
-  return false;
+}
+
+async function proxyX402(request, binding, origin, targetPath) {
+  if (!binding || typeof binding.fetch !== "function") {
+    return Response.json({ok:false,error:"internal_service_unavailable"},{status:503});
+  }
+  // x402 paid resources are GET-based. Hide transient cold-start 500s from buyers.
+  if (request.method !== "GET") return proxyBinding(request,binding,origin,targetPath,origin,true);
+
+  const incoming = new URL(request.url);
+  const target = new URL(targetPath + incoming.search, origin);
+  const headers = new Headers(request.headers);
+  headers.set("x-lumen-public-origin", origin);
+  let last = null;
+
+  for (let attempt=1; attempt<=4; attempt++) {
+    try {
+      const upstream = await binding.fetch(new Request(target.toString(), {method:"GET",headers,redirect:"manual"}));
+      if (upstream.status !== 500) return normalizeResponse(upstream, origin, {rewriteBody:true});
+      last = {
+        status:upstream.status,
+        headers:new Headers(upstream.headers),
+        body:await upstream.text(),
+      };
+    } catch (error) {
+      last = {
+        status:503,
+        headers:new Headers({"content-type":"application/json"}),
+        body:JSON.stringify({ok:false,error:"x402_internal_retry",detail:String(error?.message||error).slice(0,180)}),
+      };
+    }
+    if (attempt < 4) await new Promise(resolve => setTimeout(resolve, 350 * attempt));
+  }
+
+  return normalizeResponse(new Response(last?.body || '{"error":"Internal Server Error"}', {
+    status:last?.status || 503,
+    headers:last?.headers || {"content-type":"application/json"},
+  }), origin, {rewriteBody:true});
 }
 
 export default {
@@ -133,10 +170,9 @@ export default {
       return proxyBinding(request, env.CONVERSION, CONVERSION_INTERNAL, path, origin, true);
     }
 
-    // Service Binding handles transport, while x402 sees the real public resource URL.
+    // Service Binding handles transport; the buyer sees only the public LUMEN URL.
     if (/^\/buy\/[a-z0-9-]+$/.test(path) && ["GET","POST"].includes(request.method)) {
-      await warmX402(env.X402, origin);
-      return proxyBinding(request, env.X402, origin, path, origin, true);
+      return proxyX402(request, env.X402, origin, path);
     }
 
     const response = await core.fetch(request, env, ctx);
