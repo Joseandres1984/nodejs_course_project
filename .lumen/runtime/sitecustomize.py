@@ -208,3 +208,11 @@ else:
     _ct.build_control_tower = truthful_build_control_tower
     _ct.render_control_tower = truthful_render_control_tower
     print({"command_center_truth_patch": {"status": "active", "health": "watchdog_primary", "currency": "ARS_native_USD_reference"}}, flush=True)
+
+# Instagram approval hardening is deliberately isolated from the dashboard patch above.  It installs
+# an import hook only for the Instagram approval bridge/publisher and remains fail-closed if loading
+# ever fails, so it cannot block the rest of LUMEN from starting.
+try:
+    import instagram_approval_freeze_runtime as _instagram_approval_freeze_runtime  # noqa: F401
+except Exception as exc:
+    print({"instagram_approval_identity": {"status": "install_failed_fail_closed", "error": f"{type(exc).__name__}: {str(exc)[:240]}"}}, flush=True)
