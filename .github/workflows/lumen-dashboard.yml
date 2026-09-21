@@ -57,7 +57,7 @@ jobs:
         shell: bash
         run: printf '%s' "$LUMEN_DASHBOARD_PASSWORD" | npx --yes wrangler@4 secret put LUMEN_DASHBOARD_PASSWORD
 
-      - name: Verify authenticated unified dashboard and Railway recovery
+      - name: Verify live command center, pricing and Railway recovery
         if: steps.preflight.outputs.ready == 'true'
         shell: bash
         run: |
@@ -76,12 +76,16 @@ jobs:
           recovery = json.loads(Path('/tmp/lumen-recovery-state.json').read_text())
           assert 'Centro de Comando Completo' in html
           assert 'Recuperación Railway' in html
+          assert 'Servicios y precios' in html
+          assert 'Desde USD 59' in html
+          assert 'Desde USD 249' in html
+          assert 'LUMEN ahora' in html
           assert int((data.get('meta') or {}).get('root_keys') or 0) > 0
           assert recovery.get('available') is True
           assert int((recovery.get('historical') or {}).get('accounts') or 0) == 580
           assert int((recovery.get('policy') or {}).get('auto_promoted') or 0) == 0
           assert int((recovery.get('policy') or {}).get('safe_for_outbound') or 0) == 0
-          print('LUMEN_FULL_COMMAND_CENTER routes=ok d1_state=ok railway_recovery=ok accounts=580 safe_for_outbound=0')
+          print('LUMEN_FULL_COMMAND_CENTER routes=ok pricing=ok owner_summary=ok d1_state=ok railway_recovery=ok accounts=580 safe_for_outbound=0')
           PY
               exit 0
             fi
@@ -90,4 +94,4 @@ jobs:
           echo "LUMEN_UNIFIED_DASHBOARD verification=failed health=$health_code full=$full_code state=$state_code recovery=$recovery_code"
           exit 1
 
-# deploy trigger: refresh feedback and cache-busting fix 2026-09-21
+# deploy trigger: live pricing/result panel verification 2026-09-21
