@@ -6,8 +6,16 @@ The production mail stack prefers Brevo/Resend HTTPS transports because Railway 
 GitHub-hosted LUMEN Zero has an authenticated Gmail SMTP route, so this adapter exposes that route
 as a first-class transport after a read-only login probe. It does not send a probe message and it
 does not bypass any existing communication, quality, opt-out, go-live, or per-cycle limits.
+
+Zero-cost migration safety: before any real send, legacy LUMEN public URLs are normalized to the
+current Cloudflare public Worker and every LUMEN-owned link is fetched. A broken public link blocks
+that message at the quality gate instead of allowing a customer to receive a dead CTA.
 """
 
+import os
+import re
+import urllib.error
+import urllib.request
 from typing import Any, Dict
 
 import distribution_operator
@@ -16,12 +24,17 @@ import mail_connector
 import mail_resilience
 
 
-VERSION = "1.0-zero-cost-smtp-bridge"
+VERSION = "1.1-link-preflight"
 _SMTP_PROVIDERS = {"smtp", "gmail_smtp"}
 _probe_cache: Dict[str, Any] | None = None
 _original_transport_status = https_mail_transport.transport_status
 _original_https_send_pending = https_mail_transport.https_send_pending
 _original_https_distribution_tick = https_mail_transport.https_distribution_tick
+_PUBLIC_BASE = (os.getenv("LUMEN_PUBLIC_BASE_URL") or "https://lumen-zero-public.joseandresceol1-jac.workers.dev").strip().rstrip("/")
+_LEGACY_PUBLIC_BASES = {
+    "https://lumen-web-production-5755.up.railway.app",
+}
+_URL_RE = re.compile(r"https://[^\s<>\]\[\)\(\"']+")
 
 
 def _smtp_allowed() -> bool:
@@ -36,6 +49,71 @@ def _smtp_probe() -> Dict[str, Any]:
     if _probe_cache is None:
         _probe_cache = dict(mail_resilience.probe_transport() or {})
     return dict(_probe_cache)
+
+
+def _normalize_lumen_urls(text: str) -> str:
+    value = str(text or "")
+    for legacy in _LEGACY_PUBLIC_BASES:
+        value = value.replace(legacy.rstrip("/"), _PUBLIC_BASE)
+    return value
+
+
+def _lumen_urls(text: str) -> list[str]:
+    urls = []
+    for raw in _URL_RE.findall(str(text or "")):
+        url = raw.rstrip(".,;:!?")
+        if _PUBLIC_BASE and url.startswith(_PUBLIC_BASE + "/"):
+            urls.append(url)
+    return list(dict.fromkeys(urls))
+
+
+def _url_works(url: str) -> bool:
+    try:
+        req = urllib.request.Request(
+            url,
+            headers={"Accept": "text/html,application/json;q=0.9,*/*;q=0.8", "User-Agent": "LUMEN-B2B-LinkGuard/1.1"},
+        )
+        opener = urllib.request.build_opener(urllib.request.HTTPRedirectHandler())
+        with opener.open(req, timeout=15) as resp:
+            code = int(getattr(resp, "status", 200) or 200)
+            return 200 <= code < 400
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError):
+        return False
+
+
+def _preflight_pending_links(state: Dict[str, Any]) -> Dict[str, int]:
+    report = {"rewritten": 0, "checked": 0, "blocked": 0}
+    for item in state.get("outbox", []) or []:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("status") or "").lower() not in {"ready", "queued", "pending", "retry"}:
+            continue
+
+        for field in ("body", "html_body", "tracking_url"):
+            before = str(item.get(field) or "")
+            if not before:
+                continue
+            after = _normalize_lumen_urls(before)
+            if after != before:
+                item[field] = after
+                report["rewritten"] += 1
+
+        joined = "\n".join(str(item.get(k) or "") for k in ("body", "html_body", "tracking_url"))
+        urls = _lumen_urls(joined)
+        if not urls:
+            continue
+        failed = []
+        for url in urls:
+            report["checked"] += 1
+            if not _url_works(url):
+                failed.append(url)
+        if failed:
+            item["status"] = "blocked_quality"
+            item["quality_block_reason"] = "public_link_preflight_failed"
+            item["broken_public_links"] = failed[:5]
+            report["blocked"] += 1
+    state["outbound_link_guard"] = {**report, "version": VERSION, "public_base": _PUBLIC_BASE}
+    return report
 
 
 def zero_transport_status() -> Dict[str, Any]:
@@ -71,6 +149,7 @@ def zero_transport_status() -> Dict[str, Any]:
 
 
 def zero_send_pending(state: Dict[str, Any], live_outbound: bool) -> Dict[str, int]:
+    _preflight_pending_links(state)
     status = zero_transport_status()
     if status.get("ready") and status.get("provider") in _SMTP_PROVIDERS:
         # This path retains Communication Director, Quality Gate, opt-out, contact verification,
@@ -80,6 +159,7 @@ def zero_send_pending(state: Dict[str, Any], live_outbound: bool) -> Dict[str, i
 
 
 def zero_distribution_tick(state: Dict[str, Any], *args: Any, **kwargs: Any) -> Dict[str, Any]:
+    _preflight_pending_links(state)
     status = zero_transport_status()
     if status.get("ready") and status.get("provider") in _SMTP_PROVIDERS:
         report = dict(mail_resilience.resilient_distribution_tick(state, *args, **kwargs) or {})
@@ -92,6 +172,7 @@ def zero_distribution_tick(state: Dict[str, Any], *args: Any, **kwargs: Any) -> 
                 "transport_route": status.get("route"),
                 "transport_error": None,
                 "authenticated_probe": True,
+                "link_guard": dict(state.get("outbound_link_guard", {}) or {}),
             }
         )
         report["mail_resilience"] = resilience
@@ -114,6 +195,9 @@ print(
             "status": "installed",
             "version": VERSION,
             "probe_message_sent": False,
+            "link_preflight": True,
+            "legacy_url_rewrite": True,
+            "public_base": _PUBLIC_BASE,
             "smtp_platform_blocked": bool(getattr(https_mail_transport, "SMTP_PLATFORM_BLOCKED", False)),
         }
     }
