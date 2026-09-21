@@ -81,12 +81,12 @@ async function normalizeResponse(upstream, origin, {rewriteBody=true}={}) {
   return new Response(upstream.body, {status:upstream.status, headers});
 }
 
-async function proxyBinding(request, binding, internalBase, targetPath, origin, rewriteBody=true) {
+async function proxyBinding(request, binding, requestBase, targetPath, origin, rewriteBody=true) {
   if (!binding || typeof binding.fetch !== "function") {
     return Response.json({ok:false,error:"internal_service_unavailable"},{status:503});
   }
   const incoming = new URL(request.url);
-  const target = new URL(targetPath + incoming.search, internalBase);
+  const target = new URL(targetPath + incoming.search, requestBase);
   const headers = new Headers(request.headers);
   headers.set("x-lumen-public-origin", origin);
   const init = {method:request.method,headers,redirect:"manual"};
@@ -117,8 +117,9 @@ export default {
       return proxyBinding(request, env.CONVERSION, CONVERSION_INTERNAL, path, origin, true);
     }
 
+    // Service Binding handles transport, while x402 sees the real public resource URL.
     if (/^\/buy\/[a-z0-9-]+$/.test(path) && ["GET","POST"].includes(request.method)) {
-      return proxyBinding(request, env.X402, X402_INTERNAL, path, origin, true);
+      return proxyBinding(request, env.X402, origin, path, origin, true);
     }
 
     const response = await core.fetch(request, env, ctx);
