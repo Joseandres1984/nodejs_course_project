@@ -1,6 +1,10 @@
 name: LUMEN Conversion Loop
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/lumen-conversion.yml"
   workflow_dispatch:
 
 permissions:
