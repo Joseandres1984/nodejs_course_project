@@ -4,7 +4,7 @@ import { x402ResourceServer, HTTPFacilitatorClient } from "@x402/core/server";
 import { ExactEvmScheme } from "@x402/evm/exact/server";
 
 const SERVICE = "lumen-zero-x402";
-const VERSION = "1.2-x402-base-usdc-lazy-settlement-truth";
+const VERSION = "1.3-x402-conversion-attribution";
 const PAY_TO = "0x04285DE6A083CEb28fb0C254a2ed0F5fdB2eeD28";
 const NETWORK = "eip155:8453";
 const FACILITATOR = "https://facilitator.xpay.sh";
@@ -38,6 +38,18 @@ function decodeB64Json(value) {
   } catch {
     return null;
   }
+}
+function conversionAttribution(c) {
+  const url = new URL(c.req.url);
+  const attribution = {
+    event_id: clean(url.searchParams.get("conversion_event"), 80),
+    session_id: clean(url.searchParams.get("conversion_session"), 80),
+    campaign: clean(url.searchParams.get("campaign"), 120),
+    source: clean(url.searchParams.get("source"), 80),
+    medium: clean(url.searchParams.get("medium"), 80),
+    creative: clean(url.searchParams.get("creative"), 120),
+  };
+  return Object.values(attribution).some(Boolean) ? attribution : null;
 }
 
 async function ensureSchema(env) {
@@ -150,6 +162,7 @@ function publicCatalog(origin) {
       facilitator:FACILITATOR,
       outgoingSpendEnabled:false,
       accountingRule:"realized revenue only after PAYMENT-RESPONSE confirms settlement success",
+      conversionAttribution:"campaign/session metadata is persisted with the receipt when supplied",
     },
     products:Object.entries(PRODUCTS).map(([slug,p]) => ({
       ...p,
@@ -163,7 +176,7 @@ function publicCatalog(origin) {
       "buyer signs exact USDC authorization",
       "retry with PAYMENT-SIGNATURE",
       "LUMEN verifies authorization",
-      "resource prepares receipt",
+      "resource prepares receipt with optional conversion attribution",
       "facilitator settles Base USDC before response leaves middleware",
       "LUMEN records realized revenue only after settlement success",
       "POST receiptId + requirement to /redeem for fulfillment",
@@ -191,12 +204,14 @@ async function createVerifiedPendingReceipt(c, product) {
   }
   const receiptId=rid("X402R");
   const now=new Date().toISOString();
+  const conversion=conversionAttribution(c);
   const meta={
     source:"x402",
     authorization_verified:true,
     settlement_accounting:"await_payment_response_success",
     cfCountry:clean(c.req.header("cf-ipcountry"),16),
     userAgent:clean(c.req.header("user-agent"),300),
+    ...(conversion ? {conversion} : {}),
   };
   await c.env.DB.prepare("INSERT INTO lumen_x402_receipts(id,created_at,product_id,service_id,amount_usd,currency,network,pay_to,status,payment_fingerprint,request_metadata) VALUES(?,?,?,?,?,?,?,?,?,?,?)")
     .bind(receiptId,now,product.id,product.service_id,product.price_usd,"USD",NETWORK,PAY_TO,"verified_pending_settlement",fingerprint,JSON.stringify(meta)).run();
@@ -210,6 +225,7 @@ async function createVerifiedPendingReceipt(c, product) {
     currency:"USD",
     asset:"USDC",
     network:"Base",
+    conversionAttributed:Boolean(conversion),
     status:"settlement_before_response",
     nextAction:"When this response succeeds, settlement is reconciled server-side; POST /redeem with receiptId and requirement.",
   });
@@ -234,6 +250,7 @@ app.get("/health", async (c) => {
     ok:true, service:SERVICE, version:VERSION, x402:"LIVE",
     network:NETWORK, asset:"USDC", facilitator:FACILITATOR,
     recipientConfigured:true, resourceServerInitialized:true, outgoingSpendEnabled:false,
+    conversionAttribution:true,
   });
 });
 app.get("/catalog", (c) => c.json(publicCatalog(new URL(c.req.url).origin)));
@@ -262,6 +279,8 @@ app.post("/redeem", async (c) => {
   if (!product) return c.json({ok:false,error:"Receipt product is no longer available"},409);
   const now=new Date().toISOString();
   const contextId=rid("X402CTX"), taskId=rid("X402TASK"), inboundId=rid("A2AIN"), orderId=rid("MORD"), quoteId=rid("A2AQ");
+  let receiptMeta={};
+  try { receiptMeta=JSON.parse(receipt.request_metadata || "{}"); } catch {}
   const metadata={
     source:"a2a_machine_store", purpose:"commercial_x402_purchase",
     productId:product.id, lumen_product_id:product.id, lumen_service_id:product.service_id,
@@ -269,6 +288,7 @@ app.post("/redeem", async (c) => {
     lumen_quote_usd:String(product.price_usd), lumen_quote_id:quoteId, lumen_billing:"per_request",
     lumen_seller_mode:"receive_revenue_only", payment_verified:"true", payment_settled:"true",
     payment_method:"x402_usdc_base", x402_receipt_id:receiptId, charge_created:"true",
+    ...(receiptMeta.conversion ? {conversion:receiptMeta.conversion} : {}),
   };
   const task={
     id:taskId, contextId,
@@ -293,9 +313,12 @@ app.post("/redeem", async (c) => {
 
 app.get("/receipt/:id", async (c) => {
   await ensureSchema(c.env);
-  const row=await c.env.DB.prepare("SELECT id,created_at,product_id,service_id,amount_usd,currency,network,status,redeemed_at FROM lumen_x402_receipts WHERE id=? LIMIT 1").bind(clean(c.req.param("id"),80)).first();
+  const row=await c.env.DB.prepare("SELECT id,created_at,product_id,service_id,amount_usd,currency,network,status,redeemed_at,request_metadata FROM lumen_x402_receipts WHERE id=? LIMIT 1").bind(clean(c.req.param("id"),80)).first();
   if (!row) return c.json({ok:false,error:"Receipt not found"},404);
-  return c.json({ok:true,receipt:row});
+  let conversion=null;
+  try { conversion=JSON.parse(row.request_metadata || "{}").conversion || null; } catch {}
+  delete row.request_metadata;
+  return c.json({ok:true,receipt:{...row,conversion}});
 });
 
 app.get("/stats", async (c) => {
@@ -303,11 +326,25 @@ app.get("/stats", async (c) => {
   const totals=await c.env.DB.prepare("SELECT COUNT(*) AS payments, COALESCE(SUM(amount_usd),0) AS revenue FROM lumen_x402_receipts WHERE status IN ('settled_verified','redeemed_queued')").first();
   const pending=await c.env.DB.prepare("SELECT COUNT(*) AS n FROM lumen_x402_receipts WHERE status='verified_pending_settlement'").first();
   const redeemed=await c.env.DB.prepare("SELECT COUNT(*) AS n FROM lumen_x402_redemptions").first();
+  const paidRows=await c.env.DB.prepare("SELECT amount_usd,request_metadata FROM lumen_x402_receipts WHERE status IN ('settled_verified','redeemed_queued')").all();
+  let attributedPayments=0, attributedRevenueUsd=0;
+  for (const row of (paidRows.results || [])) {
+    try {
+      const meta=JSON.parse(row.request_metadata || "{}");
+      if (meta.conversion?.event_id || meta.conversion?.campaign || meta.conversion?.session_id) {
+        attributedPayments += 1;
+        attributedRevenueUsd += Number(row.amount_usd || 0);
+      }
+    } catch {}
+  }
   return c.json({
     payments:Number(totals?.payments||0),
     realizedRevenueUsd:Number(totals?.revenue||0),
     pendingAuthorizations:Number(pending?.n||0),
     redeemedOrders:Number(redeemed?.n||0),
+    attributedPayments,
+    attributedRevenueUsd,
+    conversionAttribution:true,
     revenueRule:"Only settled_verified or redeemed_queued x402 receipts count as realized revenue; authorization alone never counts.",
     network:"Base", asset:"USDC", facilitator:FACILITATOR, recipient:PAY_TO,
   });
