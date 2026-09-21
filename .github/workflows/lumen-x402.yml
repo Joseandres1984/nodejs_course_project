@@ -24,6 +24,7 @@ jobs:
       X402_BASE_URL: "https://lumen-zero-x402.joseandresceol1-jac.workers.dev"
       X402_EXPECTED_RECIPIENT: "0x04285DE6A083CEb28fb0C254a2ed0F5fdB2eeD28"
       X402_FACILITATOR: "https://facilitator.xpay.sh"
+      X402_EXPECTED_VERSION: "1.2-x402-base-usdc-lazy-settlement-truth"
     steps:
       - name: Checkout LUMEN Zero
         uses: actions/checkout@v4
@@ -66,59 +67,81 @@ jobs:
 
       - name: Validate Worker syntax
         working-directory: .lumen/x402-worker
-        run: node --check worker.js
+        run: |
+          node --check worker-v2.js
+          node --check worker.js
 
       - name: Deploy x402 Worker
         working-directory: .lumen/x402-worker
         run: npx wrangler deploy
 
-      - name: Verify public health catalog and zero revenue truth
+      - name: Wait for v1.2 edge propagation and verify public truth
         shell: bash
         run: |
-          health=$(curl -sS -o /tmp/x402-health.json -w '%{http_code}' "$X402_BASE_URL/health" || true)
-          catalog=$(curl -sS -o /tmp/x402-catalog.json -w '%{http_code}' "$X402_BASE_URL/catalog" || true)
-          stats=$(curl -sS -o /tmp/x402-stats.json -w '%{http_code}' "$X402_BASE_URL/stats" || true)
-          echo "health_http=$health"; cat /tmp/x402-health.json; echo
-          echo "catalog_http=$catalog"; cat /tmp/x402-catalog.json; echo
-          echo "stats_http=$stats"; cat /tmp/x402-stats.json; echo
-          [[ "$health" == "200" && "$catalog" == "200" && "$stats" == "200" ]]
+          ready=0
+          for i in {1..18}; do
+            nonce="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${i}-$(date +%s)"
+            health=$(curl -sS -o /tmp/x402-health.json -w '%{http_code}' "$X402_BASE_URL/health?deploy=$nonce" || true)
+            catalog=$(curl -sS -o /tmp/x402-catalog.json -w '%{http_code}' "$X402_BASE_URL/catalog?deploy=$nonce" || true)
+            stats=$(curl -sS -o /tmp/x402-stats.json -w '%{http_code}' "$X402_BASE_URL/stats?deploy=$nonce" || true)
+            echo "attempt=$i health=$health catalog=$catalog stats=$stats"
+            if [[ "$health" == "200" && "$catalog" == "200" && "$stats" == "200" ]]; then
+              hv=$(jq -r '.version // ""' /tmp/x402-health.json 2>/dev/null || true)
+              cv=$(jq -r '.version // ""' /tmp/x402-catalog.json 2>/dev/null || true)
+              echo "health_version=$hv catalog_version=$cv"
+              if [[ "$hv" == "$X402_EXPECTED_VERSION" && "$cv" == "$X402_EXPECTED_VERSION" ]]; then
+                ready=1
+                break
+              fi
+            fi
+            sleep 4
+          done
+          echo "health:"; cat /tmp/x402-health.json; echo
+          echo "catalog:"; cat /tmp/x402-catalog.json; echo
+          echo "stats:"; cat /tmp/x402-stats.json; echo
+          [[ "$ready" == "1" ]]
           python3 - <<'PY'
-          import json
+          import json, os
           health=json.load(open('/tmp/x402-health.json'))
           catalog=json.load(open('/tmp/x402-catalog.json'))
           stats=json.load(open('/tmp/x402-stats.json'))
           recipient='0x04285DE6A083CEb28fb0C254a2ed0F5fdB2eeD28'
           facilitator='https://facilitator.xpay.sh'
-          assert health.get('ok') is True, health
-          assert health.get('x402') == 'LIVE', health
-          assert health.get('network') == 'eip155:8453', health
-          assert health.get('asset') == 'USDC', health
-          assert health.get('facilitator') == facilitator, health
-          assert health.get('recipientConfigured') is True, health
-          assert health.get('outgoingSpendEnabled') is False, health
+          version=os.environ['X402_EXPECTED_VERSION']
+          assert health.get('ok') is True and health.get('version') == version, health
+          assert health.get('x402') == 'LIVE' and health.get('resourceServerInitialized') is True, health
+          assert health.get('network') == 'eip155:8453' and health.get('asset') == 'USDC', health
+          assert health.get('facilitator') == facilitator and health.get('outgoingSpendEnabled') is False, health
+          assert catalog.get('version') == version, catalog
           settlement=catalog.get('settlement') or {}
           assert settlement.get('recipient') == recipient, settlement
-          assert settlement.get('networkId') == 'eip155:8453', settlement
-          assert settlement.get('asset') == 'USDC', settlement
-          assert settlement.get('facilitator') == facilitator, settlement
-          assert settlement.get('outgoingSpendEnabled') is False, settlement
+          assert settlement.get('networkId') == 'eip155:8453' and settlement.get('asset') == 'USDC', settlement
+          assert settlement.get('facilitator') == facilitator and settlement.get('outgoingSpendEnabled') is False, settlement
           assert len(catalog.get('products') or []) == 6, catalog
-          assert stats.get('recipient') == recipient, stats
-          assert stats.get('network') == 'Base', stats
-          assert stats.get('asset') == 'USDC', stats
+          assert stats.get('recipient') == recipient and stats.get('network') == 'Base' and stats.get('asset') == 'USDC', stats
           assert stats.get('facilitator') == facilitator, stats
           assert float(stats.get('realizedRevenueUsd') or 0) >= 0, stats
-          print({'public_checkout':'ok','products':6,'realizedRevenueUsd':stats.get('realizedRevenueUsd')})
+          print({'public_checkout':'v1.2-ready','products':6,'realizedRevenueUsd':stats.get('realizedRevenueUsd')})
           PY
 
       - name: Verify real x402 payment challenge without spending
         shell: bash
         run: |
-          code=$(curl -sS -D /tmp/x402-headers.txt -o /tmp/x402-body.txt -w '%{http_code}' "$X402_BASE_URL/buy/supplier-snapshot" || true)
-          echo "UNPAID_X402_HTTP=$code"
+          success=0
+          for i in {1..12}; do
+            nonce="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-challenge-${i}-$(date +%s)"
+            code=$(curl -sS -D /tmp/x402-headers.txt -o /tmp/x402-body.txt -w '%{http_code}' "$X402_BASE_URL/buy/supplier-snapshot?deploy=$nonce" || true)
+            echo "challenge_attempt=$i http=$code"
+            if [[ "$code" == "402" ]]; then
+              success=1
+              break
+            fi
+            cat /tmp/x402-body.txt || true
+            sleep 4
+          done
           cat /tmp/x402-headers.txt
           cat /tmp/x402-body.txt || true
-          [[ "$code" == "402" ]]
+          [[ "$success" == "1" ]]
           python3 - <<'PY'
           import base64, json
           headers=open('/tmp/x402-headers.txt',encoding='utf-8',errors='ignore').read().splitlines()
@@ -135,6 +158,7 @@ jobs:
           assert req.get('network') == 'eip155:8453', req
           assert req.get('payTo','').lower() == '0x04285de6a083ceb28fb0c254a2ed0f5fdb2eed28', req
           assert int(req.get('amount') or 0) == 5000000, req
+          assert (req.get('extra') or {}).get('assetTransferMethod') == 'eip3009', req
           print({'x402_challenge':'ok','network':req.get('network'),'amount_atomic':req.get('amount'),'asset':req.get('asset'),'payTo':req.get('payTo')})
           PY
 
