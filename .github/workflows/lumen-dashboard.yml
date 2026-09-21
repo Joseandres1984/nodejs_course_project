@@ -90,4 +90,4 @@ jobs:
           echo "LUMEN_UNIFIED_DASHBOARD verification=failed health=$health_code full=$full_code state=$state_code recovery=$recovery_code"
           exit 1
 
-# deploy trigger: Railway recovery integrated into the unified command center 2026-09-20
+# deploy trigger: refresh feedback and cache-busting fix 2026-09-21
