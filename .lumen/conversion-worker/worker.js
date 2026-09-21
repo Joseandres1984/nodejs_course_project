@@ -1,5 +1,5 @@
 const SERVICE = "lumen-zero-conversion";
-const VERSION = "1.0-conversion-loop-live";
+const VERSION = "1.1-conversion-loop-crm";
 const X402_BASE = "https://lumen-zero-x402.joseandresceol1-jac.workers.dev";
 
 const PRODUCTS = {
@@ -43,6 +43,8 @@ async function ensureSchema(env) {
     env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_lumen_conversion_events_product_created ON lumen_conversion_events(product_id,created_at)"),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS lumen_conversion_leads (id TEXT PRIMARY KEY, created_at TEXT NOT NULL, session_id TEXT NOT NULL, product_id TEXT NOT NULL, product_slug TEXT NOT NULL, email TEXT NOT NULL, company TEXT, details TEXT, source TEXT NOT NULL, medium TEXT NOT NULL, campaign TEXT, creative TEXT, status TEXT NOT NULL DEFAULT 'new', technical_canary INTEGER NOT NULL DEFAULT 0)"),
     env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_lumen_conversion_leads_status_created ON lumen_conversion_leads(status,created_at)"),
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS lumen_public_inquiries (id TEXT PRIMARY KEY, created_at TEXT NOT NULL, service_id TEXT NOT NULL, email TEXT NOT NULL, company TEXT, name TEXT, need TEXT NOT NULL, source TEXT NOT NULL, processed INTEGER NOT NULL DEFAULT 0, processed_at TEXT)"),
+    env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_lumen_public_inquiries_pending ON lumen_public_inquiries(processed,created_at)"),
   ]);
 }
 async function recordEvent(env, eventType, sessionId, slug, attr, metadata={}) {
@@ -52,6 +54,17 @@ async function recordEvent(env, eventType, sessionId, slug, attr, metadata={}) {
   await env.DB.prepare("INSERT INTO lumen_conversion_events (id,created_at,event_type,session_id,product_id,product_slug,source,medium,campaign,creative,offer_id,technical_canary,metadata) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)")
     .bind(id,new Date().toISOString(),eventType,sessionId,p?.id || null,slug || null,attr.source,attr.medium,attr.campaign,attr.creative,attr.offer,attr.technical_canary,JSON.stringify(metadata)).run();
   return id;
+}
+async function syncLeadToCrm(env, {leadId, p, slug, email, company, details, attr}) {
+  if (attr.technical_canary) return {synced:false,reason:"technical_canary"};
+  const inquiryId = `INQ-CONV-${leadId.replace(/^CL-/,"")}`;
+  const need = clean(details,1800) || `Interés comercial en ${p.name} (USD ${p.price_usd}). Solicitud originada en LUMEN Conversion Loop.`;
+  const sourceBits = ["lumen_conversion", attr.source, attr.medium, attr.campaign].filter(Boolean).map(x=>clean(x,50));
+  const source = clean(sourceBits.join("_"),180);
+  await env.DB.prepare("INSERT OR IGNORE INTO lumen_public_inquiries(id,created_at,service_id,email,company,name,need,source,processed) VALUES(?,?,?,?,?,?,?,?,0)")
+    .bind(inquiryId,new Date().toISOString(),p.service_id,email,company,"",need,source).run();
+  await env.DB.prepare("UPDATE lumen_conversion_leads SET status='crm_synced' WHERE id=?").bind(leadId).run();
+  return {synced:true,inquiry_id:inquiryId,service_id:p.service_id,product_slug:slug};
 }
 function session(req) {
   return clean(cookieValue(req,"lumen_sid"),80) || `SID-${crypto.randomUUID().replaceAll("-","").slice(0,20).toUpperCase()}`;
@@ -92,6 +105,7 @@ async function stats(env) {
   const counts = await env.DB.prepare("SELECT event_type, COUNT(*) AS n FROM lumen_conversion_events WHERE technical_canary=0 GROUP BY event_type").all();
   const products = await env.DB.prepare("SELECT product_id, product_slug, event_type, COUNT(*) AS n FROM lumen_conversion_events WHERE technical_canary=0 GROUP BY product_id,product_slug,event_type ORDER BY product_slug,event_type").all();
   const leads = await env.DB.prepare("SELECT COUNT(*) AS n FROM lumen_conversion_leads WHERE technical_canary=0").first();
+  const crm = await env.DB.prepare("SELECT COUNT(*) AS n FROM lumen_conversion_leads WHERE technical_canary=0 AND status='crm_synced'").first();
   let settled = { orders:0, realizedRevenueUsd:0, byProduct:[] };
   try {
     const total = await env.DB.prepare("SELECT COUNT(*) AS n, COALESCE(SUM(amount_usd),0) AS usd FROM lumen_x402_receipts WHERE status='settled_verified'").first();
@@ -102,6 +116,7 @@ async function stats(env) {
     ok:true, service:SERVICE, version:VERSION,
     funnel:Object.fromEntries((counts.results || []).map(r=>[r.event_type,Number(r.n || 0)])),
     qualifiedLeads:Number(leads?.n || 0),
+    crmSyncedLeads:Number(crm?.n || 0),
     productEvents:products.results || [],
     settlement:settled,
     attributionTruth:{
@@ -110,6 +125,7 @@ async function stats(env) {
       exactSourceToSettlement:false,
       reason:"x402 receipt ledger does not yet persist conversion session/campaign correlation",
     },
+    crmTruth:{qualifiedIntentCreatesCanonicalInquiry:true,technicalCanariesExcluded:true},
     revenueRule:"Only x402 receipts with status settled_verified count as realized revenue",
   };
 }
@@ -124,7 +140,7 @@ export default {
     try {
       if (request.method === "GET" && path === "/health") {
         await ensureSchema(env);
-        return Response.json({ok:true,service:SERVICE,version:VERSION,x402:X402_BASE,paidSpend:false},{headers});
+        return Response.json({ok:true,service:SERVICE,version:VERSION,x402:X402_BASE,paidSpend:false,crmBridge:true},{headers});
       }
       if (request.method === "GET" && (path === "/" || path === "/catalog")) {
         if (path === "/catalog") await recordEvent(env,"catalog_visit",sid,null,attr);
@@ -132,7 +148,7 @@ export default {
         return new Response(catalogHtml(attr),{status:200,headers});
       }
       if (request.method === "GET" && path === "/catalog.json") {
-        return Response.json({ok:true,products:Object.entries(PRODUCTS).map(([slug,p])=>({...p,slug,offerUrl:`${url.origin}/offer/${slug}`,checkoutUrl:`${X402_BASE}/buy/${slug}`})),paidMediaSpend:false},{headers});
+        return Response.json({ok:true,products:Object.entries(PRODUCTS).map(([slug,p])=>({...p,slug,offerUrl:`${url.origin}/offer/${slug}`,checkoutUrl:`${X402_BASE}/buy/${slug}`})),paidMediaSpend:false,crmBridge:true},{headers});
       }
       if (request.method === "GET" && path === "/stats") {
         return Response.json(await stats(env),{headers});
@@ -154,6 +170,9 @@ export default {
         target.searchParams.set("conversion_event",eventId);
         target.searchParams.set("conversion_session",sid);
         if (attr.campaign) target.searchParams.set("campaign",attr.campaign);
+        if (attr.source) target.searchParams.set("source",attr.source);
+        if (attr.medium) target.searchParams.set("medium",attr.medium);
+        if (attr.creative) target.searchParams.set("creative",attr.creative);
         headers.set("location",target.toString());
         return new Response(null,{status:302,headers});
       }
@@ -170,10 +189,11 @@ export default {
         const leadId=`CL-${crypto.randomUUID().replaceAll("-","").slice(0,20).toUpperCase()}`;
         await env.DB.prepare("INSERT INTO lumen_conversion_leads (id,created_at,session_id,product_id,product_slug,email,company,details,source,medium,campaign,creative,status,technical_canary) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
           .bind(leadId,new Date().toISOString(),sid,p.id,slug,email,company,details,attr.source,attr.medium,attr.campaign,attr.creative,"new",attr.technical_canary).run();
-        await recordEvent(env,"qualified_intent",sid,slug,attr,{lead_id:leadId});
+        const crm=await syncLeadToCrm(env,{leadId,p,slug,email,company,details,attr});
+        await recordEvent(env,"qualified_intent",sid,slug,attr,{lead_id:leadId,crm});
         const q=qs(attr); const go=`/go/${slug}${q?`?${q}`:""}`;
         headers.set("content-type","text/html; charset=utf-8");
-        return new Response(page("Consulta recibida",`<main class="card"><h1>Consulta recibida.</h1><p class="sub">LUMEN registró tu interés en ${html(p.name)}. Si ya querés avanzar, podés iniciar el checkout ahora.</p><div class="actions"><a class="btn" href="${html(go)}">Comprar por USD ${p.price_usd}</a><a class="btn secondary" href="/catalog">Ver catálogo</a></div></main>`),{status:200,headers});
+        return new Response(page("Consulta recibida",`<main class="card"><h1>Consulta recibida.</h1><p class="sub">LUMEN registró tu interés en ${html(p.name)} y lo envió al flujo comercial. Si ya querés avanzar, podés iniciar el checkout ahora.</p><div class="actions"><a class="btn" href="${html(go)}">Comprar por USD ${p.price_usd}</a><a class="btn secondary" href="/catalog">Ver catálogo</a></div></main>`),{status:200,headers});
       }
       return new Response("Not found",{status:404,headers});
     } catch (error) {
