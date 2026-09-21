@@ -43,15 +43,14 @@ jobs:
         run: |
           curl -fsS "$X402_FACILITATOR/health" -o /tmp/facilitator-health.json
           curl -fsS "$X402_FACILITATOR/supported" -o /tmp/facilitator-supported.json
-          cat /tmp/facilitator-health.json
-          cat /tmp/facilitator-supported.json
+          cat /tmp/facilitator-health.json; echo
+          cat /tmp/facilitator-supported.json; echo
           python3 - <<'PY'
           import json
           supported=json.load(open('/tmp/facilitator-supported.json'))
-          blob=json.dumps(supported).lower()
-          assert 'eip155:8453' in blob, supported
-          assert 'exact' in blob or 'v2' in blob or '"version": 2' in blob or '"version": "v2"' in blob, supported
-          print({'facilitator':'ok','base_mainnet':True,'network':'eip155:8453'})
+          kinds=supported.get('kinds') or []
+          assert any(k.get('x402Version') == 2 and k.get('scheme') == 'exact' and k.get('network') == 'eip155:8453' for k in kinds), supported
+          print({'facilitator':'ok','base_mainnet':True,'network':'eip155:8453','x402Version':2,'scheme':'exact'})
           PY
 
       - name: Set up Node
@@ -73,22 +72,44 @@ jobs:
         working-directory: .lumen/x402-worker
         run: npx wrangler deploy
 
-      - name: Verify public health and catalog
+      - name: Verify public health catalog and zero revenue truth
         shell: bash
         run: |
-          for i in {1..12}; do
-            health=$(curl -sS -o /tmp/x402-health.json -w '%{http_code}' "$X402_BASE_URL/health" || true)
-            catalog=$(curl -sS -o /tmp/x402-catalog.json -w '%{http_code}' "$X402_BASE_URL/catalog" || true)
-            stats=$(curl -sS -o /tmp/x402-stats.json -w '%{http_code}' "$X402_BASE_URL/stats" || true)
-            if [[ "$health" == "200" && "$catalog" == "200" && "$stats" == "200" ]]; then
-              jq -e --arg facilitator "$X402_FACILITATOR" '.ok == true and .x402 == "LIVE" and .network == "eip155:8453" and .asset == "USDC" and .facilitator == $facilitator and .recipientConfigured == true and .outgoingSpendEnabled == false' /tmp/x402-health.json >/dev/null
-              jq -e --arg recipient "$X402_EXPECTED_RECIPIENT" --arg facilitator "$X402_FACILITATOR" '.settlement.recipient == $recipient and .settlement.networkId == "eip155:8453" and .settlement.asset == "USDC" and .settlement.facilitator == $facilitator and .settlement.outgoingSpendEnabled == false and (.products|length) == 6' /tmp/x402-catalog.json >/dev/null
-              jq -e --arg recipient "$X402_EXPECTED_RECIPIENT" --arg facilitator "$X402_FACILITATOR" '.recipient == $recipient and .network == "Base" and .asset == "USDC" and .facilitator == $facilitator and .realizedRevenueUsd >= 0' /tmp/x402-stats.json >/dev/null
-              break
-            fi
-            sleep 5
-          done
+          health=$(curl -sS -o /tmp/x402-health.json -w '%{http_code}' "$X402_BASE_URL/health" || true)
+          catalog=$(curl -sS -o /tmp/x402-catalog.json -w '%{http_code}' "$X402_BASE_URL/catalog" || true)
+          stats=$(curl -sS -o /tmp/x402-stats.json -w '%{http_code}' "$X402_BASE_URL/stats" || true)
+          echo "health_http=$health"; cat /tmp/x402-health.json; echo
+          echo "catalog_http=$catalog"; cat /tmp/x402-catalog.json; echo
+          echo "stats_http=$stats"; cat /tmp/x402-stats.json; echo
           [[ "$health" == "200" && "$catalog" == "200" && "$stats" == "200" ]]
+          python3 - <<'PY'
+          import json
+          health=json.load(open('/tmp/x402-health.json'))
+          catalog=json.load(open('/tmp/x402-catalog.json'))
+          stats=json.load(open('/tmp/x402-stats.json'))
+          recipient='0x04285DE6A083CEb28fb0C254a2ed0F5fdB2eeD28'
+          facilitator='https://facilitator.xpay.sh'
+          assert health.get('ok') is True, health
+          assert health.get('x402') == 'LIVE', health
+          assert health.get('network') == 'eip155:8453', health
+          assert health.get('asset') == 'USDC', health
+          assert health.get('facilitator') == facilitator, health
+          assert health.get('recipientConfigured') is True, health
+          assert health.get('outgoingSpendEnabled') is False, health
+          settlement=catalog.get('settlement') or {}
+          assert settlement.get('recipient') == recipient, settlement
+          assert settlement.get('networkId') == 'eip155:8453', settlement
+          assert settlement.get('asset') == 'USDC', settlement
+          assert settlement.get('facilitator') == facilitator, settlement
+          assert settlement.get('outgoingSpendEnabled') is False, settlement
+          assert len(catalog.get('products') or []) == 6, catalog
+          assert stats.get('recipient') == recipient, stats
+          assert stats.get('network') == 'Base', stats
+          assert stats.get('asset') == 'USDC', stats
+          assert stats.get('facilitator') == facilitator, stats
+          assert float(stats.get('realizedRevenueUsd') or 0) >= 0, stats
+          print({'public_checkout':'ok','products':6,'realizedRevenueUsd':stats.get('realizedRevenueUsd')})
+          PY
 
       - name: Verify real x402 payment challenge without spending
         shell: bash
@@ -114,7 +135,7 @@ jobs:
           assert req.get('network') == 'eip155:8453', req
           assert req.get('payTo','').lower() == '0x04285de6a083ceb28fb0c254a2ed0f5fdb2eed28', req
           assert int(req.get('amount') or 0) == 5000000, req
-          print({'x402_challenge':'ok','network':req.get('network'),'amount':req.get('amount'),'asset':req.get('asset'),'payTo':req.get('payTo')})
+          print({'x402_challenge':'ok','network':req.get('network'),'amount_atomic':req.get('amount'),'asset':req.get('asset'),'payTo':req.get('payTo')})
           PY
 
       - name: Deployment summary
