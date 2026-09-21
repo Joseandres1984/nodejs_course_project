@@ -2,6 +2,8 @@ import { Hono } from "hono";
 import { paymentMiddleware } from "@x402/hono";
 import { x402ResourceServer, HTTPFacilitatorClient } from "@x402/core/server";
 import { ExactEvmScheme } from "@x402/evm/exact/server";
+import { createPaywall } from "@x402/paywall";
+import { evmPaywall } from "@x402/paywall/evm";
 
 const SERVICE = "lumen-zero-x402";
 const VERSION = "1.4-x402-human-paywall";
@@ -93,10 +95,15 @@ for (const [slug, product] of Object.entries(PRODUCTS)) {
     mimeType: "application/json",
   };
 }
+const humanPaywall = createPaywall()
+  .withNetwork(evmPaywall)
+  .withConfig({ appName:"LUMEN", testnet:false })
+  .build();
 const x402Gate = paymentMiddleware(
   paidRoutes,
   resourceServer,
-  { appName:"LUMEN", testnet:false },
+  undefined,
+  humanPaywall,
 );
 
 app.use("*", async (c, next) => {
