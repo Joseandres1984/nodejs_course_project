@@ -36,6 +36,7 @@ jobs:
           node --check .lumen/dashboard/full_worker.js
           node --check .lumen/dashboard/recovery_worker.js
           node --check .lumen/dashboard/refresh_worker.js
+          node --check .lumen/dashboard/pricing_worker.js
           node --check .lumen/public-worker/worker.js
       - name: Verify commercial catalog stays synchronized
         run: python -m unittest discover -s .lumen/runtime -p 'test_service_catalog_sync.py'
