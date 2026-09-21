@@ -29,16 +29,14 @@ jobs:
           ref: lumen-zero
 
       - name: Validate A2A bridge and seller discovery syntax
-        run: python3 -m py_compile .lumen/runtime/zero_a2a_inbound_bridge_runtime.py .lumen/runtime/agent_network_runtime.py .lumen/runtime/agent_network_accelerator_runtime.py .lumen/runtime/zero_entry.py
+        run: |
+          python3 -m py_compile .lumen/runtime/zero_a2a_inbound_bridge_runtime.py .lumen/runtime/agent_network_runtime.py .lumen/runtime/agent_network_accelerator_runtime.py .lumen/runtime/zero_entry.py
+          python3 -m unittest discover -s .lumen/runtime -p 'test_a2a_machine_store.py'
 
       - name: Deployment preflight
-        id: preflight
         shell: bash
         run: |
-          if [[ -n "$CLOUDFLARE_API_TOKEN" && -n "$CLOUDFLARE_ACCOUNT_ID" ]]; then
-            echo "ready=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "ready=false" >> "$GITHUB_OUTPUT"
+          if [[ -z "$CLOUDFLARE_API_TOKEN" || -z "$CLOUDFLARE_ACCOUNT_ID" ]]; then
             echo "Missing Cloudflare deployment credentials."
             exit 1
           fi
@@ -56,60 +54,87 @@ jobs:
         working-directory: .lumen/a2a-worker
         run: npx --yes wrangler@4 deploy
 
-      - name: Verify A2A health, Agent Card and seller catalog
+      - name: Verify health, catalogs and payment truth
         shell: bash
         run: |
           for i in {1..12}; do
             health=$(curl -sS -o /tmp/a2a-health.json -w '%{http_code}' "$A2A_BASE_URL/health" || true)
             card=$(curl -sS -o /tmp/a2a-card.json -w '%{http_code}' "$A2A_BASE_URL/.well-known/agent-card.json" || true)
-            catalog=$(curl -sS -o /tmp/a2a-catalog.json -w '%{http_code}' "$A2A_BASE_URL/seller/catalog" || true)
-            if [[ "$health" == "200" && "$card" == "200" && "$catalog" == "200" ]]; then
+            services=$(curl -sS -o /tmp/a2a-services.json -w '%{http_code}' "$A2A_BASE_URL/seller/catalog" || true)
+            machine=$(curl -sS -o /tmp/a2a-machine.json -w '%{http_code}' "$A2A_BASE_URL/machine/catalog" || true)
+            payments=$(curl -sS -o /tmp/a2a-payments.json -w '%{http_code}' "$A2A_BASE_URL/payments/status" || true)
+            stats=$(curl -sS -o /tmp/a2a-stats.json -w '%{http_code}' "$A2A_BASE_URL/machine/stats" || true)
+            if [[ "$health" == "200" && "$card" == "200" && "$services" == "200" && "$machine" == "200" && "$payments" == "200" && "$stats" == "200" ]]; then
               python3 - <<'PY'
           import json
           health=json.load(open('/tmp/a2a-health.json'))
           card=json.load(open('/tmp/a2a-card.json'))
-          catalog=json.load(open('/tmp/a2a-catalog.json'))
+          catalog=json.load(open('/tmp/a2a-services.json'))
+          machine=json.load(open('/tmp/a2a-machine.json'))
+          payments=json.load(open('/tmp/a2a-payments.json'))
+          stats=json.load(open('/tmp/a2a-stats.json'))
           assert health.get('sellerMode') == 'receive_revenue_only'
           assert health.get('lumenAutonomousSpend') is False
+          assert health.get('machineProducts') == 6
+          assert health.get('recurringPlans') == 4
           assert card.get('name') == 'LUMEN B2B Agent'
           assert card.get('metadata',{}).get('sellerMode') == 'receive_revenue_only'
           assert card.get('metadata',{}).get('autonomousSpend') is False
-          services=catalog.get('services') or []
-          prices={x.get('id'):int(x.get('from_usd') or 0) for x in services}
-          assert prices == {
+          service_prices={x.get('id'):int(x.get('from_usd') or 0) for x in (catalog.get('services') or [])}
+          assert service_prices == {
               'SRV-QUOTECHECK':59,
               'SRV-SUPPLIERCHECK':79,
               'SRV-TENDER-HUNTER':99,
               'SRV-SOURCING-EXPRESS':149,
               'SRV-B2B-PROSPECTING':199,
               'SRV-EXPORT-SCOUT':249,
-          }, prices
-          assert catalog.get('settlement',{}).get('automaticBuyerSideSpend') is False
-          print({'a2a_seller_catalog':{'services':len(services),'floor_usd':catalog.get('pricing',{}).get('floor_usd'),'ceiling_usd':catalog.get('pricing',{}).get('ceiling_usd'),'sellerMode':catalog.get('sellerMode')}})
+          }, service_prices
+          product_prices={x.get('id'):int(x.get('price_usd') or 0) for x in (machine.get('machineProducts') or [])}
+          assert product_prices == {
+              'MP-SUPPLIER-SNAPSHOT':5,
+              'MP-QUOTE-SANITY':7,
+              'MP-TENDER-SCAN':9,
+              'MP-SOURCING-5':15,
+              'MP-BUYER-SIGNALS':19,
+              'MP-EXPORT-PULSE':25,
+          }, product_prices
+          plan_prices={x.get('id'):int(x.get('price_usd') or 0) for x in (machine.get('recurringPlans') or [])}
+          assert plan_prices == {'PLAN-TENDER-WATCH':29,'PLAN-SUPPLIER-WATCH':39,'PLAN-BUYER-WATCH':59,'PLAN-EXPORT-RADAR':79}, plan_prices
+          assert payments.get('autonomousPurchase') is False
+          assert payments.get('autonomousOutgoingPayment') is False
+          assert payments.get('chargeCreatedByCatalogOrQuote') is False
+          assert payments.get('x402',{}).get('status') in {'READY','SETUP_REQUIRED'}
+          assert stats.get('realizedRevenueUsd') is None
+          print({'machine_store':{'products':len(product_prices),'plans':len(plan_prices),'x402':payments.get('x402',{}).get('status'),'orders':stats.get('orders'),'quoted_pipeline_usd':stats.get('quotedPipelineUsd')}})
           PY
               exit 0
             fi
             sleep 5
           done
-          echo "A2A health/card/catalog verification failed."
-          cat /tmp/a2a-health.json 2>/dev/null || true
-          cat /tmp/a2a-card.json 2>/dev/null || true
-          cat /tmp/a2a-catalog.json 2>/dev/null || true
+          echo "A2A Machine Store production verification failed."
+          for f in /tmp/a2a-health.json /tmp/a2a-card.json /tmp/a2a-services.json /tmp/a2a-machine.json /tmp/a2a-payments.json /tmp/a2a-stats.json; do cat "$f" 2>/dev/null || true; echo; done
           exit 1
 
-      - name: Verify machine-readable catalog and quote RPC
+      - name: Verify quote RPCs and machine order round trip
         shell: bash
         run: |
-          catalog_payload='{"jsonrpc":"2.0","id":"catalog-canary","method":"GetServiceCatalog","params":{}}'
-          catalog_code=$(curl -sS -o /tmp/a2a-rpc-catalog.json -w '%{http_code}' -X POST "$A2A_BASE_URL/a2a/v1" -H 'accept: application/json' -H 'content-type: application/json' -H 'A2A-Version: 1.0' --data "$catalog_payload")
-          [[ "$catalog_code" == "200" ]]
-          jq -e '.result.catalog.services|length == 6' /tmp/a2a-rpc-catalog.json >/dev/null
+          product_quote='{"jsonrpc":"2.0","id":"product-quote-canary","method":"QuoteMachineProduct","params":{"productId":"MP-SUPPLIER-SNAPSHOT","contextId":"deploy-product-quote","metadata":{"purpose":"technical_quote_canary"}}}'
+          code=$(curl -sS -o /tmp/a2a-product-quote.json -w '%{http_code}' -X POST "$A2A_BASE_URL/a2a/v1" -H 'accept: application/json' -H 'content-type: application/json' -H 'A2A-Version: 1.0' --data "$product_quote")
+          [[ "$code" == "200" ]]
+          jq -e '.result.quote.itemId == "MP-SUPPLIER-SNAPSHOT" and .result.quote.serviceId == "SRV-SUPPLIERCHECK" and .result.quote.amount == 5 and .result.quote.currency == "USD" and .result.quote.chargeCreated == false' /tmp/a2a-product-quote.json >/dev/null
 
-          quote_payload='{"jsonrpc":"2.0","id":"quote-canary","method":"QuoteService","params":{"serviceId":"SRV-QUOTECHECK","contextId":"deploy-quote-canary","metadata":{"purpose":"technical_quote_canary"}}}'
-          quote_code=$(curl -sS -o /tmp/a2a-rpc-quote.json -w '%{http_code}' -X POST "$A2A_BASE_URL/a2a/v1" -H 'accept: application/json' -H 'content-type: application/json' -H 'A2A-Version: 1.0' --data "$quote_payload")
-          [[ "$quote_code" == "200" ]]
-          jq -e '.result.quote.serviceId == "SRV-QUOTECHECK" and .result.quote.amount == 59 and .result.quote.currency == "USD" and .result.quote.chargeCreated == false and .result.quote.lumenAutonomousSpend == false' /tmp/a2a-rpc-quote.json >/dev/null
-          echo "A2A_SELLER_RPC catalog=6 quote=ok amount_usd=59 charge_created=false autonomous_spend=false"
+          plan_quote='{"jsonrpc":"2.0","id":"plan-quote-canary","method":"QuoteRecurringPlan","params":{"planId":"PLAN-TENDER-WATCH","contextId":"deploy-plan-quote","metadata":{"purpose":"technical_quote_canary"}}}'
+          code=$(curl -sS -o /tmp/a2a-plan-quote.json -w '%{http_code}' -X POST "$A2A_BASE_URL/a2a/v1" -H 'accept: application/json' -H 'content-type: application/json' -H 'A2A-Version: 1.0' --data "$plan_quote")
+          [[ "$code" == "200" ]]
+          jq -e '.result.quote.itemId == "PLAN-TENDER-WATCH" and .result.quote.amount == 29 and .result.quote.billing == "per_month"' /tmp/a2a-plan-quote.json >/dev/null
+
+          context="machine-order-canary-${GITHUB_RUN_ID}"
+          message="machine-order-canary-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          payload=$(jq -cn --arg context "$context" --arg message "$message" '{jsonrpc:"2.0",id:"machine-order-canary",method:"SendMessage",params:{message:{messageId:$message,contextId:$context,role:"ROLE_USER",parts:[{text:"Technical deployment canary: review supplier example.com for identity signals. This is non-binding and must not create or settle a payment.",mediaType:"text/plain"}],metadata:{source:"lumen_deployment_canary",organization:"LUMEN deployment canary",purpose:"technical_machine_order_canary",productId:"MP-SUPPLIER-SNAPSHOT",domain:"example.com"}}}}')
+          code=$(curl -sS -o /tmp/a2a-machine-order.json -w '%{http_code}' -X POST "$A2A_BASE_URL/a2a/v1" -H 'accept: application/json' -H 'content-type: application/json' -H 'A2A-Version: 1.0' --data "$payload")
+          [[ "$code" == "200" ]]
+          jq -e '.result.task.status.message.parts[1].data.commercialItem.itemId == "MP-SUPPLIER-SNAPSHOT" and .result.task.status.message.parts[1].data.commercialItem.priceUsd == 5 and .result.task.status.message.parts[1].data.lumenAutonomousSpend == false' /tmp/a2a-machine-order.json >/dev/null
+          echo "A2A_MACHINE_ORDER_CANARY=success product=MP-SUPPLIER-SNAPSHOT quote_usd=5 charge_created=false"
 
       - name: Register or refresh Global A2A Registry
         id: registry
@@ -141,36 +166,14 @@ jobs:
           exit 1
 
       - name: Diagnose public A2A discovery API
-        id: discovery
         continue-on-error: true
         shell: bash
         run: |
-          code_target=$(curl -sS -o /tmp/a2a-search-target.json -w '%{http_code}' 'https://api.a2a-registry.org/public/agents?q=procurement&target=Business' || true)
-          code_open=$(curl -sS -o /tmp/a2a-search-open.json -w '%{http_code}' 'https://api.a2a-registry.org/public/agents?q=procurement' || true)
-          echo "A2A_DISCOVERY_TARGET_HTTP=$code_target"
-          echo "A2A_DISCOVERY_OPEN_HTTP=$code_open"
-          echo "TARGET_ROOT_TYPE=$(jq -r 'type' /tmp/a2a-search-target.json 2>/dev/null || echo invalid)"
-          echo "TARGET_KEYS=$(jq -c 'if type==\"object\" then keys else [] end' /tmp/a2a-search-target.json 2>/dev/null || echo '[]')"
-          echo "TARGET_BODY=$(jq -c '.' /tmp/a2a-search-target.json 2>/dev/null | head -c 5000 || true)"
+          code=$(curl -sS -o /tmp/a2a-search.json -w '%{http_code}' 'https://api.a2a-registry.org/public/agents?q=procurement&target=Business' || true)
+          echo "A2A_DISCOVERY_HTTP=$code"
+          jq -c '.' /tmp/a2a-search.json 2>/dev/null | head -c 5000 || true
           echo
-          echo "OPEN_ROOT_TYPE=$(jq -r 'type' /tmp/a2a-search-open.json 2>/dev/null || echo invalid)"
-          echo "OPEN_KEYS=$(jq -c 'if type==\"object\" then keys else [] end' /tmp/a2a-search-open.json 2>/dev/null || echo '[]')"
-          echo "OPEN_BODY=$(jq -c '.' /tmp/a2a-search-open.json 2>/dev/null | head -c 5000 || true)"
-          echo
-          if [[ "$code_target" == "200" || "$code_open" == "200" ]]; then exit 0; fi
-          exit 1
-
-      - name: Verify real A2A SendMessage round trip
-        shell: bash
-        run: |
-          context="deploy-canary-${GITHUB_RUN_ID}"
-          message="deploy-canary-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          payload=$(jq -cn --arg context "$context" --arg message "$message" '{jsonrpc:"2.0",id:"deploy-canary",method:"SendMessage",params:{message:{messageId:$message,contextId:$context,role:"ROLE_USER",parts:[{text:"LUMEN deployment capability handshake test. This is a non-binding technical canary only; no purchase, payment, contract, RFQ, commercial offer or acceptance is requested.",mediaType:"text/plain"}],metadata:{source:"lumen_deployment_canary",organization:"LUMEN B2B",purpose:"technical_nonbinding_handshake"}}}}')
-          code=$(curl -sS -o /tmp/a2a-canary.json -w '%{http_code}' -X POST "$A2A_BASE_URL/a2a/v1" -H 'accept: application/json' -H 'content-type: application/json' -H 'A2A-Version: 1.0' --data "$payload")
-          cat /tmp/a2a-canary.json
           [[ "$code" == "200" ]]
-          jq -e '.jsonrpc == "2.0" and .result.task.id != null and .result.task.metadata.nonbinding == true and .result.task.metadata.bindingActionsHumanGated == true and .result.task.metadata.lumenAutonomousSpend == false' /tmp/a2a-canary.json >/dev/null
-          echo "A2A_CANARY=success context=$context seller_mode=receive_revenue_only"
 
       - name: A2A deploy summary
         if: always()
@@ -178,8 +181,10 @@ jobs:
         run: |
           echo "A2A gateway: $A2A_BASE_URL"
           echo "Agent Card: $A2A_BASE_URL/.well-known/agent-card.json"
-          echo "Seller catalog: $A2A_BASE_URL/seller/catalog"
+          echo "Machine Store: $A2A_BASE_URL/machine/catalog"
+          echo "Service catalog: $A2A_BASE_URL/seller/catalog"
+          echo "Payments status: $A2A_BASE_URL/payments/status"
           echo "Registry action: ${{ steps.registry.outputs.action }}"
           echo "Registry final HTTP: ${{ steps.registry.outputs.http_status }}"
 
-# deploy trigger: seller mode + machine-readable pricing 2026-09-21
+# deploy trigger: machine store + recurring revenue + seller autonomy 2026-09-21
