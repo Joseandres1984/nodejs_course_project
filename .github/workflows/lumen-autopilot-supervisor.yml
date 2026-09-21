@@ -9,8 +9,8 @@ on:
     workflows: ["LUMEN Zero Runtime"]
     types: [completed]
   schedule:
-    # Independent free backstop. Normal operation is event-driven from workflow_run.
-    - cron: "3,23,43 * * * *"
+    # Independent free backstop, staggered away from the production cron.
+    - cron: "1,11,21,31,41,51 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -25,16 +25,16 @@ jobs:
   keep-lumen-running:
     if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.head_branch == 'main' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 9
+    timeout-minutes: 8
     steps:
       - name: Hold target cadence after completed runtime
         if: ${{ github.event_name == 'workflow_run' }}
         shell: bash
         run: |
-          # A normal LUMEN cycle currently takes about 4 minutes. Waiting 5 minutes
-          # here targets roughly a 9-10 minute start-to-start cadence without
-          # keeping the production runtime itself resident.
-          sleep 300
+          # Runtime normally finishes well inside the five-minute production cadence.
+          # Give the primary scheduler four minutes to create the next cycle; the
+          # supervisor dispatches only when no queued/running successor exists.
+          sleep 240
 
       - name: Ensure an autonomous successor exists
         shell: bash
@@ -66,7 +66,7 @@ jobs:
           print(max(0, int((now - then).total_seconds())))
           PY
               )
-              if (( age < 900 )); then
+              if (( age < 600 )); then
                 echo "LUMEN_AUTOPILOT backstop=healthy latest_age_seconds=$age dispatch=false"
                 exit 0
               fi
