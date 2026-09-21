@@ -124,6 +124,10 @@ import company_identity_quality_runtime  # noqa: F401,E402
 import executive_secretary_log_bridge  # noqa: F401,E402
 import revenue_os_v3_runtime  # noqa: F401,E402
 import revenue_os_v31_alignment_runtime  # noqa: F401,E402
+# Revenue OS alignment above runs during bootstrap. Re-evaluate the same strict gates when outbound
+# actually executes so companies verified later in this cycle can receive the relevant paid-service
+# offer instead of falling back to a generic introduction. Caps, cooldowns and verification stay intact.
+import service_revenue_live_alignment_runtime  # noqa: F401,E402
 import communication_greeting_fix_runtime  # noqa: F401,E402
 
 # Development-mode Instagram apps cannot reliably receive public webhooks without Meta business
