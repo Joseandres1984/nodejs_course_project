@@ -80,6 +80,15 @@ try:
 except Exception as exc:
     print({"zero_instagram_control_consume": {"status": "degraded_fail_open", "error": f"{type(exc).__name__}: {str(exc)[:300]}"}}, flush=True)
 
+# One-time repair for the three exact posts José already approved in the Cloudflare console on
+# 2026-09-21. The broken/stale console deployment did not persist those commands into the canonical
+# D1 queue. The recovery module is fail-closed: immutable IDs + current content fingerprints only,
+# no rejected/published override and no authority for any future post.
+try:
+    zero_instagram_control_bridge_runtime.recover_explicit_approvals_once()
+except Exception as exc:
+    print({"zero_instagram_approval_recovery": {"status": "degraded_fail_closed", "error": f"{type(exc).__name__}: {str(exc)[:300]}", "future_posts_authorized": False}}, flush=True)
+
 # Preserve the exact non-persistence production bootstrap order previously used by Railway.
 import search_budget_atomic_runtime  # noqa: F401,E402
 # PostgreSQL-backed atomic claims fail closed once Railway/Postgres is gone. LUMEN Zero serializes
