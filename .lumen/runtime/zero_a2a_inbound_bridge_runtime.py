@@ -4,8 +4,8 @@ from __future__ import annotations
 
 The edge Worker acknowledges non-binding A2A messages immediately and stores them in D1. This
 bridge runs inside the normal LUMEN Zero cycle, applies the existing A2A commercial classifier,
-creates only unverified research work, and writes the resulting task state back to D1 for polling.
-It never promotes an external claim directly to a verified company/opportunity or binding deal.
+creates only unverified research work, and routes priced seller requests into the canonical service
+CRM. External-agent claims remain untrusted until normal verification. Binding actions stay gated.
 """
 
 import json
@@ -17,8 +17,16 @@ import app as lumen_app
 import d1_persistence_runtime as d1
 from a2a_inbound_bridge_runtime import process_inbound_record
 
-VERSION = "1.0-zero-a2a-d1-bridge"
+VERSION = "1.1-zero-a2a-machine-store-bridge"
 MAX_BATCH = 20
+CANONICAL_SERVICE_IDS = {
+    "SRV-QUOTECHECK",
+    "SRV-SUPPLIERCHECK",
+    "SRV-TENDER-HUNTER",
+    "SRV-SOURCING-EXPRESS",
+    "SRV-B2B-PROSPECTING",
+    "SRV-EXPORT-SCOUT",
+}
 
 
 def _now() -> str:
@@ -67,6 +75,14 @@ def _category(text: str) -> str:
     return "general B2B"
 
 
+def _float(value: Any) -> float | None:
+    try:
+        result = float(value)
+        return result if result >= 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
 def _ensure_research_lead(row: Dict[str, Any], outcome: Dict[str, Any], metadata: Dict[str, Any]) -> str | None:
     if outcome.get("status") != "candidate_unverified":
         return None
@@ -108,43 +124,120 @@ def _ensure_research_lead(row: Dict[str, Any], outcome: Dict[str, Any], metadata
     return lead_id
 
 
-def _task_json(raw: Any, outcome: Dict[str, Any], lead_id: str | None) -> str:
+def _ensure_service_inquiry(row: Dict[str, Any], outcome: Dict[str, Any], metadata: Dict[str, Any]) -> str | None:
+    """Promote a priced A2A seller request into the existing service CRM, never into a binding deal."""
+    if bool(int(row.get("binding_intent") or 0)):
+        return None
+    service_id = str(metadata.get("lumen_service_id") or metadata.get("serviceId") or metadata.get("service_id") or "").strip()
+    if service_id not in CANONICAL_SERVICE_IDS:
+        return None
+
+    inbound_id = str(row.get("id") or "")
+    inquiries = lumen_app.STATE.setdefault("service_inquiries", [])
+    existing = next((x for x in inquiries if str(x.get("a2a_inbound_id") or "") == inbound_id), None)
+    if existing:
+        return str(existing.get("id") or "") or None
+
+    counterparty = str(
+        outcome.get("counterparty_hint")
+        or metadata.get("organization")
+        or metadata.get("company")
+        or metadata.get("counterparty")
+        or metadata.get("agentName")
+        or "A2A buyer"
+    ).strip()[:180]
+    email = str(metadata.get("email") or metadata.get("contactEmail") or metadata.get("commercialEmail") or "").strip()[:180]
+    contact_name = str(metadata.get("name") or metadata.get("contactName") or metadata.get("agentName") or "").strip()[:120]
+    item_type = str(metadata.get("lumen_item_type") or "service").strip()[:40]
+    item_id = str(metadata.get("lumen_item_id") or metadata.get("lumen_product_id") or metadata.get("lumen_plan_id") or service_id).strip()[:100]
+    quoted_usd = _float(metadata.get("lumen_quote_usd"))
+    inquiry_id = f"INQ-A2A-{len(inquiries)+1:05d}"
+    inquiry = {
+        "id": inquiry_id,
+        "service_id": service_id,
+        "company": counterparty,
+        "name": contact_name,
+        "email": email,
+        "need": str(row.get("text") or "")[:1500],
+        "status": "new_unverified",
+        "source": "a2a_machine_store" if item_type in {"product", "plan"} else "a2a_service_request",
+        "source_kind": "external_agent_priced_request_unverified",
+        "a2a_inbound_id": inbound_id,
+        "a2a_context_id": row.get("context_id"),
+        "a2a_task_id": row.get("task_id"),
+        "a2a_opportunity_id": outcome.get("opportunity_id"),
+        "machine_item_type": item_type,
+        "machine_item_id": item_id,
+        "machine_product_id": str(metadata.get("lumen_product_id") or "")[:100],
+        "recurring_plan_id": str(metadata.get("lumen_plan_id") or "")[:100],
+        "quoted_amount_usd": quoted_usd,
+        "quote_id": str(metadata.get("lumen_quote_id") or "")[:120],
+        "billing": str(metadata.get("lumen_billing") or "")[:80],
+        "seller_mode": "receive_revenue_only",
+        "charge_created": False,
+        "binding": False,
+        "company_verified": False,
+        "contact_verified": False,
+        "evidence_status": "external_agent_claim_unverified",
+        "website": _safe_url(metadata),
+        "created_at": str(row.get("received_at") or _now()),
+    }
+    inquiries.append(inquiry)
+    lumen_app.STATE["service_inquiries"] = inquiries[-1000:]
+    return inquiry_id
+
+
+def _task_json(raw: Any, outcome: Dict[str, Any], lead_id: str | None, inquiry_id: str | None, metadata: Dict[str, Any]) -> str:
     try:
         task = json.loads(str(raw or "{}"))
         if not isinstance(task, dict):
             task = {}
     except Exception:
         task = {}
-    metadata = task.setdefault("metadata", {})
-    if not isinstance(metadata, dict):
-        metadata = {}
-        task["metadata"] = metadata
-    metadata.update({
+    task_meta = task.setdefault("metadata", {})
+    if not isinstance(task_meta, dict):
+        task_meta = {}
+        task["metadata"] = task_meta
+    task_meta.update({
         "bridgeStatus": outcome.get("status"),
         "priority": outcome.get("priority"),
         "priorityScore": outcome.get("priority_score"),
         "missingFields": list(outcome.get("missing_fields") or []),
         "opportunityId": outcome.get("opportunity_id"),
         "researchLeadId": lead_id,
+        "serviceInquiryId": inquiry_id,
+        "serviceId": metadata.get("lumen_service_id"),
+        "machineItemType": metadata.get("lumen_item_type"),
+        "machineItemId": metadata.get("lumen_item_id"),
+        "quotedAmountUsd": _float(metadata.get("lumen_quote_usd")),
+        "quoteId": metadata.get("lumen_quote_id"),
         "verificationRequired": True,
         "bindingActionsHumanGated": True,
         "bridgeVersion": VERSION,
     })
     current_status = task.setdefault("status", {})
-    if outcome.get("status") == "needs_clarification":
+    if outcome.get("status") in {"needs_clarification", "human_gate_required", "handshake_or_noncommercial", "unclassified_nonbinding"}:
         current_status["state"] = "TASK_STATE_INPUT_REQUIRED"
-    elif outcome.get("status") == "human_gate_required":
-        current_status["state"] = "TASK_STATE_INPUT_REQUIRED"
-    elif outcome.get("status") == "candidate_unverified":
+    elif outcome.get("status") == "candidate_unverified" or inquiry_id:
         current_status["state"] = "TASK_STATE_WORKING"
-    elif outcome.get("status") in {"handshake_or_noncommercial", "unclassified_nonbinding"}:
-        current_status["state"] = "TASK_STATE_INPUT_REQUIRED"
     current_status["timestamp"] = _now()
     return json.dumps(task, ensure_ascii=False, separators=(",", ":"), default=str)
 
 
 def ingest_pending() -> Dict[str, Any]:
-    report = {"version": VERSION, "status": "ok", "pending_seen": 0, "processed": 0, "research_leads_created": 0, "clarifications": 0, "candidate_unverified": 0, "human_gates": 0, "errors": 0, "updated_at": _now()}
+    report = {
+        "version": VERSION,
+        "status": "ok",
+        "pending_seen": 0,
+        "processed": 0,
+        "research_leads_created": 0,
+        "service_inquiries_created": 0,
+        "clarifications": 0,
+        "candidate_unverified": 0,
+        "human_gates": 0,
+        "errors": 0,
+        "updated_at": _now(),
+    }
     try:
         d1._request({"batch": [
             {"sql": "CREATE TABLE IF NOT EXISTS lumen_a2a_inbound (id TEXT PRIMARY KEY, received_at TEXT NOT NULL, context_id TEXT NOT NULL, task_id TEXT NOT NULL, remote_message_id TEXT, remote_metadata TEXT, text TEXT NOT NULL, binding_intent INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL, processed INTEGER NOT NULL DEFAULT 0, processed_at TEXT, bridge_status TEXT, opportunity_id TEXT, task_json TEXT NOT NULL)", "params": []},
@@ -176,17 +269,23 @@ def ingest_pending() -> Dict[str, Any]:
                 }
                 outcome = process_inbound_record(lumen_app.STATE, record)
                 lead_id = _ensure_research_lead(row, outcome, metadata)
+                inquiry_id = _ensure_service_inquiry(row, outcome, metadata)
                 if lead_id:
                     report["research_leads_created"] += 1
+                if inquiry_id:
+                    report["service_inquiries_created"] += 1
                 status = str(outcome.get("status") or "")
-                if status == "needs_clarification": report["clarifications"] += 1
-                if status == "candidate_unverified": report["candidate_unverified"] += 1
-                if status == "human_gate_required": report["human_gates"] += 1
+                if status == "needs_clarification":
+                    report["clarifications"] += 1
+                if status == "candidate_unverified":
+                    report["candidate_unverified"] += 1
+                if status == "human_gate_required":
+                    report["human_gates"] += 1
                 completed.append({
                     "id": str(row.get("id") or ""),
                     "bridge_status": status,
                     "opportunity_id": str(outcome.get("opportunity_id") or ""),
-                    "task_json": _task_json(row.get("task_json"), outcome, lead_id),
+                    "task_json": _task_json(row.get("task_json"), outcome, lead_id, inquiry_id, metadata),
                 })
                 report["processed"] += 1
             except Exception:
