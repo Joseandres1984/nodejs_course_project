@@ -1,5 +1,5 @@
 const SERVICE = "lumen-zero-a2a";
-const VERSION = "2.1-zero-a2a-machine-store-truth";
+const VERSION = "2.2-zero-a2a-x402-checkout-discovery";
 const PROTOCOL_VERSION = "1.0";
 const RATE_LIMIT_PER_HOUR = 30;
 const MAX_BODY_BYTES = 65536;
@@ -23,6 +23,15 @@ const MACHINE_PRODUCTS = [
   { id:"MP-BUYER-SIGNALS", name:"Buyer Signal Scan", price_usd:19, service_id:"SRV-B2B-PROSPECTING", billing:"per_request", desc:"Public buying-signal and target-company scan for one B2B offer/category." },
   { id:"MP-EXPORT-PULSE", name:"Export Market Pulse", price_usd:25, service_id:"SRV-EXPORT-SCOUT", billing:"per_request", desc:"Compact market/importer/distributor pulse for one product and destination market." },
 ];
+
+const MACHINE_PRODUCT_SLUGS = {
+  "MP-SUPPLIER-SNAPSHOT":"supplier-snapshot",
+  "MP-QUOTE-SANITY":"quote-sanity",
+  "MP-TENDER-SCAN":"tender-scan",
+  "MP-SOURCING-5":"sourcing-5",
+  "MP-BUYER-SIGNALS":"buyer-signals",
+  "MP-EXPORT-PULSE":"export-pulse",
+};
 
 const RECURRING_PLANS = [
   { id:"PLAN-TENDER-WATCH", name:"Tender Watch", price_usd:29, interval:"month", service_id:"SRV-TENDER-HUNTER", desc:"Recurring monitoring brief for one defined tender/opportunity category." },
@@ -62,9 +71,18 @@ function moneySummary(rows, key) {
   const values=rows.map(x=>Number(x[key]||0)).filter(x=>Number.isFinite(x));
   return { floor_usd:Math.min(...values), ceiling_usd:Math.max(...values), average_usd:Number((values.reduce((a,b)=>a+b,0)/values.length).toFixed(2)) };
 }
+function checkoutOrigin(env) {
+  return clean(env?.X402_CHECKOUT_URL,300).replace(/\/+$/g,"");
+}
+function productCheckoutUrl(productId, env) {
+  const base=checkoutOrigin(env);
+  const slug=MACHINE_PRODUCT_SLUGS[productId];
+  return base && slug ? `${base}/buy/${slug}` : null;
+}
 function paymentsStatus(env) {
   const recipient=clean(env?.X402_PAY_TO,180);
-  const configured=/^0x[a-fA-F0-9]{40}$/.test(recipient);
+  const checkout=checkoutOrigin(env);
+  const configured=/^0x[a-fA-F0-9]{40}$/.test(recipient) && /^https:\/\//i.test(checkout);
   return {
     sellerMode:"receive_revenue_only",
     outgoingSpendEnabled:false,
@@ -73,8 +91,14 @@ function paymentsStatus(env) {
       configured,
       network:clean(env?.X402_NETWORK || "base",60),
       facilitator:clean(env?.X402_FACILITATOR || "https://x402.org/facilitator",240),
-      recipientConfigured:configured,
-      requirement:configured?null:"A valid merchant recipient wallet address is required before x402 can collect real payments."
+      recipientConfigured:/^0x[a-fA-F0-9]{40}$/.test(recipient),
+      checkoutConfigured:/^https:\/\//i.test(checkout),
+      checkoutUrl:checkout||null,
+      catalogUrl:checkout?`${checkout}/catalog`:null,
+      statsUrl:checkout?`${checkout}/stats`:null,
+      asset:"USDC",
+      settlementRule:"Paid work is released only after the x402 checkout records verified settlement.",
+      requirement:configured?null:"A valid recipient wallet and public x402 checkout URL are required before real collection is advertised as ready."
     },
     existingSettlement:{
       status:"AVAILABLE_AFTER_COMMERCIAL_VALIDATION",
@@ -87,12 +111,13 @@ function paymentsStatus(env) {
   };
 }
 function machineCatalog(origin, env) {
+  const enrichedProducts=MACHINE_PRODUCTS.map(p=>({...p,x402CheckoutUrl:productCheckoutUrl(p.id,env)}));
   return {
     name:"LUMEN Machine Store",
     version:VERSION,
     mode:"agent_consumable_b2b_intelligence",
     currency:"USD",
-    machineProducts:MACHINE_PRODUCTS,
+    machineProducts:enrichedProducts,
     recurringPlans:RECURRING_PLANS,
     pricing:{ machine:moneySummary(MACHINE_PRODUCTS,"price_usd"), recurring:moneySummary(RECURRING_PLANS,"price_usd") },
     protocol:{
@@ -102,7 +127,10 @@ function machineCatalog(origin, env) {
       quotePlan:"JSON-RPC QuoteRecurringPlan",
       request:"A2A SendMessage with metadata.productId or metadata.planId",
       status:"GetTask / tasks/get",
-      payments:`${origin}/payments/status`
+      payments:`${origin}/payments/status`,
+      x402Checkout:checkoutOrigin(env)||null,
+      x402CheckoutCatalog:checkoutOrigin(env)?`${checkoutOrigin(env)}/catalog`:null,
+      paidProductFlow:"Open machineProducts[].x402CheckoutUrl, satisfy HTTP 402 in USDC on Base, then redeem the settled receipt with the concrete requirement."
     },
     payments:paymentsStatus(env),
     guardrails:{ noAutonomousSpend:true, noAutonomousPurchase:true, noBindingAcceptance:true, externalClaimsUntrustedUntilVerified:true }
@@ -117,6 +145,7 @@ function sellerCatalog(origin, env) {
     services:SERVICE_CATALOG,
     pricing:moneySummary(SERVICE_CATALOG,"from_usd"),
     machineStore:`${origin}/machine/catalog`,
+    machineCheckout:checkoutOrigin(env)||null,
     recurringPlans:RECURRING_PLANS,
     serviceRequestProtocol:{ discover:`${origin}/seller/catalog`, quote:"JSON-RPC QuoteService", request:"A2A SendMessage with metadata.serviceId", taskStatus:"GetTask / tasks/get" },
     settlement:paymentsStatus(env)
@@ -167,13 +196,15 @@ function agentCard(origin, env) {
       serviceCatalogUrl:`${origin}/seller/catalog`,
       machineCatalogUrl:`${origin}/machine/catalog`,
       paymentsStatusUrl:`${origin}/payments/status`,
+      x402CheckoutUrl:checkoutOrigin(env)||null,
+      x402CatalogUrl:checkoutOrigin(env)?`${checkoutOrigin(env)}/catalog`:null,
       quoteMethods:["QuoteService","QuoteMachineProduct","QuoteRecurringPlan"],
       autonomousSpend:false,
       bindingActionsHumanGated:true,
       x402Status:paymentsStatus(env).x402.status
     },
     skills:[
-      {id:"lumen-machine-store",name:"LUMEN Machine Store",description:"Discover low-cost per-request B2B intelligence products and recurring monitoring plans designed for agent consumption.",tags:["machine-commerce","paid-service","b2b","procurement","sourcing","seller-mode"]},
+      {id:"lumen-machine-store",name:"LUMEN Machine Store",description:"Discover low-cost per-request B2B intelligence products and recurring monitoring plans designed for agent consumption.",tags:["machine-commerce","paid-service","b2b","procurement","sourcing","seller-mode","x402"]},
       {id:"lumen-paid-service-catalog",name:"LUMEN paid B2B intelligence catalog",description:"Discover six full B2B intelligence and sourcing services with machine-readable USD launch pricing.",tags:["b2b","paid-service","catalog","quote","seller-mode","procurement"]},
       {id:"supplier-rfq-exchange",name:"Supplier RFQ exchange",description:"Receive and structure non-binding supplier quotation requests and clarification exchanges.",tags:["rfq","supplier","quotation","procurement","sourcing"]},
       {id:"buyer-requirement-intake",name:"Buyer requirement intake",description:"Receive a buyer need and route it into verification and sourcing.",tags:["buyer","requirements","sourcing","procurement","demand"]},
@@ -219,6 +250,7 @@ async function quoteRpc(payload,env,kind) {
   if (kind==="plan") item=PLAN_BY_ID[clean(params.planId||params.plan_id,80)];
   if (!item) return rpcError(id,-32602,`Unknown ${kind} identifier. Fetch the relevant catalog first.`);
   const quote=quoteFor(item,kind,clean(params.contextId||params.context_id,160));
+  if (kind==="product") quote.x402CheckoutUrl=productCheckoutUrl(item.id,env);
   await persistQuote(env,quote,safeMetadata(params.metadata));
   return json({jsonrpc:"2.0",id,result:{quote,payments:paymentsStatus(env)}});
 }
@@ -247,6 +279,7 @@ async function sendMessage(payload,env) {
   let quote=null;
   if (item && !binding) {
     quote=quoteFor(item,itemType,contextId);
+    if (product) quote.x402CheckoutUrl=productCheckoutUrl(product.id,env);
     await persistQuote(env,quote,metadata);
   }
   const state=binding?"TASK_STATE_INPUT_REQUIRED":"TASK_STATE_WORKING";
@@ -256,7 +289,7 @@ async function sendMessage(payload,env) {
       ? `LUMEN received ${item.name}. Non-binding launch quote: USD ${quote.amount}${item.interval?`/${item.interval}`:""}. No charge was created by this message. The request is queued for scope, counterparty and evidence verification.`
       : "LUMEN received the non-binding B2B message. Agents can discover machine products at /machine/catalog, full services at /seller/catalog, request a quote by JSON-RPC, and then send the concrete requirement with metadata.productId, metadata.planId or metadata.serviceId.";
   const taskData={acceptedMode:"nonbinding",sellerMode:"receive_revenue_only",queuedForVerification:true,inboundId,bindingActionsHumanGated:true,lumenAutonomousSpend:false};
-  if (item) taskData.commercialItem={itemType,itemId:item.id,itemName:item.name,serviceId:effectiveServiceId,priceUsd:quote.amount,billing:quote.billing};
+  if (item) taskData.commercialItem={itemType,itemId:item.id,itemName:item.name,serviceId:effectiveServiceId,priceUsd:quote.amount,billing:quote.billing,x402CheckoutUrl:product?productCheckoutUrl(product.id,env):null};
   if (quote) taskData.quote=quote;
   taskData.payments=paymentsStatus(env);
   const task=taskReply(contextId,taskId,state,replyText,taskData);
@@ -271,6 +304,7 @@ async function sendMessage(payload,env) {
     storedMetadata.lumen_quote_id=quote.quoteId;
     storedMetadata.lumen_billing=quote.billing;
     storedMetadata.lumen_seller_mode="receive_revenue_only";
+    if (product) storedMetadata.lumen_x402_checkout_url=productCheckoutUrl(product.id,env)||"";
   }
   await env.DB.prepare("INSERT INTO lumen_a2a_inbound(id,received_at,context_id,task_id,remote_message_id,remote_metadata,text,binding_intent,status,processed,task_json) VALUES(?,?,?,?,?,?,?,?,?,0,?)")
     .bind(inboundId,new Date().toISOString(),contextId,taskId,clean(message.messageId,180),JSON.stringify(storedMetadata),text,binding?1:0,binding?"human_gate_required":item?"priced_service_request_received":"received_nonbinding",JSON.stringify(task)).run();
@@ -311,7 +345,7 @@ export default {
     const url=new URL(request.url);
     if (request.method==="OPTIONS") return new Response(null,{status:204,headers:{"access-control-allow-origin":"*","access-control-allow-methods":"GET,POST,OPTIONS","access-control-allow-headers":"content-type,a2a-version,payment-signature"}});
     await ensureSchema(env);
-    if (request.method==="GET" && url.pathname==="/health") return json({ok:true,service:SERVICE,version:VERSION,protocol:PROTOCOL_VERSION,storage:"cloudflare-d1",sellerMode:"receive_revenue_only",catalogServices:SERVICE_CATALOG.length,machineProducts:MACHINE_PRODUCTS.length,recurringPlans:RECURRING_PLANS.length,x402:paymentsStatus(env).x402.status,bindingActionsHumanGated:true,lumenAutonomousSpend:false});
+    if (request.method==="GET" && url.pathname==="/health") return json({ok:true,service:SERVICE,version:VERSION,protocol:PROTOCOL_VERSION,storage:"cloudflare-d1",sellerMode:"receive_revenue_only",catalogServices:SERVICE_CATALOG.length,machineProducts:MACHINE_PRODUCTS.length,recurringPlans:RECURRING_PLANS.length,x402:paymentsStatus(env).x402.status,x402Checkout:paymentsStatus(env).x402.checkoutUrl,bindingActionsHumanGated:true,lumenAutonomousSpend:false});
     if (request.method==="GET" && url.pathname==="/seller/catalog") return json(sellerCatalog(url.origin,env),200,{"cache-control":"public, max-age=300"});
     if (request.method==="GET" && url.pathname==="/machine/catalog") return json(machineCatalog(url.origin,env),200,{"cache-control":"public, max-age=300"});
     if (request.method==="GET" && url.pathname==="/payments/status") return json(paymentsStatus(env),200,{"cache-control":"public, max-age=60"});
