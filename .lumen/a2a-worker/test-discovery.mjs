@@ -42,7 +42,7 @@ assert.ok(card.skills.some(x => x.id === "machine-paid-b2b-intelligence"));
 assert.ok(card.skills.filter(x => x.id !== "existing").every(x => Array.isArray(x.examples) && x.examples.length >= 2));
 
 const registryCard = applyRegistryIdentity(card);
-assert.equal(REGISTRY_PACKAGE_NAME, "github.joseandres1984.lumen_b2b_agent");
+assert.equal(REGISTRY_PACKAGE_NAME, "github.Joseandres1984.lumen_b2b_agent");
 assert.equal(registryCard.package_name, REGISTRY_PACKAGE_NAME);
 assert.equal(registryCard.metadata.registryPackageName, REGISTRY_PACKAGE_NAME);
 assert.equal(registryCard.metadata.registryIdentityProvider, "github");
