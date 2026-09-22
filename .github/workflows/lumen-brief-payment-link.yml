@@ -55,6 +55,7 @@ jobs:
       - name: Deployment preflight
         shell: bash
         run: |
+          set -euo pipefail
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
 
@@ -77,39 +78,142 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           ready=0
           for i in {1..18}; do
             ch=$(curl -sS -o /tmp/ch.json -w '%{http_code}' "$CONVERSION_BASE_URL/health?brief_link=${GITHUB_RUN_ID}-${i}" || true)
             xh=$(curl -sS -o /tmp/xh.json -w '%{http_code}' "$X402_BASE_URL/health?brief_link=${GITHUB_RUN_ID}-${i}" || true)
-            if [[ "$ch" == "200" && "$xh" == "200" ]] && [[ "$(jq -r '.briefLinkedCheckout // false' /tmp/ch.json)" == "true" ]] && [[ "$(jq -r '.briefLinkedFulfillment // false' /tmp/xh.json)" == "true" ]]; then
+            cflag=$(jq -r '.briefLinkedCheckout // false' /tmp/ch.json 2>/dev/null || echo false)
+            xflag=$(jq -r '.briefLinkedFulfillment // false' /tmp/xh.json 2>/dev/null || echo false)
+            if [[ "$ch" == "200" && "$xh" == "200" && "$cflag" == "true" && "$xflag" == "true" ]]; then
               ready=1
               break
             fi
             sleep 4
           done
-          [[ "$ready" == "1" ]]
+          if [[ "$ready" != "1" ]]; then
+            echo 'Conversion health:'
+            cat /tmp/ch.json || true
+            echo
+            echo 'x402 health:'
+            cat /tmp/xh.json || true
+            echo
+            echo 'ERROR_STAGE=edge_readiness'
+            exit 1
+          fi
 
           CJ=/tmp/lumen-brief-cookies.txt
           Q='src=technical-canary&medium=deploy&campaign=brief-link-canary&technical_canary=1'
-          curl -fsS -c "$CJ" -b "$CJ" "$CONVERSION_BASE_URL/offer/supplier-snapshot?$Q" >/dev/null
-          curl -sS -c "$CJ" -b "$CJ" -D /tmp/intent.headers -o /dev/null -X POST \
+
+          offer_code=$(curl -sS -c "$CJ" -b "$CJ" -o /tmp/offer.html -w '%{http_code}' "$CONVERSION_BASE_URL/offer/supplier-snapshot?$Q" || true)
+          if [[ "$offer_code" != "200" ]]; then
+            echo "ERROR_STAGE=offer status=$offer_code"
+            head -c 1200 /tmp/offer.html || true
+            exit 1
+          fi
+
+          intent_code=$(curl -sS -c "$CJ" -b "$CJ" -D /tmp/intent.headers -o /tmp/intent.body -w '%{http_code}' -X POST \
             -F 'email=technical-brief-link@example.invalid' \
             -F 'company=LUMEN Brief Link Canary' \
             -F 'details=Technical canary requirement for brief-to-payment trace verification only.' \
             -F 'next=checkout' \
-            "$CONVERSION_BASE_URL/intent/supplier-snapshot?$Q"
-          GO=$(awk 'BEGIN{IGNORECASE=1} /^location:/{gsub("\r",""); sub(/^location:[[:space:]]*/,""); print; exit}' /tmp/intent.headers)
-          echo "$GO" | grep -E '/go/supplier-snapshot\?.*brief_id=CL-' >/dev/null
+            "$CONVERSION_BASE_URL/intent/supplier-snapshot?$Q" || true)
+          if [[ "$intent_code" != "303" ]]; then
+            echo "ERROR_STAGE=intent status=$intent_code"
+            sed -n '1,30p' /tmp/intent.headers || true
+            head -c 1200 /tmp/intent.body || true
+            exit 1
+          fi
 
-          curl -sS -c "$CJ" -b "$CJ" -D /tmp/go.headers -o /dev/null "$CONVERSION_BASE_URL$GO"
-          XURL=$(awk 'BEGIN{IGNORECASE=1} /^location:/{gsub("\r",""); sub(/^location:[[:space:]]*/,""); print; exit}' /tmp/go.headers)
-          echo "$XURL" | grep -F "$X402_BASE_URL/buy/supplier-snapshot" >/dev/null
-          echo "$XURL" | grep -E 'brief_id=CL-' >/dev/null
+          GO=$(python3 - <<'PY'
+          import re
+          from pathlib import Path
+          text=Path('/tmp/intent.headers').read_text(errors='replace')
+          m=re.search(r'(?im)^location:\s*(.*?)\r?$', text)
+          if not m:
+              raise SystemExit('missing Location after intent')
+          print(m.group(1).strip())
+          PY
+          )
+          BRIEF_ID=$(python3 - "$GO" <<'PY'
+          import sys
+          from urllib.parse import urlparse, parse_qs
+          u=urlparse(sys.argv[1])
+          if u.path != '/go/supplier-snapshot':
+              raise SystemExit(f'unexpected go path: {u.path}')
+          q=parse_qs(u.query)
+          brief=(q.get('brief_id') or [''])[0]
+          if not brief.startswith('CL-'):
+              raise SystemExit('missing/invalid brief_id in go redirect')
+          print(brief)
+          PY
+          )
+          echo "TRACE_STAGE=intent_to_go brief_id=$BRIEF_ID"
+
+          go_code=$(curl -sS -c "$CJ" -b "$CJ" -D /tmp/go.headers -o /tmp/go.body -w '%{http_code}' "$CONVERSION_BASE_URL$GO" || true)
+          if [[ "$go_code" != "302" ]]; then
+            echo "ERROR_STAGE=go status=$go_code brief_id=$BRIEF_ID"
+            sed -n '1,30p' /tmp/go.headers || true
+            head -c 1200 /tmp/go.body || true
+            exit 1
+          fi
+
+          XURL=$(python3 - <<'PY'
+          import re
+          from pathlib import Path
+          text=Path('/tmp/go.headers').read_text(errors='replace')
+          m=re.search(r'(?im)^location:\s*(.*?)\r?$', text)
+          if not m:
+              raise SystemExit('missing Location after go')
+          print(m.group(1).strip())
+          PY
+          )
+          python3 - "$XURL" "$X402_BASE_URL" "$BRIEF_ID" <<'PY'
+          import sys
+          from urllib.parse import urlparse, parse_qs
+          x=urlparse(sys.argv[1])
+          base=urlparse(sys.argv[2])
+          expected_brief=sys.argv[3]
+          if (x.scheme, x.netloc) != (base.scheme, base.netloc):
+              raise SystemExit('checkout origin mismatch')
+          if x.path != '/buy/supplier-snapshot':
+              raise SystemExit(f'unexpected checkout path: {x.path}')
+          q=parse_qs(x.query)
+          got=(q.get('brief_id') or [''])[0]
+          if got != expected_brief:
+              raise SystemExit(f'brief_id continuity failed: {got!r} != {expected_brief!r}')
+          if not (q.get('conversion_event') and q.get('conversion_session')):
+              raise SystemExit('conversion attribution missing from checkout URL')
+          print('TRACE_STAGE=go_to_x402 brief_continuity=pass attribution=pass')
+          PY
 
           code=$(curl -sS -H 'Accept: application/json' -D /tmp/x402.headers -o /tmp/x402.body -w '%{http_code}' "$XURL" || true)
-          [[ "$code" == "402" ]]
-          grep -Eiq '^payment-required:|^x-payment-required:' /tmp/x402.headers
-          echo 'BRIEF_TO_PAYMENT_TRACE=success payment_attempted=false outgoing_spend=false'
+          if [[ "$code" != "402" ]]; then
+            echo "ERROR_STAGE=x402_challenge status=$code brief_id=$BRIEF_ID"
+            sed -n '1,30p' /tmp/x402.headers || true
+            head -c 1200 /tmp/x402.body || true
+            exit 1
+          fi
+          python3 - <<'PY'
+          import json,re
+          from pathlib import Path
+          headers=Path('/tmp/x402.headers').read_text(errors='replace').lower()
+          body=Path('/tmp/x402.body').read_text(errors='replace')
+          header_ok=bool(re.search(r'(?im)^(payment-required|x-payment-required):', headers))
+          body_ok=False
+          try:
+              obj=json.loads(body)
+              raw=json.dumps(obj).lower()
+              body_ok=any(k in raw for k in ['payment-required','paymentrequired','x402version','accepts','payto'])
+          except Exception:
+              low=body.lower()
+              body_ok='payment' in low and ('x402' in low or 'usdc' in low or 'base' in low)
+          if not (header_ok or body_ok):
+              raise SystemExit('402 returned without a recognizable x402 payment challenge')
+          print('TRACE_STAGE=x402_challenge challenge=pass payment_attempted=false')
+          PY
+
+          echo "BRIEF_TO_PAYMENT_TRACE=success brief_id=$BRIEF_ID payment_attempted=false outgoing_spend=false"
 
       - name: Verify revenue truth remains settlement-only
         shell: bash
