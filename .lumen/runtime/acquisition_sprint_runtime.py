@@ -2,14 +2,13 @@ from __future__ import annotations
 
 """LUMEN Zero Acquisition Sprint v1.
 
-Concentrates zero-cost commercial attention on the three lowest-friction entry products
-(Supplier Snapshot, Quote Sanity Check and Tender Quick Scan), converts already-observed
-real market evidence into traceable acquisition briefs, and routes at most one current
-brief into the existing governed distribution pipeline per acquisition cycle.
+Concentrates zero-cost commercial attention on three low-friction entry products,
+converts already-observed real market evidence into traceable acquisition briefs,
+and routes at most one current brief into the existing governed distribution path.
 
-This module does not search more, spend money, buy media, widen outbound caps, accept
-binding terms or move funds. It only reuses evidence and execution gates that already
-exist in LUMEN Zero.
+This module cannot increase search/outbound budgets, buy media, move funds, purchase,
+or make binding commitments. It only reuses evidence and gates already present in
+LUMEN Zero.
 """
 
 import hashlib
@@ -65,7 +64,8 @@ _EXCLUDED_SOURCES = {
     "canary", "test", "fixture",
 }
 
-# Capture the Experiment Engine wrappers installed immediately before this module in worker_entry.
+# Experiment Engine is imported immediately before this module in worker_entry.py.
+# Preserve those wrappers so this sprint extends them rather than replacing them.
 _ORIGINAL_ACQUISITION_TICK = acquisition.acquisition_campaign_tick
 _ORIGINAL_DIRECTOR_TICK = director.director_tick
 _ORIGINAL_CHANNEL_PAYLOADS = acquisition._channel_payloads
@@ -107,11 +107,16 @@ def _norm(value: Any) -> str:
 
 def _source_is_real(row: Dict[str, Any]) -> bool:
     source = _norm(row.get("source") or row.get("market_source") or row.get("demand_source_kind"))
-    if source in _EXCLUDED_SOURCES or any(token in source for token in ("technical-canary", "simulation", "simulated")):
+    if source in _EXCLUDED_SOURCES:
         return False
-    if row.get("technical_canary") or row.get("simulation") or row.get("simulated") or row.get("probe"):
+    if any(token in source for token in ("technical-canary", "simulation", "simulated")):
         return False
-    return True
+    return not bool(
+        row.get("technical_canary")
+        or row.get("simulation")
+        or row.get("simulated")
+        or row.get("probe")
+    )
 
 
 def _row_text(row: Dict[str, Any]) -> str:
@@ -123,7 +128,7 @@ def _row_text(row: Dict[str, Any]) -> str:
     for key in keys:
         value = row.get(key)
         if isinstance(value, list):
-            parts.extend(_clean(x, 500) for x in value)
+            parts.extend(_clean(item, 500) for item in value)
         elif value not in (None, ""):
             parts.append(_clean(value, 900))
     return _norm(" ".join(parts))
@@ -162,10 +167,11 @@ def _buyer_candidates(state: Dict[str, Any]) -> List[Dict[str, Any]]:
         )
         if not has_demand:
             continue
+
         lead = leads.get(str(account.get("source_lead_id") or ""), {})
         if lead and not _source_is_real(lead):
             continue
-        text = _row_text(account) + " " + _row_text(lead)
+        text = (_row_text(account) + " " + _row_text(lead)).strip()
         product_slug = "quote-sanity" if _contains_any(text, _QUOTE_TERMS) else "supplier-snapshot"
         score = (
             100 if account.get("direct_inbound_demand") else
@@ -237,7 +243,8 @@ def _ranked_candidates(state: Dict[str, Any]) -> List[Dict[str, Any]]:
         ),
         reverse=True,
     )
-    # Product diversity first, then fill remaining capacity by evidence strength.
+
+    # Prefer product diversity without losing evidence ranking.
     picked: List[Dict[str, Any]] = []
     used_products: set[str] = set()
     for row in rows:
@@ -249,9 +256,8 @@ def _ranked_candidates(state: Dict[str, Any]) -> List[Dict[str, Any]]:
         if len(picked) >= MAX_BRIEFS_PER_CYCLE:
             return picked
     for row in rows:
-        if row in picked:
-            continue
-        picked.append(row)
+        if row not in picked:
+            picked.append(row)
         if len(picked) >= MAX_BRIEFS_PER_CYCLE:
             break
     return picked
@@ -264,28 +270,28 @@ def _current_experiment(state: Dict[str, Any]) -> Dict[str, Any]:
 def _tracking_url(brief: Dict[str, Any], experiment: Dict[str, Any]) -> str:
     slug = str(brief.get("product_slug") or "")
     creative = _clean(experiment.get("variant_id"), 120) or str(brief.get("id") or "")
-    params = urllib.parse.urlencode({
+    query = urllib.parse.urlencode({
         "src": "lumen-acquisition-sprint",
         "medium": "email_b2b",
         "campaign": SPRINT_ID,
         "creative": creative,
         "offer": str(brief.get("id") or ""),
     })
-    return f"{CONVERSION_BASE_URL}/offer/{urllib.parse.quote(slug)}?{params}"
+    return f"{CONVERSION_BASE_URL}/offer/{urllib.parse.quote(slug)}?{query}"
 
 
 def _catalog_url(campaign: Dict[str, Any], variant: Dict[str, Any], channel: str) -> str:
-    params = urllib.parse.urlencode({
+    query = urllib.parse.urlencode({
         "src": "lumen-organic-acquisition",
         "medium": channel,
         "campaign": _clean(campaign.get("id"), 120),
         "creative": _clean(variant.get("id"), 120),
     })
-    return f"{CONVERSION_BASE_URL}/catalog?{params}"
+    return f"{CONVERSION_BASE_URL}/catalog?{query}"
 
 
 def _conversion_channel_payloads(campaign: Dict[str, Any], variant: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Keep legacy campaign semantics but move every newly refreshed link onto Cloudflare Conversion."""
+    """Move newly refreshed acquisition links to Cloudflare without changing channel authority."""
     base = [dict(row) for row in (_ORIGINAL_CHANNEL_PAYLOADS(campaign, variant) or [])]
     headline = _clean(variant.get("headline") or campaign.get("headline"), 220)
     body = _clean(variant.get("body") or campaign.get("body"), 1200)
@@ -354,9 +360,12 @@ def _campaign_variant_for_audience(state: Dict[str, Any], audience: str) -> tupl
     if not campaigns:
         return {}, {}
     campaign = campaigns[0]
-    champion_id = str(campaign.get("champion_variant_id") or "")
     variants = [row for row in _l(campaign.get("variants")) if isinstance(row, dict)]
-    variant = next((row for row in variants if str(row.get("id") or "") == champion_id), variants[0] if variants else {})
+    champion_id = str(campaign.get("champion_variant_id") or "")
+    variant = next(
+        (row for row in variants if str(row.get("id") or "") == champion_id),
+        variants[0] if variants else {},
+    )
     return campaign, variant
 
 
@@ -368,30 +377,51 @@ def _queue_brief(state: Dict[str, Any], brief: Dict[str, Any], experiment: Dict[
     experiment_audience = str(experiment.get("audience") or "")
     payload = _product_message(brief, experiment)
 
-    # Best path: reuse the current Experiment Engine email canary when its audience matches.
+    # Reuse the already-governed experiment email canary when audiences match.
     if experiment_key and experiment_audience == audience:
-        item = next((row for row in queue if isinstance(row, dict) and str(row.get("key") or "") == experiment_key), None)
+        item = next(
+            (row for row in queue if isinstance(row, dict) and str(row.get("key") or "") == experiment_key),
+            None,
+        )
         if item is not None:
-            item["payload"] = payload
-            item["audience"] = audience
-            item["acquisition_sprint_id"] = SPRINT_ID
-            item["sprint_brief_id"] = brief.get("id")
-            item["product_slug"] = brief.get("product_slug")
-            item["updated_at"] = _now()
+            item.update({
+                "payload": payload,
+                "audience": audience,
+                "acquisition_sprint_id": SPRINT_ID,
+                "sprint_brief_id": brief.get("id"),
+                "product_slug": brief.get("product_slug"),
+                "updated_at": _now(),
+            })
             experiment["sprint_brief_id"] = brief.get("id")
             experiment["product_slug"] = brief.get("product_slug")
             experiment["tracking_url"] = payload["tracking_url"]
-            experiment["dispatch"]["acquisition_sprint_id"] = SPRINT_ID
-            experiment["dispatch"]["sprint_brief_id"] = brief.get("id")
-            experiment["dispatch"]["product_slug"] = brief.get("product_slug")
-            return {"queued": True, "mode": "experiment_dispatch_reused", "key": experiment_key, "channel": "email_b2b"}
+            if isinstance(experiment.get("dispatch"), dict):
+                experiment["dispatch"].update({
+                    "acquisition_sprint_id": SPRINT_ID,
+                    "sprint_brief_id": brief.get("id"),
+                    "product_slug": brief.get("product_slug"),
+                })
+            return {
+                "queued": True,
+                "mode": "experiment_dispatch_reused",
+                "key": experiment_key,
+                "channel": "email_b2b",
+            }
 
-    # Fallback keeps the same governed distribution pipeline and its existing caps/quality gates.
+    # Fallback uses the same governed acquisition pipeline and existing delivery caps.
     campaign, variant = _campaign_variant_for_audience(state, audience)
     if not campaign or not variant:
         return {"queued": False, "mode": "waiting_for_audience_campaign", "channel": "email_b2b"}
     key = f"SPRINT|{brief['id']}|{variant.get('id')}|email_b2b"
-    existing = next((row for row in queue if isinstance(row, dict) and str(row.get("key") or "") == key), None)
+    existing = next(
+        (row for row in queue if isinstance(row, dict) and str(row.get("key") or "") == key),
+        None,
+    )
+    values = {
+        "payload": payload,
+        "product_slug": brief.get("product_slug"),
+        "updated_at": _now(),
+    }
     if existing is None:
         queue.append({
             "key": key,
@@ -399,17 +429,15 @@ def _queue_brief(state: Dict[str, Any], brief: Dict[str, Any], experiment: Dict[
             "variant_id": variant.get("id"),
             "audience": audience,
             "channel": "email_b2b",
-            "payload": payload,
             "status": "ready_owned_or_existing_channel",
             "experiment_id": experiment.get("id"),
             "acquisition_sprint_id": SPRINT_ID,
             "sprint_brief_id": brief.get("id"),
-            "product_slug": brief.get("product_slug"),
             "created_at": _now(),
-            "updated_at": _now(),
+            **values,
         })
     else:
-        existing.update({"payload": payload, "product_slug": brief.get("product_slug"), "updated_at": _now()})
+        existing.update(values)
     state["acquisition_distribution_queue"] = queue[-300:]
     return {"queued": True, "mode": "governed_sprint_dispatch", "key": key, "channel": "email_b2b"}
 
@@ -422,22 +450,27 @@ def _merge_briefs(state: Dict[str, Any], candidates: List[Dict[str, Any]], exper
         old = by_id.get(bid, {})
         row = dict(old)
         row.update(candidate)
-        row["created_at"] = old.get("created_at") or _now()
-        row["last_seen_at"] = _now()
-        row["product"] = FOCUS_PRODUCTS[str(candidate.get("product_slug"))]["name"]
-        row["price_usd"] = FOCUS_PRODUCTS[str(candidate.get("product_slug"))]["price_usd"]
-        row["campaign"] = SPRINT_ID
-        row["source"] = "lumen-acquisition-sprint"
-        row["medium"] = "email_b2b"
-        row["experiment_id"] = experiment.get("id")
-        row["experiment_variant_id"] = experiment.get("variant_id")
+        row.update({
+            "created_at": old.get("created_at") or _now(),
+            "last_seen_at": _now(),
+            "product": FOCUS_PRODUCTS[str(candidate.get("product_slug"))]["name"],
+            "price_usd": FOCUS_PRODUCTS[str(candidate.get("product_slug"))]["price_usd"],
+            "campaign": SPRINT_ID,
+            "source": "lumen-acquisition-sprint",
+            "medium": "email_b2b",
+            "experiment_id": experiment.get("id"),
+            "experiment_variant_id": experiment.get("variant_id"),
+            "status": old.get("status") or "prepared_from_real_evidence",
+            "spend_usd": 0,
+            "binding": False,
+        })
         row["tracking_url"] = _tracking_url(row, experiment)
-        row["status"] = old.get("status") or "prepared_from_real_evidence"
-        row["spend_usd"] = 0
-        row["binding"] = False
         by_id[bid] = row
     merged = list(by_id.values())
-    merged.sort(key=lambda row: (str(row.get("last_seen_at") or ""), _i(row.get("evidence_score"))), reverse=True)
+    merged.sort(
+        key=lambda row: (str(row.get("last_seen_at") or ""), _i(row.get("evidence_score"))),
+        reverse=True,
+    )
     state["acquisition_sprint_briefs"] = merged[:MAX_BRIEF_HISTORY]
     return state["acquisition_sprint_briefs"]
 
@@ -446,20 +479,32 @@ def acquisition_sprint_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     candidates = _ranked_candidates(state)
     experiment = _current_experiment(state)
     briefs = _merge_briefs(state, candidates, experiment)
-    current_ids = {str(row.get("id") or "") for row in candidates}
-    current = [row for row in briefs if str(row.get("id") or "") in current_ids]
+
+    # IMPORTANT: persistence recency must never change commercial ranking. Rebuild the
+    # current view in the exact evidence-ranked candidate order before selecting a brief.
+    brief_by_id = {str(row.get("id") or ""): row for row in briefs if isinstance(row, dict)}
+    current = [
+        brief_by_id[str(candidate.get("id") or "")]
+        for candidate in candidates
+        if str(candidate.get("id") or "") in brief_by_id
+    ]
+
     dispatch = {"queued": False, "mode": "waiting_for_real_evidence", "channel": "email_b2b"}
     selected: Optional[Dict[str, Any]] = current[0] if current else None
     if selected is not None:
         dispatch = _queue_brief(state, selected, experiment)
         selected["dispatch"] = dict(dispatch)
-        selected["status"] = "queued_governed_distribution" if dispatch.get("queued") else "prepared_from_real_evidence"
+        selected["status"] = (
+            "queued_governed_distribution" if dispatch.get("queued")
+            else "prepared_from_real_evidence"
+        )
 
     cognitive = _d(state.get("cognitive_director_learning"))
     top_product = _d(cognitive.get("top_product"))
     focus_winner = str(top_product.get("product_slug") or "")
     if focus_winner not in FOCUS_PRODUCTS:
         focus_winner = ""
+
     report = {
         "version": VERSION,
         "status": "active" if current else "waiting_for_real_market_evidence",
@@ -486,7 +531,9 @@ def acquisition_sprint_tick(state: Dict[str, Any]) -> Dict[str, Any]:
             "medium": "email_b2b",
             "campaign": SPRINT_ID,
             "offer_id": selected.get("id") if selected else None,
-            "downstream_brief_id_rule": "conversion lead id is created only after requirements are submitted and is then propagated to x402",
+            "downstream_brief_id_rule": (
+                "conversion lead id is created only after requirements are submitted and is then propagated to x402"
+            ),
         },
         "guardrails": {
             "monetary_budget_usd": 0,
@@ -556,7 +603,10 @@ def _sprint_task(sprint: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def director_tick_with_acquisition_sprint(state: Dict[str, Any], adaptive_report: Dict[str, Any] | None = None) -> Dict[str, Any]:
+def director_tick_with_acquisition_sprint(
+    state: Dict[str, Any],
+    adaptive_report: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
     report = dict(_ORIGINAL_DIRECTOR_TICK(state, adaptive_report) or {})
     sprint = _d(state.get("acquisition_sprint"))
     task = _sprint_task(sprint)
@@ -568,7 +618,10 @@ def director_tick_with_acquisition_sprint(state: Dict[str, Any], adaptive_report
     plan.sort(key=lambda row: _i(row.get("priority")), reverse=True)
     report["plan"] = plan[: int(getattr(director, "MAX_PLAN", 6))]
 
-    boosts = {str(k): min(director.ROLE_BOOST_CAP, max(0.0, _f(v))) for k, v in _d(report.get("role_boosts")).items()}
+    boosts = {
+        str(key): min(director.ROLE_BOOST_CAP, max(0.0, _f(value)))
+        for key, value in _d(report.get("role_boosts")).items()
+    }
     for role in task.get("roles", []):
         amount = 0.10 if sprint.get("selected_product_slug") else 0.06
         boosts[role] = round(min(director.ROLE_BOOST_CAP, max(_f(boosts.get(role)), amount)), 4)
@@ -598,13 +651,13 @@ def director_tick_with_acquisition_sprint(state: Dict[str, Any], adaptive_report
     return report
 
 
-# Replace stale Railway acquisition links with the live Cloudflare Conversion surface before any
-# acquisition cycle runs. The original channel/connector permissions are preserved unchanged.
+# Replace stale acquisition links with the live Cloudflare Conversion surface before cycles run.
+# Existing channel/connector permissions remain unchanged.
 acquisition.PUBLIC_BASE_URL = CONVERSION_BASE_URL
 acquisition._channel_payloads = _conversion_channel_payloads
 
-# Install after Experiment Engine so one commercial decision can be converted into a product-specific,
-# traceable, zero-cost first-cash brief without bypassing the existing distribution/Director gates.
+# Install after Experiment Engine so one experiment decision can become a product-specific,
+# traceable, zero-cost first-cash brief without bypassing distribution or Director gates.
 acquisition.acquisition_campaign_tick = acquisition_tick_with_sprint
 director.director_tick = director_tick_with_acquisition_sprint
 
