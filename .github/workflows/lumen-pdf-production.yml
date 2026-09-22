@@ -38,15 +38,19 @@ jobs:
           npx playwright install --with-deps chromium
           python -m pip install --disable-pip-version-check pypdf==5.9.0 pillow==11.3.0
           command -v pdftotext >/dev/null || { sudo apt-get update; sudo apt-get install -y poppler-utils; }
+          command -v pdfinfo >/dev/null
+          command -v pdftoppm >/dev/null
 
       - name: Create stress-test report fixtures
         shell: bash
         run: |
           set -euo pipefail
+          rm -rf /tmp/lumen-pdf
           mkdir -p /tmp/lumen-pdf/{inputs,html,pdf,previews}
           cat > /tmp/lumen-pdf/inputs/micro.json <<'JSON'
           {
             "template_key":"supplier-snapshot",
+            "product_or_service_id":"supplier-snapshot",
             "report_id":"LUMEN-QA-MICRO-001",
             "client":"Cliente de prueba",
             "generated_at":"2026-09-21T21:00:00-03:00",
@@ -77,6 +81,7 @@ jobs:
           cat > /tmp/lumen-pdf/inputs/full.json <<'JSON'
           {
             "template_key":"SRV-SOURCING-EXPRESS",
+            "product_or_service_id":"SRV-SOURCING-EXPRESS",
             "report_id":"LUMEN-QA-FULL-001",
             "client":"Empresa industrial de prueba",
             "generated_at":"2026-09-21T21:00:00-03:00",
@@ -127,6 +132,33 @@ jobs:
           }
           JSON
 
+      - name: Validate report inputs before rendering
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .lumen/reporting/validate_report_input.py /tmp/lumen-pdf/inputs/micro.json --allow-test-domains
+          python .lumen/reporting/validate_report_input.py /tmp/lumen-pdf/inputs/full.json --allow-test-domains
+
+      - name: Prove bad report input is rejected
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          src = Path('/tmp/lumen-pdf/inputs/micro.json')
+          data = json.loads(src.read_text())
+          data['answer'] = 'TODO'
+          data['evidence'] = []
+          data['recommendation'] = 'Pendiente de completar'
+          Path('/tmp/lumen-pdf/inputs/negative.json').write_text(json.dumps(data, ensure_ascii=False))
+          PY
+          if python .lumen/reporting/validate_report_input.py /tmp/lumen-pdf/inputs/negative.json --allow-test-domains; then
+            echo 'ERROR: malformed report input was accepted'
+            exit 1
+          fi
+          echo 'NEGATIVE_INPUT_CANARY=blocked_as_expected'
+
       - name: Render professional HTML reports
         shell: bash
         run: |
@@ -150,6 +182,19 @@ jobs:
           pdfinfo /tmp/lumen-pdf/pdf/LUMEN-Supplier-Snapshot-QA.pdf
           pdfinfo /tmp/lumen-pdf/pdf/LUMEN-Sourcing-Express-QA.pdf
 
+      - name: Prove corrupt PDF is rejected
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp /tmp/lumen-pdf/pdf/LUMEN-Supplier-Snapshot-QA.pdf /tmp/lumen-pdf/pdf/corrupt-canary.pdf
+          truncate -s 4096 /tmp/lumen-pdf/pdf/corrupt-canary.pdf
+          if python .lumen/reporting/validate_pdf.py /tmp/lumen-pdf/pdf/corrupt-canary.pdf --report-id LUMEN-QA-MICRO-001 --title "Supplier Snapshot" --tier micro; then
+            echo 'ERROR: corrupt PDF was accepted'
+            exit 1
+          fi
+          rm -f /tmp/lumen-pdf/pdf/corrupt-canary.pdf
+          echo 'NEGATIVE_PDF_CANARY=blocked_as_expected'
+
       - name: Upload QA PDFs and page previews
         uses: actions/upload-artifact@v4
         with:
@@ -165,11 +210,17 @@ jobs:
         run: |
           {
             echo "## LUMEN PDF Production Quality"
+            echo "- Report input contract / placeholder gate: PASS"
+            echo "- Evidence, risks, table and analysis completeness: PASS"
+            echo "- Negative malformed-input canary: PASS"
             echo "- HTML renderer: PASS"
-            echo "- Chromium A4 PDF: PASS"
+            echo "- Atomic Chromium A4 PDF: PASS"
             echo "- Metadata/report ID: PASS"
-            echo "- Text extraction: PASS"
-            echo "- Page rendering / blank-page gate: PASS"
+            echo "- Required client sections: PASS"
+            echo "- Text extraction on every page: PASS"
+            echo "- Source URLs preserved in PDF: PASS"
+            echo "- Every page rendered and visually sanity-checked: PASS"
+            echo "- Negative corrupt-PDF canary: PASS"
             echo "- Long URL and table wrapping stress test: PASS"
             echo "- No payment or spending performed: PASS"
           } >> "$GITHUB_STEP_SUMMARY"
