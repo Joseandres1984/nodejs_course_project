@@ -1,0 +1,86 @@
+name: LUMEN Delivery Reports
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/lumen-delivery-reports.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate-deliveries:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout LUMEN Zero
+        uses: actions/checkout@v4
+        with:
+          ref: lumen-zero
+
+      - name: Validate delivery contract JSON
+        run: |
+          node -e "JSON.parse(require('fs').readFileSync('.lumen/contracts/delivery-templates.json','utf8')); console.log('DELIVERY_TEMPLATES_JSON=ok')"
+
+      - name: Render full-service report
+        shell: bash
+        run: |
+          cat > /tmp/full.json <<'JSON'
+          {
+            "service_id":"SRV-SOURCING-EXPRESS",
+            "report_id":"DEMO-FULL-001",
+            "client":"Empresa Demo",
+            "client_request":"Buscar proveedores de un componente industrial con entrega en Argentina.",
+            "executive_summary":"Se identificaron candidatos con distintos niveles de encaje; dos merecen contacto prioritario.",
+            "confidence":"media",
+            "metrics":{"candidatos_investigados":8,"candidatos_priorizados":3,"paises_cubiertos":4,"mejor_encaje":"Alto"},
+            "findings":[{"title":"Proveedor A","detail":"Evidencia pública consistente con el producto buscado.","confidence":"alta"},{"title":"Proveedor B","detail":"Buen encaje, pero requiere confirmar certificación.","confidence":"media"}],
+            "tables":[{"title":"Shortlist","columns":["Proveedor","País","Capacidad/Producto","Encaje","Canal corporativo","Riesgo/Gaps"],"rows":[["Proveedor A","País A","Componente industrial","Alto","Web corporativa","Confirmar plazo"],["Proveedor B","País B","Componente industrial","Medio","Formulario comercial","Confirmar certificación"]]}],
+            "risks":[{"level":"medio","title":"Certificación pendiente","detail":"La certificación solicitada no pudo confirmarse en una fuente pública."}],
+            "evidence":[{"title":"Sitio corporativo del proveedor","url":"https://example.com","note":"Respalda catálogo y canal corporativo.","observed_at":"2026-09-21"}],
+            "next_steps":["Contactar primero al Proveedor A","Solicitar certificado al Proveedor B"],
+            "recommendation":"Avanzar con contacto al Proveedor A y mantener al Proveedor B condicionado a validación documental."
+          }
+          JSON
+          node .lumen/reporting/render_report.mjs --input /tmp/full.json --output /tmp/full.html
+          grep -q 'Sourcing Express' /tmp/full.html
+          grep -q 'Resumen ejecutivo' /tmp/full.html
+          grep -q 'Evidencia y fuentes' /tmp/full.html
+          grep -q 'Riesgos y gaps' /tmp/full.html
+          grep -q 'Conclusión' /tmp/full.html
+          grep -q '@media print' /tmp/full.html
+          echo 'FULL_REPORT=success'
+
+      - name: Render microproduct report
+        shell: bash
+        run: |
+          cat > /tmp/micro.json <<'JSON'
+          {
+            "product_slug":"supplier-snapshot",
+            "report_id":"DEMO-MICRO-001",
+            "client":"Cliente Demo",
+            "client_request":"Verificar rápidamente un proveedor antes de pedir cotización.",
+            "answer":"La presencia pública observada es consistente, pero faltan datos para evaluar solvencia o cumplimiento futuro.",
+            "confidence":"media",
+            "findings":[{"title":"Identidad consistente","detail":"Nombre comercial y dominio muestran coherencia.","confidence":"alta"}],
+            "risks":[{"level":"medio","title":"Información limitada","detail":"No se encontraron estados financieros públicos."}],
+            "evidence":[{"title":"Web del proveedor","url":"https://example.com","note":"Identidad y actividad pública.","observed_at":"2026-09-21"}],
+            "next_steps":["Solicitar documentación comercial antes de avanzar"],
+            "recommendation":"Profundizar la verificación si el valor de la operación lo justifica."
+          }
+          JSON
+          node .lumen/reporting/render_report.mjs --input /tmp/micro.json --output /tmp/micro.html
+          grep -q 'Supplier Snapshot' /tmp/micro.html
+          grep -q 'Respuesta ejecutiva' /tmp/micro.html
+          grep -q 'Evidencia y fuentes' /tmp/micro.html
+          grep -q 'Conclusión' /tmp/micro.html
+          grep -q '@media print' /tmp/micro.html
+          echo 'MICRO_REPORT=success'
+
+      - name: Delivery report summary
+        run: |
+          echo 'LUMEN_DELIVERY_PRESENTATION=success'
+          echo 'HTML_RESPONSIVE=ready'
+          echo 'PDF_READY_PRINT_LAYOUT=ready'
