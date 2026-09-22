@@ -1,9 +1,7 @@
 const SERVICE = "lumen-zero-cognitive";
-const VERSION = "1.1-zero-cognitive-engine";
+const VERSION = "1.2-zero-cognitive-free-only";
 const PRIMARY_MODEL = "@cf/google/gemma-4-26b-a4b-it";
-const OPENROUTER_MODEL = "openrouter/free";
 const CF_DAILY_CALL_LIMIT = 50;
-const OPENROUTER_DAILY_CALL_LIMIT = 20;
 const MAX_CONTEXT_CHARS = 5000;
 const MAX_COMPLETION_TOKENS = 400;
 const ALLOW_PAID_AI = false;
@@ -34,7 +32,11 @@ function json(data, status = 200) {
 }
 
 function clean(value, limit = 500) {
-  return String(value ?? "").replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, limit);
+  return String(value ?? "")
+    .replace(/[\u0000-\u001f\u007f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, limit);
 }
 
 function clamp(n, min, max) {
@@ -47,6 +49,8 @@ function utcDay() {
 
 async function ensureSchema(env) {
   if (!env.DB) return;
+  // Keep the legacy openrouter_calls column for backwards-compatible D1 schema reads,
+  // but v1.2 never calls OpenRouter or any paid/secondary inference provider.
   await env.DB.batch([
     env.DB.prepare("CREATE TABLE IF NOT EXISTS lumen_cognitive_usage (day TEXT PRIMARY KEY, cf_calls INTEGER NOT NULL DEFAULT 0, openrouter_calls INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL)"),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS lumen_cognitive_decisions (id TEXT PRIMARY KEY, created_at TEXT NOT NULL, task TEXT NOT NULL, provider TEXT NOT NULL, model TEXT, decision TEXT NOT NULL, product_slug TEXT, priority TEXT NOT NULL, confidence REAL NOT NULL, technical_canary INTEGER NOT NULL DEFAULT 0, paid_ai_used INTEGER NOT NULL DEFAULT 0, monetary_cost_usd REAL NOT NULL DEFAULT 0, actions_executed INTEGER NOT NULL DEFAULT 0, payload TEXT NOT NULL)"),
@@ -55,28 +59,27 @@ async function ensureSchema(env) {
   ]);
 }
 
-async function reserveFreeCall(env, provider) {
-  if (!env.DB) return { allowed: true, reason: "no_db_counter" };
+async function reserveFreeCloudflareCall(env) {
+  if (!env.DB) return { allowed: false, reason: "usage_counter_required" };
   await ensureSchema(env);
   const day = utcDay();
   const now = new Date().toISOString();
   await env.DB.prepare("INSERT OR IGNORE INTO lumen_cognitive_usage(day,cf_calls,openrouter_calls,updated_at) VALUES(?,0,0,?)").bind(day, now).run();
-  if (provider === "cloudflare_ai") {
-    const r = await env.DB.prepare("UPDATE lumen_cognitive_usage SET cf_calls=cf_calls+1,updated_at=? WHERE day=? AND cf_calls<?").bind(now, day, CF_DAILY_CALL_LIMIT).run();
-    return { allowed: Number(r?.meta?.changes || 0) === 1, limit: CF_DAILY_CALL_LIMIT };
-  }
-  if (provider === "openrouter_free") {
-    const r = await env.DB.prepare("UPDATE lumen_cognitive_usage SET openrouter_calls=openrouter_calls+1,updated_at=? WHERE day=? AND openrouter_calls<?").bind(now, day, OPENROUTER_DAILY_CALL_LIMIT).run();
-    return { allowed: Number(r?.meta?.changes || 0) === 1, limit: OPENROUTER_DAILY_CALL_LIMIT };
-  }
-  return { allowed: false, reason: "unknown_provider" };
+  const r = await env.DB.prepare("UPDATE lumen_cognitive_usage SET cf_calls=cf_calls+1,updated_at=? WHERE day=? AND cf_calls<?")
+    .bind(now, day, CF_DAILY_CALL_LIMIT)
+    .run();
+  return {
+    allowed: Number(r?.meta?.changes || 0) === 1,
+    limit: CF_DAILY_CALL_LIMIT,
+    reason: Number(r?.meta?.changes || 0) === 1 ? "reserved" : "cloudflare_free_guard_exhausted",
+  };
 }
 
 async function usage(env) {
   if (!env.DB) return null;
   await ensureSchema(env);
-  const row = await env.DB.prepare("SELECT day,cf_calls,openrouter_calls,updated_at FROM lumen_cognitive_usage WHERE day=?").bind(utcDay()).first();
-  return row || { day: utcDay(), cf_calls: 0, openrouter_calls: 0 };
+  const row = await env.DB.prepare("SELECT day,cf_calls,updated_at FROM lumen_cognitive_usage WHERE day=?").bind(utcDay()).first();
+  return row || { day: utcDay(), cf_calls: 0 };
 }
 
 function flattenEvidence(body) {
@@ -128,7 +131,9 @@ function deterministicDecision(body) {
     decision = /sin fuente|no verific|contradic|error|faltante|incompleto/.test(hay) ? "qa_revise" : "qa_pass";
     product = null;
     priority = decision === "qa_revise" ? "high" : "medium";
-    reason = decision === "qa_revise" ? "Hay señales textuales de evidencia insuficiente o inconsistencia que requieren revisión." : "No se detectaron señales obvias de error en el contexto aportado; mantener los controles deterministas de entrega.";
+    reason = decision === "qa_revise"
+      ? "Hay señales textuales de evidencia insuficiente o inconsistencia que requieren revisión."
+      : "No se detectaron señales obvias de error en el contexto aportado; mantener los controles deterministas de entrega.";
   } else if (body.task === "director") {
     decision = product ? "prioritize" : "hold";
   } else if (body.task === "research_plan" && !product) {
@@ -141,7 +146,11 @@ function deterministicDecision(body) {
     priority,
     confidence: product || body.task === "qa_review" ? 0.62 : 0.45,
     reasons: [reason],
-    next_action: decision === "contact" || decision === "prioritize" ? "Preparar la siguiente acción comercial para revisión del Governor." : decision === "qa_revise" ? "Revisar evidencia y corregir antes de entregar." : "Reunir más evidencia antes de actuar.",
+    next_action: decision === "contact" || decision === "prioritize"
+      ? "Preparar la siguiente acción comercial para revisión del Governor."
+      : decision === "qa_revise"
+        ? "Revisar evidencia y corregir antes de entregar."
+        : "Reunir más evidencia antes de actuar.",
   };
 }
 
@@ -173,21 +182,38 @@ function parseModelJson(text) {
 
 function normalize(candidate, fallback) {
   const decision = SAFE_DECISIONS.has(String(candidate?.decision)) ? String(candidate.decision) : fallback.decision;
-  const product = candidate?.product == null ? null : PRODUCTS.has(String(candidate.product)) ? String(candidate.product) : fallback.product;
+  const product = candidate?.product == null
+    ? null
+    : PRODUCTS.has(String(candidate.product))
+      ? String(candidate.product)
+      : fallback.product;
   const priority = PRIORITIES.has(String(candidate?.priority)) ? String(candidate.priority) : fallback.priority;
   const confidence = clamp(candidate?.confidence, 0, 1);
-  const reasons = Array.isArray(candidate?.reasons) ? candidate.reasons.map(x => clean(x, 260)).filter(Boolean).slice(0, 4) : fallback.reasons;
+  const reasons = Array.isArray(candidate?.reasons)
+    ? candidate.reasons.map(x => clean(x, 260)).filter(Boolean).slice(0, 4)
+    : fallback.reasons;
   const nextAction = clean(candidate?.next_action || fallback.next_action, 320);
   if (FORBIDDEN_ACTION.test(nextAction) || reasons.some(x => FORBIDDEN_ACTION.test(x))) {
-    return { ...fallback, confidence: Math.min(fallback.confidence, 0.5), safety_override: "forbidden_action_removed" };
+    return {
+      ...fallback,
+      confidence: Math.min(fallback.confidence, 0.5),
+      safety_override: "forbidden_action_removed",
+    };
   }
-  return { decision, product, priority, confidence, reasons: reasons.length ? reasons : fallback.reasons, next_action: nextAction || fallback.next_action };
+  return {
+    decision,
+    product,
+    priority,
+    confidence,
+    reasons: reasons.length ? reasons : fallback.reasons,
+    next_action: nextAction || fallback.next_action,
+  };
 }
 
 async function cloudflareReason(env, body) {
   if (!env.AI) throw new Error("ai_binding_unavailable");
-  const budget = await reserveFreeCall(env, "cloudflare_ai");
-  if (!budget.allowed) throw new Error("cloudflare_free_guard_exhausted");
+  const budget = await reserveFreeCloudflareCall(env);
+  if (!budget.allowed) throw new Error(budget.reason || "cloudflare_free_guard_exhausted");
   const result = await env.AI.run(PRIMARY_MODEL, {
     messages: [
       { role: "system", content: systemPrompt(body.task) },
@@ -200,36 +226,32 @@ async function cloudflareReason(env, body) {
   return parseModelJson(extractText(result));
 }
 
-async function openRouterReason(env, body) {
-  if (!env.OPENROUTER_API_KEY) throw new Error("openrouter_not_configured");
-  const budget = await reserveFreeCall(env, "openrouter_free");
-  if (!budget.allowed) throw new Error("openrouter_free_guard_exhausted");
-  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "authorization": `Bearer ${env.OPENROUTER_API_KEY}`,
-      "x-title": "LUMEN Cognitive Engine",
-    },
-    body: JSON.stringify({
-      model: OPENROUTER_MODEL,
-      messages: [
-        { role: "system", content: systemPrompt(body.task) },
-        { role: "user", content: flattenEvidence(body) },
-      ],
-      max_tokens: MAX_COMPLETION_TOKENS,
-      temperature: 0.1,
-    }),
-  });
-  if (!response.ok) throw new Error(`openrouter_http_${response.status}`);
-  return parseModelJson(extractText(await response.json()));
-}
-
 async function storeDecision(env, record) {
   if (!env.DB) return;
   await ensureSchema(env);
   await env.DB.prepare("INSERT INTO lumen_cognitive_decisions(id,created_at,task,provider,model,decision,product_slug,priority,confidence,technical_canary,paid_ai_used,monetary_cost_usd,actions_executed,payload) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
-    .bind(record.id, record.created_at, record.task, record.provider, record.model || null, record.decision, record.product || null, record.priority, record.confidence, record.technical_canary ? 1 : 0, 0, 0, 0, JSON.stringify({ reasons: record.reasons, next_action: record.next_action, attempted_providers: record.attempted_providers, safety_override: record.safety_override || null })).run();
+    .bind(
+      record.id,
+      record.created_at,
+      record.task,
+      record.provider,
+      record.model || null,
+      record.decision,
+      record.product || null,
+      record.priority,
+      record.confidence,
+      record.technical_canary ? 1 : 0,
+      0,
+      0,
+      0,
+      JSON.stringify({
+        reasons: record.reasons,
+        next_action: record.next_action,
+        attempted_providers: record.attempted_providers,
+        safety_override: record.safety_override || null,
+      }),
+    )
+    .run();
 }
 
 async function decide(env, body) {
@@ -249,16 +271,9 @@ async function decide(env, body) {
       model = PRIMARY_MODEL;
     } catch (e) {
       attempted.push(`cloudflare_ai:${clean(e?.message, 100)}`);
-      try {
-        attempted.push("openrouter_free");
-        result = normalize(await openRouterReason(env, body), fallback);
-        provider = "openrouter_free";
-        model = OPENROUTER_MODEL;
-      } catch (e2) {
-        attempted.push(`openrouter_free:${clean(e2?.message, 100)}`);
-        result = fallback;
-        provider = "deterministic";
-      }
+      result = fallback;
+      provider = "deterministic";
+      model = null;
     }
   }
 
@@ -284,18 +299,24 @@ async function decide(env, body) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+
     if (request.method === "GET" && (url.pathname === "/" || url.pathname === "/health")) {
       return json({
         service: SERVICE,
         version: VERSION,
         status: "ok",
-        architecture: "cloudflare_ai -> openrouter_free(optional) -> deterministic",
+        architecture: "cloudflare_ai_free_only -> deterministic",
         primary_provider: "cloudflare_ai",
         primary_model: PRIMARY_MODEL,
-        openrouter_model: OPENROUTER_MODEL,
         ai_binding_available: Boolean(env.AI),
-        openrouter_configured: Boolean(env.OPENROUTER_API_KEY),
-        free_guard: { cloudflare_calls_per_utc_day: CF_DAILY_CALL_LIMIT, openrouter_calls_per_utc_day: OPENROUTER_DAILY_CALL_LIMIT, max_context_chars: MAX_CONTEXT_CHARS, max_completion_tokens: MAX_COMPLETION_TOKENS },
+        free_only: true,
+        free_guard: {
+          cloudflare_calls_per_utc_day: CF_DAILY_CALL_LIMIT,
+          max_context_chars: MAX_CONTEXT_CHARS,
+          max_completion_tokens: MAX_COMPLETION_TOKENS,
+          fallback: "deterministic",
+          external_paid_fallbacks: 0,
+        },
         usage_today: await usage(env),
         paid_ai_allowed: ALLOW_PAID_AI,
         monetary_budget_usd: AI_MONETARY_BUDGET_USD,
@@ -305,6 +326,7 @@ export default {
         governor_required: true,
       });
     }
+
     if (request.method === "POST" && url.pathname === "/decide") {
       let body;
       try {
@@ -314,12 +336,20 @@ export default {
       } catch {
         return json({ error: "invalid_json" }, 400);
       }
+
       try {
         return json(await decide(env, body));
       } catch (e) {
-        return json({ error: clean(e?.message || "decision_failed", 120), paid_ai_used: false, monetary_cost_usd: 0, actions_executed: false, outgoing_spend_enabled: false }, e?.status || 500);
+        return json({
+          error: clean(e?.message || "decision_failed", 120),
+          paid_ai_used: false,
+          monetary_cost_usd: 0,
+          actions_executed: false,
+          outgoing_spend_enabled: false,
+        }, e?.status || 500);
       }
     }
+
     return json({ error: "not_found" }, 404);
   },
 };
