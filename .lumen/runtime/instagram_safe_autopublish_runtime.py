@@ -130,7 +130,9 @@ def _policy_approve(module: Any, state: Dict[str, Any], job: Dict[str, Any]) -> 
         return False, reasons
 
     now = _now_dt()
-    fingerprint = module._content_fingerprint(job)
+    freeze = sys.modules.get("instagram_approval_freeze_runtime")
+    editorial_fingerprint_fn = getattr(freeze, "editorial_fingerprint", None) if freeze is not None else None
+    fingerprint = editorial_fingerprint_fn(job) if callable(editorial_fingerprint_fn) else module._content_fingerprint(job)
     approval: Dict[str, Any] = {
         "job_id": jid,
         "status": "APPROVED",
@@ -148,7 +150,6 @@ def _policy_approve(module: Any, state: Dict[str, Any], job: Dict[str, Any]) -> 
         "binding_authority_changed": False,
     }
 
-    freeze = sys.modules.get("instagram_approval_freeze_runtime")
     if freeze is not None:
         approval["fingerprint_version"] = getattr(freeze, "FINGERPRINT_VERSION", "editorial_v2")
         snapshot_fn = getattr(freeze, "editorial_snapshot", None)
