@@ -50,6 +50,7 @@ function conversionAttribution(c) {
     source: clean(url.searchParams.get("source"), 80),
     medium: clean(url.searchParams.get("medium"), 80),
     creative: clean(url.searchParams.get("creative"), 120),
+    brief_id: clean(url.searchParams.get("brief_id"), 80),
   };
   return Object.values(attribution).some(Boolean) ? attribution : null;
 }
@@ -60,6 +61,7 @@ async function ensureSchema(env) {
     env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_lumen_x402_receipts_created ON lumen_x402_receipts(created_at)"),
     env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_lumen_x402_receipts_status ON lumen_x402_receipts(status,created_at)"),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS lumen_x402_redemptions (receipt_id TEXT PRIMARY KEY, created_at TEXT NOT NULL, context_id TEXT NOT NULL, task_id TEXT NOT NULL, inbound_id TEXT NOT NULL, order_id TEXT NOT NULL, quote_id TEXT NOT NULL)"),
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS lumen_conversion_leads (id TEXT PRIMARY KEY, created_at TEXT NOT NULL, session_id TEXT NOT NULL, product_id TEXT NOT NULL, product_slug TEXT NOT NULL, email TEXT NOT NULL, company TEXT, details TEXT, source TEXT NOT NULL, medium TEXT NOT NULL, campaign TEXT, creative TEXT, status TEXT NOT NULL DEFAULT 'new', technical_canary INTEGER NOT NULL DEFAULT 0)"),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS lumen_a2a_quotes (id TEXT PRIMARY KEY, created_at TEXT NOT NULL, context_id TEXT, service_id TEXT NOT NULL, amount_usd REAL NOT NULL, status TEXT NOT NULL, remote_metadata TEXT)"),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS lumen_a2a_inbound (id TEXT PRIMARY KEY, received_at TEXT NOT NULL, context_id TEXT NOT NULL, task_id TEXT NOT NULL, remote_message_id TEXT, remote_metadata TEXT, text TEXT NOT NULL, binding_intent INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL, processed INTEGER NOT NULL DEFAULT 0, processed_at TEXT, bridge_status TEXT, opportunity_id TEXT, task_json TEXT NOT NULL)"),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS lumen_machine_orders (id TEXT PRIMARY KEY, created_at TEXT NOT NULL, context_id TEXT NOT NULL, task_id TEXT NOT NULL, item_type TEXT NOT NULL, item_id TEXT NOT NULL, service_id TEXT NOT NULL, amount_usd REAL NOT NULL, billing TEXT NOT NULL, status TEXT NOT NULL, inbound_id TEXT NOT NULL, quote_id TEXT, remote_metadata TEXT)"),
@@ -151,6 +153,21 @@ app.use("/buy/*", async (c, next) => {
         };
         await c.env.DB.prepare("UPDATE lumen_x402_receipts SET status='settled_verified', request_metadata=? WHERE payment_fingerprint=?")
           .bind(JSON.stringify(meta), fingerprint).run();
+        try {
+          const settledReceipt=await c.env.DB.prepare("SELECT * FROM lumen_x402_receipts WHERE payment_fingerprint=? LIMIT 1").bind(fingerprint).first();
+          const briefId=clean(meta?.conversion?.brief_id,80);
+          if (settledReceipt && briefId) {
+            const brief=await c.env.DB.prepare("SELECT id,email,company,details,product_id,product_slug FROM lumen_conversion_leads WHERE id=? AND product_id=? AND technical_canary=0 AND LENGTH(TRIM(COALESCE(details,'')))>=8 LIMIT 1").bind(briefId,settledReceipt.product_id).first();
+            if (brief?.details) {
+              const queued=await queuePaidReceipt(c.env,settledReceipt.id,brief.details,{source:"human_brief_auto",brief});
+              meta.fulfillment={auto_queue:queued.ok===true,status:queued.status || queued.error || "unknown",task_id:queued.taskId || null,order_id:queued.orderId || null,brief_id:briefId,reconciled_at:new Date().toISOString()};
+              await c.env.DB.prepare("UPDATE lumen_x402_receipts SET request_metadata=? WHERE id=?").bind(JSON.stringify(meta),settledReceipt.id).run();
+            }
+          }
+        } catch (error) {
+          meta.fulfillment={auto_queue:false,status:"queue_error",detail:clean(error?.message,300),reconciled_at:new Date().toISOString()};
+          await c.env.DB.prepare("UPDATE lumen_x402_receipts SET request_metadata=? WHERE payment_fingerprint=?").bind(JSON.stringify(meta),fingerprint).run();
+        }
       }
     } else if (paymentResponse) {
       await c.env.DB.prepare("UPDATE lumen_x402_receipts SET status='settlement_failed' WHERE payment_fingerprint=? AND status='verified_pending_settlement'")
@@ -190,7 +207,7 @@ function publicCatalog(origin) {
       "resource prepares receipt with optional conversion attribution",
       "facilitator settles Base USDC before response leaves middleware",
       "LUMEN records realized revenue only after settlement success",
-      "POST receiptId + requirement to /redeem for fulfillment",
+      "human checkout: linked brief auto-queues only after verified settlement; machine clients may POST /redeem",
     ],
   };
 }
@@ -210,7 +227,7 @@ async function createVerifiedPendingReceipt(c, product) {
       productId:existing.product_id,
       amountUsd:Number(existing.amount_usd),
       status:existing.status,
-      nextAction:"After settlement success, POST /redeem with receiptId and requirement.",
+      nextAction:"Linked human briefs auto-queue after settlement; machine clients may POST /redeem.",
     });
   }
   const receiptId=rid("X402R");
@@ -238,7 +255,7 @@ async function createVerifiedPendingReceipt(c, product) {
     network:"Base",
     conversionAttributed:Boolean(conversion),
     status:"settlement_before_response",
-    nextAction:"When this response succeeds, settlement is reconciled server-side; POST /redeem with receiptId and requirement.",
+    nextAction:"Settlement is reconciled server-side. Linked human briefs auto-queue; machine clients may POST /redeem.",
   });
 }
 
@@ -261,7 +278,7 @@ app.get("/health", async (c) => {
     ok:true, service:SERVICE, version:VERSION, x402:"LIVE",
     network:NETWORK, asset:"USDC", facilitator:FACILITATOR,
     recipientConfigured:true, resourceServerInitialized:true, outgoingSpendEnabled:false,
-    conversionAttribution:true, humanPaywall:true,
+    conversionAttribution:true, humanPaywall:true, briefLinkedFulfillment:true,
   });
 });
 app.get("/catalog", (c) => c.json(publicCatalog(new URL(c.req.url).origin)));
@@ -270,56 +287,62 @@ for (const [slug,product] of Object.entries(PRODUCTS)) {
   app.get(`/buy/${slug}`, (c) => createVerifiedPendingReceipt(c,product));
 }
 
-app.post("/redeem", async (c) => {
-  await ensureSchema(c.env);
-  let body={};
-  try { body=await c.req.json(); } catch { return c.json({ok:false,error:"Valid JSON body required"},400); }
-  const receiptId=clean(body.receiptId || body.receipt_id,80);
-  const requirement=clean(body.requirement || body.request || body.input,8000);
-  if (!receiptId || !requirement) return c.json({ok:false,error:"receiptId and requirement are required"},400);
-
-  const receipt=await c.env.DB.prepare("SELECT * FROM lumen_x402_receipts WHERE id=? LIMIT 1").bind(receiptId).first();
-  if (!receipt) return c.json({ok:false,error:"Receipt not found"},404);
-  if (receipt.status !== "settled_verified" && receipt.status !== "redeemed_queued") {
-    return c.json({ok:false,error:"Payment is not yet confirmed as settled",status:receipt.status},409);
-  }
-  const prior=await c.env.DB.prepare("SELECT * FROM lumen_x402_redemptions WHERE receipt_id=? LIMIT 1").bind(receiptId).first();
-  if (prior) return c.json({ok:true,duplicateSafe:true,receiptId,taskId:prior.task_id,orderId:prior.order_id,status:"already_redeemed"});
-
+async function queuePaidReceipt(env, receiptIdRaw, requirementRaw, options={}) {
+  await ensureSchema(env);
+  const receiptId=clean(receiptIdRaw,80);
+  const requirement=clean(requirementRaw,8000);
+  if (!receiptId || !requirement) return {ok:false,statusCode:400,error:"receiptId and requirement are required"};
+  const receipt=await env.DB.prepare("SELECT * FROM lumen_x402_receipts WHERE id=? LIMIT 1").bind(receiptId).first();
+  if (!receipt) return {ok:false,statusCode:404,error:"Receipt not found"};
+  if (receipt.status !== "settled_verified" && receipt.status !== "redeemed_queued") return {ok:false,statusCode:409,error:"Payment is not yet confirmed as settled",status:receipt.status};
+  const prior=await env.DB.prepare("SELECT * FROM lumen_x402_redemptions WHERE receipt_id=? LIMIT 1").bind(receiptId).first();
+  if (prior) return {ok:true,statusCode:200,duplicateSafe:true,receiptId,taskId:prior.task_id,orderId:prior.order_id,status:"already_redeemed"};
   const product=Object.values(PRODUCTS).find(p => p.id === receipt.product_id);
-  if (!product) return c.json({ok:false,error:"Receipt product is no longer available"},409);
+  if (!product) return {ok:false,statusCode:409,error:"Receipt product is no longer available"};
   const now=new Date().toISOString();
   const contextId=rid("X402CTX"), taskId=rid("X402TASK"), inboundId=rid("A2AIN"), orderId=rid("MORD"), quoteId=rid("A2AQ");
   let receiptMeta={};
   try { receiptMeta=JSON.parse(receipt.request_metadata || "{}"); } catch {}
+  const brief=options.brief || null;
   const metadata={
     source:"a2a_machine_store", purpose:"commercial_x402_purchase",
+    fulfillment_source:clean(options.source || "manual_redeem",80),
     productId:product.id, lumen_product_id:product.id, lumen_service_id:product.service_id,
     lumen_item_type:"product", lumen_item_id:product.id,
     lumen_quote_usd:String(product.price_usd), lumen_quote_id:quoteId, lumen_billing:"per_request",
     lumen_seller_mode:"receive_revenue_only", payment_verified:"true", payment_settled:"true",
     payment_method:"x402_usdc_base", x402_receipt_id:receiptId, charge_created:"true",
     ...(receiptMeta.conversion ? {conversion:receiptMeta.conversion} : {}),
+    ...(brief?.id ? {brief_id:clean(brief.id,80),delivery_email:clean(brief.email,180),customer_company:clean(brief.company,180)} : {}),
   };
   const task={
     id:taskId, contextId,
     status:{state:"TASK_STATE_WORKING",timestamp:now,message:{messageId:rid("MSG"),contextId,taskId,role:"ROLE_AGENT",parts:[{text:`Paid ${product.name} request received and queued for fulfillment.`,mediaType:"text/plain"}]}},
-    metadata:{lumen:true,paid:true,paymentVerified:true,paymentSettled:true,paymentMethod:"x402_usdc_base",receiptId,sellerMode:"receive_revenue_only",lumenAutonomousSpend:false},
+    metadata:{lumen:true,paid:true,paymentVerified:true,paymentSettled:true,paymentMethod:"x402_usdc_base",receiptId,briefId:brief?.id || receiptMeta.conversion?.brief_id || null,sellerMode:"receive_revenue_only",lumenAutonomousSpend:false},
   };
   try {
-    await c.env.DB.batch([
-      c.env.DB.prepare("INSERT INTO lumen_x402_redemptions(receipt_id,created_at,context_id,task_id,inbound_id,order_id,quote_id) VALUES(?,?,?,?,?,?,?)").bind(receiptId,now,contextId,taskId,inboundId,orderId,quoteId),
-      c.env.DB.prepare("UPDATE lumen_x402_receipts SET status='redeemed_queued', redeemed_at=? WHERE id=? AND status='settled_verified'").bind(now,receiptId),
-      c.env.DB.prepare("INSERT INTO lumen_a2a_quotes(id,created_at,context_id,service_id,amount_usd,status,remote_metadata) VALUES(?,?,?,?,?,?,?)").bind(quoteId,now,contextId,product.service_id,product.price_usd,"PAID_VERIFIED",JSON.stringify(metadata)),
-      c.env.DB.prepare("INSERT INTO lumen_a2a_inbound(id,received_at,context_id,task_id,remote_message_id,remote_metadata,text,binding_intent,status,processed,task_json) VALUES(?,?,?,?,?,?,?,?,?,0,?)").bind(inboundId,now,contextId,taskId,rid("X402MSG"),JSON.stringify(metadata),requirement,0,"x402_paid_service_request",JSON.stringify(task)),
-      c.env.DB.prepare("INSERT INTO lumen_machine_orders(id,created_at,context_id,task_id,item_type,item_id,service_id,amount_usd,billing,status,inbound_id,quote_id,remote_metadata) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(orderId,now,contextId,taskId,"product",product.id,product.service_id,product.price_usd,"per_request","x402_paid_queued",inboundId,quoteId,JSON.stringify(metadata)),
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO lumen_x402_redemptions(receipt_id,created_at,context_id,task_id,inbound_id,order_id,quote_id) VALUES(?,?,?,?,?,?,?)").bind(receiptId,now,contextId,taskId,inboundId,orderId,quoteId),
+      env.DB.prepare("UPDATE lumen_x402_receipts SET status='redeemed_queued', redeemed_at=? WHERE id=? AND status='settled_verified'").bind(now,receiptId),
+      env.DB.prepare("INSERT INTO lumen_a2a_quotes(id,created_at,context_id,service_id,amount_usd,status,remote_metadata) VALUES(?,?,?,?,?,?,?)").bind(quoteId,now,contextId,product.service_id,product.price_usd,"PAID_VERIFIED",JSON.stringify(metadata)),
+      env.DB.prepare("INSERT INTO lumen_a2a_inbound(id,received_at,context_id,task_id,remote_message_id,remote_metadata,text,binding_intent,status,processed,task_json) VALUES(?,?,?,?,?,?,?,?,?,0,?)").bind(inboundId,now,contextId,taskId,rid("X402MSG"),JSON.stringify(metadata),requirement,0,"x402_paid_service_request",JSON.stringify(task)),
+      env.DB.prepare("INSERT INTO lumen_machine_orders(id,created_at,context_id,task_id,item_type,item_id,service_id,amount_usd,billing,status,inbound_id,quote_id,remote_metadata) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(orderId,now,contextId,taskId,"product",product.id,product.service_id,product.price_usd,"per_request","x402_paid_queued",inboundId,quoteId,JSON.stringify(metadata)),
     ]);
+    if (brief?.id) await env.DB.prepare("UPDATE lumen_conversion_leads SET status='paid_queued' WHERE id=?").bind(clean(brief.id,80)).run();
   } catch (error) {
-    const race=await c.env.DB.prepare("SELECT * FROM lumen_x402_redemptions WHERE receipt_id=? LIMIT 1").bind(receiptId).first();
-    if (race) return c.json({ok:true,duplicateSafe:true,receiptId,taskId:race.task_id,orderId:race.order_id,status:"already_redeemed"});
-    return c.json({ok:false,error:"Could not queue paid request",detail:clean(error?.message,300)},500);
+    const race=await env.DB.prepare("SELECT * FROM lumen_x402_redemptions WHERE receipt_id=? LIMIT 1").bind(receiptId).first();
+    if (race) return {ok:true,statusCode:200,duplicateSafe:true,receiptId,taskId:race.task_id,orderId:race.order_id,status:"already_redeemed"};
+    return {ok:false,statusCode:500,error:"Could not queue paid request",detail:clean(error?.message,300)};
   }
-  return c.json({ok:true,paymentVerified:true,paymentSettled:true,receiptId,productId:product.id,serviceId:product.service_id,amountUsd:product.price_usd,taskId,orderId,status:"paid_queued_for_fulfillment",lumenAutonomousSpend:false});
+  return {ok:true,statusCode:200,paymentVerified:true,paymentSettled:true,receiptId,productId:product.id,serviceId:product.service_id,amountUsd:product.price_usd,taskId,orderId,status:"paid_queued_for_fulfillment",lumenAutonomousSpend:false};
+}
+
+app.post("/redeem", async (c) => {
+  let body={};
+  try { body=await c.req.json(); } catch { return c.json({ok:false,error:"Valid JSON body required"},400); }
+  const result=await queuePaidReceipt(c.env,body.receiptId || body.receipt_id,body.requirement || body.request || body.input,{source:"manual_redeem"});
+  const {statusCode=200,...payload}=result;
+  return c.json(payload,statusCode);
 });
 
 app.get("/receipt/:id", async (c) => {

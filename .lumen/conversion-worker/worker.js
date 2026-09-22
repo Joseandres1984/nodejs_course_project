@@ -134,7 +134,7 @@ export default {
     try {
       if (request.method === "GET" && path === "/health") {
         await ensureSchema(env);
-        return Response.json({ok:true,service:SERVICE,version:VERSION,x402:X402_BASE,paidSpend:false,crmBridge:true,productContractVersion:PRODUCT_CONTRACT_VERSION,requirementsBeforeHumanCheckout:true},{headers});
+        return Response.json({ok:true,service:SERVICE,version:VERSION,x402:X402_BASE,paidSpend:false,crmBridge:true,productContractVersion:PRODUCT_CONTRACT_VERSION,requirementsBeforeHumanCheckout:true,briefLinkedCheckout:true},{headers});
       }
       if (request.method === "GET" && (path === "/" || path === "/catalog")) {
         if (path === "/catalog") await recordEvent(env,"catalog_visit",sid,null,attr);
@@ -160,14 +160,20 @@ export default {
         const slug=goMatch[1]; const p=PRODUCTS[slug];
         if (!p) return new Response("Not found",{status:404,headers});
         await ensureSchema(env);
+        const requestedBriefId=clean(url.searchParams.get("brief_id"),80);
+        let brief=null;
         if (!attr.technical_canary) {
-          const requirement=await env.DB.prepare("SELECT id FROM lumen_conversion_leads WHERE session_id=? AND product_slug=? AND technical_canary=0 AND LENGTH(TRIM(COALESCE(details,'')))>=8 ORDER BY created_at DESC LIMIT 1").bind(sid,slug).first();
-          if (!requirement) { const q=qs(attr); headers.set("location",`/offer/${slug}${q?`?${q}`:""}`); return new Response(null,{status:303,headers}); }
+          brief=requestedBriefId
+            ? await env.DB.prepare("SELECT id,email,company,details FROM lumen_conversion_leads WHERE id=? AND session_id=? AND product_slug=? AND technical_canary=0 AND LENGTH(TRIM(COALESCE(details,'')))>=8 LIMIT 1").bind(requestedBriefId,sid,slug).first()
+            : await env.DB.prepare("SELECT id,email,company,details FROM lumen_conversion_leads WHERE session_id=? AND product_slug=? AND technical_canary=0 AND LENGTH(TRIM(COALESCE(details,'')))>=8 ORDER BY created_at DESC LIMIT 1").bind(sid,slug).first();
+          if (!brief) { const q=qs(attr); headers.set("location",`/offer/${slug}${q?`?${q}`:""}`); return new Response(null,{status:303,headers}); }
         }
-        const eventId=await recordEvent(env,"checkout_started",sid,slug,attr,{destination:`${X402_BASE}/buy/${slug}`,requirementsCaptured:true});
+        const briefId=clean(brief?.id || requestedBriefId,80);
+        const eventId=await recordEvent(env,"checkout_started",sid,slug,attr,{destination:`${X402_BASE}/buy/${slug}`,requirementsCaptured:true,brief_id:briefId});
         const target=new URL(`${X402_BASE}/buy/${slug}`);
         target.searchParams.set("conversion_event",eventId);
         target.searchParams.set("conversion_session",sid);
+        if (briefId) target.searchParams.set("brief_id",briefId);
         if (attr.campaign) target.searchParams.set("campaign",attr.campaign);
         if (attr.source) target.searchParams.set("source",attr.source);
         if (attr.medium) target.searchParams.set("medium",attr.medium);
@@ -191,8 +197,10 @@ export default {
           .bind(leadId,new Date().toISOString(),sid,p.id,slug,email,company,details,attr.source,attr.medium,attr.campaign,attr.creative,"new",attr.technical_canary).run();
         const crm=await syncLeadToCrm(env,{leadId,p,slug,email,company,details,attr});
         await recordEvent(env,"qualified_intent",sid,slug,attr,{lead_id:leadId,crm,next});
-        const q=qs(attr); const go=`/go/${slug}${q?`?${q}`:""}`;
-        if (next === "checkout") { await recordEvent(env,"requirements_captured",sid,slug,attr,{lead_id:leadId}); headers.set("location",go); return new Response(null,{status:303,headers}); }
+        const qparams=new URLSearchParams(qs(attr));
+        qparams.set("brief_id",leadId);
+        const go=`/go/${slug}?${qparams.toString()}`;
+        if (next === "checkout") { await recordEvent(env,"requirements_captured",sid,slug,attr,{lead_id:leadId,brief_id:leadId}); headers.set("location",go); return new Response(null,{status:303,headers}); }
         headers.set("content-type","text/html; charset=utf-8");
         return new Response(page("Consulta recibida",`<main class="card"><h1>Consulta recibida.</h1><p class="sub">LUMEN guardó el requerimiento de ${html(p.name)}. No se realizó ningún cargo.</p><div class="actions"><a class="btn" href="${html(go)}">Continuar al pago · USD ${p.price_usd}</a><a class="btn secondary" href="/catalog">Ver catálogo</a></div></main>`),{status:200,headers});
       }
