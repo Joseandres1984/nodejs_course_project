@@ -39,6 +39,9 @@ import adaptive_operator_runtime  # noqa: F401
 # Autonomous Director extends the existing Adaptive Operator with bounded anti-stall management.
 # It may reallocate reversible attention/strategy only; spend, binding terms and deployments remain gated.
 import autonomous_director_runtime  # noqa: F401
+# Feed real Cognitive Engine outcomes into Director attention only after the base Director is installed.
+# This bridge is read-only, keeps the hard funnel bottleneck authoritative and cannot widen execution authority.
+import cognitive_director_learning_runtime  # noqa: F401
 import commercial_truth_repair_runtime  # noqa: F401
 import procurement_document_enrichment_runtime  # noqa: F401
 import procurement_lineage_runtime  # noqa: F401
