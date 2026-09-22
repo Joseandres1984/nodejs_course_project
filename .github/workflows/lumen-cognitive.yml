@@ -21,6 +21,8 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.LUMEN_D1_ACCOUNT_ID }}
+      SHADOW_URL: "https://lumen-zero-cognitive-shadow.lumen-b2b.workers.dev"
+      OLD_PUBLIC_URL: "https://lumen-zero-cognitive.lumen-b2b.workers.dev"
     steps:
       - name: Checkout LUMEN Zero
         uses: actions/checkout@v4
@@ -28,36 +30,35 @@ jobs:
           ref: lumen-zero
 
       - name: Deployment preflight
-        id: preflight
         shell: bash
         run: |
           set -euo pipefail
-          if [[ -z "$CLOUDFLARE_API_TOKEN" || -z "$CLOUDFLARE_ACCOUNT_ID" ]]; then
-            echo "Missing Cloudflare deployment credentials"
-            exit 1
-          fi
-          echo "ready=true" >> "$GITHUB_OUTPUT"
+          [[ -n "$CLOUDFLARE_API_TOKEN" ]]
+          [[ -n "$CLOUDFLARE_ACCOUNT_ID" ]]
 
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: '24'
 
-      - name: Deploy Cognitive Worker
+      - name: Validate Worker syntax
+        working-directory: .lumen/cognitive-worker
+        run: node --check worker.js
+
+      - name: Deploy private Cognitive Worker
         working-directory: .lumen/cognitive-worker
         run: npx --yes wrangler@4 deploy
 
-      - name: Verify hard-zero health policy
+      - name: Verify cognitive engine through Service Binding
         shell: bash
         run: |
           set -euo pipefail
-          base='https://lumen-zero-cognitive.lumen-b2b.workers.dev'
           ok=0
           for i in {1..15}; do
-            code=$(curl -sS -H 'cache-control: no-cache' -o /tmp/cognitive-health.json -w '%{http_code}' "$base/health?deploy=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$i" || true)
-            version=$(jq -r '.version // ""' /tmp/cognitive-health.json 2>/dev/null || true)
-            model=$(jq -r '.primary_model // ""' /tmp/cognitive-health.json 2>/dev/null || true)
-            echo "HEALTH_ATTEMPT=$i HTTP=$code VERSION=$version MODEL=$model"
+            code=$(curl -sS -H 'cache-control: no-cache' -o /tmp/shadow-health.json -w '%{http_code}' "$SHADOW_URL/health?cognitive_deploy=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$i" || true)
+            version=$(jq -r '.cognitive.version // ""' /tmp/shadow-health.json 2>/dev/null || true)
+            model=$(jq -r '.cognitive.model // ""' /tmp/shadow-health.json 2>/dev/null || true)
+            echo "SERVICE_BINDING_ATTEMPT=$i HTTP=$code VERSION=$version MODEL=$model"
             if [[ "$code" == "200" && "$version" == "1.1-zero-cognitive-engine" && "$model" == "@cf/google/gemma-4-26b-a4b-it" ]]; then
               ok=1
               break
@@ -65,100 +66,65 @@ jobs:
             sleep 4
           done
           [[ "$ok" == "1" ]]
-          cat /tmp/cognitive-health.json
+          cat /tmp/shadow-health.json
           jq -e '
-            .status == "ok" and
-            .version == "1.1-zero-cognitive-engine" and
-            .primary_provider == "cloudflare_ai" and
-            .primary_model == "@cf/google/gemma-4-26b-a4b-it" and
-            .ai_binding_available == true and
-            .paid_ai_allowed == false and
-            .monetary_budget_usd == 0 and
-            .paid_ai_used == false and
-            .outgoing_spend_enabled == false and
+            .ok == true and
+            .mode == "shadow_only" and
+            .cognitive.connected == true and
+            .cognitive.version == "1.1-zero-cognitive-engine" and
+            .cognitive.model == "@cf/google/gemma-4-26b-a4b-it" and
+            .cognitive.paid_ai_allowed == false and
+            .cognitive.monetary_budget_usd == 0 and
+            .cognitive.outgoing_spend_enabled == false and
             .actions_executed == false and
-            .governor_required == true and
-            .free_guard.cloudflare_calls_per_utc_day <= 50
-          ' /tmp/cognitive-health.json >/dev/null
+            .outgoing_spend_enabled == false and
+            .governor_required == true
+          ' /tmp/shadow-health.json >/dev/null
 
-      - name: Prove Workers AI reasoning without side effects
+      - name: Prove private Workers AI reasoning through LUMEN
         shell: bash
         run: |
           set -euo pipefail
-          base='https://lumen-zero-cognitive.lumen-b2b.workers.dev'
-          cat >/tmp/cognitive-ai.json <<'JSON'
-          {
-            "task":"sales_triage",
-            "technical_canary":true,
-            "subject":{
-              "company":"LUMEN Canary Industrial",
-              "country":"Argentina",
-              "sector":"industrial pumps",
-              "signals":[
-                "The company published a new export page",
-                "The page explicitly mentions looking for distributors in Chile"
-              ],
-              "history":{"contacted":false,"recent_contact":false}
-            },
-            "context":{"instruction":"Choose the best LUMEN microproduct using only these facts."}
-          }
-          JSON
-          code=$(curl -sS -o /tmp/cognitive-ai-out.json -w '%{http_code}' -H 'content-type: application/json' --data-binary @/tmp/cognitive-ai.json "$base/decide")
-          echo "AI_CANARY_HTTP=$code"
-          cat /tmp/cognitive-ai-out.json
+          code=$(curl -sS -X POST -o /tmp/private-ai-canary.json -w '%{http_code}' "$SHADOW_URL/canary")
+          echo "PRIVATE_AI_CANARY_HTTP=$code"
+          cat /tmp/private-ai-canary.json
           [[ "$code" == "200" ]]
           jq -e '
+            .ok == true and
+            .stored == true and
             .provider == "cloudflare_ai" and
             .model == "@cf/google/gemma-4-26b-a4b-it" and
-            (.decision | IN("contact","research","hold","prioritize")) and
-            (.priority | IN("low","medium","high")) and
-            (.confidence >= 0 and .confidence <= 1) and
+            .mode == "shadow_only" and
             .paid_ai_used == false and
             .monetary_cost_usd == 0 and
             .actions_executed == false and
-            .governor_required == true and
-            .outgoing_spend_enabled == false
-          ' /tmp/cognitive-ai-out.json >/dev/null
+            .outgoing_spend_enabled == false and
+            .governor_required == true
+          ' /tmp/private-ai-canary.json >/dev/null
 
-      - name: Prove deterministic fallback
+      - name: Verify direct cognitive workers.dev route is closed
         shell: bash
         run: |
           set -euo pipefail
-          base='https://lumen-zero-cognitive.lumen-b2b.workers.dev'
-          cat >/tmp/cognitive-det.json <<'JSON'
-          {
-            "task":"sales_triage",
-            "technical_canary":true,
-            "use_ai":false,
-            "subject":{
-              "company":"Fallback Canary",
-              "signals":["needs supplier sourcing for an industrial component"]
-            }
-          }
-          JSON
-          code=$(curl -sS -o /tmp/cognitive-det-out.json -w '%{http_code}' -H 'content-type: application/json' --data-binary @/tmp/cognitive-det.json "$base/decide")
-          echo "DETERMINISTIC_CANARY_HTTP=$code"
-          cat /tmp/cognitive-det-out.json
-          [[ "$code" == "200" ]]
+          code=$(curl -sS --max-time 15 -o /tmp/old-public-body.txt -w '%{http_code}' "$OLD_PUBLIC_URL/health?private_check=${GITHUB_RUN_ID}" || true)
+          echo "DIRECT_COGNITIVE_PUBLIC_HTTP=$code"
+          if [[ "$code" == "200" ]]; then
+            echo "ERROR: cognitive engine is still publicly reachable"
+            cat /tmp/old-public-body.txt || true
+            exit 1
+          fi
+          echo "COGNITIVE_PRIVATE_ROUTE=success"
+
+      - name: Zero-cost policy summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS "$SHADOW_URL/health" -o /tmp/final-health.json
           jq -e '
-            .provider == "deterministic" and
-            .paid_ai_used == false and
-            .monetary_cost_usd == 0 and
+            .cognitive.connected == true and
+            .cognitive.paid_ai_allowed == false and
+            .cognitive.monetary_budget_usd == 0 and
             .actions_executed == false and
             .outgoing_spend_enabled == false
-          ' /tmp/cognitive-det-out.json >/dev/null
-
-      - name: Verify daily free guard advanced safely
-        shell: bash
-        run: |
-          set -euo pipefail
-          base='https://lumen-zero-cognitive.lumen-b2b.workers.dev'
-          curl -sS "$base/health" -o /tmp/cognitive-health-after.json
-          cat /tmp/cognitive-health-after.json
-          jq -e '
-            .usage_today.cf_calls >= 1 and
-            .usage_today.cf_calls <= .free_guard.cloudflare_calls_per_utc_day and
-            .paid_ai_allowed == false and
-            .monetary_budget_usd == 0
-          ' /tmp/cognitive-health-after.json >/dev/null
-          echo "LUMEN_COGNITIVE_ZERO_COST_CANARY=success"
+          ' /tmp/final-health.json >/dev/null
+          echo "LUMEN_PRIVATE_COGNITIVE_ZERO_COST_CANARY=success"
