@@ -1,4 +1,5 @@
 import core from "./worker.js";
+import {handleRevenueStorefront} from "./revenue-storefront.js";
 
 const CONVERSION_BASE = "https://lumen-zero-conversion.lumen-b2b.workers.dev";
 const X402_BASE = "https://lumen-zero-x402.lumen-b2b.workers.dev";
@@ -48,8 +49,8 @@ function rewriteText(text, origin) {
     .replaceAll(X402_BASE, origin)
     .replaceAll(X402_INTERNAL, origin)
     .replaceAll('href="/catalog"', 'href="/store"')
-    .replaceAll('<a href="/services">Servicios</a>', '<a href="/services">Servicios</a><a href="/store">Comprar</a>')
-    .replaceAll('<a class="cta" href="/services">Ver servicios</a>', '<a class="cta" href="/services">Ver servicios</a> <a class="cta" href="/store">Comprar intelligence</a>');
+    .replaceAll('<a href="/services">Servicios</a>', '<a href="/services">Servicios</a><a href="/catalogo">Catálogo</a><a href="/store">Comprar</a>')
+    .replaceAll('<a class="cta" href="/services">Ver servicios</a>', '<a class="cta" href="/catalogo">Ver catálogo</a> <a class="cta" href="/services">Servicios a medida</a>');
   return humanCheckout(rewritten, origin);
 }
 
@@ -169,6 +170,9 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname.replace(/\/+$/, "") || "/";
     const origin = url.origin;
+
+    const revenueResponse = await handleRevenueStorefront(request, env);
+    if (revenueResponse) return revenueResponse;
 
     if (request.method === "GET" && (path === "/store" || path === "/catalog")) {
       if (ctx?.waitUntil) ctx.waitUntil(warmX402(env.X402, origin));
