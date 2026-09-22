@@ -32,13 +32,16 @@ jobs:
           node-version: '24'
       - name: Compile runtime
         run: python -m compileall .lumen/runtime
-      - name: Verify zero runtime auto-loads customization hooks
+      - name: Verify Autonomous Director worker activation
         working-directory: .lumen/runtime
         run: |
           python - <<'PY'
-          import sys
-          assert 'sitecustomize' in sys.modules, 'sitecustomize did not auto-load'
-          assert 'usercustomize' in sys.modules, 'usercustomize did not auto-load'
+          from pathlib import Path
+          source = Path('worker_entry.py').read_text(encoding='utf-8')
+          adaptive = source.index('import adaptive_operator_runtime')
+          director = source.index('import autonomous_director_runtime')
+          truth = source.index('import commercial_truth_repair_runtime')
+          assert adaptive < director < truth, 'Autonomous Director import order is not deterministic'
           import adaptive_operator_runtime
           import autonomous_director_runtime
           assert adaptive_operator_runtime.adaptive_operator_tick.__module__ == 'autonomous_director_runtime'
