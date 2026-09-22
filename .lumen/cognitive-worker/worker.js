@@ -1,11 +1,11 @@
 const SERVICE = "lumen-zero-cognitive";
-const VERSION = "1.0-zero-cognitive-engine";
-const PRIMARY_MODEL = "@cf/zai-org/glm-4.7-flash";
+const VERSION = "1.1-zero-cognitive-engine";
+const PRIMARY_MODEL = "@cf/google/gemma-4-26b-a4b-it";
 const OPENROUTER_MODEL = "openrouter/free";
 const CF_DAILY_CALL_LIMIT = 50;
 const OPENROUTER_DAILY_CALL_LIMIT = 20;
 const MAX_CONTEXT_CHARS = 5000;
-const MAX_COMPLETION_TOKENS = 240;
+const MAX_COMPLETION_TOKENS = 400;
 const ALLOW_PAID_AI = false;
 const AI_MONETARY_BUDGET_USD = 0;
 
@@ -153,8 +153,11 @@ function extractText(result) {
   if (!result) return "";
   if (typeof result === "string") return result;
   if (typeof result.response === "string") return result.response;
+  if (result.response && typeof result.response === "object") return JSON.stringify(result.response);
   if (typeof result.result === "string") return result.result;
-  const c = result?.choices?.[0]?.message?.content;
+  const message = result?.choices?.[0]?.message;
+  if (message?.parsed && typeof message.parsed === "object") return JSON.stringify(message.parsed);
+  const c = message?.content;
   if (typeof c === "string") return c;
   if (Array.isArray(c)) return c.map(x => typeof x === "string" ? x : x?.text || "").join("");
   return "";
@@ -190,8 +193,9 @@ async function cloudflareReason(env, body) {
       { role: "system", content: systemPrompt(body.task) },
       { role: "user", content: flattenEvidence(body) },
     ],
-    temperature: 0.2,
-    max_tokens: MAX_COMPLETION_TOKENS,
+    temperature: 0.1,
+    max_completion_tokens: MAX_COMPLETION_TOKENS,
+    chat_template_kwargs: { enable_thinking: false },
   });
   return parseModelJson(extractText(result));
 }
@@ -214,7 +218,7 @@ async function openRouterReason(env, body) {
         { role: "user", content: flattenEvidence(body) },
       ],
       max_tokens: MAX_COMPLETION_TOKENS,
-      temperature: 0.2,
+      temperature: 0.1,
     }),
   });
   if (!response.ok) throw new Error(`openrouter_http_${response.status}`);
