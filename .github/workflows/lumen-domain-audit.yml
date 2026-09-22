@@ -1,0 +1,50 @@
+name: LUMEN Domain Audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/lumen-domain-audit.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  audit-domain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout LUMEN Zero
+        uses: actions/checkout@v4
+        with:
+          ref: lumen-zero
+          fetch-depth: 1
+
+      - name: Audit old workers.dev identity references
+        shell: bash
+        run: |
+          set -euo pipefail
+          OLD='joseandresceol1-jac.workers.dev'
+          NEW='lumen-b2b.workers.dev'
+          echo '=== OLD DOMAIN REFERENCES ==='
+          git grep -n -F "$OLD" -- . ':!*.lock' || true
+          echo '=== NEW DOMAIN REFERENCES ==='
+          git grep -n -F "$NEW" -- . ':!*.lock' || true
+          old_count=$(git grep -I -F -l "$OLD" -- . ':!*.lock' | wc -l | tr -d ' ')
+          new_count=$(git grep -I -F -l "$NEW" -- . ':!*.lock' | wc -l | tr -d ' ')
+          echo "OLD_DOMAIN_FILES=$old_count"
+          echo "NEW_DOMAIN_FILES=$new_count"
+          if [[ "$old_count" -gt 0 ]]; then
+            echo 'DOMAIN_AUDIT=STALE_REFERENCES_FOUND'
+          else
+            echo 'DOMAIN_AUDIT=CLEAN'
+          fi
+
+      - name: Summary
+        shell: bash
+        run: |
+          echo '## LUMEN workers.dev domain audit' >> "$GITHUB_STEP_SUMMARY"
+          echo '- Source branch inspected: lumen-zero' >> "$GITHUB_STEP_SUMMARY"
+          echo '- Target public suffix: lumen-b2b.workers.dev' >> "$GITHUB_STEP_SUMMARY"
+          echo '- Audit only: no payment, no spending, no secret output' >> "$GITHUB_STEP_SUMMARY"
