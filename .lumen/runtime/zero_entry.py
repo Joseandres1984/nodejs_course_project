@@ -104,6 +104,18 @@ import zero_search_budget_runtime  # noqa: F401,E402
 # but cannot become counterparties or consume commercial execution capacity.
 import zero_discovery_quality_runtime  # noqa: F401,E402
 
+# A settled customer order outranks new prospecting. This dedicated lane consumes only
+# x402 orders already proven settled/queued in D1, claims at most one job atomically,
+# gathers zero-cost public evidence and produces structured report JSON. It cannot send
+# mail, create a charge, move funds or mark a report delivered. Any failure stays closed
+# inside the fulfillment lane so the paid job remains auditable for retry/review.
+try:
+    import paid_fulfillment_runtime  # noqa: E402
+    _paid_fulfillment = paid_fulfillment_runtime.run_once()
+    print({"paid_fulfillment_runtime": _paid_fulfillment}, flush=True)
+except Exception as exc:
+    print({"paid_fulfillment_runtime": {"status": "degraded_fail_closed", "error": f"{type(exc).__name__}: {str(exc)[:300]}", "outgoing_spend": False, "delivery_attempted": False}}, flush=True)
+
 # First-cash demand priority: reserve the beginning of each zero-cost cycle for one official/public
 # procurement query before broader demand modules can consume the shared daily pool. The shared hard
 # cap remains unchanged and the local public-procurement daily cap still applies. Disable a second
