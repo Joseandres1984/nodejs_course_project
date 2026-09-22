@@ -5,7 +5,7 @@ from __future__ import annotations
 Adds three zero-cost monetization lanes on top of existing LUMEN capabilities:
 1) Sourcing Success: success-fee sourcing preparation for verified buyer demand.
 2) Tender / Buyer Intent subscriptions: recurring intelligence products.
-3) Agent APIs: fixed-price machine-readable services for external agents.
+3) Agent APIs / machine offers: fixed-price machine-readable services already exposed by A2A.
 
 This runtime never creates binding commitments, spends money, changes payment authority,
 lowers evidence gates, or fabricates commercial outcomes. It only materializes catalog,
@@ -69,12 +69,15 @@ SUBSCRIPTIONS = [
     },
 ]
 
+# Keep this aligned with the already-live A2A machine store. Revenue Expansion must not
+# advertise phantom checkout products that the gateway cannot actually quote/route.
 AGENT_APIS = [
-    {"id": "A2A-COMPANY-VERIFY", "name": "Company Verify", "unit_price_usd": 0.02, "unit": "call"},
-    {"id": "A2A-SUPPLIER-CHECK", "name": "Supplier Check", "unit_price_usd": 0.10, "unit": "call"},
-    {"id": "A2A-QUOTE-CHECK", "name": "Quote Check", "unit_price_usd": 0.25, "unit": "call"},
-    {"id": "A2A-SOURCING-SHORTLIST", "name": "Sourcing Shortlist", "unit_price_usd": 2.00, "unit": "request"},
-    {"id": "A2A-TENDER-MATCH", "name": "Tender Match", "unit_price_usd": 0.50, "unit": "call"},
+    {"id": "MP-SUPPLIER-SNAPSHOT", "name": "Supplier Snapshot", "unit_price_usd": 5.0, "unit": "request"},
+    {"id": "MP-QUOTE-SANITY", "name": "Quote Sanity Check", "unit_price_usd": 7.0, "unit": "request"},
+    {"id": "MP-TENDER-SCAN", "name": "Tender Quick Scan", "unit_price_usd": 9.0, "unit": "request"},
+    {"id": "MP-SOURCING-5", "name": "Supplier Shortlist 5", "unit_price_usd": 15.0, "unit": "request"},
+    {"id": "MP-BUYER-SIGNALS", "name": "Buyer Signal Scan", "unit_price_usd": 19.0, "unit": "request"},
+    {"id": "MP-EXPORT-PULSE", "name": "Export Market Pulse", "unit_price_usd": 25.0, "unit": "request"},
 ]
 
 
@@ -149,8 +152,8 @@ def _lane_priority(state: Dict[str, Any]) -> List[Dict[str, Any]]:
     lanes.append({
         "lane": "agent_apis",
         "priority": 72,
-        "reason": "machine_readable_catalog_can_accumulate_24x7_pay_per_call_demand_without_paid_spend",
-        "next_action": "publish_fixed_price_nonbinding_machine_catalog_and_track_paid_settlement_separately",
+        "reason": "existing_machine_store_can_accumulate_24x7_paid_requests_without_paid_spend",
+        "next_action": "surface_live_machine_store_products_and_track_settlement_separately",
     })
 
     lanes.sort(key=lambda row: -_i(row.get("priority")))
@@ -165,6 +168,8 @@ def build_catalog() -> Dict[str, Any]:
         "agent_apis": [dict(row) for row in AGENT_APIS],
         "currency": "USD",
         "pricing_status": "launch_validation",
+        "a2a_catalog_url": "https://lumen-zero-a2a.lumen-b2b.workers.dev/revenue/catalog",
+        "machine_store_url": "https://lumen-zero-a2a.lumen-b2b.workers.dev/machine/catalog",
         "price_changes_require_human_review": True,
         "paid_media_spend": False,
         "autonomous_outgoing_spend": False,
