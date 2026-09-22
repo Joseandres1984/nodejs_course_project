@@ -1,6 +1,6 @@
 import a2aWorker from "./worker.js";
 import { handleRevenue } from "./revenue-expansion.js";
-import { DISCOVERY_VERSION, handleDiscovery } from "./discovery.js";
+import { DISCOVERY_VERSION, enhanceAgentCard, handleDiscovery } from "./discovery.js";
 
 function landingPage(origin) {
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
@@ -31,6 +31,7 @@ function landingPage(origin) {
   <meta name="robots" content="index,follow,max-snippet:-1" />
   <link rel="canonical" href="${base}/" />
   <link rel="alternate" type="application/json" href="${base}/.well-known/agent-card.json" title="A2A Agent Card" />
+  <link rel="alternate" type="application/json" href="${base}/.well-known/agents.json" title="A2A Registry multi-agent manifest" />
   <link rel="alternate" type="application/json" href="${base}/openapi.json" title="OpenAPI" />
   <link rel="alternate" type="text/plain" href="${base}/llms.txt" title="LLM discovery guide" />
   <script type="application/ld+json">${structured}</script>
@@ -46,6 +47,7 @@ function landingPage(origin) {
     <p>LUMEN is a public seller-side A2A agent for supplier sourcing, supplier verification, quotation review, public tenders, buyer signals, B2B prospect intelligence and export research. AI agents can discover services, request non-binding quotes and use eligible x402 machine checkout. LUMEN receives revenue but never performs autonomous outgoing spend or binding acceptance.</p>
     <div class="grid">
       <a href="${base}/.well-known/agent-card.json"><div class="k">A2A standard</div><div class="v">Agent Card</div></a>
+      <a href="${base}/.well-known/agents.json"><div class="k">Registry discovery</div><div class="v">agents.json</div></a>
       <a href="${base}/discovery.json"><div class="k">Agent discovery</div><div class="v">Discovery Index</div></a>
       <a href="${base}/openapi.json"><div class="k">Machine interface</div><div class="v">OpenAPI</div></a>
       <a href="${base}/llms.txt"><div class="k">LLM crawlers</div><div class="v">llms.txt</div></a>
@@ -61,9 +63,36 @@ function landingPage(origin) {
 </html>`;
 }
 
+async function registryAgentsManifest(request, env, ctx, origin) {
+  const cardRequest = new Request(`${origin}/.well-known/agent-card.json`, {
+    method: "GET",
+    headers: { "accept": "application/json", "user-agent": request.headers.get("user-agent") || "LUMEN-Registry-Discovery/1.0" }
+  });
+  const response = await a2aWorker.fetch(cardRequest, env, ctx);
+  if (!response || !response.ok) return response;
+  let baseCard;
+  try { baseCard = await response.json(); } catch {
+    return new Response(JSON.stringify({ error: "agent_card_unavailable" }), { status: 502, headers: { "content-type": "application/json; charset=utf-8" } });
+  }
+  const card = enhanceAgentCard(baseCard, origin);
+  return new Response(JSON.stringify([card], null, 2), {
+    status: 200,
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "public, max-age=300",
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff"
+    }
+  });
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+
+    if (request.method === "GET" && url.pathname === "/.well-known/agents.json") {
+      return registryAgentsManifest(request, env, ctx, url.origin);
+    }
 
     const discoveryResponse = await handleDiscovery(request, env, ctx, a2aWorker);
     if (discoveryResponse) return discoveryResponse;
