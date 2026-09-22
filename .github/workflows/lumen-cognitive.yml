@@ -59,7 +59,7 @@ jobs:
             version=$(jq -r '.cognitive.version // ""' /tmp/shadow-health.json 2>/dev/null || true)
             model=$(jq -r '.cognitive.model // ""' /tmp/shadow-health.json 2>/dev/null || true)
             echo "SERVICE_BINDING_ATTEMPT=$i HTTP=$code VERSION=$version MODEL=$model"
-            if [[ "$code" == "200" && "$version" == "1.1-zero-cognitive-engine" && "$model" == "@cf/google/gemma-4-26b-a4b-it" ]]; then
+            if [[ "$code" == "200" && "$version" == "1.2-zero-cognitive-free-only" && "$model" == "@cf/google/gemma-4-26b-a4b-it" ]]; then
               ok=1
               break
             fi
@@ -71,7 +71,7 @@ jobs:
             .ok == true and
             .mode == "shadow_only" and
             .cognitive.connected == true and
-            .cognitive.version == "1.1-zero-cognitive-engine" and
+            .cognitive.version == "1.2-zero-cognitive-free-only" and
             .cognitive.model == "@cf/google/gemma-4-26b-a4b-it" and
             .cognitive.paid_ai_allowed == false and
             .cognitive.monetary_budget_usd == 0 and
