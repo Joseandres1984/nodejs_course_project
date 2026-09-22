@@ -1,4 +1,4 @@
-import app from "./pricing_worker.js";
+import app from "./experiment_dashboard_worker.js";
 
 const RETRYABLE_PATHS = new Set([
   "/health",
