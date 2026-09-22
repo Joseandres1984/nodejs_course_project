@@ -82,6 +82,8 @@ jobs:
         run: python -m unittest discover -s .lumen/runtime -p 'test_service_catalog_sync.py'
       - name: Verify A2A Machine Store and seller autonomy
         run: python -m unittest discover -s .lumen/runtime -p 'test_a2a_machine_store.py'
+      - name: Verify global A2A sales conversion loop
+        run: python -m unittest discover -s .lumen/runtime -p 'test_a2a_global_sales_runtime.py'
       - name: Verify every sold service has a live runtime path
         run: python -m unittest discover -s .lumen/runtime -p 'test_commercial_runtime_coverage.py'
       - name: Run LUMEN Zero adapter unit tests

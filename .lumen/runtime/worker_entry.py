@@ -62,6 +62,9 @@ import multicurrency_runtime  # noqa: F401
 # This preserves the original probe/handshake caps and all safety guardrails.
 import agent_network_runtime  # noqa: F401
 import agent_network_accelerator_runtime  # noqa: F401
+# Convert successful A2A protocol responses into one bounded, product-fit commercial follow-up.
+# Transport replies never count as buying intent, orders or revenue without explicit downstream evidence.
+import a2a_global_sales_runtime  # noqa: F401
 
 runpy.run_module("worker_journal", run_name="__main__")
 
