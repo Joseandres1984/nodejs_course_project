@@ -57,10 +57,6 @@ def _f(value: Any, default: float = 0.0) -> float:
         return default
 
 
-def _clean(value: Any, limit: int = 140) -> str:
-    return " ".join(str(value or "").strip().split())[:limit]
-
-
 def _cycle(state: Dict[str, Any]) -> int:
     workforce = _safe_dict(_safe_dict(state.get("agent_workforce")).get("last_cycle"))
     return max(1, _i(workforce.get("company_cycle"), _i(state.get("ticks"), 1)))
@@ -72,7 +68,6 @@ def _perf(variant: Dict[str, Any]) -> Dict[str, Any]:
     leads = max(0, _i(p.get("submissions")))
     verified = max(0, _i(p.get("verified_companies")))
     rate = leads / max(1, clicks)
-    # Conservative ranking: verified outcomes > leads > conversion rate > exposure.
     score = verified * 100.0 + leads * 35.0 + rate * 20.0 + min(clicks, 20) * 0.05
     return {
         "clicks": clicks,
@@ -97,7 +92,6 @@ def _champion(campaign: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     converting = [v for v in variants if _perf(v)["leads"] > 0 or _perf(v)["verified_companies"] > 0]
     if converting:
         best = max(converting, key=_rank_key)
-        # Avoid replacing a converting incumbent merely because another arm has tiny exposure.
         if current and _perf(current)["leads"] > 0 and _perf(best)["score"] <= _perf(current)["score"]:
             return current
         return best
@@ -111,7 +105,6 @@ def _challenger(campaign: Dict[str, Any], champion: Dict[str, Any]) -> Optional[
     ]
     if not variants:
         return None
-    # Exploration prefers the least exposed arm. Supported performance breaks exposure ties.
     return min(
         variants,
         key=lambda v: (
@@ -124,7 +117,6 @@ def _challenger(campaign: Dict[str, Any], champion: Dict[str, Any]) -> Optional[
 
 
 def _allocation_phase(campaign_id: str, cycle: int) -> str:
-    # Stable campaign-specific offset prevents every campaign from exploring on the same cycle.
     offset = int(hashlib.sha1(campaign_id.encode("utf-8")).hexdigest()[:4], 16) % ALLOCATION_BUCKETS
     return "explore" if ((cycle + offset) % ALLOCATION_BUCKETS) == 0 else "exploit"
 
@@ -146,7 +138,6 @@ def _evaluation(champion: Dict[str, Any], challenger: Optional[Dict[str, Any]]) 
 
 
 def _payloads(campaign: Dict[str, Any], variant: Dict[str, Any]) -> List[Dict[str, Any]]:
-    # Reuse the canonical acquisition channel builder to preserve current copy/tracking policy.
     try:
         import acquisition_campaigns
 
@@ -165,9 +156,6 @@ def _activate_variant_queue(
     cid = str(campaign.get("id") or "")
     vid = str(variant.get("id") or "")
     queue = [x for x in _safe_list(state.get("acquisition_distribution_queue")) if isinstance(x, dict)]
-
-    # Keep only current active experimental arm for this campaign. Historical receipts/jobs live in
-    # their dedicated ledgers and are not erased.
     queue = [x for x in queue if str(x.get("campaign_id") or "") != cid]
     added = 0
     for payload in _payloads(campaign, variant):
@@ -190,8 +178,6 @@ def _activate_variant_queue(
         added += 1
     state["acquisition_distribution_queue"] = queue[-300:]
 
-    # Pending jobs from a previous arm must not be dispatched after the arm becomes inactive.
-    # Completed/published or already-queued mail remains audit truth and is preserved.
     active_keys = {str(x.get("key") or "") for x in queue}
     kept_jobs = []
     for job in _safe_list(state.get("distribution_operator_jobs")):
@@ -355,7 +341,7 @@ def director_tick_with_experiment_engine(state: Dict[str, Any], adaptive_report:
             "action": "Ejecutar la asignación 80/20 del Experiment Engine usando únicamente canales orgánicos/propios o conectores ya autorizados; medir leads y resultados verificables.",
             "success_metric": "experiment_verified_conversion_progress",
             "mode": phase,
-            "reason": "Aprender causalmente qué variante/canal genera mejor avance comercial sin desplazar el cuello de botella canónico.",
+            "reason": "Aprender qué variante/canal genera mejor avance comercial sin desplazar el cuello de botella canónico.",
             "binding": False,
             "spend_usd": 0,
         })
@@ -389,6 +375,31 @@ def director_tick_with_experiment_engine(state: Dict[str, Any], adaptive_report:
 # The Cognitive Director bridge is installed first in worker_entry. Wrap that final decision surface
 # so Experiment Engine adds only bounded reversible allocation on top of it.
 director.director_tick = director_tick_with_experiment_engine
+
+# Acquisition Campaigns already refreshes performance and canonical tracking on every Meta-LUMEN
+# cycle. Wrap that tick rather than adding another scheduler: experimentation runs immediately after
+# fresh campaign metrics and before Creative Distribution / Distribution Operator consume the queue.
+try:
+    import acquisition_campaigns as _acquisition_campaigns
+
+    _ORIGINAL_ACQUISITION_TICK = _acquisition_campaigns.acquisition_campaign_tick
+
+    def _acquisition_tick_with_experiments(state: Dict[str, Any]) -> Dict[str, Any]:
+        acquisition = dict(_ORIGINAL_ACQUISITION_TICK(state) or {})
+        experiment = dict(experiment_engine_tick(state) or {})
+        acquisition["experiment_engine"] = {
+            "version": experiment.get("version"),
+            "status": experiment.get("status"),
+            "experiments_active": experiment.get("experiments_active"),
+            "experiments_total": experiment.get("experiments_total"),
+            "distribution_entries_active": experiment.get("distribution_entries_active"),
+            "allocation_policy": experiment.get("allocation_policy"),
+        }
+        return acquisition
+
+    _acquisition_campaigns.acquisition_campaign_tick = _acquisition_tick_with_experiments
+except Exception as exc:
+    print({"experiment_engine_acquisition_bridge": {"status": "degraded_fail_open", "error": f"{type(exc).__name__}: {str(exc)[:220]}"}}, flush=True)
 
 print({
     "experiment_engine_runtime": {
