@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
 import autonomous_director_runtime as director
 
@@ -57,6 +58,41 @@ class AutonomousDirectorRuntimeTests(unittest.TestCase):
         self.assertIn("DIR-ZERO-QUOTA-MODE", ids)
         self.assertEqual(report["escalation"]["mode"], "challenge_plan")
         self.assertEqual(report["operating_mode"], "offline_existing_evidence")
+
+    def test_persisted_service_truth_and_pacing_drive_real_first_cash_plan(self) -> None:
+        state = {
+            "ticks": 89,
+            "canonical_revenue_truth": {"counts": {"verified_buyers": 23, "buyers_with_verified_demand": 0}},
+            "business_funnel": {"verified_buyers": 23, "buyers_with_public_demand": 0},
+            "external_market_readiness": {"eligible_external_prospects": 0},
+            "service_revenue_runtime": {
+                "pipeline_total": 40,
+                "replies": 0,
+                "inbound_service_leads": 0,
+                "won": 0,
+                "realized_service_revenue_usd": 0,
+            },
+            "service_revenue_opportunities": [{"id": f"SVC-{i}"} for i in range(40)],
+            "continuous_revenue_drive": {
+                "intelligence_revenue": {
+                    "verified_product_fit_candidates": 24,
+                    "replies": 0,
+                    "realized_intelligence_revenue_usd": 0,
+                }
+            },
+        }
+        with patch("search_budget_governor.summary", return_value={"pacing": {"enabled": True, "available_now": 0}}):
+            report = director.director_tick(state, {"no_progress_cycles": 78, "search": {"remaining": 39}})
+        ids = {row["id"] for row in report["plan"]}
+        self.assertIn("DIR-FIRST-CASH-PARALLEL", ids)
+        self.assertIn("DIR-ZERO-QUOTA-MODE", ids)
+        self.assertEqual(report["search_reported_remaining"], 39)
+        self.assertEqual(report["search_available_now"], 0)
+        self.assertEqual(report["operating_mode"], "offline_existing_evidence")
+        metrics = director._expanded_metrics(state)
+        self.assertEqual(metrics["service_replies"], 0)
+        self.assertEqual(director._service_snapshot(state)["pipeline_total"], 40)
+        self.assertEqual(director._intelligence_snapshot(state)["verified_candidates"], 24)
 
     def test_director_never_widens_money_or_binding_authority(self) -> None:
         state = {
