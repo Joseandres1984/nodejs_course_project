@@ -36,7 +36,7 @@ jobs:
           node-version: '24'
       - name: Compile runtime
         run: python -m compileall .lumen/runtime
-      - name: Verify Autonomous Director worker activation
+      - name: Verify Autonomous Director and Experiment Engine activation
         working-directory: .lumen/runtime
         run: |
           python - <<'PY'
@@ -44,12 +44,17 @@ jobs:
           source = Path('worker_entry.py').read_text(encoding='utf-8')
           adaptive = source.index('import adaptive_operator_runtime')
           director = source.index('import autonomous_director_runtime')
+          cognitive = source.index('import cognitive_director_learning_runtime')
+          experiment = source.index('import experiment_engine_runtime')
           truth = source.index('import commercial_truth_repair_runtime')
-          assert adaptive < director < truth, 'Autonomous Director import order is not deterministic'
+          assert adaptive < director < cognitive < experiment < truth, 'Director/Cognitive/Experiment import order is not deterministic'
           import adaptive_operator_runtime
           import autonomous_director_runtime
+          import cognitive_director_learning_runtime
+          import experiment_engine_runtime
           assert adaptive_operator_runtime.adaptive_operator_tick.__module__ == 'autonomous_director_runtime'
-          print('AUTONOMOUS_DIRECTOR_ACTIVATION ok')
+          assert autonomous_director_runtime.director_tick.__module__ == 'experiment_engine_runtime'
+          print('AUTONOMOUS_DIRECTOR_EXPERIMENT_ACTIVATION ok')
           PY
       - name: Validate Cloudflare workers syntax
         run: |
@@ -107,6 +112,8 @@ jobs:
         run: python -m unittest discover -s .lumen/runtime -p 'test_revenue_os_v31_alignment_runtime.py'
       - name: Run Autonomous Director unit tests
         run: python -m unittest discover -s .lumen/runtime -p 'test_autonomous_director_runtime.py'
+      - name: Run Experiment Engine unit tests
+        run: python -m unittest discover -s .lumen/runtime -p 'test_experiment_engine_runtime.py'
       - name: Run Demand Recovery autonomy unit tests
         run: python -m unittest discover -s .lumen/runtime -p 'test_demand_recovery_runtime.py'
       - name: Run Revenue Expansion unit tests
