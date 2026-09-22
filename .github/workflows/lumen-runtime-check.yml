@@ -55,9 +55,28 @@ jobs:
           node --check .lumen/dashboard/refresh_worker.js
           node --check .lumen/dashboard/pricing_worker.js
           node --check .lumen/public-worker/worker.js
+          node --check .lumen/public-worker/gateway.js
+          node --check .lumen/public-worker/revenue-storefront.js
           node --check .lumen/a2a-worker/worker.js
           node --check .lumen/a2a-worker/worker-entry.js
           node --check .lumen/a2a-worker/revenue-expansion.js
+      - name: Verify public Revenue storefront wiring
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          gateway = Path('.lumen/public-worker/gateway.js').read_text(encoding='utf-8')
+          storefront = Path('.lumen/public-worker/revenue-storefront.js').read_text(encoding='utf-8')
+          wrangler = Path('.lumen/public-worker/wrangler.toml').read_text(encoding='utf-8')
+          assert 'handleRevenueStorefront' in gateway
+          assert '"/catalogo"' in storefront
+          assert '"/catalogo/request"' in storefront
+          assert '/revenue/catalog' in storefront
+          assert '/revenue/request' in storefront
+          assert 'binding = "A2A"' in wrangler
+          assert 'service = "lumen-zero-a2a"' in wrangler
+          assert 'No se genera ningún cargo' in storefront
+          print('PUBLIC_REVENUE_STOREFRONT_WIRING ok')
+          PY
       - name: Verify commercial catalog stays synchronized
         run: python -m unittest discover -s .lumen/runtime -p 'test_service_catalog_sync.py'
       - name: Verify A2A Machine Store and seller autonomy
