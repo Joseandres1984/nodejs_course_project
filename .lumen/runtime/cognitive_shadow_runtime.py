@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Tuple
 
 import master_orchestrator as _master
 from cognitive_engine import CognitiveEngine
+from cognitive_outcome_runtime import settle_and_stage_outcome
 
 
 _ORIGINAL_MASTER_TICK = _master.master_orchestrator_tick
@@ -227,6 +228,18 @@ def _record_comparison(state: Dict[str, Any], recommendation: Dict[str, Any], ma
     }
     memory["history"].append(row)
     memory["history"] = memory["history"][-_MAX_COMPARISON_HISTORY:]
+
+    outcome = settle_and_stage_outcome(
+        state,
+        memory,
+        cycle=memory["cycles"],
+        cognitive_mode=recommended,
+        master_mode=master_mode,
+        agreed=agreed,
+    )
+    if outcome.get("settled_previous"):
+        row["prior_cycle_outcome"] = outcome["settled_previous"]
+
     return {
         "agreed": agreed,
         "cycles": memory["cycles"],
@@ -235,6 +248,8 @@ def _record_comparison(state: Dict[str, Any], recommendation: Dict[str, Any], ma
         "agreement_rate_pct": memory["agreement_rate_pct"],
         "agreement_streak": memory["agreement_streak"],
         "disagreement_streak": memory["disagreement_streak"],
+        "last_observed_outcome": memory.get("last_outcome"),
+        "causal_attribution": False,
     }
 
 
@@ -320,9 +335,10 @@ _master.master_orchestrator_tick = master_orchestrator_with_cognitive_shadow
 print({
     "cognitive_shadow_runtime": {
         "status": "active",
-        "mode": "independent_recommendation_and_comparison",
+        "mode": "independent_recommendation_comparison_and_outcome_observation",
         "authoritative": False,
         "fail_open_to_master": True,
         "hard_ai_monetary_budget_usd": 0.0,
+        "causal_attribution": False,
     }
 }, flush=True)
