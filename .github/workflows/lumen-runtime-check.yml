@@ -10,7 +10,7 @@ on:
       - '.lumen/a2a-worker/**'
       - '.github/workflows/lumen-runtime-check.yml'
   pull_request:
-    branches: [lumen-deploy]
+    branches: [lumen-deploy, lumen-zero]
     paths:
       - '.lumen/runtime/**'
       - '.lumen/dashboard/**'
@@ -32,6 +32,18 @@ jobs:
           node-version: '24'
       - name: Compile runtime
         run: python -m compileall .lumen/runtime
+      - name: Verify zero runtime auto-loads customization hooks
+        working-directory: .lumen/runtime
+        run: |
+          python - <<'PY'
+          import sys
+          assert 'sitecustomize' in sys.modules, 'sitecustomize did not auto-load'
+          assert 'usercustomize' in sys.modules, 'usercustomize did not auto-load'
+          import adaptive_operator_runtime
+          import autonomous_director_runtime
+          assert adaptive_operator_runtime.adaptive_operator_tick.__module__ == 'autonomous_director_runtime'
+          print('AUTONOMOUS_DIRECTOR_ACTIVATION ok')
+          PY
       - name: Validate Cloudflare workers syntax
         run: |
           node --check .lumen/dashboard/worker.js
@@ -57,3 +69,5 @@ jobs:
         run: python -m unittest discover -s .lumen/runtime -p 'test_revenue_capture_v3_runtime.py'
       - name: Run Revenue OS v3.1 alignment unit tests
         run: python -m unittest discover -s .lumen/runtime -p 'test_revenue_os_v31_alignment_runtime.py'
+      - name: Run Autonomous Director unit tests
+        run: python -m unittest discover -s .lumen/runtime -p 'test_autonomous_director_runtime.py'
