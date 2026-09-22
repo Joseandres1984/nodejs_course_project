@@ -2,6 +2,23 @@ import a2aWorker from "./worker.js";
 import { handleRevenue } from "./revenue-expansion.js";
 import { DISCOVERY_VERSION, enhanceAgentCard, handleDiscovery } from "./discovery.js";
 
+export const REGISTRY_PACKAGE_NAME = "github.joseandres1984.lumen_b2b_agent";
+
+export function applyRegistryIdentity(card) {
+  const base = card && typeof card === "object" ? card : {};
+  const metadata = base.metadata && typeof base.metadata === "object" ? base.metadata : {};
+  return {
+    ...base,
+    package_name: REGISTRY_PACKAGE_NAME,
+    metadata: {
+      ...metadata,
+      registryPackageName: REGISTRY_PACKAGE_NAME,
+      registryIdentityProvider: "github",
+      registryOwner: "Joseandres1984"
+    }
+  };
+}
+
 function landingPage(origin) {
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
   const base = esc(origin);
@@ -74,7 +91,7 @@ async function registryAgentsManifest(request, env, ctx, origin) {
   try { baseCard = await response.json(); } catch {
     return new Response(JSON.stringify({ error: "agent_card_unavailable" }), { status: 502, headers: { "content-type": "application/json; charset=utf-8" } });
   }
-  const card = enhanceAgentCard(baseCard, origin);
+  const card = applyRegistryIdentity(enhanceAgentCard(baseCard, origin));
   return new Response(JSON.stringify([card], null, 2), {
     status: 200,
     headers: {
@@ -83,6 +100,16 @@ async function registryAgentsManifest(request, env, ctx, origin) {
       "access-control-allow-origin": "*",
       "x-content-type-options": "nosniff"
     }
+  });
+}
+
+async function withRegistryIdentityResponse(response) {
+  if (!response || !response.ok) return response;
+  let card;
+  try { card = await response.json(); } catch { return response; }
+  return new Response(JSON.stringify(applyRegistryIdentity(card), null, 2), {
+    status: response.status,
+    headers: response.headers
   });
 }
 
@@ -95,7 +122,12 @@ export default {
     }
 
     const discoveryResponse = await handleDiscovery(request, env, ctx, a2aWorker);
-    if (discoveryResponse) return discoveryResponse;
+    if (discoveryResponse) {
+      if (["/.well-known/agent-card.json", "/.well-known/agent.json"].includes(url.pathname)) {
+        return withRegistryIdentityResponse(discoveryResponse);
+      }
+      return discoveryResponse;
+    }
 
     if (request.method === "GET" && (url.pathname === "/" || url.pathname === "")) {
       return new Response(landingPage(url.origin), {
