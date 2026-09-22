@@ -107,11 +107,11 @@ jobs:
           assert (agents.get('agents') or [{}])[0].get('manifestUrl','').endswith('/.well-known/agent-card.json')
           assert '/.well-known/agent-card.json' in llms
           assert 'Machine products start at USD 5' in llms
-          assert 'Sitemap:' in robots
+          assert robots.strip(), 'robots.txt must return a public policy; Cloudflare may append or replace directives on workers.dev'
           assert '/openapi.json' in sitemap
           assert 'application/ld+json' in root
           assert 'A2A v1.0 gateway online worldwide' in root
-          print({'lumen_global_discovery':{'status':'live','skills':len(skill_ids),'target':'Business','coverage':'Worldwide','agent_card':meta.get('discoveryIndexUrl')}})
+          print({'lumen_global_discovery':{'status':'live','skills':len(skill_ids),'target':'Business','coverage':'Worldwide','agent_card':meta.get('discoveryIndexUrl'),'robots_policy':'public_nonempty'}})
           PY
 
       - name: Publish to Global A2A Registry
