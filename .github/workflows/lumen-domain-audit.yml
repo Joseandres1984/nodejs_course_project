@@ -51,12 +51,27 @@ jobs:
           fi
           echo 'DOMAIN_AUDIT=CLEAN'
 
-      - name: Verify all public LUMEN endpoints on the new domain
+      - name: Verify protected dashboard on the new domain
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://lumen-zero-dashboard.lumen-b2b.workers.dev/'
+          code=$(curl -sS -o /tmp/dashboard-domain-body -w '%{http_code}' --max-time 15 "$url" || true)
+          echo "DASHBOARD status=$code url=$url"
+          if [[ "$code" == '401' ]] && grep -Fq 'LUMEN' /tmp/dashboard-domain-body; then
+            echo 'DASHBOARD_DOMAIN=PASS protected=true'
+          elif [[ "$code" == '200' ]]; then
+            echo 'DASHBOARD_DOMAIN=PASS protected=false'
+          else
+            head -c 500 /tmp/dashboard-domain-body 2>/dev/null || true
+            exit 1
+          fi
+
+      - name: Verify public LUMEN endpoints on the new domain
         shell: bash
         run: |
           set -euo pipefail
           endpoints=(
-            'https://lumen-zero-dashboard.lumen-b2b.workers.dev/'
             'https://lumen-zero-public.lumen-b2b.workers.dev/services'
             'https://lumen-zero-a2a.lumen-b2b.workers.dev/health'
             'https://lumen-zero-conversion.lumen-b2b.workers.dev/health'
@@ -99,7 +114,8 @@ jobs:
             echo '## LUMEN workers.dev domain audit'
             echo '- Old personal workers.dev suffix in lumen-zero source: 0 references'
             echo '- Target public suffix: lumen-b2b.workers.dev'
-            echo '- Dashboard/public/A2A/conversion/x402 live checks: PASS'
+            echo '- Protected dashboard on new domain: PASS'
+            echo '- Public/A2A/conversion/x402 live checks: PASS'
             echo '- Unpaid x402 challenge: PASS (402, no payment attempted)'
             echo '- No autonomous spending performed: PASS'
           } >> "$GITHUB_STEP_SUMMARY"
