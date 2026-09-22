@@ -1,11 +1,14 @@
 const SERVICE = "lumen-zero-cognitive";
-const VERSION = "1.2-zero-cognitive-free-only";
+const VERSION = "1.3-zero-cognitive-learning-calibrated";
 const PRIMARY_MODEL = "@cf/google/gemma-4-26b-a4b-it";
 const CF_DAILY_CALL_LIMIT = 50;
 const MAX_CONTEXT_CHARS = 5000;
 const MAX_COMPLETION_TOKENS = 400;
 const ALLOW_PAID_AI = false;
 const AI_MONETARY_BUDGET_USD = 0;
+const MIN_LEARNING_SAMPLE = 5;
+const MIN_PRIORITY_SAMPLE = 8;
+const MAX_LEARNED_CONFIDENCE = 0.95;
 
 const PRODUCTS = new Set([
   "supplier-snapshot",
@@ -50,12 +53,14 @@ function utcDay() {
 async function ensureSchema(env) {
   if (!env.DB) return;
   // Keep the legacy openrouter_calls column for backwards-compatible D1 schema reads,
-  // but v1.2 never calls OpenRouter or any paid/secondary inference provider.
+  // but this worker never calls OpenRouter or any paid/secondary inference provider.
   await env.DB.batch([
     env.DB.prepare("CREATE TABLE IF NOT EXISTS lumen_cognitive_usage (day TEXT PRIMARY KEY, cf_calls INTEGER NOT NULL DEFAULT 0, openrouter_calls INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL)"),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS lumen_cognitive_decisions (id TEXT PRIMARY KEY, created_at TEXT NOT NULL, task TEXT NOT NULL, provider TEXT NOT NULL, model TEXT, decision TEXT NOT NULL, product_slug TEXT, priority TEXT NOT NULL, confidence REAL NOT NULL, technical_canary INTEGER NOT NULL DEFAULT 0, paid_ai_used INTEGER NOT NULL DEFAULT 0, monetary_cost_usd REAL NOT NULL DEFAULT 0, actions_executed INTEGER NOT NULL DEFAULT 0, payload TEXT NOT NULL)"),
     env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_lumen_cognitive_decisions_created ON lumen_cognitive_decisions(created_at)"),
     env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_lumen_cognitive_decisions_provider ON lumen_cognitive_decisions(provider,created_at)"),
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS lumen_cognitive_learning_profiles (profile_key TEXT PRIMARY KEY, updated_at TEXT NOT NULL, current_product_slug TEXT, decision TEXT NOT NULL, samples INTEGER NOT NULL DEFAULT 0, finalized_samples INTEGER NOT NULL DEFAULT 0, checkout_rate REAL NOT NULL DEFAULT 0, settlement_rate REAL NOT NULL DEFAULT 0, observed_success_rate REAL NOT NULL DEFAULT 0, average_confidence REAL NOT NULL DEFAULT 0, calibration_error REAL NOT NULL DEFAULT 0, confidence_multiplier REAL NOT NULL DEFAULT 1, priority_adjustment INTEGER NOT NULL DEFAULT 0, authority TEXT NOT NULL DEFAULT 'calibration_only')"),
+    env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_lumen_cognitive_learning_product ON lumen_cognitive_learning_profiles(current_product_slug,decision)"),
   ]);
 }
 
@@ -226,6 +231,90 @@ async function cloudflareReason(env, body) {
   return parseModelJson(extractText(result));
 }
 
+function shiftPriority(priority, adjustment) {
+  const levels = ["low", "medium", "high"];
+  const index = levels.indexOf(priority);
+  if (index < 0 || !adjustment) return priority;
+  return levels[Math.max(0, Math.min(levels.length - 1, index + Math.sign(adjustment)))];
+}
+
+async function loadLearningProfile(env, body, result) {
+  if (!env.DB || !["sales_triage", "director"].includes(String(body.task || ""))) return null;
+  const currentProduct = clean(body?.subject?.current_product, 80);
+  const decision = clean(result?.decision, 40);
+  if (!PRODUCTS.has(currentProduct) || !decision) return null;
+  await ensureSchema(env);
+  return await env.DB.prepare("SELECT profile_key,updated_at,current_product_slug,decision,samples,finalized_samples,checkout_rate,settlement_rate,observed_success_rate,average_confidence,calibration_error,confidence_multiplier,priority_adjustment,authority FROM lumen_cognitive_learning_profiles WHERE profile_key=? LIMIT 1")
+    .bind(`${currentProduct}|${decision}`).first();
+}
+
+async function applyLearningCalibration(env, body, result) {
+  try {
+    const profile = await loadLearningProfile(env, body, result);
+    if (!profile) return { result, learning: null };
+    const samples = Number(profile.samples || 0);
+    const rawMultiplier = clamp(profile.confidence_multiplier, 0.75, 1.05);
+    const canCalibrate = samples >= MIN_LEARNING_SAMPLE && profile.authority === "calibration_only";
+    const multiplier = canCalibrate ? rawMultiplier : 1;
+    const confidenceBefore = clamp(result.confidence, 0, 1);
+    const confidenceAfter = canCalibrate
+      ? Number(clamp(confidenceBefore * multiplier, 0, MAX_LEARNED_CONFIDENCE).toFixed(4))
+      : confidenceBefore;
+
+    let priorityAfter = result.priority;
+    let appliedPriorityAdjustment = 0;
+    const canAdjustPriority = canCalibrate
+      && samples >= MIN_PRIORITY_SAMPLE
+      && ["contact", "prioritize"].includes(String(result.decision || ""));
+    if (canAdjustPriority) {
+      appliedPriorityAdjustment = Math.max(-1, Math.min(1, Number(profile.priority_adjustment || 0)));
+      priorityAfter = shiftPriority(result.priority, appliedPriorityAdjustment);
+    }
+
+    return {
+      result: { ...result, confidence: confidenceAfter, priority: priorityAfter },
+      learning: {
+        applied: canCalibrate,
+        profile_key: profile.profile_key,
+        samples,
+        finalized_samples: Number(profile.finalized_samples || 0),
+        checkout_rate: Number(profile.checkout_rate || 0),
+        settlement_rate: Number(profile.settlement_rate || 0),
+        observed_success_rate: Number(profile.observed_success_rate || 0),
+        historical_average_confidence: Number(profile.average_confidence || 0),
+        calibration_error: Number(profile.calibration_error || 0),
+        confidence_multiplier: multiplier,
+        confidence_before: confidenceBefore,
+        confidence_after: confidenceAfter,
+        priority_before: result.priority,
+        priority_after: priorityAfter,
+        priority_adjustment: appliedPriorityAdjustment,
+        authority: "confidence_and_one_step_priority_only",
+        decision_changed: false,
+        product_changed: false,
+      },
+    };
+  } catch (e) {
+    return {
+      result,
+      learning: {
+        applied: false,
+        error: clean(e?.message || "learning_profile_error", 120),
+        authority: "fail_open_to_original_recommendation_without_extra_authority",
+        decision_changed: false,
+        product_changed: false,
+      },
+    };
+  }
+}
+
+async function listLearningProfiles(env) {
+  if (!env.DB) return [];
+  await ensureSchema(env);
+  const rows = await env.DB.prepare("SELECT profile_key,updated_at,current_product_slug,decision,samples,finalized_samples,checkout_rate,settlement_rate,observed_success_rate,average_confidence,calibration_error,confidence_multiplier,priority_adjustment,authority FROM lumen_cognitive_learning_profiles ORDER BY samples DESC,profile_key LIMIT 100").all();
+  return rows.results || [];
+}
+
 async function storeDecision(env, record) {
   if (!env.DB) return;
   await ensureSchema(env);
@@ -249,6 +338,7 @@ async function storeDecision(env, record) {
         next_action: record.next_action,
         attempted_providers: record.attempted_providers,
         safety_override: record.safety_override || null,
+        learning_calibration: record.learning_calibration || null,
       }),
     )
     .run();
@@ -277,6 +367,9 @@ async function decide(env, body) {
     }
   }
 
+  const calibrated = await applyLearningCalibration(env, body, result);
+  result = calibrated.result;
+
   const record = {
     id: `CD-${crypto.randomUUID().replaceAll("-", "").slice(0, 20).toUpperCase()}`,
     created_at: new Date().toISOString(),
@@ -285,6 +378,7 @@ async function decide(env, body) {
     model,
     ...result,
     attempted_providers: attempted,
+    learning_calibration: calibrated.learning,
     technical_canary: Boolean(body.technical_canary),
     paid_ai_used: false,
     monetary_cost_usd: 0,
@@ -305,7 +399,7 @@ export default {
         service: SERVICE,
         version: VERSION,
         status: "ok",
-        architecture: "cloudflare_ai_free_only -> deterministic",
+        architecture: "cloudflare_ai_free_only -> deterministic -> bounded_outcome_calibration",
         primary_provider: "cloudflare_ai",
         primary_model: PRIMARY_MODEL,
         ai_binding_available: Boolean(env.AI),
@@ -317,12 +411,34 @@ export default {
           fallback: "deterministic",
           external_paid_fallbacks: 0,
         },
+        learning: {
+          enabled: true,
+          mode: "historical_outcome_calibration",
+          min_learning_sample: MIN_LEARNING_SAMPLE,
+          min_priority_sample: MIN_PRIORITY_SAMPLE,
+          max_learned_confidence: MAX_LEARNED_CONFIDENCE,
+          authority: "confidence_and_one_step_priority_only",
+          may_change_decision: false,
+          may_change_product: false,
+          may_expand_execution_authority: false,
+        },
         usage_today: await usage(env),
         paid_ai_allowed: ALLOW_PAID_AI,
         monetary_budget_usd: AI_MONETARY_BUDGET_USD,
         paid_ai_used: false,
         outgoing_spend_enabled: false,
         actions_executed: false,
+        governor_required: true,
+      });
+    }
+
+    if (request.method === "GET" && url.pathname === "/learning") {
+      return json({
+        ok: true,
+        profiles: await listLearningProfiles(env),
+        monetary_cost_usd: 0,
+        actions_executed: false,
+        outgoing_spend_enabled: false,
         governor_required: true,
       });
     }
