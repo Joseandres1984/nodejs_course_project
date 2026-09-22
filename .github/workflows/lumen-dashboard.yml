@@ -48,7 +48,9 @@ jobs:
 
       - name: Validate dashboard worker syntax
         if: steps.preflight.outputs.ready == 'true'
-        run: node --check .lumen/dashboard/pricing_worker.js
+        run: |
+          node --check .lumen/dashboard/pricing_worker.js
+          node --check .lumen/dashboard/stable_worker.js
 
       - name: Deploy unified command center
         if: steps.preflight.outputs.ready == 'true'
@@ -129,4 +131,4 @@ jobs:
           echo "LUMEN_UNIFIED_DASHBOARD verification=failed health=$health_code full=$full_code data=$data_code state=$state_code recovery=$recovery_code machine=$machine_code stats=$stats_code"
           exit 1
 
-# deploy trigger: Machine Store + recurring revenue command center 2026-09-21
+# deploy trigger: dashboard D1 read shield 2026-09-22
