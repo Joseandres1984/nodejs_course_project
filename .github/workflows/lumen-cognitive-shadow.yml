@@ -58,7 +58,7 @@ jobs:
             version=$(jq -r '.version // ""' /tmp/shadow-health.json 2>/dev/null || true)
             connected=$(jq -r '.cognitive.connected // false' /tmp/shadow-health.json 2>/dev/null || true)
             echo "SHADOW_HEALTH_ATTEMPT=$i HTTP=$code VERSION=$version COGNITIVE_CONNECTED=$connected"
-            if [[ "$code" == "200" && "$version" == "1.0-cognitive-shadow-loop" && "$connected" == "true" ]]; then
+            if [[ "$code" == "200" && "$version" == "1.1-cognitive-learning-loop" && "$connected" == "true" ]]; then
               ok=1
               break
             fi
@@ -68,12 +68,14 @@ jobs:
           cat /tmp/shadow-health.json
           jq -e '
             .ok == true and
-            .mode == "shadow_only" and
+            .mode == "shadow_only_learning" and
             .scheduled == true and
             .cognitive.connected == true and
             .cognitive.model == "@cf/google/gemma-4-26b-a4b-it" and
             .cognitive.paid_ai_allowed == false and
             .cognitive.monetary_budget_usd == 0 and
+            .learning.enabled == true and
+            .learning.authority == "calibration_only" and
             .paid_ai_allowed == false and
             .monetary_budget_usd == 0 and
             .actions_executed == false and
@@ -102,7 +104,7 @@ jobs:
             .governor_required == true
           ' /tmp/shadow-canary.json >/dev/null
 
-      - name: Verify shadow ledger excludes canary from real decisions
+      - name: Verify shadow ledger and learning stats
         shell: bash
         run: |
           set -euo pipefail
@@ -121,8 +123,11 @@ jobs:
           jq -e '
             .ok == true and
             .technical_canaries >= 1 and
+            .learning.mode == "outcome_calibration_v1" and
+            .learning.authority == "confidence_and_one_step_priority_only" and
+            .learning.decision_or_product_rewrite == false and
             .actions_executed == 0 and
             .monetary_cost_usd == 0 and
             .mode == "shadow_only"
           ' /tmp/shadow-stats.json >/dev/null
-          echo "LUMEN_COGNITIVE_SHADOW_CANARY=success"
+          echo "LUMEN_COGNITIVE_SHADOW_LEARNING_CANARY=success"
