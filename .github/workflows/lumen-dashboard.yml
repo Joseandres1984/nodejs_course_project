@@ -111,9 +111,12 @@ jobs:
           assert int(catalog.get('ceiling_usd') or 0) == 249
           assert float(catalog.get('average_usd') or 0) == 139.0
 
+          assert experiments.get('status') == 'active', experiments
           assert experiments.get('policy') == '80_20_exploit_explore', experiments
           assert float(experiments.get('exploit_share') or 0) == 0.8
           assert float(experiments.get('explore_share') or 0) == 0.2
+          assert experiments.get('experiment_id') not in {None, '', '—'}, experiments
+          assert experiments.get('mode') in {'exploit','explore'}, experiments
           exp_guard = experiments.get('guardrails') or {}
           assert float(exp_guard.get('monetary_budget_usd') or 0) == 0
           assert exp_guard.get('paid_media_authority_changed') is False
@@ -135,7 +138,7 @@ jobs:
           assert int((recovery.get('historical') or {}).get('accounts') or 0) == 580
           assert int((recovery.get('policy') or {}).get('auto_promoted') or 0) == 0
           assert int((recovery.get('policy') or {}).get('safe_for_outbound') or 0) == 0
-          print('LUMEN_FULL_COMMAND_CENTER experiment_engine=80/20-zero-cost pricing=6/6 machine_products=6 recurring_plans=4 owner_summary=ok d1_state=ok recovery=ok')
+          print('LUMEN_FULL_COMMAND_CENTER experiment_engine=ACTIVE-80/20-zero-cost pricing=6/6 machine_products=6 recurring_plans=4 owner_summary=ok d1_state=ok recovery=ok')
           PY
               exit 0
             fi
@@ -144,4 +147,4 @@ jobs:
           echo "LUMEN_UNIFIED_DASHBOARD verification=failed health=$health_code full=$full_code data=$data_code state=$state_code experiments=$experiment_code recovery=$recovery_code machine=$machine_code stats=$stats_code"
           exit 1
 
-# deploy trigger: Experiment Engine v1 command-center promotion 2026-09-22
+# deploy trigger: Experiment Engine dashboard hotfix v2 verified against live markup/state 2026-09-22
