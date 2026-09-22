@@ -61,7 +61,8 @@ try {
       td { font-size: 9.3px !important; line-height: 1.32 !important; }
       a { overflow-wrap: anywhere !important; word-break: break-all !important; }
       img, svg, canvas { max-width: 100% !important; height: auto !important; }
-      .cover { min-height: 273mm !important; break-after: page !important; page-break-after: always !important; }
+      .cover:not(.micro-cover) { min-height: 273mm !important; break-after: page !important; page-break-after: always !important; }
+      .micro-cover { min-height: 0 !important; break-after: auto !important; page-break-after: auto !important; padding-top: 30px !important; padding-bottom: 24px !important; }
       .section h2 { break-after: avoid !important; page-break-after: avoid !important; }
     }
     @page { size: A4; margin: 12mm; }
