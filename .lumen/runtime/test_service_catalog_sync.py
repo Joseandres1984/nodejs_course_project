@@ -5,11 +5,20 @@ import unittest
 from pathlib import Path
 
 
+# Catalogs are JavaScript object literals and some deployment generators emit
+# compact JSON-style quoted keys while others keep readable unquoted keys.
+# These checks validate the commercial truth, not incidental formatting.
 CANONICAL_RE = re.compile(
-    r'\{\s*id:\s*"(?P<id>SRV-[^"]+)"\s*,\s*name:\s*"(?P<name>[^"]+)"\s*,\s*from_usd:\s*(?P<price>\d+)\s*,'
+    r'\{[^{}]*?["\']?id["\']?\s*:\s*["\'](?P<id>SRV-[^"\']+)["\']'
+    r'[^{}]*?["\']?name["\']?\s*:\s*["\'](?P<name>[^"\']+)["\']'
+    r'[^{}]*?["\']?from_usd["\']?\s*:\s*(?P<price>\d+)\s*[,}]',
+    re.DOTALL,
 )
 DEPLOYED_RE = re.compile(
-    r'\{\s*id:\s*"(?P<id>SRV-[^"]+)"\s*,\s*name:\s*"(?P<name>[^"]+)"\s*,\s*price:\s*(?P<price>\d+)\s*,'
+    r'\{[^{}]*?["\']?id["\']?\s*:\s*["\'](?P<id>SRV-[^"\']+)["\']'
+    r'[^{}]*?["\']?name["\']?\s*:\s*["\'](?P<name>[^"\']+)["\']'
+    r'[^{}]*?["\']?price["\']?\s*:\s*(?P<price>\d+)\s*[,}]',
+    re.DOTALL,
 )
 
 
@@ -60,6 +69,7 @@ class ServiceCatalogSyncTests(unittest.TestCase):
     def test_catalog_price_floor_and_average_are_expected(self) -> None:
         public = self.canonical_catalog(self.public_worker)
         prices = [price for _, price in public.values()]
+        self.assertEqual(6, len(prices), "Canonical catalog parsing must discover all six services")
         self.assertEqual(59, min(prices))
         self.assertEqual(139, sum(prices) / len(prices))
 
