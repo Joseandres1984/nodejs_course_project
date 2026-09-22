@@ -34,6 +34,7 @@ jobs:
         run: |
           python3 -m py_compile .lumen/runtime/zero_a2a_inbound_bridge_runtime.py .lumen/runtime/agent_network_runtime.py .lumen/runtime/agent_network_accelerator_runtime.py .lumen/runtime/zero_entry.py
           python3 -m unittest discover -s .lumen/runtime -p 'test_a2a_machine_store.py'
+          python3 -m unittest discover -s .lumen/runtime -p 'test_revenue_expansion_runtime.py'
 
       - name: Deployment preflight
         shell: bash
@@ -50,13 +51,16 @@ jobs:
 
       - name: Validate A2A Worker syntax
         working-directory: .lumen/a2a-worker
-        run: node --check worker.js
+        run: |
+          node --check worker.js
+          node --check worker-entry.js
+          node --check revenue-expansion.js
 
       - name: Deploy A2A Worker
         working-directory: .lumen/a2a-worker
         run: npx --yes wrangler@4 deploy
 
-      - name: Verify health, catalogs and live receiving configuration
+      - name: Verify health, catalogs, Revenue Expansion and live receiving configuration
         shell: bash
         run: |
           for i in {1..12}; do
@@ -64,17 +68,19 @@ jobs:
             card=$(curl -sS -o /tmp/a2a-card.json -w '%{http_code}' "$A2A_BASE_URL/.well-known/agent-card.json" || true)
             services=$(curl -sS -o /tmp/a2a-services.json -w '%{http_code}' "$A2A_BASE_URL/seller/catalog" || true)
             machine=$(curl -sS -o /tmp/a2a-machine.json -w '%{http_code}' "$A2A_BASE_URL/machine/catalog" || true)
+            revenue=$(curl -sS -o /tmp/a2a-revenue.json -w '%{http_code}' "$A2A_BASE_URL/revenue/catalog" || true)
             payments=$(curl -sS -o /tmp/a2a-payments.json -w '%{http_code}' "$A2A_BASE_URL/payments/status" || true)
             stats=$(curl -sS -o /tmp/a2a-stats.json -w '%{http_code}' "$A2A_BASE_URL/machine/stats" || true)
             checkout=$(curl -sS -o /tmp/x402-health.json -w '%{http_code}' "$X402_CHECKOUT_URL/health" || true)
             xstats=$(curl -sS -o /tmp/x402-stats.json -w '%{http_code}' "$X402_CHECKOUT_URL/stats" || true)
-            if [[ "$health" == "200" && "$card" == "200" && "$services" == "200" && "$machine" == "200" && "$payments" == "200" && "$stats" == "200" && "$checkout" == "200" && "$xstats" == "200" ]]; then
+            if [[ "$health" == "200" && "$card" == "200" && "$services" == "200" && "$machine" == "200" && "$revenue" == "200" && "$payments" == "200" && "$stats" == "200" && "$checkout" == "200" && "$xstats" == "200" ]]; then
               python3 - <<'PY'
           import json, os
           health=json.load(open('/tmp/a2a-health.json'))
           card=json.load(open('/tmp/a2a-card.json'))
           catalog=json.load(open('/tmp/a2a-services.json'))
           machine=json.load(open('/tmp/a2a-machine.json'))
+          revenue=json.load(open('/tmp/a2a-revenue.json'))
           payments=json.load(open('/tmp/a2a-payments.json'))
           stats=json.load(open('/tmp/a2a-stats.json'))
           checkout=json.load(open('/tmp/x402-health.json'))
@@ -107,6 +113,24 @@ jobs:
           }, product_prices
           plan_prices={x.get('id'):int(x.get('price_usd') or 0) for x in (machine.get('recurringPlans') or [])}
           assert plan_prices == {'PLAN-TENDER-WATCH':29,'PLAN-SUPPLIER-WATCH':39,'PLAN-BUYER-WATCH':59,'PLAN-EXPORT-RADAR':79}, plan_prices
+          assert revenue.get('version') == '1.0-revenue-expansion', revenue
+          assert revenue.get('zero_cost_operator_budget_usd') == 0
+          sourcing=revenue.get('sourcing_success') or {}
+          assert sourcing.get('id') == 'REV-SOURCING-SUCCESS'
+          assert sourcing.get('upfront_usd') == 0
+          assert sourcing.get('success_fee_pct') == {'min':4,'target':6,'max':8}
+          subscriptions={x.get('id'):int(x.get('price_usd') or 0) for x in (revenue.get('subscriptions') or [])}
+          assert subscriptions == {
+              'REV-TENDER-RADAR-BASIC':29,
+              'REV-TENDER-RADAR-PRO':79,
+              'REV-TENDER-RADAR-PLUS':199,
+              'REV-BUYER-INTENT-FEED':99,
+          }, subscriptions
+          guardrails=revenue.get('guardrails') or {}
+          assert guardrails.get('autonomous_outgoing_spend') is False
+          assert guardrails.get('autonomous_purchase') is False
+          assert guardrails.get('autonomous_contract') is False
+          assert guardrails.get('binding_actions_human_gated') is True
           assert payments.get('autonomousPurchase') is False
           assert payments.get('autonomousOutgoingPayment') is False
           assert payments.get('chargeCreatedByCatalogOrQuote') is False
@@ -125,14 +149,15 @@ jobs:
           assert xstats.get('recipient') == expected
           assert xstats.get('asset') == 'USDC'
           assert xstats.get('network') == 'Base'
+          print({'revenue_expansion':{'version':revenue.get('version'),'subscriptions':subscriptions,'success_fee':sourcing.get('success_fee_pct'),'budget_usd':revenue.get('zero_cost_operator_budget_usd')}})
           print({'machine_store':{'products':len(product_prices),'plans':len(plan_prices),'x402':x402.get('status'),'checkout':'LIVE','settled_payments':xstats.get('payments'),'realized_revenue_usd':xstats.get('realizedRevenueUsd')}})
           PY
               exit 0
             fi
             sleep 5
           done
-          echo "A2A Machine Store production verification failed."
-          for f in /tmp/a2a-health.json /tmp/a2a-card.json /tmp/a2a-services.json /tmp/a2a-machine.json /tmp/a2a-payments.json /tmp/a2a-stats.json /tmp/x402-health.json /tmp/x402-stats.json; do cat "$f" 2>/dev/null || true; echo; done
+          echo "A2A Machine Store / Revenue Expansion production verification failed."
+          for f in /tmp/a2a-health.json /tmp/a2a-card.json /tmp/a2a-services.json /tmp/a2a-machine.json /tmp/a2a-revenue.json /tmp/a2a-payments.json /tmp/a2a-stats.json /tmp/x402-health.json /tmp/x402-stats.json; do cat "$f" 2>/dev/null || true; echo; done
           exit 1
 
       - name: Verify quote RPCs and machine order round trip
@@ -147,6 +172,16 @@ jobs:
           code=$(curl -sS -o /tmp/a2a-plan-quote.json -w '%{http_code}' -X POST "$A2A_BASE_URL/a2a/v1" -H 'accept: application/json' -H 'content-type: application/json' -H 'A2A-Version: 1.0' --data "$plan_quote")
           [[ "$code" == "200" ]]
           jq -e '.result.quote.itemId == "PLAN-TENDER-WATCH" and .result.quote.amount == 29 and .result.quote.billing == "per_month"' /tmp/a2a-plan-quote.json >/dev/null
+
+          revenue_quote='{"jsonrpc":"2.0","id":"revenue-quote-canary","method":"QuoteRevenuePlan","params":{"planId":"REV-TENDER-RADAR-BASIC","contextId":"deploy-revenue-quote"}}'
+          code=$(curl -sS -o /tmp/a2a-revenue-quote.json -w '%{http_code}' -X POST "$A2A_BASE_URL/a2a/v1" -H 'accept: application/json' -H 'content-type: application/json' -H 'A2A-Version: 1.0' --data "$revenue_quote")
+          [[ "$code" == "200" ]]
+          jq -e '.result.quote.item_id == "REV-TENDER-RADAR-BASIC" and .result.quote.amount_usd == 29 and .result.quote.charge_created == false and .result.quote.status == "NON_BINDING_QUOTE"' /tmp/a2a-revenue-quote.json >/dev/null
+
+          sourcing_quote='{"jsonrpc":"2.0","id":"sourcing-success-canary","method":"QuoteSourcingSuccess","params":{"contextId":"deploy-sourcing-success"}}'
+          code=$(curl -sS -o /tmp/a2a-sourcing-success.json -w '%{http_code}' -X POST "$A2A_BASE_URL/a2a/v1" -H 'accept: application/json' -H 'content-type: application/json' -H 'A2A-Version: 1.0' --data "$sourcing_quote")
+          [[ "$code" == "200" ]]
+          jq -e '.result.quote.item_id == "REV-SOURCING-SUCCESS" and .result.quote.upfront_usd == 0 and .result.quote.charge_created == false and .result.quote.requires_verified_demand == true' /tmp/a2a-sourcing-success.json >/dev/null
 
           context="machine-order-canary-${GITHUB_RUN_ID}"
           message="machine-order-canary-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
@@ -228,6 +263,7 @@ jobs:
         run: |
           echo "A2A gateway: $A2A_BASE_URL"
           echo "Agent Card: $A2A_BASE_URL/.well-known/agent-card.json"
+          echo "Revenue catalog: $A2A_BASE_URL/revenue/catalog"
           echo "Machine Store: $A2A_BASE_URL/machine/catalog"
           echo "Service catalog: $A2A_BASE_URL/seller/catalog"
           echo "Payments status: $A2A_BASE_URL/payments/status"
@@ -236,4 +272,4 @@ jobs:
           echo "Registry action: ${{ steps.registry.outputs.action }}"
           echo "Registry final HTTP: ${{ steps.registry.outputs.http_status }}"
 
-# x402 receiving activation redeploy 2026-09-21
+# Revenue Expansion v1 production verification 2026-09-22
