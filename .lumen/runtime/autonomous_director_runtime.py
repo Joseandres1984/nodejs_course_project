@@ -4,8 +4,8 @@ from __future__ import annotations
 
 Adds a management reflex above Adaptive Operator + Autonomy Core: detect verified
 commercial stagnation, rotate reversible tactics, reallocate role attention, keep
-useful work moving after public-search quota exhaustion, and open a parallel
-zero-cost first-cash lane after prolonged stalls.
+useful work moving after currently-unlocked public-search quota exhaustion, and
+open a parallel zero-cost first-cash lane after prolonged stalls.
 
 It never widens financial, binding, legal, connector, paid-media, publication,
 or production-code authority. Evidence and Governor gates remain authoritative.
@@ -17,7 +17,7 @@ from typing import Any, Dict, List
 import adaptive_operator_runtime
 import autonomy_core_runtime
 
-VERSION = "1.0-autonomous-director"
+VERSION = "1.1-autonomous-director"
 MAX_HISTORY = 60
 MAX_PLAN = 6
 ROLE_BOOST_CAP = float(getattr(autonomy_core_runtime, "ROLE_BOOST_CAP", 0.12))
@@ -36,6 +36,10 @@ def _safe_dict(value: Any) -> Dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _safe_list(value: Any) -> List[Any]:
+    return value if isinstance(value, list) else []
+
+
 def _i(value: Any, default: int = 0) -> int:
     try:
         return int(value)
@@ -50,14 +54,61 @@ def _f(value: Any, default: float = 0.0) -> float:
         return default
 
 
+def _service_snapshot(state: Dict[str, Any]) -> Dict[str, Any]:
+    """Read the persisted service CRM truth, with compatibility fallbacks."""
+    persisted = _safe_dict(state.get("service_revenue_runtime"))
+    legacy = _safe_dict(state.get("service_growth_pipeline"))
+    opportunities = _safe_list(state.get("service_revenue_opportunities"))
+    pipeline = _safe_list(state.get("service_sales_pipeline"))
+    return {
+        "pipeline_total": max(
+            _i(persisted.get("pipeline_total")),
+            _i(legacy.get("pipeline_total")),
+            len(pipeline),
+            len(opportunities),
+        ),
+        "replies": max(_i(persisted.get("replies")), _i(legacy.get("replies"))),
+        "inbound_service_leads": max(
+            _i(persisted.get("inbound_service_leads")),
+            _i(legacy.get("inbound_service_leads")),
+        ),
+        "won": max(_i(persisted.get("won")), _i(legacy.get("won"))),
+        "realized_service_revenue_usd": max(
+            _f(persisted.get("realized_service_revenue_usd")),
+            _f(legacy.get("realized_service_revenue_usd")),
+        ),
+    }
+
+
+def _intelligence_snapshot(state: Dict[str, Any]) -> Dict[str, Any]:
+    direct = _safe_dict(state.get("intelligence_revenue_engine"))
+    continuous = _safe_dict(_safe_dict(state.get("continuous_revenue_drive")).get("intelligence_revenue"))
+    return {
+        "verified_candidates": max(
+            _i(direct.get("verified_candidates")),
+            _i(continuous.get("verified_product_fit_candidates")),
+        ),
+        "replies": max(_i(direct.get("replies")), _i(continuous.get("replies"))),
+        "realized_revenue_usd": max(
+            _f(direct.get("realized_revenue_usd")),
+            _f(continuous.get("realized_intelligence_revenue_usd")),
+        ),
+    }
+
+
 def _expanded_metrics(state: Dict[str, Any]) -> Dict[str, float]:
     metrics = dict(_ORIGINAL_METRICS(state) or {})
     counts = _safe_dict(_safe_dict(state.get("canonical_revenue_truth")).get("counts"))
     funnel = _safe_dict(state.get("business_funnel"))
     readiness = _safe_dict(state.get("external_market_readiness"))
-    services = _safe_dict(state.get("service_growth_pipeline"))
-    intelligence = _safe_dict(state.get("intelligence_revenue_engine"))
+    services = _service_snapshot(state)
+    intelligence = _intelligence_snapshot(state)
     acquisition = _safe_dict(state.get("acquisition_campaigns"))
+    realized_profit = max(
+        _f(metrics.get("realized_profit_usd")),
+        _f(services.get("realized_service_revenue_usd")),
+        _f(intelligence.get("realized_revenue_usd")),
+    )
     metrics.update({
         "verified_buyers": _f(counts.get("verified_buyers") or funnel.get("verified_buyers")),
         "buyers_with_verified_demand": _f(counts.get("buyers_with_verified_demand") or funnel.get("buyers_with_public_demand")),
@@ -68,6 +119,7 @@ def _expanded_metrics(state: Dict[str, Any]) -> Dict[str, float]:
         "service_won": _f(services.get("won")),
         "intelligence_replies": _f(intelligence.get("replies")),
         "acquisition_leads": _f(acquisition.get("leads")),
+        "realized_profit_usd": realized_profit,
     })
     return metrics
 
@@ -213,14 +265,29 @@ def _task(task_id: str, priority: int, roles: List[str], action: str, metric: st
     }
 
 
+def _effective_search_remaining(state: Dict[str, Any], adaptive: Dict[str, Any]) -> Dict[str, int]:
+    reported = max(0, _i(_safe_dict(adaptive.get("search")).get("remaining")))
+    available_now = reported
+    try:
+        import search_budget_governor as governor
+
+        summary = _safe_dict(governor.summary(state))
+        pacing = _safe_dict(summary.get("pacing"))
+        if pacing.get("enabled") is True and "available_now" in pacing:
+            available_now = min(reported, max(0, _i(pacing.get("available_now"))))
+    except Exception:
+        pass
+    return {"reported_remaining": reported, "available_now": available_now}
+
+
 def _build_plan(state: Dict[str, Any], metrics: Dict[str, float], bottleneck: str, target_metric: str, stall: int, search_remaining: int) -> List[Dict[str, Any]]:
     offline = search_remaining <= 0
     plan: List[Dict[str, Any]] = []
     primary = {
-        "demand_discovery": _task("DIR-DEMAND-EVIDENCE", 100, ["research_analyst", "buyer_hunter", "revops"], "Revisar primero evidencia guardada de compradores verificados y promover solamente demanda exacta con trazabilidad; si queda cupo, usar búsqueda pública de precisión sobre compradores concretos.", "buyers_with_verified_demand", "offline_existing_evidence" if offline else "stored_first_then_bounded_search", "Sin demanda verificada no puede existir una oportunidad canónica."),
+        "demand_discovery": _task("DIR-DEMAND-EVIDENCE", 100, ["research_analyst", "buyer_hunter", "revops"], "Revisar primero evidencia guardada de compradores verificados y promover solamente demanda exacta con trazabilidad; si queda cupo actualmente desbloqueado, usar búsqueda pública de precisión sobre compradores concretos.", "buyers_with_verified_demand", "offline_existing_evidence" if offline else "stored_first_then_bounded_search", "Sin demanda verificada no puede existir una oportunidad canónica."),
         "verification_contact": _task("DIR-CONTACT-REPAIR", 100, ["research_analyst", "buyer_hunter", "revops"], "Convertir compradores con demanda verificada en prospectos utilizables reparando identidad y canales corporativos oficiales, sin inferir emails personales ni saltar cooldowns.", "eligible_external_prospects", "offline_existing_evidence" if offline else "stored_first_then_bounded_search", "La demanda existe pero todavía no puede ejecutarse contacto seguro."),
         "opportunity_creation": _task("DIR-OPPORTUNITY-BUILD", 100, ["revops", "research_analyst", "supplier_hunter"], "Cruzar demanda verificada con proveedores verificados y materializar sólo oportunidades con evidencia y linaje completos.", "canonical_opportunities", "offline_existing_evidence", "Hay evidencia aguas arriba pero todavía no se convirtió en una oportunidad canónica."),
-        "requirement_completion": _task("DIR-RFQ-PACK", 100, ["research_analyst", "revops", "risk_quality"], "Completar alcance técnico, cantidad y lugar de entrega únicamente desde documentos o mensajes existentes; buscar afuera sólo si queda cupo.", "requirements_ready_for_rfq", "offline_existing_evidence" if offline else "stored_first_then_bounded_search", "Sin paquete RFQ completo no corresponde avanzar a cotización."),
+        "requirement_completion": _task("DIR-RFQ-PACK", 100, ["research_analyst", "revops", "risk_quality"], "Completar alcance técnico, cantidad y lugar de entrega únicamente desde documentos o mensajes existentes; buscar afuera sólo si queda cupo actualmente desbloqueado.", "requirements_ready_for_rfq", "offline_existing_evidence" if offline else "stored_first_then_bounded_search", "Sin paquete RFQ completo no corresponde avanzar a cotización."),
         "quote_capture": _task("DIR-QUOTE-CAPTURE", 100, ["supplier_hunter", "negotiator", "revops"], "Priorizar RFQ no vinculante hacia proveedores ya verificados y normalizar respuestas reales para comparabilidad.", "canonical_real_offers", "nonbinding_execution", "El cuello de botella está en obtener evidencia real de oferta/cotización."),
         "proposal_creation": _task("DIR-PROPOSAL", 100, ["negotiator", "revops", "finance", "risk_quality"], "Preparar propuesta no vinculante usando únicamente cotizaciones comparables y economía verificable.", "canonical_proposals", "offline_existing_evidence", "Ya hay evidencia de oferta; falta convertirla en propuesta comprensible y trazable."),
         "close_path": _task("DIR-CLOSE-PATH", 100, ["revops", "negotiator", "risk_quality", "finance"], "Identificar la condición exacta que impide cierre y resolver automáticamente sólo lo reversible; elevar cualquier aceptación vinculante al humano.", "canonical_close_ready", "nonbinding_execution", "La oportunidad avanzó y ahora importa eliminar fricción de cierre sin ampliar autoridad."),
@@ -234,12 +301,14 @@ def _build_plan(state: Dict[str, Any], metrics: Dict[str, float], bottleneck: st
     if stall >= 6:
         plan.append(_task("DIR-TACTIC-ROTATION", 96, ["research_analyst", "revops", "buyer_hunter", "supplier_hunter"], "Rotar automáticamente la táctica reversible del experimento activo y elegir una alternativa menos intentada, manteniendo los mismos gates.", target_metric, "reversible_strategy_rotation", "La táctica actual no produjo progreso verificable en varios ciclos."))
 
-    services = _safe_dict(state.get("service_growth_pipeline"))
-    intelligence = _safe_dict(state.get("intelligence_revenue_engine"))
-    if stall >= 10 and _f(metrics.get("realized_profit_usd")) <= 0 and (_i(services.get("pipeline_total")) > 0 or _i(intelligence.get("verified_candidates")) > 0):
+    services = _service_snapshot(state)
+    intelligence = _intelligence_snapshot(state)
+    if stall >= 10 and _f(metrics.get("realized_profit_usd")) <= 0 and (
+        _i(services.get("pipeline_total")) > 0 or _i(intelligence.get("verified_candidates")) > 0
+    ):
         plan.append(_task("DIR-FIRST-CASH-PARALLEL", 98, ["revops", "market_manager", "research_analyst"], "Mantener el cuello de botella principal, pero abrir en paralelo una ruta de primera caja con servicios/inteligencia ya preparados: seguimiento, mejora de mensaje y conversión orgánica sobre candidatos verificados.", "service_replies", "parallel_zero_cost_cash_lane", "Una racha prolongada justifica diversificar reversiblemente la vía de ingreso sin abandonar la evidencia principal."))
     if offline:
-        plan.append(_task("DIR-ZERO-QUOTA-MODE", 94, ["research_analyst", "revops", "risk_quality"], "Mientras el cupo de búsqueda sea cero, usar memoria D1: deduplicar, releer documentos, reparar identidades, priorizar follow-ups y preparar el próximo lote de búsquedas de máxima precisión.", target_metric, "offline_existing_evidence", "No debe existir tiempo ocioso sólo porque se agotó una fuente externa."))
+        plan.append(_task("DIR-ZERO-QUOTA-MODE", 94, ["research_analyst", "revops", "risk_quality"], "Mientras el cupo actualmente desbloqueado de búsqueda sea cero, usar memoria D1: deduplicar, releer documentos, reparar identidades, priorizar follow-ups y preparar el próximo lote de búsquedas de máxima precisión.", target_metric, "offline_existing_evidence", "No debe existir tiempo ocioso sólo porque el cupo gratuito está temporalmente agotado."))
     return sorted(plan, key=lambda x: -_i(x.get("priority")))[:MAX_PLAN]
 
 
@@ -258,10 +327,21 @@ def director_tick(state: Dict[str, Any], adaptive_report: Dict[str, Any] | None 
     bottleneck, target_metric = _expanded_bottleneck(metrics)
     adaptive = adaptive_report if isinstance(adaptive_report, dict) else _safe_dict(state.get("adaptive_operator"))
     stall = _i(adaptive.get("no_progress_cycles"))
-    search_remaining = _i(_safe_dict(adaptive.get("search")).get("remaining"))
+    search = _effective_search_remaining(state, adaptive)
+    search_remaining = _i(search.get("available_now"))
     plan = _build_plan(state, metrics, bottleneck, target_metric, stall, search_remaining)
     history = list(director.get("history", []) or [])
-    history.append({"cycle": _i(state.get("ticks")), "at": _now(), "bottleneck": bottleneck, "target_metric": target_metric, "stall_cycles": stall, "search_remaining": search_remaining, "plan_ids": [x.get("id") for x in plan], "metrics": metrics})
+    history.append({
+        "cycle": _i(state.get("ticks")),
+        "at": _now(),
+        "bottleneck": bottleneck,
+        "target_metric": target_metric,
+        "stall_cycles": stall,
+        "search_reported_remaining": _i(search.get("reported_remaining")),
+        "search_available_now": search_remaining,
+        "plan_ids": [x.get("id") for x in plan],
+        "metrics": metrics,
+    })
     director.update({
         "version": VERSION,
         "status": "active",
@@ -273,12 +353,27 @@ def director_tick(state: Dict[str, Any], adaptive_report: Dict[str, Any] | None 
         "escalation": _escalation(stall),
         "operating_mode": "offline_existing_evidence" if search_remaining <= 0 else "bounded_market_plus_internal",
         "search_remaining": search_remaining,
+        "search_reported_remaining": _i(search.get("reported_remaining")),
+        "search_available_now": search_remaining,
         "plan": plan,
         "role_boosts": _role_boosts(plan),
         "history": history[-MAX_HISTORY:],
         "authority": {
-            "autonomous": ["reversible attention reallocation", "reversible strategy rotation", "research priority changes", "case prioritization and temporary rotation", "nonbinding commercial preparation within existing gates"],
-            "human_required": ["binding contracts or acceptance of binding terms", "payments, orders or financial commitments", "material legal or liability decisions", "new external connectors or account authorization", "paid media spend", "production code changes or deployments"],
+            "autonomous": [
+                "reversible attention reallocation",
+                "reversible strategy rotation",
+                "research priority changes",
+                "case prioritization and temporary rotation",
+                "nonbinding commercial preparation within existing gates",
+            ],
+            "human_required": [
+                "binding contracts or acceptance of binding terms",
+                "payments, orders or financial commitments",
+                "material legal or liability decisions",
+                "new external connectors or account authorization",
+                "paid media spend",
+                "production code changes or deployments",
+            ],
             "monetary_budget_usd": 0,
             "binding_authority_changed": False,
             "evidence_gates_preserved": True,
@@ -306,13 +401,32 @@ def _blackboard_with_director(state: Dict[str, Any], core: Dict[str, Any], issue
     _ORIGINAL_BLACKBOARD(state, core, issues)
     cards = list(core.get("blackboard", []) or [])
     for item in list(director.get("plan", []) or []):
-        cards.append({"kind": "autonomous_director", "id": item.get("id"), "priority": item.get("priority"), "text": item.get("action"), "roles": item.get("roles"), "metric": item.get("success_metric"), "mode": item.get("mode"), "binding": False})
+        cards.append({
+            "kind": "autonomous_director",
+            "id": item.get("id"),
+            "priority": item.get("priority"),
+            "text": item.get("action"),
+            "roles": item.get("roles"),
+            "metric": item.get("success_metric"),
+            "mode": item.get("mode"),
+            "binding": False,
+        })
     cards.sort(key=lambda x: -_i(x.get("priority")))
     core["blackboard"] = cards[:getattr(autonomy_core_runtime, "MAX_BLACKBOARD", 60)]
     briefings = _safe_dict(core.get("role_briefings"))
     for role, briefing in briefings.items():
         if isinstance(briefing, dict):
-            briefing["director_tasks"] = [{"id": item.get("id"), "priority": item.get("priority"), "action": item.get("action"), "metric": item.get("success_metric"), "mode": item.get("mode")} for item in list(director.get("plan", []) or []) if role in (item.get("roles", []) or [])][:4]
+            briefing["director_tasks"] = [
+                {
+                    "id": item.get("id"),
+                    "priority": item.get("priority"),
+                    "action": item.get("action"),
+                    "metric": item.get("success_metric"),
+                    "mode": item.get("mode"),
+                }
+                for item in list(director.get("plan", []) or [])
+                if role in (item.get("roles", []) or [])
+            ][:4]
     state.setdefault("agent_workforce", {})["autonomy_briefing"] = briefings
     state["agent_workforce"]["shared_blackboard"] = core["blackboard"][:30]
 
@@ -349,6 +463,8 @@ def _adaptive_with_director(state: Dict[str, Any]) -> Dict[str, Any]:
         "stall_cycles": director.get("stall_cycles"),
         "escalation": director.get("escalation"),
         "operating_mode": director.get("operating_mode"),
+        "search_reported_remaining": director.get("search_reported_remaining"),
+        "search_available_now": director.get("search_available_now"),
         "plan_ids": [x.get("id") for x in director.get("plan", []) or []],
         "role_boosts": director.get("role_boosts"),
         "monetary_budget_usd": 0,
@@ -367,8 +483,9 @@ print({
         "anti_stall_escalation": True,
         "reversible_strategy_rotation": True,
         "role_reallocation": True,
-        "offline_zero_quota_mode": True,
+        "pacing_aware_zero_quota_mode": True,
         "parallel_first_cash_lane": True,
+        "persistent_service_truth": True,
         "monetary_budget_usd": 0,
         "binding_authority_changed": False,
         "production_self_modify": False,
