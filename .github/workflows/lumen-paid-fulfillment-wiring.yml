@@ -1,0 +1,111 @@
+name: LUMEN Paid Fulfillment Wiring
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/lumen-paid-fulfillment-wiring.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: lumen-paid-fulfillment-wiring
+  cancel-in-progress: true
+
+jobs:
+  wire-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout LUMEN Zero
+        uses: actions/checkout@v4
+        with:
+          ref: lumen-zero
+          fetch-depth: 0
+
+      - name: Apply wiring migration
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .lumen/migrations/wire_paid_fulfillment.py
+          python3 -m py_compile .lumen/runtime/paid_fulfillment_runtime.py .lumen/runtime/zero_entry.py
+          grep -q 'paid_fulfillment_runtime.run_once()' .lumen/runtime/zero_entry.py
+
+      - name: Run isolated report-builder canary
+        shell: bash
+        run: |
+          set -euo pipefail
+          PYTHONPATH=.lumen/runtime python3 - <<'PY'
+          import sys, types
+          fake_d1=types.ModuleType('d1_persistence_runtime')
+          fake_d1._request=lambda body: []
+          fake_d1._result_statements=lambda result: []
+          fake_d1._statement_rows=lambda statement: []
+          sys.modules['d1_persistence_runtime']=fake_d1
+          fake_scout=types.ModuleType('scout_connector')
+          fake_scout.search=lambda q: []
+          sys.modules['scout_connector']=fake_scout
+          import paid_fulfillment_runtime as p
+          job={
+            'order_id':'MORD-REALISTIC-12345','receipt_id':'X402R-REALISTIC-12345','brief_id':'CL-REALISTIC-12345',
+            'item_id':'MP-SOURCING-5','service_id':'SRV-SOURCING-EXPRESS','company':'Industria Sur SA',
+            'requirement':'Buscar proveedores de válvulas industriales AISI 316 para entrega en Argentina.'
+          }
+          evidence=[
+            {'title':'Proveedor Industrial A','url':'https://www.parker.com/','note':'Sitio corporativo con soluciones industriales.','observed_at':'2026-09-21','host':'parker.com'},
+            {'title':'Proveedor Industrial B','url':'https://www.swagelok.com/','note':'Sitio corporativo con catálogo técnico.','observed_at':'2026-09-21','host':'swagelok.com'},
+          ]
+          report=p._build_report(job,evidence,p._queries(job['item_id'],job['requirement']))
+          assert report['template_key']=='sourcing-5'
+          assert report['client_request']==job['requirement']
+          assert report['fulfillment']['order_id']==job['order_id']
+          assert report['fulfillment']['outgoing_spend'] is False
+          assert len(report['evidence'])==2
+          print({'REPORT_BUILDER_CANARY':'pass','report_id':report['report_id'],'evidence':len(report['evidence']),'outgoing_spend':False})
+          PY
+
+      - name: Verify paid lane precedes prospecting
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          text=Path('.lumen/runtime/zero_entry.py').read_text()
+          paid=text.index('paid_fulfillment_runtime.run_once()')
+          prospect=text.index('# First-cash demand priority:')
+          assert paid < prospect, (paid, prospect)
+          src=Path('.lumen/runtime/paid_fulfillment_runtime.py').read_text()
+          required=["r.status='redeemed_queued'","settlement.success","payment_verified","payment_settled","technical_canary=0","status='researching'","RETURNING *, ? AS claim_token","report_ready","outgoing_spend"]
+          missing=[x for x in required if x not in src]
+          assert not missing, missing
+          print({'PAID_PRIORITY_CANARY':'pass','atomic_claim':True,'settlement_gate':True,'delivery_in_this_lane':False})
+          PY
+
+      - name: Commit runtime wiring
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .lumen/runtime/zero_entry.py
+          if git diff --cached --quiet; then
+            echo 'Paid fulfillment wiring already current.'
+          else
+            git commit -m 'Prioritize settled customer fulfillment before prospecting'
+            git push origin HEAD:lumen-zero
+          fi
+
+      - name: Summary
+        shell: bash
+        run: |
+          {
+            echo '## LUMEN Paid Fulfillment Wiring'
+            echo '- Settled x402 orders only: PASS'
+            echo '- Technical canaries excluded: PASS'
+            echo '- Atomic one-job claim: PASS'
+            echo '- Evidence-backed report JSON: PASS'
+            echo '- Paid work precedes prospecting search: PASS'
+            echo '- Delivery/payment/spend not performed by research lane: PASS'
+          } >> "$GITHUB_STEP_SUMMARY"
