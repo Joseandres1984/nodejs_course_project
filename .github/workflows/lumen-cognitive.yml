@@ -64,6 +64,7 @@ jobs:
           jq -e '
             .status == "ok" and
             .primary_provider == "cloudflare_ai" and
+            .primary_model == "@cf/google/gemma-4-26b-a4b-it" and
             .ai_binding_available == true and
             .paid_ai_allowed == false and
             .monetary_budget_usd == 0 and
@@ -102,7 +103,7 @@ jobs:
           [[ "$code" == "200" ]]
           jq -e '
             .provider == "cloudflare_ai" and
-            .model == "@cf/zai-org/glm-4.7-flash" and
+            .model == "@cf/google/gemma-4-26b-a4b-it" and
             (.decision | IN("contact","research","hold","prioritize")) and
             (.priority | IN("low","medium","high")) and
             (.confidence >= 0 and .confidence <= 1) and
