@@ -1,0 +1,236 @@
+name: LUMEN Paid Report Delivery
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/lumen-paid-delivery.yml"
+  schedule:
+    # Lightweight D1 preflight every 5 minutes. Chromium installs only when a paid report is ready.
+    - cron: "1,6,11,16,21,26,31,36,41,46,51,56 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lumen-paid-report-delivery
+  cancel-in-progress: false
+
+jobs:
+  source-qa:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout LUMEN Zero
+        uses: actions/checkout@v4
+        with:
+          ref: lumen-zero
+      - name: Syntax and safety checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile .lumen/runtime/paid_fulfillment_runtime.py .lumen/runtime/paid_delivery_runtime.py .lumen/reporting/approve_delivery.py
+          python3 - <<'PY'
+          from pathlib import Path
+          delivery=Path('.lumen/runtime/paid_delivery_runtime.py').read_text()
+          fulfill=Path('.lumen/runtime/paid_fulfillment_runtime.py').read_text()
+          for token in ["receipt_not_settled","settlement_evidence_missing","order_not_paid_queued","brief_not_real_paid_request","delivery_ambiguous","status='sending'","attachment","outgoing_spend"]:
+              assert token in delivery, token
+          for token in ["r.status='redeemed_queued'","payment_verified","payment_settled","technical_canary=0","report_ready"]:
+              assert token in fulfill, token
+          assert 'requests.post' not in delivery
+          print({'PAID_DELIVERY_SOURCE_QA':'pass','fail_closed':True,'private_attachment':True,'outgoing_spend':False})
+          PY
+
+  deliver-one:
+    if: github.event_name != 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      LUMEN_ZERO_COST_MODE: "true"
+      LUMEN_D1_ACCOUNT_ID: ${{ secrets.LUMEN_D1_ACCOUNT_ID }}
+      LUMEN_D1_DATABASE_ID: ${{ secrets.LUMEN_D1_DATABASE_ID }}
+      LUMEN_D1_API_TOKEN: ${{ secrets.LUMEN_D1_API_TOKEN }}
+      LUMEN_BREVO_API_KEY: ${{ secrets.LUMEN_BREVO_API_KEY }}
+      LUMEN_BREVO_FROM_EMAIL: ${{ secrets.LUMEN_BREVO_FROM_EMAIL }}
+      LUMEN_BREVO_FROM_NAME: ${{ secrets.LUMEN_BREVO_FROM_NAME }}
+      LUMEN_RESEND_API_KEY: ${{ secrets.LUMEN_RESEND_API_KEY }}
+      LUMEN_RESEND_FROM: ${{ secrets.LUMEN_RESEND_FROM }}
+    steps:
+      - name: Checkout LUMEN Zero
+        uses: actions/checkout@v4
+        with:
+          ref: lumen-zero
+
+      - name: Production preflight
+        id: preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          d1=false
+          mail=false
+          [[ -n "$LUMEN_D1_ACCOUNT_ID" && -n "$LUMEN_D1_DATABASE_ID" && -n "$LUMEN_D1_API_TOKEN" ]] && d1=true
+          [[ -n "$LUMEN_BREVO_API_KEY" && -n "$LUMEN_BREVO_FROM_EMAIL" ]] && mail=true
+          [[ -n "$LUMEN_RESEND_API_KEY" && -n "$LUMEN_RESEND_FROM" ]] && mail=true
+          echo "d1=$d1" >> "$GITHUB_OUTPUT"
+          echo "mail=$mail" >> "$GITHUB_OUTPUT"
+          if [[ "$d1" != true ]]; then
+            echo 'D1 unavailable: delivery cycle safely skipped.'
+          elif [[ "$mail" != true ]]; then
+            echo 'No HTTPS attachment-capable mail provider configured: report remains unclaimed/report_ready.'
+          fi
+
+      - name: Claim one settled report
+        id: claim
+        if: steps.preflight.outputs.d1 == 'true' && steps.preflight.outputs.mail == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/lumen-paid-delivery
+          mkdir -p /tmp/lumen-paid-delivery/work /tmp/lumen-paid-delivery/previews /tmp/lumen-paid-delivery/approved
+          PYTHONPATH=.lumen/runtime python3 .lumen/runtime/paid_delivery_runtime.py claim --out-dir /tmp/lumen-paid-delivery/work | tee /tmp/lumen-paid-delivery/claim.json
+          HAS=$(jq -r '.has_job // false' /tmp/lumen-paid-delivery/claim.json)
+          echo "has_job=$HAS" >> "$GITHUB_OUTPUT"
+          if [[ "$HAS" == true ]]; then
+            ORDER_ID=$(jq -r '.order_id' /tmp/lumen-paid-delivery/claim.json)
+            REPORT_ID=$(jq -r '.report_id' /tmp/lumen-paid-delivery/claim.json)
+            [[ "$ORDER_ID" =~ ^[A-Za-z0-9_-]{8,100}$ ]]
+            [[ "$REPORT_ID" =~ ^[A-Za-z0-9_-]{8,120}$ ]]
+            echo "order_id=$ORDER_ID" >> "$GITHUB_OUTPUT"
+            echo "report_id=$REPORT_ID" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Node
+        if: steps.claim.outputs.has_job == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Set up Python
+        if: steps.claim.outputs.has_job == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install PDF runtime only for paid work
+        if: steps.claim.outputs.has_job == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-save playwright@1.55.0 pdf-lib@1.17.1
+          npx playwright install --with-deps chromium
+          python -m pip install --disable-pip-version-check pypdf==5.9.0 pillow==11.3.0
+          command -v pdftotext >/dev/null || { sudo apt-get update; sudo apt-get install -y poppler-utils; }
+
+      - name: Validate structured client report
+        id: contract
+        if: steps.claim.outputs.has_job == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          REPORT=/tmp/lumen-paid-delivery/work/report.json
+          python .lumen/reporting/validate_report_input.py "$REPORT"
+          KEY=$(jq -r '.product_or_service_id' "$REPORT")
+          TITLE=$(jq -r --arg k "$KEY" '.service_templates[$k].title // .micro_templates[$k].title // empty' .lumen/contracts/delivery-templates.json)
+          [[ -n "$TITLE" ]] || { echo "Unknown report template: $KEY"; exit 1; }
+          if jq -e --arg k "$KEY" '.micro_templates[$k] != null' .lumen/contracts/delivery-templates.json >/dev/null; then TIER=micro; else TIER=full; fi
+          echo "title=$TITLE" >> "$GITHUB_OUTPUT"
+          echo "tier=$TIER" >> "$GITHUB_OUTPUT"
+
+      - name: Render final private PDF
+        if: steps.claim.outputs.has_job == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          REPORT_ID='${{ steps.claim.outputs.report_id }}'
+          TITLE='${{ steps.contract.outputs.title }}'
+          node .lumen/reporting/render_report.mjs --input /tmp/lumen-paid-delivery/work/report.json --output /tmp/lumen-paid-delivery/work/report.html
+          node .lumen/reporting/render_pdf.mjs --input /tmp/lumen-paid-delivery/work/report.html --output /tmp/lumen-paid-delivery/work/LUMEN-report.pdf --report-id "$REPORT_ID" --title "$TITLE"
+
+      - name: Run PDF quality gate
+        if: steps.claim.outputs.has_job == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .lumen/reporting/validate_pdf.py /tmp/lumen-paid-delivery/work/LUMEN-report.pdf \
+            --report-id '${{ steps.claim.outputs.report_id }}' \
+            --title '${{ steps.contract.outputs.title }}' \
+            --tier '${{ steps.contract.outputs.tier }}' \
+            --preview-dir /tmp/lumen-paid-delivery/previews > /tmp/lumen-paid-delivery/work/quality.json
+          jq -e '.ok == true and .quality_gate == "client_delivery_ready"' /tmp/lumen-paid-delivery/work/quality.json >/dev/null
+
+      - name: Cross-check exact payment/order/brief/PDF
+        if: steps.claim.outputs.has_job == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .lumen/reporting/approve_delivery.py \
+            --context /tmp/lumen-paid-delivery/work/context.json \
+            --report-json /tmp/lumen-paid-delivery/work/report.json \
+            --pdf /tmp/lumen-paid-delivery/work/LUMEN-report.pdf \
+            --quality-json /tmp/lumen-paid-delivery/work/quality.json \
+            --manifest /tmp/lumen-paid-delivery/approved/delivery-manifest.json | tee /tmp/lumen-paid-delivery/work/approval.json
+          jq -e '.ok == true and .delivery_status == "ready_for_delivery" and .outgoing_spend == false' /tmp/lumen-paid-delivery/work/approval.json >/dev/null
+          cp /tmp/lumen-paid-delivery/work/LUMEN-report.pdf /tmp/lumen-paid-delivery/approved/LUMEN-report.pdf
+
+      - name: Persist delivery approval
+        if: steps.claim.outputs.has_job == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          PYTHONPATH=.lumen/runtime python3 .lumen/runtime/paid_delivery_runtime.py approve \
+            --order-id '${{ steps.claim.outputs.order_id }}' \
+            --manifest /tmp/lumen-paid-delivery/approved/delivery-manifest.json | tee /tmp/lumen-paid-delivery/work/persist.json
+          jq -e '.ok == true and .status == "ready_for_delivery" and .outgoing_spend == false' /tmp/lumen-paid-delivery/work/persist.json >/dev/null
+
+      - name: Archive exact approved deliverable
+        if: steps.claim.outputs.has_job == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: lumen-paid-delivery-${{ steps.claim.outputs.order_id }}
+          path: |
+            /tmp/lumen-paid-delivery/approved/LUMEN-report.pdf
+            /tmp/lumen-paid-delivery/approved/delivery-manifest.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Send private PDF to purchasing email
+        id: send
+        if: steps.claim.outputs.has_job == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          PYTHONPATH=.lumen/runtime python3 .lumen/runtime/paid_delivery_runtime.py send \
+            --order-id '${{ steps.claim.outputs.order_id }}' \
+            --pdf /tmp/lumen-paid-delivery/approved/LUMEN-report.pdf \
+            --manifest /tmp/lumen-paid-delivery/approved/delivery-manifest.json | tee /tmp/lumen-paid-delivery/work/send.json
+          jq -e '.ok == true and .status == "delivered" and .outgoing_spend == false' /tmp/lumen-paid-delivery/work/send.json >/dev/null
+
+      - name: Fail closed before send if any production gate failed
+        if: failure() && steps.claim.outputs.has_job == 'true' && steps.send.outcome != 'failure'
+        shell: bash
+        run: |
+          set +e
+          PYTHONPATH=.lumen/runtime python3 .lumen/runtime/paid_delivery_runtime.py block \
+            --order-id '${{ steps.claim.outputs.order_id }}' \
+            --error "production_delivery_gate_failed:${GITHUB_RUN_ID}"
+          exit 0
+
+      - name: Delivery summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '## LUMEN Paid Report Delivery'
+            echo "- D1 ready: ${{ steps.preflight.outputs.d1 || 'false' }}"
+            echo "- Private attachment mail ready: ${{ steps.preflight.outputs.mail || 'false' }}"
+            echo "- Paid report claimed: ${{ steps.claim.outputs.has_job || 'false' }}"
+            if [[ '${{ steps.claim.outputs.has_job }}' == 'true' ]]; then
+              echo "- Order: ${{ steps.claim.outputs.order_id }}"
+              echo "- PDF quality gate: ${{ steps.send.outcome == 'success' && 'PASS' || 'see job status' }}"
+              echo "- Send outcome: ${{ steps.send.outcome || 'not-run' }}"
+            fi
+            echo '- Outgoing payments/spend: disabled'
+          } >> "$GITHUB_STEP_SUMMARY"
