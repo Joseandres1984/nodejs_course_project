@@ -2,14 +2,12 @@
 import argparse
 import json
 import math
-import os
 import re
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
 
-from PIL import Image, ImageStat
+from PIL import Image
 from pypdf import PdfReader
 
 
@@ -29,10 +27,16 @@ def norm(s):
     return re.sub(r"\s+", " ", str(s or "")).strip().casefold()
 
 
+def compact(s):
+    # Text extractors can insert line breaks/spaces around punctuation. Compare
+    # identifiers on their alphanumeric skeleton while keeping normal text
+    # checks for titles and human-readable content.
+    return re.sub(r"[^0-9a-záéíóúüñ]+", "", str(s or "").casefold())
+
+
 def nonwhite_ratio(image_path):
     with Image.open(image_path) as im:
         rgb = im.convert("RGB")
-        # Downsample for a stable and cheap blank-page test.
         rgb.thumbnail((800, 1200))
         pixels = rgb.load()
         w, h = rgb.size
@@ -74,7 +78,7 @@ def main():
     pages = len(reader.pages)
     if pages < 1:
         fail("pdf_has_no_pages")
-    max_pages = 6 if args.tier == "micro" else 20
+    max_pages = 3 if args.tier == "micro" else 15
     if pages > max_pages:
         fail("unexpected_page_count", {"pages": pages, "tier": args.tier, "max": max_pages})
 
@@ -83,14 +87,18 @@ def main():
     subject_meta = norm(meta.get("/Subject", ""))
     if norm(args.title) not in title_meta and title_meta not in norm(args.title):
         fail("metadata_title_mismatch", {"expected": args.title, "actual": meta.get("/Title")})
-    if norm(args.report_id) not in subject_meta:
+    if compact(args.report_id) not in compact(subject_meta):
         fail("metadata_report_id_missing", meta.get("/Subject"))
 
     text = run("pdftotext", "-layout", str(pdf), "-")
     text_n = norm(text)
-    for required in ["lumen", args.report_id, args.title]:
-        if norm(required) not in text_n:
-            fail("required_text_missing", required)
+    text_compact = compact(text)
+    if "lumen" not in text_n:
+        fail("required_text_missing", "LUMEN")
+    if norm(args.title) not in text_n:
+        fail("required_text_missing", args.title)
+    if compact(args.report_id) not in text_compact:
+        fail("required_text_missing", args.report_id)
     if not any(token in text_n for token in ["conclusión", "conclusion"]):
         fail("conclusion_missing")
     if len(text_n) < (450 if args.tier == "micro" else 900):
@@ -116,13 +124,10 @@ def main():
     page_stats = []
     for i, image in enumerate(images, 1):
         nonwhite, dark, size = nonwhite_ratio(image)
-        # A truly blank/broken page is normally near zero. This leaves ample
-        # room for intentionally sparse pages while catching empty output.
         if nonwhite < 0.0015:
             fail("blank_or_near_blank_page", {"page": i, "nonwhite_ratio": nonwhite})
         page_stats.append({"page": i, "nonwhite_ratio": round(nonwhite, 5), "dark_ratio": round(dark, 5), "pixels": size})
 
-    # PDF text should not contain Unicode replacement glyphs or obvious browser error pages.
     for bad in ["�", "aw, snap", "page crashed", "error code: out of memory"]:
         if norm(bad) in text_n:
             fail("render_corruption_marker", bad)
