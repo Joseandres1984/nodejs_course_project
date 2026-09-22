@@ -1,0 +1,191 @@
+name: LUMEN A2A Global Discovery
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/lumen-a2a-discovery.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lumen-a2a-global-discovery
+  cancel-in-progress: true
+
+jobs:
+  publish-discovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.LUMEN_D1_ACCOUNT_ID }}
+      A2A_BASE_URL: https://lumen-zero-a2a.lumen-b2b.workers.dev
+      AGENT_CARD_URL: https://lumen-zero-a2a.lumen-b2b.workers.dev/.well-known/agent-card.json
+    steps:
+      - name: Checkout canonical LUMEN Zero
+        uses: actions/checkout@v4
+        with:
+          ref: lumen-zero
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Validate discovery bundle
+        run: |
+          node --check .lumen/a2a-worker/worker.js
+          node --check .lumen/a2a-worker/worker-entry.js
+          node --check .lumen/a2a-worker/revenue-expansion.js
+          node --check .lumen/a2a-worker/discovery.js
+          node .lumen/a2a-worker/test-discovery.mjs
+
+      - name: Deployment preflight
+        shell: bash
+        run: |
+          if [[ -z "$CLOUDFLARE_API_TOKEN" || -z "$CLOUDFLARE_ACCOUNT_ID" ]]; then
+            echo "Missing Cloudflare deployment credentials."
+            exit 1
+          fi
+
+      - name: Deploy discoverable A2A Worker
+        working-directory: .lumen/a2a-worker
+        run: npx --yes wrangler@4 deploy
+
+      - name: Verify global discovery surfaces live
+        shell: bash
+        run: |
+          set -euo pipefail
+          success=0
+          for i in {1..12}; do
+            root=$(curl -sS -o /tmp/lumen-root.html -w '%{http_code}' "$A2A_BASE_URL/" || true)
+            card=$(curl -sS -o /tmp/lumen-card.json -w '%{http_code}' "$AGENT_CARD_URL" || true)
+            discovery=$(curl -sS -o /tmp/lumen-discovery.json -w '%{http_code}' "$A2A_BASE_URL/discovery.json" || true)
+            openapi=$(curl -sS -o /tmp/lumen-openapi.json -w '%{http_code}' "$A2A_BASE_URL/openapi.json" || true)
+            llms=$(curl -sS -o /tmp/lumen-llms.txt -w '%{http_code}' "$A2A_BASE_URL/llms.txt" || true)
+            robots=$(curl -sS -o /tmp/lumen-robots.txt -w '%{http_code}' "$A2A_BASE_URL/robots.txt" || true)
+            sitemap=$(curl -sS -o /tmp/lumen-sitemap.xml -w '%{http_code}' "$A2A_BASE_URL/sitemap.xml" || true)
+            agents=$(curl -sS -o /tmp/lumen-agents-index.json -w '%{http_code}' "$A2A_BASE_URL/.well-known/agents/index.json" || true)
+            if [[ "$root" == "200" && "$card" == "200" && "$discovery" == "200" && "$openapi" == "200" && "$llms" == "200" && "$robots" == "200" && "$sitemap" == "200" && "$agents" == "200" ]]; then
+              success=1
+              break
+            fi
+            sleep 5
+          done
+          [[ "$success" == "1" ]]
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          card=json.load(open('/tmp/lumen-card.json',encoding='utf-8'))
+          discovery=json.load(open('/tmp/lumen-discovery.json',encoding='utf-8'))
+          openapi=json.load(open('/tmp/lumen-openapi.json',encoding='utf-8'))
+          agents=json.load(open('/tmp/lumen-agents-index.json',encoding='utf-8'))
+          llms=Path('/tmp/lumen-llms.txt').read_text(encoding='utf-8')
+          robots=Path('/tmp/lumen-robots.txt').read_text(encoding='utf-8')
+          sitemap=Path('/tmp/lumen-sitemap.xml').read_text(encoding='utf-8')
+          root=Path('/tmp/lumen-root.html').read_text(encoding='utf-8')
+
+          meta=card.get('metadata') or {}
+          skill_ids={x.get('id') for x in (card.get('skills') or [])}
+          assert card.get('protocolVersion') == '1.0'
+          assert card.get('name') == 'LUMEN B2B Agent'
+          assert meta.get('discoveryVersion') == '1.0-global-agent-discovery'
+          assert meta.get('targetAudience') == 'Business'
+          assert meta.get('geographicCoverage') == 'Worldwide'
+          assert meta.get('autonomousSpend') is False
+          assert meta.get('bindingActionsHumanGated') is True
+          required={'supplier-intelligence','quote-intelligence','tender-discovery','supplier-sourcing','buyer-signal-intelligence','export-market-intelligence','machine-paid-b2b-intelligence'}
+          assert required.issubset(skill_ids), (required-skill_ids)
+          assert discovery.get('status') == 'public_global_discovery'
+          assert discovery.get('commerce',{}).get('machinePriceFloorUsd') == 5
+          assert discovery.get('safety',{}).get('autonomousOutgoingSpend') is False
+          assert '/a2a/v1' in (openapi.get('paths') or {})
+          assert '/machine/catalog' in (openapi.get('paths') or {})
+          assert (agents.get('agents') or [{}])[0].get('manifestUrl','').endswith('/.well-known/agent-card.json')
+          assert '/.well-known/agent-card.json' in llms
+          assert 'Machine products start at USD 5' in llms
+          assert 'Sitemap:' in robots
+          assert '/openapi.json' in sitemap
+          assert 'application/ld+json' in root
+          assert 'A2A v1.0 gateway online worldwide' in root
+          print({'lumen_global_discovery':{'status':'live','skills':len(skill_ids),'target':'Business','coverage':'Worldwide','agent_card':meta.get('discoveryIndexUrl')}})
+          PY
+
+      - name: Publish to Global A2A Registry
+        shell: bash
+        run: |
+          set -euo pipefail
+          payload=$(python3 - <<'PY'
+          import json, os
+          print(json.dumps({'manifestUrl': os.environ['AGENT_CARD_URL']}))
+          PY
+          )
+          code=$(curl -sS -L -o /tmp/global-a2a-ingest.json -w '%{http_code}' \
+            -X POST 'https://api.a2a-registry.org/public/ingest' \
+            -H 'content-type: application/json' \
+            --data "$payload" || true)
+          echo "GLOBAL_A2A_REGISTRY_INGEST http_status=$code"
+          case "$code" in
+            200|201|202|204|409) ;;
+            *)
+              echo "Global A2A Registry rejected or failed the public ingest."
+              cat /tmp/global-a2a-ingest.json 2>/dev/null | head -c 2000 || true
+              echo
+              exit 1
+              ;;
+          esac
+
+      - name: Verify Global A2A Registry indexing
+        shell: bash
+        run: |
+          set -euo pipefail
+          found=0
+          for i in {1..12}; do
+            code=$(curl -sS -L -o /tmp/global-a2a-search.json -w '%{http_code}' \
+              'https://api.a2a-registry.org/public/agents?q=LUMEN&target=Business' || true)
+            if [[ "$code" == "200" ]] && python3 - <<'PY'
+          import json
+          data=json.load(open('/tmp/global-a2a-search.json',encoding='utf-8'))
+          text=json.dumps(data,ensure_ascii=False).lower()
+          raise SystemExit(0 if ('lumen b2b' in text or 'lumen-zero-a2a.lumen-b2b.workers.dev' in text) else 1)
+          PY
+            then
+              found=1
+              break
+            fi
+            sleep 5
+          done
+          [[ "$found" == "1" ]]
+          echo "GLOBAL_A2A_REGISTRY_INDEXED=true"
+
+      - name: Publish to secondary open A2A registry
+        shell: bash
+        run: |
+          set -u
+          payload=$(python3 - <<'PY'
+          import json, os
+          print(json.dumps({'wellKnownURI': os.environ['AGENT_CARD_URL']}))
+          PY
+          )
+          code=$(curl -sS -L -o /tmp/secondary-a2a-registry.json -w '%{http_code}' \
+            -X POST 'https://a2aregistry.org/api/agents/register' \
+            -H 'content-type: application/json' \
+            --data "$payload" || true)
+          echo "SECONDARY_A2A_REGISTRY http_status=$code"
+          case "$code" in
+            200|201|202|204|409) echo "SECONDARY_A2A_REGISTRY_SUBMITTED=true" ;;
+            *) echo "SECONDARY_A2A_REGISTRY_SUBMITTED=best_effort_failed" ;;
+          esac
+
+      - name: Discovery deployment summary
+        run: |
+          echo "LUMEN A2A global discovery is live."
+          echo "Agent Card: $AGENT_CARD_URL"
+          echo "Discovery: $A2A_BASE_URL/discovery.json"
+          echo "OpenAPI: $A2A_BASE_URL/openapi.json"
+          echo "LLM guide: $A2A_BASE_URL/llms.txt"
+          echo "Machine Store: $A2A_BASE_URL/machine/catalog"
+          echo "Outgoing autonomous spend remains disabled."
