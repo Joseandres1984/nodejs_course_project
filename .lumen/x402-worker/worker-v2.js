@@ -186,7 +186,7 @@ app.use("/buy/*", async (c, next) => {
         .bind(fingerprint).run();
     }
   }
-  return result;
+  return result instanceof Response ? result : c.res;
 });
 
 function publicCatalog(origin) {
