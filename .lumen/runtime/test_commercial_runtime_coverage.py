@@ -6,7 +6,10 @@ import unittest
 from pathlib import Path
 
 
-PUBLIC_ID_RE = re.compile(r'id:\s*"(?P<id>SRV-[^"]+)"')
+# Public worker catalogs may be emitted as readable JS object literals or
+# compact JSON-style objects. Runtime coverage must validate service IDs rather
+# than depend on one incidental serialization style.
+PUBLIC_ID_RE = re.compile(r'["\']?id["\']?\s*:\s*["\'](?P<id>SRV-[^"\']+)["\']')
 
 
 def python_catalog(path: Path, variable: str) -> list[dict]:
