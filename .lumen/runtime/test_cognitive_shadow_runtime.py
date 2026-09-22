@@ -94,6 +94,27 @@ class CognitiveShadowRuntimeTests(unittest.TestCase):
         self.assertEqual(metrics["agreement_rate_pct"], 100.0)
         self.assertEqual(len(metrics["history"]), 2)
 
+    def test_next_cycle_records_observed_business_outcome_without_causal_attribution(self):
+        shadow_runtime._ORIGINAL_MASTER_TICK = self._fake_master_revenue
+        state = self._revenue_state()
+        state["cfo"] = {"financial_snapshot": {"realized_profit_usd": 0, "risk_adjusted_expected_profit_usd": 0}}
+        shadow_runtime.master_orchestrator_with_cognitive_shadow(state, {"connected": True})
+
+        state["transactions"] = [{"id": "TX-1", "status": "paid"}]
+        state["cfo"]["financial_snapshot"]["realized_profit_usd"] = 500
+        state["cfo"]["financial_snapshot"]["risk_adjusted_expected_profit_usd"] = 1000
+        state["market_opportunities"].append({"id": "OPP-2"})
+        report = shadow_runtime.master_orchestrator_with_cognitive_shadow(state, {"connected": True})
+
+        outcome = report["cognitive_shadow"]["comparison"]["last_observed_outcome"]
+        self.assertIsNotNone(outcome)
+        self.assertEqual(outcome["decision_cycle"], 1)
+        self.assertEqual(outcome["observed_at_cycle"], 2)
+        self.assertEqual(outcome["delta"]["real_transactions"], 1.0)
+        self.assertEqual(outcome["delta"]["realized_profit_usd"], 500.0)
+        self.assertEqual(outcome["direction"], "improved")
+        self.assertFalse(outcome["causal_attribution"])
+
     def test_cognitive_failure_does_not_break_master_result(self):
         shadow_runtime._ORIGINAL_MASTER_TICK = self._fake_master_revenue
         shadow_runtime._ENGINE = BrokenEngine()
