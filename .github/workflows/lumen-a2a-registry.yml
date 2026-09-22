@@ -21,25 +21,24 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Publish current Cloudflare A2A manifest
+      - name: Register canonical Cloudflare A2A agent
         shell: bash
         run: |
           python - <<'PY'
           import json
-          import re
           import time
           import urllib.error
           import urllib.parse
           import urllib.request
 
-          manifest = "https://lumen-zero-a2a.lumen-b2b.workers.dev/.well-known/agent-card.json"
-          documented_ingest = "https://api.a2a-registry.org/public/ingest"
-          search = "https://api.a2a-registry.org/public/agents"
-          submit_page = "https://www.a2a-registry.org/submit"
-          user_agent = "LUMEN-B2B-Registry-Publisher/1.3"
+          origin = "https://lumen-zero-a2a.lumen-b2b.workers.dev"
+          manifest = origin + "/.well-known/agent-card.json"
+          public_search = "https://api.a2a-registry.org/public/agents"
+          registry_origins = ("https://api.a2a-registry.org", "https://www.a2a-registry.org")
+          user_agent = "LUMEN-B2B-Registry-Publisher/2.0"
 
-          def request(url, method="GET", body=None, accept="application/json", timeout=20):
-              headers = {"Accept": accept, "User-Agent": user_agent}
+          def request(url, method="GET", body=None, timeout=25):
+              headers = {"Accept": "application/json", "User-Agent": user_agent}
               data = None
               if body is not None:
                   data = json.dumps(body).encode("utf-8")
@@ -47,102 +46,89 @@ jobs:
               req = urllib.request.Request(url, data=data, method=method, headers=headers)
               try:
                   with urllib.request.urlopen(req, timeout=timeout) as response:
-                      return int(response.status), response.read(1000000).decode("utf-8", errors="replace"), dict(response.headers)
+                      return int(response.status), response.read(500000).decode("utf-8", errors="replace")
               except urllib.error.HTTPError as exc:
-                  return int(exc.code), exc.read(1000000).decode("utf-8", errors="replace"), dict(exc.headers)
+                  return int(exc.code), exc.read(500000).decode("utf-8", errors="replace")
               except Exception as exc:
-                  return 0, f"{type(exc).__name__}: {str(exc)[:300]}", {}
+                  return 0, f"{type(exc).__name__}: {str(exc)[:300]}"
 
-          def json_payload(url):
-              status, raw, _ = request(url)
-              if status != 200:
-                  return status, {}
+          def decode(raw):
               try:
-                  return status, json.loads(raw or "{}")
+                  return json.loads(raw or "{}")
               except Exception:
-                  return status, {}
+                  return {}
 
-          status, card = json_payload(manifest)
+          # Fail closed before any registry mutation if LUMEN's canonical public identity drifted.
+          status, raw = request(manifest)
+          card = decode(raw)
           assert status == 200, f"agent_card_http_{status}"
-          assert str(card.get("name") or "") == "LUMEN B2B Agent", "unexpected_agent_identity"
-          assert str(card.get("protocolVersion") or "") == "1.0", "unexpected_a2a_protocol_version"
-          endpoint = str(card.get("url") or "")
-          assert endpoint.startswith("https://lumen-zero-a2a.lumen-b2b.workers.dev/"), "noncanonical_agent_endpoint"
+          assert card.get("name") == "LUMEN B2B Agent", "unexpected_agent_identity"
+          assert str(card.get("protocolVersion") or "") == "1.0", "unexpected_protocol_version"
+          assert str(card.get("url") or "").startswith(origin + "/"), "noncanonical_agent_endpoint"
+          assert any(str((x or {}).get("id") or "") == "lumen-machine-store" for x in card.get("skills", []) if isinstance(x, dict)), "machine_store_skill_missing"
           print("LUMEN_REGISTRY_PREFLIGHT card=ok protocol=1.0 canonical_cloudflare=true")
 
-          def find_lumen():
+          # The live Registry UI (verified 2026-09-22) uses POST /public/ingest/scan with {url}.
+          registry_base = None
+          scan_data = None
+          for base in registry_origins:
+              scan_status, scan_raw = request(base + "/public/ingest/scan", method="POST", body={"url": origin})
+              payload = decode(scan_raw)
+              print(f"LUMEN_REGISTRY_SCAN base={base} http={scan_status} success={bool(payload.get('success'))}")
+              if scan_status in range(200, 300) and payload.get("success") and isinstance(payload.get("data"), dict) and payload["data"].get("found"):
+                  registry_base = base
+                  scan_data = payload["data"]
+                  break
+          if not registry_base:
+              raise SystemExit("registry_scan_did_not_detect_lumen")
+
+          safe_scan = {
+              "found": bool(scan_data.get("found")),
+              "package_name": scan_data.get("package_name") or scan_data.get("packageName"),
+              "manifest_url": scan_data.get("manifest_url") or scan_data.get("manifestUrl"),
+              "status": scan_data.get("status"),
+          }
+          print("LUMEN_REGISTRY_SCAN_DETECTED " + json.dumps(safe_scan, ensure_ascii=False)[:2000])
+
+          # Same exact public flow used by the Registry's Submit Agent page.
+          submit_status, submit_raw = request(
+              registry_base + "/public/ingest/submit-and-claim",
+              method="POST",
+              body={"url": origin},
+          )
+          submit = decode(submit_raw)
+          print(f"LUMEN_REGISTRY_SUBMIT base={registry_base} http={submit_status} success={bool(submit.get('success'))}")
+          if submit_status not in range(200, 300) or not submit.get("success"):
+              print("LUMEN_REGISTRY_SUBMIT_RESPONSE " + submit_raw[:3000])
+              raise SystemExit(f"registry_submit_failed_{submit_status}")
+
+          data = submit.get("data") if isinstance(submit.get("data"), dict) else {}
+          print("LUMEN_REGISTRY_SUBMIT_RESULT " + json.dumps({
+              "status": data.get("status"),
+              "package_name": data.get("package_name") or data.get("packageName"),
+              "message": data.get("message"),
+              "claim_hint_present": bool(data.get("claimHint")),
+          }, ensure_ascii=False)[:3000])
+
+          # Public search is authoritative for discoverability. Allow a short indexing delay.
+          visible = []
+          for attempt in range(8):
               params = urllib.parse.urlencode({"q": "LUMEN B2B", "target": "Business"})
-              status, payload = json_payload(search + "?" + params)
-              if status != 200:
-                  return []
-              rows = payload if isinstance(payload, list) else payload.get("agents") or payload.get("results") or payload.get("data") or []
+              q_status, q_raw = request(public_search + "?" + params)
+              q = decode(q_raw)
+              rows = q if isinstance(q, list) else q.get("agents") or q.get("results") or q.get("data") or []
               if isinstance(rows, dict):
                   rows = rows.get("agents") or rows.get("results") or []
-              matches = []
-              for row in rows if isinstance(rows, list) else []:
-                  text = json.dumps(row, ensure_ascii=False).lower()
-                  if "lumen b2b" in text or "lumen-zero-a2a.lumen-b2b.workers.dev" in text:
-                      matches.append(row)
-              return matches
+              visible = [row for row in rows if isinstance(row, dict) and ("lumen b2b" in json.dumps(row, ensure_ascii=False).lower() or "lumen-zero-a2a.lumen-b2b.workers.dev" in json.dumps(row, ensure_ascii=False).lower())]
+              if visible:
+                  break
+              if attempt < 7:
+                  time.sleep(8)
 
-          before = find_lumen()
-          canonical_before = [x for x in before if "lumen-zero-a2a.lumen-b2b.workers.dev" in json.dumps(x, ensure_ascii=False).lower()]
-          print(f"LUMEN_REGISTRY_BEFORE matches={len(before)} canonical_cloudflare={len(canonical_before)}")
-
-          ingest_status, ingest_raw, _ = request(documented_ingest, method="POST", body={"manifestUrl": manifest})
-          print(f"LUMEN_REGISTRY_INGEST documented_http={ingest_status} response={ingest_raw[:1000]}")
-
-          if ingest_status == 404:
-              page_status, page_html, _ = request(submit_page, accept="text/html")
-              print(f"LUMEN_REGISTRY_SUBMIT_PAGE http={page_status} bytes={len(page_html)}")
-              srcs = re.findall(r'<script[^>]+src=["\']([^"\']+)["\']', page_html, flags=re.I)
-              candidates = set()
-              contexts = []
-              skipped_assets = 0
-              route_needles = ("/public/ingest/scan", "/public/ingest/submit-and-claim")
-              for src in srcs[:40]:
-                  asset = urllib.parse.urljoin(submit_page, src)
-                  astatus, text, _ = request(asset, accept="*/*", timeout=12)
-                  if astatus != 200:
-                      skipped_assets += 1
-                      continue
-                  for needle in route_needles:
-                      start = 0
-                      while True:
-                          idx = text.find(needle, start)
-                          if idx < 0:
-                              break
-                          left = max(0, idx - 1800)
-                          right = min(len(text), idx + len(needle) + 2400)
-                          context = text[left:right]
-                          context = re.sub(r'(?i)(authorization|bearer|token|secret|password)\s*[:=]\s*["\'][^"\']+["\']', r'\1:"[redacted]"', context)
-                          contexts.append({"asset": asset, "route": needle, "context": context})
-                          start = idx + len(needle)
-                  for pat in (
-                      r'["\']([^"\']*(?:ingest|submit|register)[^"\']*)["\']',
-                      r'["\']([^"\']*manifestUrl[^"\']*)["\']',
-                  ):
-                      for value in re.findall(pat, text, flags=re.I):
-                          if len(value) <= 300:
-                              candidates.add(value)
-              safe = sorted(x for x in candidates if "secret" not in x.lower() and "token" not in x.lower())
-              print("LUMEN_REGISTRY_ROUTE_DISCOVERY " + json.dumps(safe[:80], ensure_ascii=False)[:12000])
-              for i, item in enumerate(contexts[:8], 1):
-                  print(f"LUMEN_REGISTRY_SCHEMA_CONTEXT_{i} " + json.dumps(item, ensure_ascii=False)[:9000])
-              print(f"LUMEN_REGISTRY_SCHEMA_CONTEXTS total={len(contexts)} skipped_assets={skipped_assets}")
-              print("LUMEN_REGISTRY_STATUS documented_endpoint_stale=true write_not_retried_without_verified_schema=true")
-          elif ingest_status in range(200, 300) or ingest_status == 409:
-              for attempt in range(6):
-                  after = find_lumen()
-                  canonical = [x for x in after if "lumen-zero-a2a.lumen-b2b.workers.dev" in json.dumps(x, ensure_ascii=False).lower()]
-                  if canonical:
-                      print(f"LUMEN_REGISTRY_VERIFY visible_now=true matches={len(after)} canonical_cloudflare={len(canonical)}")
-                      print("LUMEN_REGISTRY_MATCH " + json.dumps(canonical[:3], ensure_ascii=False)[:4000])
-                      break
-                  if attempt < 5:
-                      time.sleep(10)
-              else:
-                  print("LUMEN_REGISTRY_VERIFY visible_now=false indexing_may_be_async=true")
-          else:
-              raise SystemExit(f"registry_ingest_http_{ingest_status}")
+          canonical = [row for row in visible if "lumen-zero-a2a.lumen-b2b.workers.dev" in json.dumps(row, ensure_ascii=False).lower()]
+          print(f"LUMEN_REGISTRY_VERIFY visible={bool(visible)} matches={len(visible)} canonical_cloudflare={len(canonical)}")
+          if visible:
+              print("LUMEN_REGISTRY_PUBLIC_MATCH " + json.dumps(visible[:3], ensure_ascii=False)[:5000])
+          if not visible:
+              raise SystemExit("registry_submit_succeeded_but_public_search_not_visible_yet")
           PY
