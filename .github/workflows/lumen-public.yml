@@ -45,12 +45,19 @@ jobs:
         with:
           node-version: '24'
 
+      - name: Validate public Worker syntax
+        if: steps.preflight.outputs.ready == 'true'
+        run: |
+          node --check .lumen/public-worker/worker.js
+          node --check .lumen/public-worker/gateway.js
+          node --check .lumen/public-worker/revenue-storefront.js
+
       - name: Deploy public Worker
         if: steps.preflight.outputs.ready == 'true'
         working-directory: .lumen/public-worker
         run: npx --yes wrangler@4 deploy
 
-      - name: Verify public health, campaigns and unified storefront
+      - name: Verify public health, Revenue catalog, campaigns and unified storefront
         if: steps.preflight.outputs.ready == 'true'
         shell: bash
         run: |
@@ -68,6 +75,47 @@ jobs:
             if [[ "$i" == "12" ]]; then failed=1; fi
             sleep 5
           done
+
+          catalog_ok=0
+          for i in {1..12}; do
+            code=$(curl -sS -o /tmp/lumen-revenue-catalog.html -w '%{http_code}' "$base/catalogo?technical_canary=1" || true)
+            echo "REVENUE_CATALOG_ATTEMPT=$i HTTP=$code"
+            if [[ "$code" == "200" ]] \
+              && grep -q 'LUMEN Sourcing Success' /tmp/lumen-revenue-catalog.html \
+              && grep -q 'Tender Radar Basic' /tmp/lumen-revenue-catalog.html \
+              && grep -q 'Buyer Intent Feed' /tmp/lumen-revenue-catalog.html \
+              && grep -q 'Machine Store' /tmp/lumen-revenue-catalog.html \
+              && grep -q 'Enviar solicitud' /tmp/lumen-revenue-catalog.html; then
+              catalog_ok=1
+              break
+            fi
+            sleep 4
+          done
+          if [[ "$catalog_ok" != "1" ]]; then
+            echo "Human Revenue catalog validation failed"
+            head -100 /tmp/lumen-revenue-catalog.html || true
+            failed=1
+          fi
+
+          code=$(curl -sS -o /tmp/lumen-revenue-catalog.json -w '%{http_code}' "$base/catalogo.json" || true)
+          echo "REVENUE_CATALOG_JSON_HTTP=$code"
+          if [[ "$code" != "200" ]]; then
+            cat /tmp/lumen-revenue-catalog.json || true
+            failed=1
+          else
+            python3 - <<'PY'
+          import json
+          data=json.load(open('/tmp/lumen-revenue-catalog.json'))
+          assert data.get('version') == '1.0-revenue-expansion'
+          assert (data.get('sourcing_success') or {}).get('id') == 'REV-SOURCING-SUCCESS'
+          subs={x.get('id'):x.get('price_usd') for x in (data.get('subscriptions') or [])}
+          assert subs.get('REV-TENDER-RADAR-BASIC') == 29
+          assert subs.get('REV-BUYER-INTENT-FEED') == 99
+          assert len(data.get('machine_offers') or []) == 6
+          print({'public_revenue_catalog':'ok','subscriptions':len(subs),'machine_offers':len(data.get('machine_offers') or [])})
+          PY
+            if [[ "$?" != "0" ]]; then failed=1; fi
+          fi
 
           for token in D1A6FA819E21 4F11F08D4303; do
             code=$(curl -sS -L -o /tmp/lumen-campaign.html -w '%{http_code}' "$base/c/$token" || true)
@@ -135,7 +183,8 @@ jobs:
             echo "LUMEN_UNIFIED_PUBLIC_GATEWAY=failure"
             exit 1
           fi
+          echo "LUMEN_PUBLIC_REVENUE_CATALOG=success"
           echo "LUMEN_CHECKOUT_UI=success"
           echo "LUMEN_UNIFIED_PUBLIC_GATEWAY=success"
 
-# deploy trigger: branded Spanish human checkout 2026-09-21
+# deploy trigger: human Revenue Expansion storefront 2026-09-22
