@@ -74,6 +74,9 @@ import agent_network_accelerator_runtime  # noqa: F401
 # Convert successful A2A protocol responses into one bounded, product-fit commercial follow-up.
 # Transport replies never count as buying intent, orders or revenue without explicit downstream evidence.
 import a2a_global_sales_runtime  # noqa: F401
+# Reduce first-cash friction for future compatible peers by offering the exact $5/$7/$9 machine
+# product and direct x402 checkout, without changing network caps or LUMEN outgoing-spend authority.
+import a2a_first_cash_accelerator_runtime  # noqa: F401
 
 runpy.run_module("worker_journal", run_name="__main__")
 
