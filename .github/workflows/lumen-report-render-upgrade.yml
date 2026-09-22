@@ -22,7 +22,7 @@ jobs:
           ref: lumen-zero
           fetch-depth: 0
 
-      - name: Apply compact micro-report renderer migration
+      - name: Apply idempotent compact micro-report migration
         shell: bash
         run: |
           set -euo pipefail
@@ -60,7 +60,7 @@ jobs:
         run: |
           {
             echo '## LUMEN Report Renderer Upgrade'
-            echo '- Micro report layout compaction: APPLIED/ALREADY CURRENT'
+            echo '- Idempotent micro-report layout migration: PASS'
             echo '- JavaScript syntax: PASS'
             echo '- Full PDF quality suite: DISPATCHED'
             echo '- No payment or spending performed: PASS'
