@@ -7,6 +7,11 @@ secondary lane when a canonical prerequisite is absent. If verified buyers exist
 verified demand signal, no canonical opportunity can be created. In that exact state the canonical
 `demand_discovery` lane preempts hysteresis immediately. All evidence, search-budget, outbound and
 binding-action gates remain unchanged.
+
+The same bootstrap point also installs the bounded Demand Recovery runtime. Demand Recovery may
+only reorder buyers that Demand Intelligence already considers eligible; the original eligibility,
+cooldown, score, evidence, outbound and budget gates remain authoritative. Its failure mode is the
+original production ordering.
 """
 
 from datetime import datetime, timezone
@@ -17,7 +22,7 @@ from typing import Any, Dict
 import conversion_autonomy_runtime  # noqa: F401
 import revenue_allocator_runtime
 
-VERSION = "1.0-upstream-demand-preempts-hysteresis"
+VERSION = "1.1-upstream-demand-recovery"
 _ORIGINAL_RESOLVE = revenue_allocator_runtime._resolve_lane_with_anti_drift
 
 
@@ -94,12 +99,39 @@ def _resolve_with_upstream_guard(
 
 revenue_allocator_runtime._resolve_lane_with_anti_drift = _resolve_with_upstream_guard
 
+# Install Demand Recovery before worker_entry imports the production Demand Intelligence path.
+# The recovery report uses the prior persisted Director state; the candidate-order patch then
+# affects this cycle immediately. Any exception leaves the original production behavior intact.
+try:
+    import demand_recovery_runtime  # noqa: F401
+
+    demand_recovery_runtime.run_once()
+except Exception as exc:
+    print(
+        {
+            "demand_recovery": {
+                "status": "degraded_fail_open",
+                "error": f"{type(exc).__name__}: {str(exc)[:300]}",
+                "fallback": "original_demand_intelligence_candidate_order",
+                "search_cap_changed": False,
+                "minimum_demand_score_unchanged": 75,
+                "cooldowns_bypassed": False,
+                "requirements_inferred": False,
+                "outbound_gate_relaxed": False,
+                "binding_authority_changed": False,
+                "monetary_budget_usd": 0,
+            }
+        },
+        flush=True,
+    )
+
 print(
     {
         "revenue_lane_upstream_guard_runtime": {
             "version": VERSION,
             "status": "active",
             "rule": "verified_buyers_and_zero_verified_demand_preempt_conversion_hysteresis",
+            "demand_recovery": "bounded_priority_patch_installed",
             "search_cap_changed": False,
             "evidence_thresholds_changed": False,
             "outbound_gate_relaxed": False,
