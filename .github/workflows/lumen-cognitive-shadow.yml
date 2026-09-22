@@ -106,7 +106,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsS "$SHADOW_URL/stats" -o /tmp/shadow-stats.json
+          ok=0
+          for i in {1..12}; do
+            code=$(curl -sS -H 'cache-control: no-cache' -o /tmp/shadow-stats.json -w '%{http_code}' "$SHADOW_URL/stats?deploy=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$i" || true)
+            echo "SHADOW_STATS_ATTEMPT=$i HTTP=$code"
+            if [[ "$code" == "200" ]] && jq -e '.ok == true' /tmp/shadow-stats.json >/dev/null 2>&1; then
+              ok=1
+              break
+            fi
+            sleep 3
+          done
+          [[ "$ok" == "1" ]]
           cat /tmp/shadow-stats.json
           jq -e '
             .ok == true and
