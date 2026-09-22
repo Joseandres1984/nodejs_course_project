@@ -216,3 +216,10 @@ try:
     import instagram_approval_freeze_runtime as _instagram_approval_freeze_runtime  # noqa: F401
 except Exception as exc:
     print({"instagram_approval_identity": {"status": "install_failed_fail_closed", "error": f"{type(exc).__name__}: {str(exc)[:240]}"}}, flush=True)
+
+# Owned-channel Instagram editorial may publish autonomously only after the freeze policy above is
+# installed. Any install failure stays fail-closed and leaves the existing human gate untouched.
+try:
+    import instagram_safe_autopublish_runtime as _instagram_safe_autopublish_runtime  # noqa: F401
+except Exception as exc:
+    print({"instagram_safe_autopublish": {"status": "install_failed_fail_closed", "error": f"{type(exc).__name__}: {str(exc)[:240]}"}}, flush=True)
