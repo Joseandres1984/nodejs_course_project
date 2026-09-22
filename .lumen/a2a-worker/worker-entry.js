@@ -2,7 +2,7 @@ import a2aWorker from "./worker.js";
 import { handleRevenue } from "./revenue-expansion.js";
 import { DISCOVERY_VERSION, enhanceAgentCard, handleDiscovery } from "./discovery.js";
 
-export const REGISTRY_PACKAGE_NAME = "github.joseandres1984.lumen_b2b_agent";
+export const REGISTRY_PACKAGE_NAME = "github.Joseandres1984.lumen_b2b_agent";
 
 export function applyRegistryIdentity(card) {
   const base = card && typeof card === "object" ? card : {};
