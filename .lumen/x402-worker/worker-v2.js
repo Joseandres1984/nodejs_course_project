@@ -132,7 +132,19 @@ app.use("/buy/*", async (c, next) => {
     return c.json({ ok:false, error:"x402_facilitator_initialization_failed", detail:clean(error?.message,300) }, 503);
   }
 
-  const result = await x402Gate(c, next);
+  let result;
+  try {
+    result = await x402Gate(c, next);
+  } catch (error) {
+    console.error("x402_gate_error", error);
+    return c.json({
+      ok:false,
+      error:"x402_gate_failed",
+      detail:clean(error?.message || error,300),
+      paymentAttempted:false,
+      outgoingSpendEnabled:false,
+    }, 503);
+  }
   const paymentSignature = c.req.header("payment-signature") || c.req.header("x-payment") || "";
   if (paymentSignature) {
     const fingerprint = await sha256Hex(paymentSignature);
