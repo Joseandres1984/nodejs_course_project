@@ -1,5 +1,5 @@
 name = "lumen-zero-dashboard"
-main = "pricing_worker.js"
+main = "stable_worker.js"
 compatibility_date = "2026-09-20"
 workers_dev = true
 

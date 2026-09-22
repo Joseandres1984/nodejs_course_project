@@ -54,6 +54,7 @@ jobs:
           node --check .lumen/dashboard/recovery_worker.js
           node --check .lumen/dashboard/refresh_worker.js
           node --check .lumen/dashboard/pricing_worker.js
+          node --check .lumen/dashboard/stable_worker.js
           node --check .lumen/public-worker/worker.js
           node --check .lumen/public-worker/gateway.js
           node --check .lumen/public-worker/revenue-storefront.js
