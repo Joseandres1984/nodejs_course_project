@@ -101,10 +101,8 @@ class DemandRecoveryRuntimeTests(unittest.TestCase):
     def test_run_once_reports_guardrails_unchanged(self):
         buyer = self._buyer("ACC-A")
         original_candidates = recovery._ORIGINAL_CANDIDATES
-        original_save_state = recovery.app.save_state
         try:
             recovery._ORIGINAL_CANDIDATES = lambda state: [buyer]
-            recovery.app.save_state = lambda: True
             report = recovery.run_once({
                 "ticks": 99,
                 "autonomous_director": {"stall_cycles": 15},
@@ -112,7 +110,6 @@ class DemandRecoveryRuntimeTests(unittest.TestCase):
             })
         finally:
             recovery._ORIGINAL_CANDIDATES = original_candidates
-            recovery.app.save_state = original_save_state
 
         self.assertEqual(report["mode"], "challenge_plan")
         self.assertEqual(report["minimum_demand_score_unchanged"], 75)
