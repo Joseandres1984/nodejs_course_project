@@ -36,7 +36,7 @@ jobs:
           node-version: '24'
       - name: Compile runtime
         run: python -m compileall .lumen/runtime
-      - name: Verify Autonomous Director and Experiment Engine activation
+      - name: Verify Autonomous Director, Experiment Engine and Acquisition Sprint activation
         working-directory: .lumen/runtime
         run: |
           python - <<'PY'
@@ -46,15 +46,21 @@ jobs:
           director = source.index('import autonomous_director_runtime')
           cognitive = source.index('import cognitive_director_learning_runtime')
           experiment = source.index('import experiment_engine_runtime')
+          acquisition_sprint = source.index('import acquisition_sprint_runtime')
           truth = source.index('import commercial_truth_repair_runtime')
-          assert adaptive < director < cognitive < experiment < truth, 'Director/Cognitive/Experiment import order is not deterministic'
+          assert adaptive < director < cognitive < experiment < acquisition_sprint < truth, 'Director/Cognitive/Experiment/Acquisition Sprint import order is not deterministic'
+          import acquisition_campaigns
           import adaptive_operator_runtime
           import autonomous_director_runtime
           import cognitive_director_learning_runtime
           import experiment_engine_runtime
+          import acquisition_sprint_runtime
           assert adaptive_operator_runtime.adaptive_operator_tick.__module__ == 'autonomous_director_runtime'
-          assert autonomous_director_runtime.director_tick.__module__ == 'experiment_engine_runtime'
-          print('AUTONOMOUS_DIRECTOR_EXPERIMENT_ACTIVATION ok')
+          assert autonomous_director_runtime.director_tick.__module__ == 'acquisition_sprint_runtime'
+          assert acquisition_campaigns.acquisition_campaign_tick.__module__ == 'acquisition_sprint_runtime'
+          assert acquisition_sprint_runtime._ORIGINAL_DIRECTOR_TICK.__module__ == 'experiment_engine_runtime'
+          assert acquisition_sprint_runtime._ORIGINAL_ACQUISITION_TICK.__module__ == 'experiment_engine_runtime'
+          print('AUTONOMOUS_DIRECTOR_EXPERIMENT_ACQUISITION_SPRINT_ACTIVATION ok')
           PY
       - name: Validate Cloudflare workers syntax
         run: |
@@ -117,6 +123,8 @@ jobs:
         run: python -m unittest discover -s .lumen/runtime -p 'test_autonomous_director_runtime.py'
       - name: Run Experiment Engine unit tests
         run: python -m unittest discover -s .lumen/runtime -p 'test_experiment_engine_runtime.py'
+      - name: Run Acquisition Sprint unit tests
+        run: python -m unittest discover -s .lumen/runtime -p 'test_acquisition_sprint_runtime.py'
       - name: Run Demand Recovery autonomy unit tests
         run: python -m unittest discover -s .lumen/runtime -p 'test_demand_recovery_runtime.py'
       - name: Run Revenue Expansion unit tests

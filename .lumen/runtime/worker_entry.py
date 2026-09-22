@@ -45,6 +45,9 @@ import cognitive_director_learning_runtime  # noqa: F401
 # Run bounded 80/20 commercial experiments after Cognitive learning is installed. The Experiment
 # Engine may rotate reversible variants/attention only and cannot add spend, search budget or binding authority.
 import experiment_engine_runtime  # noqa: F401
+# Turn real already-observed market evidence into low-ticket first-cash briefs after Experiment Engine
+# is installed. This sprint only reuses governed zero-cost distribution and never widens search/spend authority.
+import acquisition_sprint_runtime  # noqa: F401
 import commercial_truth_repair_runtime  # noqa: F401
 import procurement_document_enrichment_runtime  # noqa: F401
 import procurement_lineage_runtime  # noqa: F401
