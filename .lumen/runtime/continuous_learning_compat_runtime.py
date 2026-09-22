@@ -10,6 +10,7 @@ metric read, preserving the original state shape and all existing authority boun
 from typing import Any, Dict
 
 import continuous_learning_runtime as _learning
+import cognitive_shadow_runtime  # noqa: F401
 
 _ORIGINAL_METRIC_SNAPSHOT = _learning._metric_snapshot
 
