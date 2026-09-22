@@ -8,10 +8,10 @@ verified demand signal, no canonical opportunity can be created. In that exact s
 `demand_discovery` lane preempts hysteresis immediately. All evidence, search-budget, outbound and
 binding-action gates remain unchanged.
 
-The same bootstrap point also installs the bounded Demand Recovery runtime. Demand Recovery may
-only reorder buyers that Demand Intelligence already considers eligible; the original eligibility,
-cooldown, score, evidence, outbound and budget gates remain authoritative. Its failure mode is the
-original production ordering.
+The same bootstrap point installs bounded Demand Recovery and Revenue Expansion. Demand Recovery may
+only reorder buyers that Demand Intelligence already considers eligible. Revenue Expansion only
+materializes zero-cost, nonbinding monetization lanes and catalog priorities; neither module widens
+search, evidence, outbound, payment or binding authority.
 """
 
 from datetime import datetime, timezone
@@ -22,7 +22,7 @@ from typing import Any, Dict
 import conversion_autonomy_runtime  # noqa: F401
 import revenue_allocator_runtime
 
-VERSION = "1.1-upstream-demand-recovery"
+VERSION = "1.2-upstream-demand-recovery-revenue-expansion"
 _ORIGINAL_RESOLVE = revenue_allocator_runtime._resolve_lane_with_anti_drift
 
 
@@ -125,6 +125,48 @@ except Exception as exc:
         flush=True,
     )
 
+# Revenue Expansion runs before the worker cycle so every commercial engine can see the latest
+# monetization catalog and priority order. It changes attention/catalog only; no charge, payment,
+# discount, contract or additional search/outbound authority is created here.
+try:
+    import app as _revenue_app
+    import revenue_expansion_runtime
+
+    if _revenue_app.load_state():
+        _revenue_report = dict(revenue_expansion_runtime.run_once(_revenue_app.STATE) or {})
+        _revenue_report["persisted"] = bool(_revenue_app.save_state())
+        print(
+            {
+                "revenue_expansion": {
+                    "version": _revenue_report.get("version"),
+                    "status": _revenue_report.get("status"),
+                    "lane_priority": _revenue_report.get("lane_priority"),
+                    "counts": _revenue_report.get("counts"),
+                    "realized_revenue_truth_usd": _revenue_report.get("realized_revenue_truth_usd"),
+                    "monetary_budget_usd": _revenue_report.get("monetary_budget_usd"),
+                    "search_cap_changed": _revenue_report.get("search_cap_changed"),
+                    "outbound_caps_changed": _revenue_report.get("outbound_caps_changed"),
+                    "binding_authority_changed": _revenue_report.get("binding_authority_changed"),
+                    "persisted": _revenue_report.get("persisted"),
+                }
+            },
+            flush=True,
+        )
+except Exception as exc:
+    print(
+        {
+            "revenue_expansion": {
+                "status": "degraded_fail_open",
+                "error": f"{type(exc).__name__}: {str(exc)[:300]}",
+                "monetary_budget_usd": 0,
+                "search_cap_changed": False,
+                "outbound_caps_changed": False,
+                "binding_authority_changed": False,
+            }
+        },
+        flush=True,
+    )
+
 print(
     {
         "revenue_lane_upstream_guard_runtime": {
@@ -132,6 +174,7 @@ print(
             "status": "active",
             "rule": "verified_buyers_and_zero_verified_demand_preempt_conversion_hysteresis",
             "demand_recovery": "bounded_priority_patch_installed",
+            "revenue_expansion": "zero_cost_nonbinding_lanes_installed",
             "search_cap_changed": False,
             "evidence_thresholds_changed": False,
             "outbound_gate_relaxed": False,
