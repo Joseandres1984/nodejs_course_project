@@ -33,5 +33,5 @@ jobs:
         run: python -m unittest discover -s .lumen/runtime -p 'test_revenue_os_v31_alignment_runtime.py'
       - name: Run Cognitive Engine unit tests
         run: python -m unittest discover -s .lumen/runtime -p 'test_cognitive_engine.py'
-      - name: Run Cognitive Shadow integration tests
+      - name: Run Cognitive Shadow independent decision and outcome tests
         run: python -m unittest discover -s .lumen/runtime -p 'test_cognitive_shadow_runtime.py'
