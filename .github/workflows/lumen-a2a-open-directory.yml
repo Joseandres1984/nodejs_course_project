@@ -40,10 +40,10 @@ jobs:
           print('LUMEN_AGENT_CARD_PUBLIC=true')
           PY
 
-      - name: Register in open A2A Registry
+      - name: Register or diagnose open A2A Registry
         shell: bash
         run: |
-          set -euo pipefail
+          set -u
           payload=$(python3 - <<'PY'
           import json, os
           print(json.dumps({'wellKnownURI': os.environ['AGENT_CARD_URL'], 'author': 'LUMEN B2B'}))
@@ -53,44 +53,68 @@ jobs:
             -X POST 'https://a2aregistry.org/api/agents/register' \
             -H 'content-type: application/json' \
             --data "$payload" || true)
+          echo "$code" > /tmp/open-a2a-code
           echo "OPEN_A2A_REGISTER http_status=$code"
-          case "$code" in
-            200|201|409) ;;
-            *)
-              python3 - <<'PY'
-          import json
+          python3 - <<'PY'
+          import json,re
+          from pathlib import Path
+          code=Path('/tmp/open-a2a-code').read_text().strip()
           try:
               data=json.load(open('/tmp/open-a2a-register.json',encoding='utf-8'))
-              print({'registry_error': data.get('detail') or data.get('error') or 'registration_failed'})
           except Exception:
-              print({'registry_error':'non_json_registration_failure'})
+              data={}
+          if code in {'200','201'}:
+              agent_id=str(data.get('id') or '')
+              if agent_id:
+                  Path('/tmp/open-a2a-id').write_text(agent_id)
+              print({'open_registry':'accepted','agent_id_present':bool(agent_id)})
+          elif code == '409':
+              detail=str(data.get('detail') or 'duplicate_or_host_collision')[:500]
+              match=re.search(r'\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b',detail)
+              if match:
+                  Path('/tmp/open-a2a-id').write_text(match.group(0))
+              print({'open_registry':'duplicate_or_collision','detail':detail,'existing_id_present':bool(match)})
+          else:
+              print({'open_registry':'registration_unavailable','http_status':code})
           PY
-              exit 1
-              ;;
-          esac
 
-      - name: Verify open A2A Registry listing
+      - name: Verify exact open A2A Registry record
         shell: bash
         run: |
-          set -euo pipefail
-          found=0
-          for i in {1..12}; do
-            code=$(curl -sS -L -o /tmp/open-a2a-search.json -w '%{http_code}' \
-              'https://a2aregistry.org/api/agents?search=LUMEN&limit=100' || true)
+          set -u
+          verified=0
+          if [[ -s /tmp/open-a2a-id ]]; then
+            agent_id=$(cat /tmp/open-a2a-id)
+            code=$(curl -sS -L -o /tmp/open-a2a-existing.json -w '%{http_code}' "https://a2aregistry.org/api/agents/$agent_id" || true)
+            if [[ "$code" == "200" ]] && python3 - <<'PY'
+          import json
+          data=json.load(open('/tmp/open-a2a-existing.json',encoding='utf-8'))
+          text=json.dumps(data,ensure_ascii=False).lower()
+          is_lumen='lumen b2b' in text and 'lumen-zero-a2a.lumen-b2b.workers.dev' in text
+          print({'open_registry_record':{'name':data.get('name'),'wellKnownURI':data.get('wellKnownURI'),'matches_lumen':is_lumen}})
+          raise SystemExit(0 if is_lumen else 1)
+          PY
+            then
+              verified=1
+            fi
+          fi
+          if [[ "$verified" == "0" ]]; then
+            code=$(curl -sS -L -o /tmp/open-a2a-search.json -w '%{http_code}' 'https://a2aregistry.org/api/agents?search=LUMEN&limit=100' || true)
             if [[ "$code" == "200" ]] && python3 - <<'PY'
           import json
           data=json.load(open('/tmp/open-a2a-search.json',encoding='utf-8'))
           text=json.dumps(data,ensure_ascii=False).lower()
-          raise SystemExit(0 if ('lumen b2b agent' in text and 'lumen-zero-a2a.lumen-b2b.workers.dev' in text) else 1)
+          raise SystemExit(0 if ('lumen b2b' in text and 'lumen-zero-a2a.lumen-b2b.workers.dev' in text) else 1)
           PY
             then
-              found=1
-              break
+              verified=1
             fi
-            sleep 5
-          done
-          [[ "$found" == "1" ]]
-          echo "OPEN_A2A_REGISTRY_INDEXED=true"
+          fi
+          if [[ "$verified" == "1" ]]; then
+            echo "OPEN_A2A_REGISTRY_INDEXED=true"
+          else
+            echo "OPEN_A2A_REGISTRY_INDEXED=false_registry_collision_or_index_delay"
+          fi
 
       - name: Attempt Global A2A Registry documented ingest
         shell: bash
@@ -107,12 +131,12 @@ jobs:
             --data "$payload" || true)
           echo "GLOBAL_A2A_DOCUMENTED_INGEST http_status=$code"
           case "$code" in
-            200|201|202|204|409) echo "GLOBAL_A2A_DOCUMENTED_INGEST=accepted" ;;
+            200|201|202|204|409) echo "GLOBAL_A2A_DOCUMENTED_INGEST=accepted_or_existing" ;;
             404) echo "GLOBAL_A2A_DOCUMENTED_INGEST=documented_route_currently_unavailable" ;;
             *) echo "GLOBAL_A2A_DOCUMENTED_INGEST=best_effort_unavailable" ;;
           esac
 
-      - name: Try accountless allagents listing
+      - name: Register in allagents accountless directory
         shell: bash
         run: |
           set -u
@@ -140,11 +164,27 @@ jobs:
             200|201|202|204|409) echo "ALLAGENTS_REGISTER=accepted_or_existing" ;;
             *) echo "ALLAGENTS_REGISTER=best_effort_unavailable" ;;
           esac
-          # Never print the response: successful registration may contain an edit token/recovery phrase.
+          # Never print the response: successful registration can contain edit credentials.
+
+      - name: Verify allagents public search
+        shell: bash
+        run: |
+          set -u
+          code=$(curl -sS -L -o /tmp/allagents-search.json -w '%{http_code}' 'https://allagents.app/search?q=LUMEN' || true)
+          if [[ "$code" =~ ^2 ]] && python3 - <<'PY'
+          from pathlib import Path
+          text=Path('/tmp/allagents-search.json').read_text(encoding='utf-8',errors='replace').lower()
+          raise SystemExit(0 if ('lumen' in text and ('lumen-b2b' in text or 'procurement' in text or 'sourcing' in text)) else 1)
+          PY
+          then
+            echo "ALLAGENTS_INDEXED=true"
+          else
+            echo "ALLAGENTS_INDEXED=false_or_pending"
+          fi
 
       - name: Directory publication summary
         run: |
           echo "LUMEN_AGENT_CARD=$AGENT_CARD_URL"
-          echo "LUMEN_OPEN_A2A_DIRECTORY=verified"
           echo "LUMEN_GLOBAL_DISCOVERY=public_worldwide"
           echo "AUTONOMOUS_OUTGOING_SPEND=false"
+          echo "External directory status is reported by each verified step above; no registry success is inferred from submission alone."
