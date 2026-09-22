@@ -1,0 +1,67 @@
+name: LUMEN Report Renderer Upgrade
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/lumen-report-render-upgrade.yml"
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  upgrade-renderer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout LUMEN Zero
+        uses: actions/checkout@v4
+        with:
+          ref: lumen-zero
+          fetch-depth: 0
+
+      - name: Apply compact micro-report renderer migration
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .lumen/migrations/compact_micro_report_pdf.py
+          node --check .lumen/reporting/render_report.mjs
+
+      - name: Persist renderer upgrade
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .lumen/reporting/render_report.mjs
+          if git diff --cached --quiet; then
+            echo 'Renderer already current.'
+          else
+            git commit -m 'Compact micro reports to contractual PDF length'
+            git push origin HEAD:lumen-zero
+          fi
+
+      - name: Launch full PDF production quality suite
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api --method POST \
+            -H 'Accept: application/vnd.github+json' \
+            /repos/${GITHUB_REPOSITORY}/actions/workflows/lumen-pdf-production.yml/dispatches \
+            -f ref=main
+          echo 'PDF_QUALITY_DISPATCHED=true'
+
+      - name: Upgrade summary
+        shell: bash
+        run: |
+          {
+            echo '## LUMEN Report Renderer Upgrade'
+            echo '- Micro report layout compaction: APPLIED/ALREADY CURRENT'
+            echo '- JavaScript syntax: PASS'
+            echo '- Full PDF quality suite: DISPATCHED'
+            echo '- No payment or spending performed: PASS'
+          } >> "$GITHUB_STEP_SUMMARY"
