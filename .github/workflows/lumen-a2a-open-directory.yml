@@ -65,55 +65,102 @@ jobs:
               data={}
           if code in {'200','201'}:
               agent_id=str(data.get('id') or '')
-              if agent_id:
-                  Path('/tmp/open-a2a-id').write_text(agent_id)
+              if agent_id: Path('/tmp/open-a2a-id').write_text(agent_id)
               print({'open_registry':'accepted','agent_id_present':bool(agent_id)})
           elif code == '409':
               detail=str(data.get('detail') or 'duplicate_or_host_collision')[:500]
               match=re.search(r'\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b',detail)
-              if match:
-                  Path('/tmp/open-a2a-id').write_text(match.group(0))
+              if match: Path('/tmp/open-a2a-id').write_text(match.group(0))
               print({'open_registry':'duplicate_or_collision','detail':detail,'existing_id_present':bool(match)})
           else:
               print({'open_registry':'registration_unavailable','http_status':code})
           PY
 
-      - name: Verify exact open A2A Registry record
+      - name: Inspect existing open A2A Registry record
+        shell: bash
+        run: |
+          set -u
+          current=0
+          stale=0
+          if [[ -s /tmp/open-a2a-id ]]; then
+            agent_id=$(cat /tmp/open-a2a-id)
+            code=$(curl -sS -L -o /tmp/open-a2a-existing.json -w '%{http_code}' "https://a2aregistry.org/api/agents/$agent_id" || true)
+            if [[ "$code" == "200" ]]; then
+              python3 - <<'PY'
+          import json
+          from pathlib import Path
+          data=json.load(open('/tmp/open-a2a-existing.json',encoding='utf-8'))
+          text=json.dumps(data,ensure_ascii=False).lower()
+          current='lumen-zero-a2a.lumen-b2b.workers.dev' in text
+          stale='lumen-web-production-5755.up.railway.app' in text
+          if current: Path('/tmp/open-a2a-current').write_text('1')
+          if stale: Path('/tmp/open-a2a-stale').write_text('1')
+          print({'open_registry_record':{'name':data.get('name'),'wellKnownURI':data.get('wellKnownURI'),'current_lumen_endpoint':current,'legacy_railway_endpoint':stale}})
+          PY
+            fi
+          fi
+
+      - name: Register current Zero deployment if legacy record blocks name
+        shell: bash
+        run: |
+          set -u
+          if [[ -s /tmp/open-a2a-current ]]; then
+            echo "OPEN_A2A_CURRENT_REGISTRATION=already_current"
+            exit 0
+          fi
+          if [[ ! -s /tmp/open-a2a-stale ]]; then
+            echo "OPEN_A2A_CURRENT_REGISTRATION=no_confirmed_legacy_collision"
+            exit 0
+          fi
+          payload=$(python3 - <<'PY'
+          import json, os
+          print(json.dumps({'wellKnownURI': os.environ['AGENT_CARD_URL'], 'author': 'LUMEN B2B Zero'}))
+          PY
+          )
+          code=$(curl -sS -L -o /tmp/open-a2a-zero-register.json -w '%{http_code}' \
+            -X POST 'https://a2aregistry.org/api/agents/register' \
+            -H 'content-type: application/json' \
+            --data "$payload" || true)
+          echo "OPEN_A2A_ZERO_REGISTER http_status=$code"
+          python3 - <<'PY'
+          import json,re
+          from pathlib import Path
+          try: data=json.load(open('/tmp/open-a2a-zero-register.json',encoding='utf-8'))
+          except Exception: data={}
+          code=''
+          # Prefer returned ID; duplicate detail may also contain the existing current deployment ID.
+          agent_id=str(data.get('id') or '')
+          if not agent_id:
+              detail=str(data.get('detail') or '')
+              m=re.search(r'\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b',detail)
+              agent_id=m.group(0) if m else ''
+          if agent_id: Path('/tmp/open-a2a-zero-id').write_text(agent_id)
+          print({'open_registry_zero_registration':{'agent_id_present':bool(agent_id)}})
+          PY
+
+      - name: Verify current open A2A Registry record
         shell: bash
         run: |
           set -u
           verified=0
-          if [[ -s /tmp/open-a2a-id ]]; then
-            agent_id=$(cat /tmp/open-a2a-id)
-            code=$(curl -sS -L -o /tmp/open-a2a-existing.json -w '%{http_code}' "https://a2aregistry.org/api/agents/$agent_id" || true)
+          if [[ -s /tmp/open-a2a-current ]]; then verified=1; fi
+          if [[ "$verified" == "0" && -s /tmp/open-a2a-zero-id ]]; then
+            agent_id=$(cat /tmp/open-a2a-zero-id)
+            code=$(curl -sS -L -o /tmp/open-a2a-zero.json -w '%{http_code}' "https://a2aregistry.org/api/agents/$agent_id" || true)
             if [[ "$code" == "200" ]] && python3 - <<'PY'
           import json
-          data=json.load(open('/tmp/open-a2a-existing.json',encoding='utf-8'))
+          data=json.load(open('/tmp/open-a2a-zero.json',encoding='utf-8'))
           text=json.dumps(data,ensure_ascii=False).lower()
-          is_lumen='lumen b2b' in text and 'lumen-zero-a2a.lumen-b2b.workers.dev' in text
-          print({'open_registry_record':{'name':data.get('name'),'wellKnownURI':data.get('wellKnownURI'),'matches_lumen':is_lumen}})
-          raise SystemExit(0 if is_lumen else 1)
+          ok='lumen b2b agent' in text and 'lumen-zero-a2a.lumen-b2b.workers.dev' in text
+          print({'open_registry_current_record':{'name':data.get('name'),'author':data.get('author'),'wellKnownURI':data.get('wellKnownURI'),'matches_current_lumen':ok}})
+          raise SystemExit(0 if ok else 1)
           PY
-            then
-              verified=1
-            fi
-          fi
-          if [[ "$verified" == "0" ]]; then
-            code=$(curl -sS -L -o /tmp/open-a2a-search.json -w '%{http_code}' 'https://a2aregistry.org/api/agents?search=LUMEN&limit=100' || true)
-            if [[ "$code" == "200" ]] && python3 - <<'PY'
-          import json
-          data=json.load(open('/tmp/open-a2a-search.json',encoding='utf-8'))
-          text=json.dumps(data,ensure_ascii=False).lower()
-          raise SystemExit(0 if ('lumen b2b' in text and 'lumen-zero-a2a.lumen-b2b.workers.dev' in text) else 1)
-          PY
-            then
-              verified=1
-            fi
+            then verified=1; fi
           fi
           if [[ "$verified" == "1" ]]; then
-            echo "OPEN_A2A_REGISTRY_INDEXED=true"
+            echo "OPEN_A2A_REGISTRY_CURRENT_ENDPOINT_INDEXED=true"
           else
-            echo "OPEN_A2A_REGISTRY_INDEXED=false_registry_collision_or_index_delay"
+            echo "OPEN_A2A_REGISTRY_CURRENT_ENDPOINT_INDEXED=false"
           fi
 
       - name: Attempt Global A2A Registry documented ingest
@@ -166,7 +213,7 @@ jobs:
           esac
           # Never print the response: successful registration can contain edit credentials.
 
-      - name: Verify allagents public search
+      - name: Verify allagents current endpoint in public search
         shell: bash
         run: |
           set -u
@@ -174,12 +221,15 @@ jobs:
           if [[ "$code" =~ ^2 ]] && python3 - <<'PY'
           from pathlib import Path
           text=Path('/tmp/allagents-search.json').read_text(encoding='utf-8',errors='replace').lower()
-          raise SystemExit(0 if ('lumen' in text and ('lumen-b2b' in text or 'procurement' in text or 'sourcing' in text)) else 1)
+          exact='lumen-zero-a2a.lumen-b2b.workers.dev' in text
+          broad='lumen' in text and ('procurement' in text or 'sourcing' in text)
+          print({'allagents_search':{'lumen_present':broad,'current_endpoint_present':exact}})
+          raise SystemExit(0 if exact else 1)
           PY
           then
-            echo "ALLAGENTS_INDEXED=true"
+            echo "ALLAGENTS_CURRENT_ENDPOINT_INDEXED=true"
           else
-            echo "ALLAGENTS_INDEXED=false_or_pending"
+            echo "ALLAGENTS_CURRENT_ENDPOINT_INDEXED=false_or_listing_abstracts_endpoint"
           fi
 
       - name: Directory publication summary
@@ -187,4 +237,4 @@ jobs:
           echo "LUMEN_AGENT_CARD=$AGENT_CARD_URL"
           echo "LUMEN_GLOBAL_DISCOVERY=public_worldwide"
           echo "AUTONOMOUS_OUTGOING_SPEND=false"
-          echo "External directory status is reported by each verified step above; no registry success is inferred from submission alone."
+          echo "External directory status is reported by verified record checks; no success is inferred from submission alone."
