@@ -12,10 +12,9 @@ returned unchanged.
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List
 
-import app
 import demand_intelligence
 
-VERSION = "1.0-bounded-demand-recovery"
+VERSION = "1.1-bounded-demand-recovery"
 MAX_QUEUE = 24
 MAX_HISTORY = 40
 
@@ -183,12 +182,18 @@ def _prioritized_candidates(state: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def run_once(state: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    save_state = None
     if state is None:
-        if not app.load_state():
+        # Persistence is intentionally lazy so importing/testing the recovery policy does not
+        # require the production database stack. Production still uses the canonical app state.
+        import app as lumen_app
+
+        if not lumen_app.load_state():
             report = {"version": VERSION, "status": "state_unavailable", "searches_used": 0}
             print({"demand_recovery": report}, flush=True)
             return report
-        state = app.STATE
+        state = lumen_app.STATE
+        save_state = lumen_app.save_state
 
     director = state.get("autonomous_director") if isinstance(state.get("autonomous_director"), dict) else {}
     stall_cycles = _i((director or {}).get("stall_cycles"))
@@ -237,7 +242,8 @@ def run_once(state: Dict[str, Any] | None = None) -> Dict[str, Any]:
         "updated_at": _now(),
     }
     state["demand_recovery"] = report
-    app.save_state()
+    if save_state is not None:
+        save_state()
     print({"demand_recovery": {k: v for k, v in report.items() if k != "history"}}, flush=True)
     return report
 
@@ -259,5 +265,6 @@ print({
         "binding_authority_changed": False,
         "monetary_budget_usd": 0,
         "fail_safe": "original_candidate_order",
+        "persistence_import": "lazy",
     }
 }, flush=True)
