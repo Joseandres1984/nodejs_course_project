@@ -11,6 +11,10 @@ service = "lumen-zero-conversion"
 binding = "X402"
 service = "lumen-zero-x402"
 
+[[services]]
+binding = "A2A"
+service = "lumen-zero-a2a"
+
 [[d1_databases]]
 binding = "DB"
 database_name = "lumen-zero"
