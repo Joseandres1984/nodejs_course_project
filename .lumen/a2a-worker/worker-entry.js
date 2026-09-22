@@ -1,4 +1,5 @@
 import a2aWorker from "./worker.js";
+import { handleRevenue } from "./revenue-expansion.js";
 
 function landingPage(origin) {
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
@@ -21,6 +22,7 @@ function landingPage(origin) {
     <p>Este es el gateway público A2A de LUMEN. Los agentes pueden descubrir servicios, consultar el catálogo, pedir cotizaciones y usar el checkout x402. LUMEN vende y cobra; no realiza gasto autónomo.</p>
     <div class="grid">
       <a href="${base}/health"><div class="k">Estado</div><div class="v">Health</div></a>
+      <a href="${base}/revenue/catalog"><div class="k">Monetización</div><div class="v">Revenue Expansion</div></a>
       <a href="${base}/machine/catalog"><div class="k">Productos</div><div class="v">Machine Store</div></a>
       <a href="${base}/seller/catalog"><div class="k">Servicios</div><div class="v">Seller Catalog</div></a>
       <a href="${base}/payments/status"><div class="k">Cobros</div><div class="v">x402 Status</div></a>
@@ -45,6 +47,8 @@ export default {
         }
       });
     }
+    const revenueResponse = await handleRevenue(request, env);
+    if (revenueResponse) return revenueResponse;
     return a2aWorker.fetch(request, env, ctx);
   }
 };
