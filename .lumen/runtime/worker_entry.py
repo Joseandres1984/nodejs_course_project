@@ -36,6 +36,9 @@ import mission_team_runtime  # noqa: F401
 import conversion_unblock_runtime  # noqa: F401
 import casework_hygiene_runtime  # noqa: F401
 import adaptive_operator_runtime  # noqa: F401
+# Autonomous Director extends the existing Adaptive Operator with bounded anti-stall management.
+# It may reallocate reversible attention/strategy only; spend, binding terms and deployments remain gated.
+import autonomous_director_runtime  # noqa: F401
 import commercial_truth_repair_runtime  # noqa: F401
 import procurement_document_enrichment_runtime  # noqa: F401
 import procurement_lineage_runtime  # noqa: F401
