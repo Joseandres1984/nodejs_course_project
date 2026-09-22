@@ -1,0 +1,118 @@
+name: LUMEN Cognitive Shadow Loop
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/lumen-cognitive-shadow.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lumen-cognitive-shadow-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy-shadow:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.LUMEN_D1_ACCOUNT_ID }}
+      SHADOW_URL: "https://lumen-zero-cognitive-shadow.lumen-b2b.workers.dev"
+    steps:
+      - name: Checkout LUMEN Zero
+        uses: actions/checkout@v4
+        with:
+          ref: lumen-zero
+
+      - name: Deployment preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$CLOUDFLARE_API_TOKEN" ]]
+          [[ -n "$CLOUDFLARE_ACCOUNT_ID" ]]
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Validate Worker syntax
+        working-directory: .lumen/cognitive-shadow-worker
+        run: node --check worker.js
+
+      - name: Deploy cognitive shadow Worker
+        working-directory: .lumen/cognitive-shadow-worker
+        run: npx --yes wrangler@4 deploy
+
+      - name: Verify shadow health and private service binding
+        shell: bash
+        run: |
+          set -euo pipefail
+          ok=0
+          for i in {1..15}; do
+            code=$(curl -sS -H 'cache-control: no-cache' -o /tmp/shadow-health.json -w '%{http_code}' "$SHADOW_URL/health?deploy=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$i" || true)
+            version=$(jq -r '.version // ""' /tmp/shadow-health.json 2>/dev/null || true)
+            connected=$(jq -r '.cognitive.connected // false' /tmp/shadow-health.json 2>/dev/null || true)
+            echo "SHADOW_HEALTH_ATTEMPT=$i HTTP=$code VERSION=$version COGNITIVE_CONNECTED=$connected"
+            if [[ "$code" == "200" && "$version" == "1.0-cognitive-shadow-loop" && "$connected" == "true" ]]; then
+              ok=1
+              break
+            fi
+            sleep 4
+          done
+          [[ "$ok" == "1" ]]
+          cat /tmp/shadow-health.json
+          jq -e '
+            .ok == true and
+            .mode == "shadow_only" and
+            .scheduled == true and
+            .cognitive.connected == true and
+            .cognitive.model == "@cf/google/gemma-4-26b-a4b-it" and
+            .cognitive.paid_ai_allowed == false and
+            .cognitive.monetary_budget_usd == 0 and
+            .paid_ai_allowed == false and
+            .monetary_budget_usd == 0 and
+            .actions_executed == false and
+            .outgoing_spend_enabled == false and
+            .governor_required == true
+          ' /tmp/shadow-health.json >/dev/null
+
+      - name: Prove lead-to-cognitive shadow decision
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=$(curl -sS -X POST -o /tmp/shadow-canary.json -w '%{http_code}' "$SHADOW_URL/canary")
+          echo "SHADOW_CANARY_HTTP=$code"
+          cat /tmp/shadow-canary.json
+          [[ "$code" == "200" ]]
+          jq -e '
+            .ok == true and
+            .stored == true and
+            .provider == "cloudflare_ai" and
+            .model == "@cf/google/gemma-4-26b-a4b-it" and
+            .mode == "shadow_only" and
+            .paid_ai_used == false and
+            .monetary_cost_usd == 0 and
+            .actions_executed == false and
+            .outgoing_spend_enabled == false and
+            .governor_required == true
+          ' /tmp/shadow-canary.json >/dev/null
+
+      - name: Verify shadow ledger excludes canary from real decisions
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS "$SHADOW_URL/stats" -o /tmp/shadow-stats.json
+          cat /tmp/shadow-stats.json
+          jq -e '
+            .ok == true and
+            .technical_canaries >= 1 and
+            .actions_executed == 0 and
+            .monetary_cost_usd == 0 and
+            .mode == "shadow_only"
+          ' /tmp/shadow-stats.json >/dev/null
+          echo "LUMEN_COGNITIVE_SHADOW_CANARY=success"
