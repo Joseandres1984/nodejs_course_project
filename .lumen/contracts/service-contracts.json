@@ -1,0 +1,121 @@
+{
+  "version": "2026-09-21-v1",
+  "services": [
+    {
+      "id": "SRV-QUOTECHECK",
+      "slug": "quotecheck-global",
+      "name": "LUMEN QuoteCheck Global",
+      "from_usd": 59,
+      "description": "Revisión estructurada de cotizaciones B2B para entender precio, condiciones, diferencias y señales que requieren atención.",
+      "scope": "Paquete inicial: hasta 3 cotizaciones comparables o 1 cotización contrastada con referencias públicas disponibles.",
+      "client_inputs": ["Cotización o datos principales de la oferta", "Producto/especificación y cantidad", "Moneda, país, Incoterm y fecha si están disponibles"],
+      "deliverables": ["Tabla comparativa de precios y condiciones", "Referencias públicas de mercado cuando existan", "Desvíos, inconsistencias y preguntas para el proveedor", "Conclusión ejecutiva de razonabilidad y próximos pasos"],
+      "not_included": ["Tasación o valuación certificada", "Asesoramiento legal, tributario o contable", "Garantía de que un precio sea el mejor disponible"]
+    },
+    {
+      "id": "SRV-SUPPLIERCHECK",
+      "slug": "suppliercheck",
+      "name": "LUMEN SupplierCheck",
+      "from_usd": 79,
+      "description": "Investigación pública de un proveedor para verificar identidad, presencia comercial, encaje y señales de riesgo antes de avanzar.",
+      "scope": "Paquete inicial: 1 proveedor o entidad por análisis.",
+      "client_inputs": ["Nombre legal/comercial o URL del proveedor", "País y producto/servicio que ofrece", "Qué decisión necesitás tomar"],
+      "deliverables": ["Identidad y canales oficiales encontrados", "Actividad, presencia pública y señales comerciales", "Encaje con el producto/servicio requerido", "Alertas o inconsistencias observables", "Fuentes utilizadas y conclusión de riesgo comercial"],
+      "not_included": ["Informe crediticio privado", "Due diligence legal certificada", "Inspección física o auditoría de fábrica", "Garantía de solvencia o cumplimiento futuro"]
+    },
+    {
+      "id": "SRV-TENDER-HUNTER",
+      "slug": "tender-hunter-global",
+      "name": "LUMEN Tender Hunter Global",
+      "from_usd": 99,
+      "description": "Búsqueda y preanálisis de licitaciones u oportunidades públicas compatibles con lo que vende tu empresa.",
+      "scope": "Paquete inicial: hasta 10 oportunidades priorizadas dentro del mercado y criterios acordados.",
+      "client_inputs": ["Qué producto o servicio ofrecés", "Países/regiones y sectores objetivo", "Palabras clave, códigos o exclusiones si las tenés"],
+      "deliverables": ["Shortlist priorizada de oportunidades", "Organismo/comprador, fecha límite y enlace fuente", "Resumen de requisitos visibles", "Evaluación inicial de encaje", "Próximos pasos recomendados"],
+      "not_included": ["Presentación de ofertas en nombre del cliente", "Garantía de adjudicación", "Asesoramiento jurídico sobre pliegos", "Certificación de elegibilidad"]
+    },
+    {
+      "id": "SRV-SOURCING-EXPRESS",
+      "slug": "sourcing-express",
+      "name": "LUMEN Sourcing Express",
+      "from_usd": 149,
+      "description": "Investigación de proveedores para una necesidad de compra concreta, con comparación y priorización.",
+      "scope": "Paquete inicial: hasta 10 candidatos investigados y hasta 5 priorizados para contacto.",
+      "client_inputs": ["Producto y especificación técnica", "Cantidad aproximada y país de entrega", "Marcas, certificaciones, materiales o restricciones obligatorias"],
+      "deliverables": ["Shortlist de proveedores candidatos", "Evidencia pública de capacidad y ubicación", "Canales corporativos públicos cuando estén disponibles", "Comparación de encaje y principales diferencias", "Riesgos/gaps y recomendación de próximos contactos"],
+      "not_included": ["Compra o emisión de órdenes por cuenta del cliente", "Inspección física", "Garantía de stock o precio", "Negociación vinculante sin autorización humana"]
+    },
+    {
+      "id": "SRV-B2B-PROSPECTING",
+      "slug": "b2b-prospecting",
+      "name": "LUMEN Prospección B2B",
+      "from_usd": 199,
+      "description": "Investigación de empresas que podrían comprar una oferta B2B definida y priorización por señales públicas de encaje.",
+      "scope": "Paquete inicial: hasta 25 empresas objetivo priorizadas.",
+      "client_inputs": ["Qué vendés y propuesta de valor", "Tipo de cliente ideal", "Geografía objetivo y exclusiones", "Ticket, sector o tamaño de empresa si importa"],
+      "deliverables": ["Lista priorizada de empresas objetivo", "Motivo de encaje para cada cuenta", "Señales públicas de necesidad o actividad cuando existan", "Canales corporativos públicos disponibles", "Segmentación y sugerencia de enfoque comercial"],
+      "not_included": ["Garantía de respuesta o venta", "Datos personales obtenidos por vías no públicas", "Spam masivo", "Compromisos comerciales en nombre del cliente"]
+    },
+    {
+      "id": "SRV-EXPORT-SCOUT",
+      "slug": "export-scout",
+      "name": "LUMEN Export Scout",
+      "from_usd": 249,
+      "description": "Exploración inicial de mercados y compradores para una empresa que quiere evaluar oportunidades de exportación.",
+      "scope": "Paquete inicial: hasta 5 mercados evaluados con shortlist inicial de actores relevantes.",
+      "client_inputs": ["Producto y país de origen", "Capacidad, certificaciones y restricciones conocidas", "Mercados de interés si ya existen", "Tipo de comprador buscado"],
+      "deliverables": ["Priorización de mercados", "Señales públicas de demanda y competencia", "Importadores, distribuidores o compradores candidatos", "Barreras y requisitos públicos visibles", "Ruta inicial recomendada para profundizar"],
+      "not_included": ["Asesoramiento aduanero, legal o tributario", "Clasificación arancelaria certificada", "Garantía de acceso al mercado", "Representación comercial vinculante"]
+    }
+  ],
+  "microproducts": {
+    "supplier-snapshot": {
+      "id": "MP-SUPPLIER-SNAPSHOT", "name": "Supplier Snapshot", "price_usd": 5, "service_id": "SRV-SUPPLIERCHECK",
+      "promise": "Validación rápida de un proveedor con señales públicas para decidir si vale la pena profundizar.",
+      "requires": ["Nombre o URL del proveedor", "País y producto/servicio ofrecido", "Qué querés verificar"],
+      "deliverables": ["Resumen de identidad y presencia pública", "Señales comerciales y alertas visibles", "Conclusión breve y próximo paso sugerido"],
+      "not_included": ["Informe crediticio", "Due diligence legal", "Inspección física"],
+      "details_placeholder": "Proveedor/URL, país, producto y qué querés verificar."
+    },
+    "quote-sanity": {
+      "id": "MP-QUOTE-SANITY", "name": "Quote Sanity Check", "price_usd": 7, "service_id": "SRV-QUOTECHECK",
+      "promise": "Chequeo rápido de coherencia de una cotización para detectar desvíos o puntos que merecen revisión.",
+      "requires": ["Precio y condiciones de la cotización", "Producto/especificación y cantidad", "Moneda y país si se conocen"],
+      "deliverables": ["Chequeo de coherencia", "Principales alertas o preguntas", "Referencias públicas rápidas cuando existan"],
+      "not_included": ["Valuación certificada", "Garantía de mejor precio"],
+      "details_placeholder": "Pegá los datos de la cotización: producto, especificación, cantidad, precio, moneda y condiciones."
+    },
+    "tender-scan": {
+      "id": "MP-TENDER-SCAN", "name": "Tender Quick Scan", "price_usd": 9, "service_id": "SRV-TENDER-HUNTER",
+      "promise": "Escaneo breve de oportunidades públicas de licitación compatibles con una oferta definida.",
+      "requires": ["Qué vendés", "País/región objetivo", "Sector o palabras clave"],
+      "deliverables": ["Hasta 5 oportunidades/señales relevantes", "Fecha, comprador y enlace público", "Comentario breve de encaje"],
+      "not_included": ["Presentación de oferta", "Garantía de adjudicación"],
+      "details_placeholder": "Qué vendés, mercados/sectores objetivo y palabras clave."
+    },
+    "sourcing-5": {
+      "id": "MP-SOURCING-5", "name": "Supplier Shortlist 5", "price_usd": 15, "service_id": "SRV-SOURCING-EXPRESS",
+      "promise": "Shortlist de hasta cinco proveedores candidatos para una necesidad concreta.",
+      "requires": ["Producto y especificación", "Cantidad aproximada", "País de entrega y restricciones"],
+      "deliverables": ["Hasta 5 proveedores candidatos", "Links y evidencia pública de encaje", "Observaciones para priorizar contactos"],
+      "not_included": ["Garantía de stock/precio", "Compra o negociación vinculante"],
+      "details_placeholder": "Producto, especificación, cantidad, país de entrega y requisitos obligatorios."
+    },
+    "buyer-signals": {
+      "id": "MP-BUYER-SIGNALS", "name": "Buyer Signal Scan", "price_usd": 19, "service_id": "SRV-B2B-PROSPECTING",
+      "promise": "Búsqueda rápida de señales públicas de empresas que podrían comprar una oferta B2B definida.",
+      "requires": ["Qué vendés", "Cliente ideal", "Geografía objetivo"],
+      "deliverables": ["Hasta 10 empresas/señales candidatas", "Motivo de encaje", "Canal corporativo público cuando esté disponible"],
+      "not_included": ["Garantía de respuesta o venta", "Datos personales obtenidos por vías no públicas"],
+      "details_placeholder": "Qué vendés, quién debería comprarlo y en qué mercado querés buscar."
+    },
+    "export-pulse": {
+      "id": "MP-EXPORT-PULSE", "name": "Export Market Pulse", "price_usd": 25, "service_id": "SRV-EXPORT-SCOUT",
+      "promise": "Pulso rápido para explorar mercados y señales públicas antes de invertir en una investigación exportadora completa.",
+      "requires": ["Producto", "País de origen", "Mercados de interés o tipo de comprador"],
+      "deliverables": ["Hasta 3 mercados/señales priorizadas", "Actores comerciales públicos relevantes", "Barreras visibles y próximo paso"],
+      "not_included": ["Asesoramiento aduanero/legal", "Garantía de acceso al mercado"],
+      "details_placeholder": "Producto, país de origen, capacidad/certificaciones y mercados o compradores de interés."
+    }
+  }
+}

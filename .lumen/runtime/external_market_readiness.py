@@ -7,7 +7,7 @@ from typing import Any, Dict
 import outbound_engine
 from https_mail_transport import transport_status
 
-VERSION = "1.2-external-market-readiness"
+VERSION = "1.3-external-market-readiness"
 MAX_EVENTS = 400
 
 
@@ -76,7 +76,7 @@ def _legacy_provider_block(state: Dict[str, Any], provider: str | None) -> Dict[
 
 
 def _provider_block(state: Dict[str, Any], provider: str | None) -> Dict[str, Any] | None:
-    # Outbound Recovery v1.2 runs a read-only live API probe every cycle. Prefer it over historical
+    # Outbound Recovery runs a read-only provider/auth probe every cycle. Prefer it over historical
     # send_failed records so a resolved provider issue clears automatically without manual state edits.
     outbound = dict(state.get("outbound_engine", {}) or {})
     if "provider_api_probe_ok" in outbound:
@@ -97,7 +97,7 @@ def _provider_block(state: Dict[str, Any], provider: str | None) -> Dict[str, An
             }
         return {
             "code": "mail_provider_api_probe_failed",
-            "detail": f"El proveedor {provider or 'de email'} no pasó el probe API ({status or 'sin HTTP'}): {reason[:240]}",
+            "detail": f"El proveedor {provider or 'de email'} no pasó el probe de transporte ({status or 'sin HTTP'}): {reason[:240]}",
         }
     return _legacy_provider_block(state, provider)
 
@@ -140,9 +140,19 @@ def external_market_readiness_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     awaiting_connector = sum(1 for x in social_jobs if x.get("status") == "awaiting_authorized_connector")
 
     live_requested = bool(getattr(outbound_engine, "LIVE", False))
-    provider_block = _provider_block(state, transport.get("provider"))
-    configured = bool(transport.get("ready"))
+    outbound_report = dict(state.get("outbound_engine", {}) or {})
+    probe_provider = outbound_report.get("provider_api_probe_provider")
+    effective_provider = transport.get("provider") or probe_provider
+    provider_block = _provider_block(state, effective_provider)
+    smtp_probe_ready = bool(
+        outbound_report.get("provider_api_probe_ok") is True
+        and str(probe_provider or "").lower() == "smtp"
+    )
+    configured = bool(transport.get("ready")) or smtp_probe_ready
     effective_transport_ready = configured and provider_block is None
+    effective_route = transport.get("route") or (
+        outbound_report.get("provider_api_probe_route") if smtp_probe_ready else None
+    )
 
     if provider_block:
         status = "BLOCKED"
@@ -160,7 +170,6 @@ def external_market_readiness_tick(state: Dict[str, Any]) -> Dict[str, Any]:
         status = "READY" if sent == 0 else "ACTIVE"
         blocker = None
 
-    outbound_report = dict(state.get("outbound_engine", {}) or {})
     report = {
         "version": VERSION,
         "updated_at": utcnow(),
@@ -168,8 +177,8 @@ def external_market_readiness_tick(state: Dict[str, Any]) -> Dict[str, Any]:
         "primary_blocker": blocker,
         "mail_transport_configured": configured,
         "mail_transport_ready": effective_transport_ready,
-        "mail_provider": transport.get("provider"),
-        "mail_route": transport.get("route"),
+        "mail_provider": effective_provider,
+        "mail_route": effective_route,
         "mail_provider_block_detail": provider_block.get("detail") if provider_block else None,
         "provider_api_probe_ok": outbound_report.get("provider_api_probe_ok"),
         "provider_api_probe_http_status": outbound_report.get("provider_api_probe_http_status"),
@@ -204,7 +213,7 @@ def external_market_readiness_tick(state: Dict[str, Any]) -> Dict[str, Any]:
                 f"external_ready:{signature}",
                 "INFO",
                 "Salida comercial externa lista",
-                f"Transporte {transport.get('provider')} listo y {eligible} prospecto(s) elegible(s). Falta convertir esa capacidad en envío verificado.",
+                f"Transporte {effective_provider} listo y {eligible} prospecto(s) elegible(s). Falta convertir esa capacidad en envío verificado.",
             )
         else:
             _add_event(

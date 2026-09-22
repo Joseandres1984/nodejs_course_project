@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List
 import autonomy_operating_system
 
-VERSION = "1.1-canonical-revenue-truth"
+VERSION = "1.2-canonical-revenue-truth-demand-first"
 MIN_OPPORTUNITY_SCORE = 75.0
 TRACEABLE_SOURCES = {"public_evidence", "manual_verified", "verified_inbound", "formal_quote"}
 TERMINAL_DEAL_STAGES = {"closed", "lost", "cancelled", "canceled", "cerrado", "perdido", "cancelado"}
@@ -68,12 +68,21 @@ def canonical_revenue_truth_tick(state: Dict[str, Any]) -> Dict[str, Any]:
     offers=[x for x in state.get("offers",[]) or [] if isinstance(x,dict) and _norm(x.get("source")) not in {"demo","demo/simulación","simulation","simulated"} and _row_links(x,opp_ids,deal_ids)]
     proposals=[x for x in state.get("proposals",[]) or [] if isinstance(x,dict) and _row_links(x,opp_ids,deal_ids)]
     buyers=[x for x in accounts.values() if x.get("type")=="buyer" and x.get("verified_company")]; demand=[x for x in buyers if x.get("demand_signal")]; readiness=state.get("external_market_readiness",{}) or {}; inelig=readiness.get("ineligibility_reasons",{}) or {}
-    if closepath and not closeready: lane,target,reason="closing","canonical_close_ready","Existe al menos un deal canónico con requerimiento confirmado y oferta real; corresponde empujarlo hacia cierre seguro."
-    elif copps and not offers: lane,target,reason="quote_creation","canonical_real_offers","Existen oportunidades canónicas pero todavía no hay ofertas reales vinculadas; priorizar RFQ y cotización comparable."
-    elif demand and not copps: lane,target,reason="opportunity_building","canonical_opportunities","Existe demanda verificada pero ninguna oportunidad supera todavía los gates canónicos de evidencia."
-    elif int(readiness.get("eligible_external_prospects") or 0)<=0 and (int(inelig.get("company_not_verified") or 0)+int(inelig.get("contact_not_verified") or 0))>0: lane,target,reason="verification_contact","eligible_external_prospects","La salida comercial está bloqueada por verificación de identidad/contacto."
-    else: lane,target,reason="demand_discovery","buyers_with_verified_demand","No existe todavía una ruta canónica suficientemente madura; ampliar demanda verificada sin degradar calidad."
-    snap={"version":VERSION,"status":"active","updated_at":utcnow(),"truth_rule":"raw_activity_never_drives_closing; only traceable evidence-backed opportunity lineage may create canonical deals","recommended_lane":lane,"target_metric":target,"reason":reason,"counts":{"raw_market_opportunities":len(opps),"canonical_opportunities":len(copps),"quarantined_opportunities":len(qopps),"raw_deals":len(deals),"canonical_deals":len(cdeals),"canonical_active_deals":len(active),"closing_eligible_deals":len(closepath),"canonical_close_ready":len(closeready),"buyers_with_verified_demand":len(demand),"canonical_real_offers":len(offers),"canonical_proposals":len(proposals),"quarantined_deals":len(qdeals)},"canonical_opportunity_ids":list(opp_ids),"canonical_deal_ids":list(deal_ids),"closing_eligible_deal_ids":[x["id"] for x in closepath],"quarantined_opportunities":qopps[:20],"quarantined_deals":qdeals[:20],"governance":{"legacy_rows_preserved_for_audit":True,"legacy_rows_can_drive_closing":False,"binding_actions_remain_human_gated":True,"evidence_threshold_lowered":False}}
+    if closepath and not closeready:
+        lane,target,reason="closing","canonical_close_ready","Existe al menos un deal canónico con requerimiento confirmado y oferta real; corresponde empujarlo hacia cierre seguro."
+    elif copps and not offers:
+        lane,target,reason="quote_creation","canonical_real_offers","Existen oportunidades canónicas pero todavía no hay ofertas reales vinculadas; priorizar RFQ y cotización comparable."
+    elif demand and not copps:
+        lane,target,reason="opportunity_building","canonical_opportunities","Existe demanda verificada pero ninguna oportunidad supera todavía los gates canónicos de evidencia."
+    # Demand is upstream of outreach. If verified buyers exist but none has a verified need, more
+    # contact verification cannot create a canonical deal and must not outrank the real bottleneck.
+    elif buyers and not demand:
+        lane,target,reason="demand_discovery","buyers_with_verified_demand","Hay compradores verificados pero 0 con demanda pública confirmada; priorizar evidencia de necesidad real antes de ampliar contacto comercial."
+    elif int(readiness.get("eligible_external_prospects") or 0)<=0 and (int(inelig.get("company_not_verified") or 0)+int(inelig.get("contact_not_verified") or 0))>0:
+        lane,target,reason="verification_contact","eligible_external_prospects","La salida comercial está bloqueada por verificación de identidad/contacto."
+    else:
+        lane,target,reason="demand_discovery","buyers_with_verified_demand","No existe todavía una ruta canónica suficientemente madura; ampliar demanda verificada sin degradar calidad."
+    snap={"version":VERSION,"status":"active","updated_at":utcnow(),"truth_rule":"raw_activity_never_drives_closing; only traceable evidence-backed opportunity lineage may create canonical deals","recommended_lane":lane,"target_metric":target,"reason":reason,"counts":{"verified_buyers":len(buyers),"raw_market_opportunities":len(opps),"canonical_opportunities":len(copps),"quarantined_opportunities":len(qopps),"raw_deals":len(deals),"canonical_deals":len(cdeals),"canonical_active_deals":len(active),"closing_eligible_deals":len(closepath),"canonical_close_ready":len(closeready),"buyers_with_verified_demand":len(demand),"canonical_real_offers":len(offers),"canonical_proposals":len(proposals),"quarantined_deals":len(qdeals)},"canonical_opportunity_ids":list(opp_ids),"canonical_deal_ids":list(deal_ids),"closing_eligible_deal_ids":[x["id"] for x in closepath],"quarantined_opportunities":qopps[:20],"quarantined_deals":qdeals[:20],"governance":{"legacy_rows_preserved_for_audit":True,"legacy_rows_can_drive_closing":False,"binding_actions_remain_human_gated":True,"evidence_threshold_lowered":False,"demand_is_upstream_of_outreach":True}}
     state["canonical_revenue_truth"]=snap; return snap
 
 def _canonical_cases_with_truth(state: Dict[str, Any]):
@@ -86,4 +95,4 @@ def _canonical_cases_with_truth(state: Dict[str, Any]):
     return out
 
 autonomy_operating_system._canonical_cases=_canonical_cases_with_truth
-print({"canonical_revenue_truth_runtime":{"version":VERSION,"status":"active","autonomy_filter":True}},flush=True)
+print({"canonical_revenue_truth_runtime":{"version":VERSION,"status":"active","autonomy_filter":True,"demand_gap_priority":True}},flush=True)

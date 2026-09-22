@@ -2,27 +2,53 @@ name: LUMEN runtime check
 
 on:
   push:
-    branches: [lumen-deploy]
+    branches: [lumen-deploy, lumen-zero]
     paths:
       - '.lumen/runtime/**'
+      - '.lumen/dashboard/**'
+      - '.lumen/public-worker/**'
+      - '.lumen/a2a-worker/**'
       - '.github/workflows/lumen-runtime-check.yml'
   pull_request:
     branches: [lumen-deploy]
     paths:
       - '.lumen/runtime/**'
+      - '.lumen/dashboard/**'
+      - '.lumen/public-worker/**'
+      - '.lumen/a2a-worker/**'
       - '.github/workflows/lumen-runtime-check.yml'
   workflow_dispatch:
 
 jobs:
-  compile:
+  validate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
       - name: Compile runtime
         run: python -m compileall .lumen/runtime
+      - name: Validate Cloudflare workers syntax
+        run: |
+          node --check .lumen/dashboard/worker.js
+          node --check .lumen/dashboard/full_worker.js
+          node --check .lumen/dashboard/recovery_worker.js
+          node --check .lumen/dashboard/refresh_worker.js
+          node --check .lumen/dashboard/pricing_worker.js
+          node --check .lumen/public-worker/worker.js
+          node --check .lumen/a2a-worker/worker.js
+      - name: Verify commercial catalog stays synchronized
+        run: python -m unittest discover -s .lumen/runtime -p 'test_service_catalog_sync.py'
+      - name: Verify A2A Machine Store and seller autonomy
+        run: python -m unittest discover -s .lumen/runtime -p 'test_a2a_machine_store.py'
+      - name: Verify every sold service has a live runtime path
+        run: python -m unittest discover -s .lumen/runtime -p 'test_commercial_runtime_coverage.py'
+      - name: Run LUMEN Zero adapter unit tests
+        run: python -m unittest discover -s .lumen/runtime -p 'test_lumen_zero_runtime.py'
       - name: Run market intelligence unit tests
         run: python -m unittest discover -s .lumen/runtime -p 'test_market_intelligence_scout.py'
       - name: Run Revenue OS v3 unit tests

@@ -1,0 +1,133 @@
+{
+  "version": "2026-09-21-v1",
+  "brand": {
+    "name": "LUMEN",
+    "descriptor": "B2B Intelligence",
+    "tone": "ejecutivo, claro, verificable y accionable",
+    "visual_principles": [
+      "Portada limpia con nombre del servicio, cliente, fecha e ID de informe",
+      "Resumen ejecutivo visible antes del detalle",
+      "Tablas comparables y jerarquía visual consistente",
+      "Fuentes públicas trazables con URL y fecha de consulta",
+      "Riesgos separados de hechos y de inferencias",
+      "Conclusión y próximos pasos siempre al final"
+    ],
+    "truth_rules": [
+      "No presentar hipótesis como hechos",
+      "No inventar datos faltantes",
+      "Distinguir evidencia pública, inferencia y recomendación",
+      "No prometer resultados comerciales futuros",
+      "Indicar limitaciones materiales del análisis"
+    ]
+  },
+  "tiers": {
+    "micro": {
+      "format": "brief ejecutivo",
+      "target_length": "1-3 páginas equivalentes",
+      "purpose": "resolver una pregunta concreta con velocidad",
+      "required_sections": ["portada_compacta", "pedido_del_cliente", "respuesta_ejecutiva", "hallazgos", "evidencia", "riesgos", "proximo_paso", "fuentes_y_limites"]
+    },
+    "full": {
+      "format": "informe ejecutivo profesional",
+      "target_length": "4-12 páginas equivalentes según evidencia disponible",
+      "purpose": "permitir una decisión empresarial documentada",
+      "required_sections": ["portada", "resumen_ejecutivo", "alcance_y_pedido", "metodologia", "analisis", "tablas_comparativas", "evidencia", "riesgos_y_gaps", "conclusion", "proximos_pasos", "fuentes", "limitaciones"]
+    }
+  },
+  "service_templates": {
+    "SRV-QUOTECHECK": {
+      "title": "QuoteCheck Global",
+      "decision_question": "¿La cotización es razonable y qué puntos deberían revisarse antes de avanzar?",
+      "hero_metrics": ["precio_total", "desvio_vs_referencias", "cantidad_de_ofertas", "nivel_de_confianza"],
+      "analysis_blocks": ["resumen_de_ofertas", "comparacion_de_precios", "condiciones_comerciales", "desvios_y_alertas", "preguntas_para_proveedor"],
+      "primary_table": ["Proveedor", "Producto/alcance", "Precio", "Moneda", "Condiciones", "Referencia", "Observación"],
+      "final_callout": "Conclusión de razonabilidad y acción recomendada"
+    },
+    "SRV-SUPPLIERCHECK": {
+      "title": "SupplierCheck",
+      "decision_question": "¿Qué evidencia pública existe sobre este proveedor y qué riesgos visibles conviene considerar?",
+      "hero_metrics": ["identidad_verificada", "presencia_publica", "encaje", "nivel_de_riesgo"],
+      "analysis_blocks": ["identidad_y_canales", "actividad_y_presencia", "encaje_comercial", "señales_positivas", "alertas_e_inconsistencias"],
+      "primary_table": ["Dimensión", "Hallazgo", "Evidencia", "Impacto", "Confianza"],
+      "final_callout": "Recomendación: avanzar, profundizar o detener"
+    },
+    "SRV-TENDER-HUNTER": {
+      "title": "Tender Hunter Global",
+      "decision_question": "¿Qué oportunidades públicas encajan mejor con la oferta del cliente?",
+      "hero_metrics": ["oportunidades_encontradas", "oportunidades_priorizadas", "fecha_limite_mas_proxima", "mejor_encaje"],
+      "analysis_blocks": ["criterios_de_busqueda", "oportunidades_priorizadas", "requisitos_visibles", "encaje", "riesgos_de_elegibilidad"],
+      "primary_table": ["Prioridad", "Organismo/Comprador", "Oportunidad", "Fecha límite", "Encaje", "Fuente"],
+      "final_callout": "Oportunidades que merecen acción inmediata"
+    },
+    "SRV-SOURCING-EXPRESS": {
+      "title": "Sourcing Express",
+      "decision_question": "¿Qué proveedores públicos parecen mejor posicionados para esta necesidad de compra?",
+      "hero_metrics": ["candidatos_investigados", "candidatos_priorizados", "paises_cubiertos", "mejor_encaje"],
+      "analysis_blocks": ["requerimiento", "mercado_relevado", "shortlist", "comparacion_de_encaje", "gaps_y_riesgos"],
+      "primary_table": ["Proveedor", "País", "Capacidad/Producto", "Encaje", "Canal corporativo", "Riesgo/Gaps"],
+      "final_callout": "Orden recomendado de contacto"
+    },
+    "SRV-B2B-PROSPECTING": {
+      "title": "Prospección B2B",
+      "decision_question": "¿Qué empresas muestran mejor encaje y señales públicas para una aproximación comercial?",
+      "hero_metrics": ["cuentas_investigadas", "cuentas_priorizadas", "segmentos", "señales_fuertes"],
+      "analysis_blocks": ["perfil_objetivo", "segmentacion", "cuentas_priorizadas", "señales_de_encaje", "enfoque_comercial"],
+      "primary_table": ["Prioridad", "Empresa", "País/Sector", "Motivo de encaje", "Señal pública", "Canal corporativo"],
+      "final_callout": "Primeras cuentas a trabajar y mensaje sugerido"
+    },
+    "SRV-EXPORT-SCOUT": {
+      "title": "Export Scout",
+      "decision_question": "¿Qué mercados y actores parecen más prometedores para profundizar una estrategia de exportación?",
+      "hero_metrics": ["mercados_evaluados", "mercados_priorizados", "actores_identificados", "barreras_clave"],
+      "analysis_blocks": ["producto_y_capacidad", "comparacion_de_mercados", "demanda_y_competencia", "actores_relevantes", "barreras_visibles"],
+      "primary_table": ["Mercado", "Señal de demanda", "Competencia", "Actores", "Barreras", "Prioridad"],
+      "final_callout": "Ruta recomendada para validación comercial"
+    }
+  },
+  "micro_templates": {
+    "supplier-snapshot": {
+      "title": "Supplier Snapshot",
+      "answer_first": true,
+      "sections": ["qué_verificamos", "respuesta_breve", "3_a_6_hallazgos", "alertas", "fuentes", "próximo_paso"],
+      "primary_table": ["Señal", "Resultado", "Evidencia"]
+    },
+    "quote-sanity": {
+      "title": "Quote Sanity Check",
+      "answer_first": true,
+      "sections": ["datos_de_la_cotizacion", "respuesta_breve", "coherencia_de_precio", "alertas", "referencias_rapidas", "próximo_paso"],
+      "primary_table": ["Elemento", "Cotización", "Referencia/criterio", "Observación"]
+    },
+    "tender-scan": {
+      "title": "Tender Quick Scan",
+      "answer_first": true,
+      "sections": ["criterios", "oportunidades", "encaje", "fechas_clave", "fuentes", "próximo_paso"],
+      "primary_table": ["Oportunidad", "Comprador", "Fecha", "Encaje", "Fuente"]
+    },
+    "sourcing-5": {
+      "title": "Supplier Shortlist 5",
+      "answer_first": true,
+      "sections": ["requerimiento", "shortlist", "comparacion", "gaps", "fuentes", "orden_de_contacto"],
+      "primary_table": ["Proveedor", "País", "Encaje", "Canal", "Observación"]
+    },
+    "buyer-signals": {
+      "title": "Buyer Signal Scan",
+      "answer_first": true,
+      "sections": ["oferta_analizada", "cuentas_candidatas", "señales", "prioridad", "fuentes", "próximo_paso"],
+      "primary_table": ["Empresa", "Señal", "Motivo de encaje", "Canal", "Prioridad"]
+    },
+    "export-pulse": {
+      "title": "Export Market Pulse",
+      "answer_first": true,
+      "sections": ["producto_y_origen", "mercados/señales", "actores", "barreras_visibles", "fuentes", "próximo_paso"],
+      "primary_table": ["Mercado", "Señal", "Actores", "Barrera", "Prioridad"]
+    }
+  },
+  "delivery_rules": {
+    "mandatory_metadata": ["report_id", "product_or_service_id", "client_request", "generated_at", "evidence_cutoff"],
+    "recommended_output": ["HTML responsivo", "versión imprimible/PDF-ready"],
+    "source_format": "Título o entidad · URL · fecha de consulta · qué respalda",
+    "risk_labels": ["bajo", "medio", "alto", "no_determinado"],
+    "confidence_labels": ["alta", "media", "baja"],
+    "prohibited": ["capturas sin contexto como única evidencia", "afirmaciones sin fuente cuando la fuente es verificable", "logos de terceros usados como respaldo implícito", "garantías de resultado"]
+  }
+}

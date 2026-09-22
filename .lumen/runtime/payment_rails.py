@@ -57,8 +57,14 @@ def _mercadopago_rail() -> Dict[str, Any]:
 
 def runtime_rails() -> Dict[str, Dict[str, Any]]:
     # Raw instructions live only in process environment and are stripped before persistence/API.
+    # The generic Argentine bank-transfer rail is intentionally provider-agnostic: CBU/CVU/alias
+    # details are supplied only through GitHub Actions secrets, never committed to source or D1.
     return {
         "mercadopago_ars": _mercadopago_rail(),
+        "arg_bank_ars": _rail_env(
+            "ARG_BANK_ARS", "arg_bank_ars", "Transferencia bancaria Argentina ARS", "ARS", "domestic", 95,
+            "Respaldo local sin costo por transferencia a CBU/CVU/alias verificado; los datos sensibles viven solo en secretos de runtime.",
+        ),
         "prex_ars": _rail_env("PREX_ARS", "prex_ars", "Prex ARS", "ARS", "domestic", 90, "Respaldo local por CVU/alias."),
         "arg_bank_usd": _rail_env("ARG_BANK_USD", "arg_bank_usd", "Cuenta bancaria argentina USD", "USD", "domestic", 85, "Opcional si más adelante se configura una cuenta bancaria USD apta para el cobro."),
         "payoneer_usd": _rail_env("PAYONEER", "payoneer_usd", "Payoneer USD", "USD", "international", 100, "Principal internacional USD; luego puede retirarse a Prex de forma separada."),
@@ -107,7 +113,7 @@ def choose_payment_route(state: Dict[str, Any], deal: Dict[str, Any]) -> Dict[st
     elif domestic and currency == "EUR":
         preferred_codes = []
     elif domestic:
-        preferred_codes = ["mercadopago_ars", "prex_ars"]
+        preferred_codes = ["mercadopago_ars", "arg_bank_ars", "prex_ars"]
     elif currency == "EUR":
         preferred_codes = ["prex_eur_iban", "payoneer_usd", "wise_usd"]
     else:
@@ -157,17 +163,19 @@ def payment_rails_tick(state: Dict[str, Any]) -> Dict[str, Any]:
 
     report = {
         "updated_at": utcnow(), "mode": "autonomous_payment_rail_routing",
-        "primary_domestic_rail": "mercadopago_ars", "domestic_fallback": "prex_ars",
+        "primary_domestic_rail": "mercadopago_ars", "domestic_fallback": "arg_bank_ars",
+        "secondary_domestic_fallback": "prex_ars",
         "primary_international_rail": "payoneer_usd", "international_eur_rail": "prex_eur_iban",
         "rails": [public_rail(x) for x in rails.values()], "routes": routes[:160],
         "ready_routes": sum(1 for x in routes if x.get("status") == "READY"),
         "setup_required": sum(1 for x in routes if x.get("status") != "READY"),
         "governance": {
             "secret_rule": "Las credenciales e instrucciones bancarias/PSP no se persisten en Git, estado, logs ni API.",
-            "selection_rule": "Argentina ARS: Mercado Pago, luego Prex ARS. Argentina USD: solo rail USD verificado. Exterior USD: Payoneer. EUR/SEPA: Prex vIBAN si está habilitado.",
-            "currency_rule": "LUMEN no convierte automáticamente una comisión USD/EUR a ARS para cobrar por Mercado Pago.",
+            "selection_rule": "Argentina ARS: Mercado Pago; si no está disponible, transferencia bancaria argentina verificada; luego Prex ARS. Argentina USD: solo rail USD verificado. Exterior USD: Payoneer. EUR/SEPA: Prex vIBAN si está habilitado.",
+            "currency_rule": "LUMEN no convierte automáticamente una comisión USD/EUR a ARS para cobrar por Mercado Pago o transferencia local.",
+            "cash_truth_rule": "Preparar instrucciones o un link de pago no equivale a cobrar; el ingreso solo se reconoce con evidencia de liquidación verificada.",
             "prex_rule": "Prex Argentina no se trata como receptor genérico de transferencias bancarias internacionales USD; el vIBAN EUR es un rail separado.",
-            "authority_rule": "El sistema puede seleccionar/preparar el riel y un link de cobro sobre términos ya documentados; no puede cambiar destinos, mover fondos ni autorizar pagos por sí solo.",
+            "authority_rule": "El sistema puede seleccionar/preparar el riel y un link o instrucciones de cobro sobre términos ya documentados; no puede cambiar destinos, mover fondos ni autorizar pagos por sí solo.",
         },
     }
     state["payment_rails"] = report; state["payment_route_index"] = route_index

@@ -15,7 +15,7 @@ from typing import Any, Dict, List
 import mission_team_runtime
 import professional_casework
 
-VERSION = "1.0-casework-hygiene"
+VERSION = "1.1-casework-hygiene"
 
 RESEARCH_ONLY_DOMAINS = {
     "google.com", "google.com.ar", "bing.com", "yahoo.com", "duckduckgo.com",
@@ -23,6 +23,8 @@ RESEARCH_ONLY_DOMAINS = {
     "x.com", "twitter.com", "reddit.com", "pinterest.com", "wikipedia.org",
     "indeed.com", "indeed.com.ar", "glassdoor.com", "glassdoor.com.ar",
     "zonajobs.com.ar", "computrabajo.com", "computrabajo.com.ar", "bumeran.com.ar",
+    "halaxia.com",
+    "catalogoindustrial.com.ar",
     "mercadolibre.com", "mercadolibre.com.ar", "amazon.com",
 }
 
@@ -158,7 +160,7 @@ def sanitize_casework(state: Dict[str, Any]) -> Dict[str, int]:
         if source and _research_only(source):
             reason = "La fuente original es una plataforma/resultado de investigación y no una contraparte comercial accionable."
         elif case_is_blocked:
-            reason = "El expediente apunta a una plataforma de investigación, red social o portal laboral, no a una contraparte comercial."
+            reason = "El expediente apunta a una plataforma de investigación, red social, directorio o portal laboral, no a una contraparte comercial."
         elif not source and _job_only_source({"title": case.get("title"), "source_url": case.get("source_url")}):
             reason = "El expediente histórico representa una señal laboral, no evidencia suficiente de intención de compra."
         else:

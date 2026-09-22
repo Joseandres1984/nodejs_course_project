@@ -1,0 +1,95 @@
+{
+  "schema_version": 1,
+  "source": "railway_deploy_logs",
+  "project": "lumen-b2b",
+  "deployment_status": "REMOVED",
+  "snapshot_at": "2026-09-19T14:45:58Z",
+  "recovery_policy": {
+    "historical_only": true,
+    "auto_promote_to_current_pipeline": false,
+    "requires_reverification_before_outbound": true,
+    "fabricate_missing_history": false
+  },
+  "startup_health": {
+    "status": "healthy",
+    "passed": 17,
+    "warnings": 0,
+    "failed": 0,
+    "total": 17,
+    "score_pct": 100.0,
+    "persisted": true
+  },
+  "commercial_snapshot": {
+    "commercial_accounts": 580,
+    "eligible_at_legacy_snapshot": 86,
+    "ineligible_reason_counts": {
+      "company_not_verified": 250,
+      "contact_not_verified": 218,
+      "recent_successful_contact_window": 23,
+      "suppressed_or_optout": 1,
+      "below_outbound_score": 2
+    },
+    "outbox_status": {
+      "needs_verified_contact": 2,
+      "send_failed": 1,
+      "sent": 25,
+      "closer_hold": 238,
+      "blocked_quality": 2
+    }
+  },
+  "outbound_engine_snapshot": {
+    "status": "active",
+    "live": true,
+    "eligible_prospects": 86,
+    "messages_total": 227,
+    "sent_total": 21,
+    "delivered_verified": 8,
+    "send_failed": 0,
+    "replies_detected": 0,
+    "daily_remaining": 0,
+    "mail_transport_ok": true,
+    "mail_provider": "brevo"
+  },
+  "recovered_capabilities": {
+    "executive_secretary_route": "/secretaria",
+    "autonomy_route": "/autonomia",
+    "command_center_route": "/command-center",
+    "revenue_cockpit_route": "/revenue-cockpit",
+    "instagram_route": "/instagram",
+    "instagram_publishing_route": "/instagram/publishing",
+    "services_route": "/services",
+    "intelligence_route": "/intelligence",
+    "service_catalog_entries": 6,
+    "intelligence_products": [
+      "SRV-QUOTECHECK",
+      "SRV-SUPPLIERCHECK",
+      "SRV-EXPORT-SCOUT",
+      "SRV-TENDER-HUNTER"
+    ],
+    "instagram_subscription_configured": true,
+    "instagram_subscription_ok": true,
+    "instagram_fields": [
+      "comments",
+      "messages",
+      "messaging_postbacks",
+      "message_edit",
+      "message_reactions",
+      "messaging_seen",
+      "messaging_referral",
+      "messaging_handover",
+      "standby"
+    ],
+    "instagram_human_approval_required": true,
+    "instagram_autonomous_publish": false,
+    "a2a_status": "registered",
+    "a2a_registry_http_status": 201,
+    "multicurrency": ["ARS", "USD", "EUR"],
+    "automatic_fx_conversion": false
+  },
+  "notes": [
+    "Legacy account/contact verification is historical evidence only and may be stale.",
+    "The Zero runtime must re-verify counterparties before new external messaging.",
+    "Railway logs preserve enough evidence to continue reconstructing the old commercial universe without inventing history.",
+    "WhatsApp is not treated as a current blocker; its legacy delivery probe failed authentication and template readiness was false."
+  ]
+}

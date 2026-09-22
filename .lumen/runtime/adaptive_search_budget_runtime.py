@@ -3,15 +3,20 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Dict
 
+# Install the shared intraday pacing layer before demand/procurement modules capture budget
+# functions. The configured zero-cost hard cap is preserved; pacing only prevents Autopilot from
+# consuming the full free allowance too early in the Argentina day.
+import search_budget_governor as governor
+import search_budget_pacing_runtime  # noqa: F401
+
 import demand_hunter
 import demand_hunter_runtime
 import demand_intelligence
 import public_procurement_hunter
-import search_budget_governor as governor
 import scout_connector
 from app import STATE, load_state
 
-VERSION = "1.4-first-cash-revenue-sprint"
+VERSION = "1.7-demand-gap-first-cash-dynamic-budget"
 _ORIGINAL_SUMMARY = governor.summary
 
 
@@ -54,16 +59,21 @@ def _signals(state: Dict[str, Any]) -> Dict[str, Any]:
 def build_budget_plan(state: Dict[str, Any]) -> Dict[str, Any]:
     total = int(governor.TOTAL_DAILY_CAP)
     s = _signals(state)
+    demand_gap_reason = False
 
-    # Reallocate the existing envelope only. Never increase the provider/cost cap here.
-    # During First Cash, conversion evidence gets priority over broad exploration, but the
-    # general lane retains 30% so identity/contact verification cannot be starved.
-    if s["first_cash_active"] and s["market_opportunities"] > 0 and s["requirements_ready_for_rfq"] == 0:
+    # Reallocate only the configured free envelope. Never increase provider/cost authority. When
+    # verified buyers exist but zero have verified demand, discovery of a real need is the upstream
+    # blocker; reserve about 83% for demand while preserving the remainder for verification/general.
+    if s["verified_buyers"] > 0 and s["buyers_with_demand"] == 0:
+        demand_ratio = 0.83
+        reason = ""
+        demand_gap_reason = True
+    elif s["first_cash_active"] and s["market_opportunities"] > 0 and s["requirements_ready_for_rfq"] == 0:
         demand_ratio = 0.70
-        reason = "Revenue Sprint 2.0: First Cash activo y 0 requisitos listos para RFQ; priorizar evidencia de demanda/requisitos sin eliminar verificación de identidad y contacto."
-    elif s["verified_buyers"] == 0 or s["buyers_with_demand"] == 0:
+        reason = "First Cash activo y 0 requisitos listos para RFQ; priorizar evidencia de demanda/requisitos sin eliminar verificación de identidad y contacto."
+    elif s["verified_buyers"] == 0:
         demand_ratio = 0.65
-        reason = "Falta demanda/comprador verificado; proteger más capacidad para demanda de alta intención."
+        reason = "Faltan compradores verificados; mantener búsqueda de demanda pero preservar capacidad general para construir el lado comprador."
     elif s["market_opportunities"] > 0 and s["requirements_ready_for_rfq"] == 0:
         demand_ratio = 0.60
         reason = "Hay oportunidades verificadas pero ninguna lista para RFQ; priorizar demanda pública y evidencia de requisitos reales para destrabar cotizaciones."
@@ -83,6 +93,11 @@ def build_budget_plan(state: Dict[str, Any]) -> Dict[str, Any]:
     min_lane = max(2, int(round(total * 0.15)))
     demand = max(min_lane, min(total - min_lane, int(round(total * demand_ratio))))
     general = total - demand
+    if demand_gap_reason:
+        reason = (
+            f"Hay compradores verificados pero 0 con demanda confirmada; reservar {demand}/{total} "
+            f"búsquedas gratuitas para demanda pública y compras, manteniendo {general} para verificación/general."
+        )
     return {
         "version": VERSION,
         "status": "active",
@@ -100,6 +115,7 @@ def build_budget_plan(state: Dict[str, Any]) -> Dict[str, Any]:
             "dependent_runtime_caps_synchronized": True,
             "legacy_overage_reconciliation_reopens_budget": False,
             "general_lane_preserved_for_verification": True,
+            "intraday_pacing_enabled": True,
         },
     }
 
@@ -144,6 +160,7 @@ def adaptive_summary(state: Dict[str, Any]) -> Dict[str, Any]:
         "procurement_can_use_full_demand_pool": True,
         "accounting_reconciled": bool(reconciliation.get("reconciled")),
         "legacy_overage_absorbed": int(reconciliation.get("legacy_overage_absorbed") or 0),
+        "intraday_pacing_enabled": True,
     }
     return base
 
@@ -160,6 +177,7 @@ try:
             "accounting_reconciled": bool(_RECON.get("reconciled")),
             "legacy_overage_absorbed": int(_RECON.get("legacy_overage_absorbed") or 0),
             "procurement_can_use_full_demand_pool": True,
+            "intraday_pacing_enabled": True,
         }
     }, flush=True)
 except Exception as exc:

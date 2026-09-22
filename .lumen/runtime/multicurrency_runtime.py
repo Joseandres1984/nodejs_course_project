@@ -6,10 +6,10 @@ from typing import Any, Dict, Iterable
 from payment_rails import runtime_rails
 
 
-VERSION = "1.0-multicurrency-truth"
+VERSION = "1.1-multicurrency-truth"
 SUPPORTED_CURRENCIES = ("ARS", "USD", "EUR")
 PRIMARY_RAILS = {
-    "ARS": ("mercadopago_ars", "prex_ars"),
+    "ARS": ("mercadopago_ars", "arg_bank_ars", "prex_ars"),
     "USD": ("payoneer_usd", "arg_bank_usd", "wise_usd"),
     "EUR": ("prex_eur_iban",),
 }
@@ -80,6 +80,7 @@ def multicurrency_tick(state: Dict[str, Any]) -> Dict[str, Any]:
         "currency_matrix": matrix,
         "ready_currencies": [code for code, row in matrix.items() if row.get("ready_to_collect")],
         "setup_required_currencies": [code for code, row in matrix.items() if not row.get("ready_to_collect")],
+        "ars_collection_priority": ["mercadopago_ars", "arg_bank_ars", "prex_ars"],
         "fx_policy": "native_currency_only_no_automatic_fx_conversion",
         "quote_policy": "preserve_documented_currency",
         "landed_cost_policy": "compare_only_when_currency_and_cost_basis_are_explicit",
@@ -88,6 +89,7 @@ def multicurrency_tick(state: Dict[str, Any]) -> Dict[str, Any]:
             "autonomous_payment": False,
             "autonomous_fund_movement": False,
             "binding_terms_human_gated": True,
+            "prepared_collection_is_revenue": False,
             "secrets_exposed": False,
         },
     }
