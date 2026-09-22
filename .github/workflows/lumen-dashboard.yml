@@ -50,6 +50,7 @@ jobs:
         if: steps.preflight.outputs.ready == 'true'
         run: |
           node --check .lumen/dashboard/pricing_worker.js
+          node --check .lumen/dashboard/experiment_worker.js
           node --check .lumen/dashboard/stable_worker.js
 
       - name: Deploy unified command center
@@ -63,7 +64,7 @@ jobs:
         shell: bash
         run: printf '%s' "$LUMEN_DASHBOARD_PASSWORD" | npx --yes wrangler@4 secret put LUMEN_DASHBOARD_PASSWORD
 
-      - name: Verify live command center, pricing, Machine Store and recovery
+      - name: Verify live command center, Experiment Engine, pricing, Machine Store and recovery
         if: steps.preflight.outputs.ready == 'true'
         shell: bash
         run: |
@@ -74,10 +75,11 @@ jobs:
             full_code=$(curl -sS -u "socio:$LUMEN_DASHBOARD_PASSWORD" -o /tmp/lumen-full.html -w '%{http_code}' "$base/full" || true)
             data_code=$(curl -sS -u "socio:$LUMEN_DASHBOARD_PASSWORD" -o /tmp/lumen-data.json -w '%{http_code}' "$base/api/data" || true)
             state_code=$(curl -sS -u "socio:$LUMEN_DASHBOARD_PASSWORD" -o /tmp/lumen-full-state.json -w '%{http_code}' "$base/api/full-state" || true)
+            experiment_code=$(curl -sS -u "socio:$LUMEN_DASHBOARD_PASSWORD" -o /tmp/lumen-experiments.json -w '%{http_code}' "$base/api/experiments" || true)
             recovery_code=$(curl -sS -u "socio:$LUMEN_DASHBOARD_PASSWORD" -o /tmp/lumen-recovery-state.json -w '%{http_code}' "$base/api/recovery-state" || true)
             machine_code=$(curl -sS -o /tmp/lumen-machine.json -w '%{http_code}' "$a2a/machine/catalog" || true)
             stats_code=$(curl -sS -o /tmp/lumen-machine-stats.json -w '%{http_code}' "$a2a/machine/stats" || true)
-            if [[ "$health_code" == "200" && "$full_code" == "200" && "$data_code" == "200" && "$state_code" == "200" && "$recovery_code" == "200" && "$machine_code" == "200" && "$stats_code" == "200" ]]; then
+            if [[ "$health_code" == "200" && "$full_code" == "200" && "$data_code" == "200" && "$state_code" == "200" && "$experiment_code" == "200" && "$recovery_code" == "200" && "$machine_code" == "200" && "$stats_code" == "200" ]]; then
               python - <<'PY'
           import json
           from pathlib import Path
@@ -85,11 +87,12 @@ jobs:
           html = Path('/tmp/lumen-full.html').read_text(errors='replace')
           runtime = json.loads(Path('/tmp/lumen-data.json').read_text())
           data = json.loads(Path('/tmp/lumen-full-state.json').read_text())
+          experiments = json.loads(Path('/tmp/lumen-experiments.json').read_text())
           recovery = json.loads(Path('/tmp/lumen-recovery-state.json').read_text())
           machine = json.loads(Path('/tmp/lumen-machine.json').read_text())
           machine_stats = json.loads(Path('/tmp/lumen-machine-stats.json').read_text())
 
-          for token in ('Centro de Comando Completo','Recuperación Railway','Servicios y precios','Desde USD 59','USD 249','LUMEN ahora','A2A · Machine Store','Productos que otros agentes pueden comprar','USD 5','Ingresos recurrentes'):
+          for token in ('Centro de Comando Completo','Recuperación Railway','Servicios y precios','Desde USD 59','USD 249','LUMEN ahora','A2A · Machine Store','Productos que otros agentes pueden comprar','USD 5','Ingresos recurrentes','Experimentos','Experiment Engine','Aprender qué vende mejor'):
               assert token in html, token
 
           catalog = runtime.get('catalog') or {}
@@ -108,6 +111,16 @@ jobs:
           assert int(catalog.get('ceiling_usd') or 0) == 249
           assert float(catalog.get('average_usd') or 0) == 139.0
 
+          assert experiments.get('policy') == '80_20_exploit_explore', experiments
+          assert float(experiments.get('exploit_share') or 0) == 0.8
+          assert float(experiments.get('explore_share') or 0) == 0.2
+          exp_guard = experiments.get('guardrails') or {}
+          assert float(exp_guard.get('monetary_budget_usd') or 0) == 0
+          assert exp_guard.get('paid_media_authority_changed') is False
+          assert exp_guard.get('binding_authority_changed') is False
+          assert exp_guard.get('search_budget_increased') is False
+          assert exp_guard.get('hard_bottleneck_override') is False
+
           products = machine.get('machineProducts') or []
           plans = machine.get('recurringPlans') or []
           assert len(products) == 6
@@ -122,13 +135,13 @@ jobs:
           assert int((recovery.get('historical') or {}).get('accounts') or 0) == 580
           assert int((recovery.get('policy') or {}).get('auto_promoted') or 0) == 0
           assert int((recovery.get('policy') or {}).get('safe_for_outbound') or 0) == 0
-          print('LUMEN_FULL_COMMAND_CENTER pricing=6/6 machine_products=6 recurring_plans=4 owner_summary=ok d1_state=ok recovery=ok')
+          print('LUMEN_FULL_COMMAND_CENTER experiment_engine=80/20-zero-cost pricing=6/6 machine_products=6 recurring_plans=4 owner_summary=ok d1_state=ok recovery=ok')
           PY
               exit 0
             fi
             sleep 5
           done
-          echo "LUMEN_UNIFIED_DASHBOARD verification=failed health=$health_code full=$full_code data=$data_code state=$state_code recovery=$recovery_code machine=$machine_code stats=$stats_code"
+          echo "LUMEN_UNIFIED_DASHBOARD verification=failed health=$health_code full=$full_code data=$data_code state=$state_code experiments=$experiment_code recovery=$recovery_code machine=$machine_code stats=$stats_code"
           exit 1
 
-# deploy trigger: dashboard D1 read shield 2026-09-22
+# deploy trigger: Experiment Engine v1 command-center promotion 2026-09-22
