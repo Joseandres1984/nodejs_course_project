@@ -1,0 +1,138 @@
+name: LUMEN Report Presentation Polish
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/lumen-report-polish.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  polish-reporting:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout LUMEN Zero
+        uses: actions/checkout@v4
+        with:
+          ref: lumen-zero
+          fetch-depth: 0
+
+      - name: Apply presentation polish
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p=Path('.lumen/reporting/render_report.mjs')
+          s=p.read_text()
+          old="function titleize(v='') { return String(v).replaceAll('_',' ').replace(/\\b\\w/g, m=>m.toUpperCase()); }"
+          new="""function titleize(v='') { return String(v).replaceAll('_',' ').replace(/\\b\\w/g, m=>m.toUpperCase()); }
+          function formatDate(v='') {
+            const raw=String(v || '');
+            const m=raw.match(/^(\\d{4})-(\\d{2})-(\\d{2})T(\\d{2}):(\\d{2})/);
+            return m ? `${m[3]}/${m[2]}/${m[1]} ${m[4]}:${m[5]}` : raw;
+          }"""
+          assert old in s
+          s=s.replace(old,new,1)
+          s=s.replace('.cover{min-height:520px;background:', '.cover{min-height:520px;background:',1)
+          marker='.brand{letter-spacing:.22em;font-weight:900;font-size:14px}'
+          assert marker in s
+          s=s.replace(marker, '.micro-cover{min-height:0;padding:38px 64px 30px;display:block}.micro-cover h1{font-size:40px;margin:24px 0 10px}.micro-cover .question{display:none}.micro-cover .covermeta{grid-template-columns:repeat(4,minmax(0,1fr));margin-top:24px;gap:12px}.micro-cover .covermeta strong{font-size:12px}'+marker,1)
+          old_print='@media print{body{background:#fff}.report{box-shadow:none;margin:0;max-width:none}.section,.risk,.findings article,.tablewrap{break-inside:avoid}.cover{break-after:page}.body{padding-top:34px}@page{size:A4;margin:12mm}}'
+          new_print='@media print{body{background:#fff}.report{box-shadow:none;margin:0;max-width:none}.section,.risk,.findings article,.tablewrap{break-inside:avoid}.cover:not(.micro-cover){break-after:page}.micro-cover{break-after:auto;page-break-after:auto}.body{padding-top:34px}@page{size:A4;margin:12mm}}'
+          assert old_print in s
+          s=s.replace(old_print,new_print,1)
+          old_header='<header class="cover"><div><div class="brand">${esc(brand.name)}</div>'
+          new_header='<header class="${tier===\'micro\'?\'cover micro-cover\':\'cover\'}"><div><div class="brand">${esc(brand.name)}</div>'
+          assert old_header in s
+          s=s.replace(old_header,new_header,1)
+          s=s.replace('<div><span>Fecha</span><strong>${esc(meta.generated_at)}</strong></div><div><span>Corte de evidencia</span><strong>${esc(meta.evidence_cutoff)}</strong></div>', '<div><span>Fecha</span><strong>${esc(formatDate(meta.generated_at))}</strong></div><div><span>Corte de evidencia</span><strong>${esc(formatDate(meta.evidence_cutoff))}</strong></div>',1)
+          p.write_text(s)
+
+          p=Path('.lumen/reporting/render_pdf.mjs')
+          s=p.read_text()
+          old='      .cover { min-height: 273mm !important; break-after: page !important; page-break-after: always !important; }'
+          new='      .cover:not(.micro-cover) { min-height: 273mm !important; break-after: page !important; page-break-after: always !important; }\n      .micro-cover { min-height: 0 !important; break-after: auto !important; page-break-after: auto !important; padding-top: 30px !important; padding-bottom: 24px !important; }'
+          assert old in s
+          s=s.replace(old,new,1)
+          p.write_text(s)
+          PY
+
+      - name: Validate JavaScript syntax
+        run: |
+          node --check .lumen/reporting/render_report.mjs
+          node --check .lumen/reporting/render_pdf.mjs
+
+      - name: Commit polished renderer
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .lumen/reporting/render_report.mjs .lumen/reporting/render_pdf.mjs
+          if git diff --cached --quiet; then
+            echo 'No renderer changes required.'
+          else
+            git commit -m 'Polish LUMEN report presentation and compact micro PDFs'
+            git push origin HEAD:lumen-zero
+          fi
+
+      - name: Set up Node and Python
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install PDF QA runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-save playwright@1.55.0 pdf-lib@1.17.1
+          npx playwright install --with-deps chromium
+          python3 -m pip install --disable-pip-version-check pypdf==5.9.0 pillow==11.3.0
+          command -v pdftotext >/dev/null || { sudo apt-get update; sudo apt-get install -y poppler-utils; }
+
+      - name: Validate compact micro PDF
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/lumen-polish/{html,pdf,preview}
+          cat > /tmp/lumen-polish/micro.json <<'JSON'
+          {
+            "template_key":"supplier-snapshot",
+            "report_id":"LUMEN-QA-MICRO-POLISH",
+            "client":"Cliente QA",
+            "generated_at":"2026-09-21T21:00:00-03:00",
+            "evidence_cutoff":"2026-09-21T20:55:00-03:00",
+            "client_request":"Validar un proveedor industrial antes de avanzar.",
+            "answer":"La evidencia disponible permite avanzar a una validación comercial acotada, sin inferir solvencia, stock ni capacidad futura.",
+            "confidence":"media",
+            "findings":["Identidad pública consistente","Canal corporativo disponible","Capacidad específica pendiente de confirmación"],
+            "tables":[{"title":"Señales","columns":["Señal","Resultado","Evidencia"],"rows":[["Identidad","Consistente","Fuente pública"],["Actividad","Visible","Catálogo corporativo"],["Capacidad","Pendiente","Confirmar directamente"]]}],
+            "risks":[{"level":"medio","title":"Capacidad no verificada","detail":"El catálogo no demuestra stock ni capacidad futura."}],
+            "evidence":[{"title":"Fuente pública","url":"https://example.com/supplier/industrial/catalog/long-reference-for-wrapping","note":"Respalda presencia pública.","observed_at":"2026-09-21"}],
+            "next_steps":["Solicitar cotización y ficha técnica.","Confirmar certificaciones y plazo."],
+            "recommendation":"Avanzar a contacto comercial y validar los puntos pendientes antes de decidir."
+          }
+          JSON
+          node .lumen/reporting/render_report.mjs --input /tmp/lumen-polish/micro.json --output /tmp/lumen-polish/html/micro.html
+          node .lumen/reporting/render_pdf.mjs --input /tmp/lumen-polish/html/micro.html --output /tmp/lumen-polish/pdf/micro.pdf --report-id LUMEN-QA-MICRO-POLISH --title 'Supplier Snapshot'
+          python .lumen/reporting/validate_pdf.py /tmp/lumen-polish/pdf/micro.pdf --report-id LUMEN-QA-MICRO-POLISH --title 'Supplier Snapshot' --tier micro --preview-dir /tmp/lumen-polish/preview
+          pages=$(pdfinfo /tmp/lumen-polish/pdf/micro.pdf | awk '/^Pages:/{print $2}')
+          echo "MICRO_PAGES=$pages"
+          [[ "$pages" -le 3 ]]
+          pdftotext -layout /tmp/lumen-polish/pdf/micro.pdf - | grep -F '21/09/2026 21:00' >/dev/null
+
+      - name: Upload polished micro sample
+        uses: actions/upload-artifact@v4
+        with:
+          name: lumen-polished-micro-report
+          path: |
+            /tmp/lumen-polish/pdf/micro.pdf
+            /tmp/lumen-polish/preview/*.png
+          if-no-files-found: error
+          retention-days: 7
