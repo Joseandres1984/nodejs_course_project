@@ -6,7 +6,7 @@ import { createPaywall } from "@x402/paywall";
 import { evmPaywall } from "@x402/paywall/evm";
 
 const SERVICE = "lumen-zero-x402";
-const VERSION = "1.4-x402-human-paywall";
+const VERSION = "1.5-x402-native-hono-chain";
 const PAY_TO = "0x04285DE6A083CEb28fb0C254a2ed0F5fdB2eeD28";
 const NETWORK = "eip155:8453";
 const FACILITATOR = "https://facilitator.xpay.sh";
@@ -106,6 +106,7 @@ const x402Gate = paymentMiddleware(
   resourceServer,
   undefined,
   humanPaywall,
+  false,
 );
 
 app.use("*", async (c, next) => {
@@ -123,34 +124,39 @@ app.use("*", async (c, next) => {
 });
 
 // Lazy initialization is required on Workers: x402 must load facilitator
-// capabilities before constructing payment requirements, while network I/O must
-// happen inside a request rather than at module startup.
+// capabilities inside a request. Keep this as a normal Hono middleware so the
+// official x402 middleware remains part of the native chain.
 app.use("/buy/*", async (c, next) => {
   try {
     await ensurePaymentServerInitialized();
   } catch (error) {
-    return c.json({ ok:false, error:"x402_facilitator_initialization_failed", detail:clean(error?.message,300) }, 503);
-  }
-
-  let result;
-  try {
-    result = await x402Gate(c, next);
-  } catch (error) {
-    console.error("x402_gate_error", error);
     return c.json({
       ok:false,
-      error:"x402_gate_failed",
+      error:"x402_facilitator_initialization_failed",
       detail:clean(error?.message || error,300),
       paymentAttempted:false,
       outgoingSpendEnabled:false,
     }, 503);
   }
+  await next();
+  return c.res;
+});
+
+// This wrapper runs before x402 and resumes only after x402 has verified,
+// executed the paid resource and attempted settlement. That lets LUMEN record
+// revenue strictly from the final PAYMENT-RESPONSE without reimplementing the
+// payment gate or weakening fail-closed behavior.
+app.use("/buy/*", async (c, next) => {
+  await next();
+
   const paymentSignature = c.req.header("payment-signature") || c.req.header("x-payment") || "";
-  if (paymentSignature) {
+  if (!paymentSignature) return c.res;
+
+  try {
     const fingerprint = await sha256Hex(paymentSignature);
-    const response = result instanceof Response ? result : c.res;
-    const paymentResponse = response?.headers?.get("payment-response") || response?.headers?.get("x-payment-response") || "";
+    const paymentResponse = c.res?.headers?.get("payment-response") || c.res?.headers?.get("x-payment-response") || "";
     const settlement = decodeB64Json(paymentResponse);
+
     if (settlement?.success === true) {
       const row = await c.env.DB.prepare("SELECT request_metadata FROM lumen_x402_receipts WHERE payment_fingerprint=? LIMIT 1").bind(fingerprint).first();
       if (row) {
@@ -165,6 +171,7 @@ app.use("/buy/*", async (c, next) => {
         };
         await c.env.DB.prepare("UPDATE lumen_x402_receipts SET status='settled_verified', request_metadata=? WHERE payment_fingerprint=?")
           .bind(JSON.stringify(meta), fingerprint).run();
+
         try {
           const settledReceipt=await c.env.DB.prepare("SELECT * FROM lumen_x402_receipts WHERE payment_fingerprint=? LIMIT 1").bind(fingerprint).first();
           const briefId=clean(meta?.conversion?.brief_id,80);
@@ -177,7 +184,7 @@ app.use("/buy/*", async (c, next) => {
             }
           }
         } catch (error) {
-          meta.fulfillment={auto_queue:false,status:"queue_error",detail:clean(error?.message,300),reconciled_at:new Date().toISOString()};
+          meta.fulfillment={auto_queue:false,status:"queue_error",detail:clean(error?.message || error,300),reconciled_at:new Date().toISOString()};
           await c.env.DB.prepare("UPDATE lumen_x402_receipts SET request_metadata=? WHERE payment_fingerprint=?").bind(JSON.stringify(meta),fingerprint).run();
         }
       }
@@ -185,9 +192,19 @@ app.use("/buy/*", async (c, next) => {
       await c.env.DB.prepare("UPDATE lumen_x402_receipts SET status='settlement_failed' WHERE payment_fingerprint=? AND status='verified_pending_settlement'")
         .bind(fingerprint).run();
     }
+  } catch (error) {
+    // Settlement reconciliation must never convert a valid x402 response into a
+    // false success. Log it and preserve the protocol response; revenue remains
+    // uncounted unless a verified settlement was persisted.
+    console.error("x402_reconciliation_error", error);
   }
-  return result instanceof Response ? result : c.res;
+
+  return c.res;
 });
+
+// Official x402 middleware participates natively in the Hono chain. This is the
+// fail-closed payment gate: unpaid requests stop here with HTTP 402.
+app.use("/buy/*", x402Gate);
 
 function publicCatalog(origin) {
   return {
