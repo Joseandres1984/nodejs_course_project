@@ -1,45 +1,44 @@
 from __future__ import annotations
 
-"""LUMEN Zero Commercial Experiment Engine v1.
+"""LUMEN Zero Experiment Engine v1.
 
-Runs bounded, deterministic commercial experiments over the existing acquisition variants.
-The engine deliberately allocates most cycles to the current champion while reserving a small
-exploration lane for a challenger. It never creates paid spend, binding authority, new search
-budget or production self-modification.
+Turns the existing acquisition A/B surfaces into a deterministic 80/20 experiment loop:
+4 decisions exploit the strongest currently observed variant and every 5th decision explores an
+under-exposed alternative. The engine never creates paid spend, never accepts binding terms and
+never bypasses the existing outbound/contact/publication gates.
 
-The engine also exposes the already-learned Cognitive Director product/channel signals so the
-Autonomous Director can combine experimentation with real downstream outcome evidence.
+Execution is deliberately conservative: the selected variant may enqueue one governed distribution
+canary through the already-existing acquisition/distribution pipeline. Email canaries keep their
+verified-business-contact, opt-out, risk and daily/cycle caps. Social publication and paid media
+permissions are not expanded by this module.
 """
 
-import hashlib
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+import acquisition_campaigns as acquisition
 import autonomous_director_runtime as director
 
-VERSION = "1.0-commercial-experiment-engine"
-EXPLOIT_SHARE = 0.80
-EXPLORE_SHARE = 0.20
-ALLOCATION_BUCKETS = 5
-MIN_EVALUATION_CLICKS = 8
-MIN_WIN_LEADS = 1
-MAX_HISTORY = 120
-MAX_EXPERIMENTS = 24
-MAX_PLAN = int(getattr(director, "MAX_PLAN", 6))
-ROLE_BOOST_CAP = float(getattr(director, "ROLE_BOOST_CAP", 0.12))
+VERSION = "1.0-zero-experiment-engine"
+POLICY = "80_20_exploit_explore"
+WINDOW_SIZE = 5
+MAX_HISTORY = 100
+MAX_DIRECTOR_PRIORITY = 99
+DISPATCH_CHANNEL = "email_b2b"
 
 _ORIGINAL_DIRECTOR_TICK = director.director_tick
+_ORIGINAL_ACQUISITION_TICK = acquisition.acquisition_campaign_tick
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    return datetime.now(timezone.utc).isoformat()
 
 
-def _safe_dict(value: Any) -> Dict[str, Any]:
+def _d(value: Any) -> Dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def _safe_list(value: Any) -> List[Any]:
+def _l(value: Any) -> List[Any]:
     return value if isinstance(value, list) else []
 
 
@@ -57,359 +56,379 @@ def _f(value: Any, default: float = 0.0) -> float:
         return default
 
 
-def _cycle(state: Dict[str, Any]) -> int:
-    workforce = _safe_dict(_safe_dict(state.get("agent_workforce")).get("last_cycle"))
-    return max(1, _i(workforce.get("company_cycle"), _i(state.get("ticks"), 1)))
+def _clean(value: Any, limit: int = 160) -> str:
+    return " ".join(str(value or "").strip().split())[:limit]
 
 
-def _perf(variant: Dict[str, Any]) -> Dict[str, Any]:
-    p = _safe_dict(variant.get("performance"))
-    clicks = max(0, _i(p.get("clicks")))
-    leads = max(0, _i(p.get("submissions")))
-    verified = max(0, _i(p.get("verified_companies")))
-    rate = leads / max(1, clicks)
-    score = verified * 100.0 + leads * 35.0 + rate * 20.0 + min(clicks, 20) * 0.05
+def _mode_for_sequence(sequence: int) -> str:
+    return "explore" if max(1, int(sequence)) % WINDOW_SIZE == 0 else "exploit"
+
+
+def _audience_fit(bottleneck: str, audience: str) -> int:
+    b = str(bottleneck or "").lower()
+    audience = str(audience or "").lower()
+    if any(token in b for token in ("demand", "buyer", "inbound")):
+        return 3 if audience == "buyer" else 1
+    if any(token in b for token in ("supplier", "supply", "quote", "offer")):
+        return 3 if audience == "supplier" else 1
+    if "partner" in b or "catalog" in b:
+        return 3 if audience == "partner" else 1
+    return 1
+
+
+def _candidates(state: Dict[str, Any]) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    for campaign in _l(state.get("acquisition_campaigns")):
+        if not isinstance(campaign, dict) or campaign.get("status") != "active":
+            continue
+        cid = _clean(campaign.get("id"), 80)
+        champion = _clean(campaign.get("champion_variant_id"), 100)
+        for variant in _l(campaign.get("variants")):
+            if not isinstance(variant, dict) or not variant.get("id"):
+                continue
+            perf = _d(variant.get("performance"))
+            rows.append({
+                "campaign": campaign,
+                "variant": variant,
+                "campaign_id": cid,
+                "variant_id": _clean(variant.get("id"), 100),
+                "audience": _clean(campaign.get("audience"), 40),
+                "is_champion": _clean(variant.get("id"), 100) == champion,
+                "status": _clean(variant.get("status"), 40) or "testing",
+                "clicks": max(0, _i(perf.get("clicks"))),
+                "landing_views": max(0, _i(perf.get("landing_views"))),
+                "leads": max(0, _i(perf.get("submissions"))),
+                "verified_companies": max(0, _i(perf.get("verified_companies"))),
+                "conversion_rate": max(0.0, min(1.0, _f(perf.get("click_to_lead_rate")))),
+                "score": _f(perf.get("score")),
+                "angle": _clean(variant.get("angle"), 80),
+                "headline": _clean(variant.get("headline"), 220),
+                "tracking_path": _clean(variant.get("tracking_path"), 180),
+            })
+    return rows
+
+
+def _select_candidate(state: Dict[str, Any], mode: str, bottleneck: str = "") -> Optional[Dict[str, Any]]:
+    rows = _candidates(state)
+    if not rows:
+        return None
+
+    if mode == "explore":
+        pool = [x for x in rows if not x["is_champion"] and x["status"] != "needs_rotation"]
+        if not pool:
+            pool = [x for x in rows if not x["is_champion"]]
+        if not pool:
+            pool = rows
+        return sorted(
+            pool,
+            key=lambda x: (
+                x["clicks"],
+                x["landing_views"],
+                -_audience_fit(bottleneck, x["audience"]),
+                x["campaign_id"],
+                x["variant_id"],
+            ),
+        )[0]
+
+    champions = [x for x in rows if x["is_champion"] and x["status"] != "needs_rotation"]
+    pool = champions or [x for x in rows if x["status"] != "needs_rotation"] or rows
+    return sorted(
+        pool,
+        key=lambda x: (
+            x["verified_companies"],
+            x["leads"],
+            x["conversion_rate"],
+            x["score"],
+            _audience_fit(bottleneck, x["audience"]),
+            -x["clicks"],
+            x["campaign_id"],
+            x["variant_id"],
+        ),
+        reverse=True,
+    )[0]
+
+
+def _cognitive_truth(state: Dict[str, Any]) -> Dict[str, Any]:
+    learning = _d(state.get("cognitive_director_learning"))
+    product = _d(learning.get("top_product"))
+    channel = _d(learning.get("top_channel"))
     return {
-        "clicks": clicks,
-        "leads": leads,
-        "verified_companies": verified,
-        "lead_rate": round(rate, 4),
-        "score": round(score, 4),
+        "product_slug": _clean(product.get("product_slug"), 80) or None,
+        "product_evidence_class": product.get("evidence_class"),
+        "channel": _clean(channel.get("source"), 80) or None,
+        "channel_campaign": _clean(channel.get("campaign"), 120) or None,
+        "settled_count": max(0, _i(product.get("settled_count"))),
+        "realized_revenue_usd": round(max(0.0, _f(product.get("realized_revenue_usd"))), 4),
+        "outcome_samples": max(0, _i(product.get("samples"))),
     }
 
 
-def _rank_key(variant: Dict[str, Any]) -> tuple[float, int, int, str]:
-    p = _perf(variant)
-    return (p["score"], p["verified_companies"], p["leads"], str(variant.get("id") or ""))
+def _experiment_id(cycle: int, sequence: int, candidate: Dict[str, Any]) -> str:
+    marker = cycle if cycle > 0 else sequence
+    return f"EXP-{marker:06d}-{sequence:05d}-{candidate['variant_id']}"[:190]
 
 
-def _champion(campaign: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    variants = [v for v in _safe_list(campaign.get("variants")) if isinstance(v, dict) and v.get("id")]
-    if not variants:
+def _payload_for(candidate: Dict[str, Any], channel: str) -> Optional[Dict[str, Any]]:
+    campaign = candidate.get("campaign")
+    variant = candidate.get("variant")
+    if not isinstance(campaign, dict) or not isinstance(variant, dict):
         return None
-    current_id = str(campaign.get("champion_variant_id") or "")
-    current = next((v for v in variants if str(v.get("id") or "") == current_id), None)
-    converting = [v for v in variants if _perf(v)["leads"] > 0 or _perf(v)["verified_companies"] > 0]
-    if converting:
-        best = max(converting, key=_rank_key)
-        if current and _perf(current)["leads"] > 0 and _perf(best)["score"] <= _perf(current)["score"]:
-            return current
-        return best
-    return current or variants[0]
+    for payload in acquisition._channel_payloads(campaign, variant):
+        if str(payload.get("channel") or "") == channel:
+            return dict(payload)
+    return None
 
 
-def _challenger(campaign: Dict[str, Any], champion: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    variants = [
-        v for v in _safe_list(campaign.get("variants"))
-        if isinstance(v, dict) and v.get("id") and str(v.get("id")) != str(champion.get("id"))
-    ]
-    if not variants:
-        return None
-    return min(
-        variants,
-        key=lambda v: (
-            _perf(v)["clicks"],
-            -_perf(v)["leads"],
-            -_perf(v)["verified_companies"],
-            str(v.get("id") or ""),
-        ),
-    )
+def _queue_governed_canary(state: Dict[str, Any], experiment: Dict[str, Any], candidate: Dict[str, Any]) -> Dict[str, Any]:
+    channel = DISPATCH_CHANNEL
+    payload = _payload_for(candidate, channel)
+    if not payload:
+        return {"queued": False, "channel": channel, "reason": "payload_unavailable"}
+    if payload.get("requires_human_budget_approval") or channel == "paid_ads":
+        return {"queued": False, "channel": channel, "reason": "paid_or_budget_gated"}
 
+    queue = state.setdefault("acquisition_distribution_queue", [])
+    key = f"EXPERIMENT|{experiment['id']}|{channel}"
+    if any(str(row.get("key") or "") == key for row in queue if isinstance(row, dict)):
+        return {"queued": False, "channel": channel, "reason": "already_queued", "key": key}
 
-def _allocation_phase(campaign_id: str, cycle: int) -> str:
-    offset = int(hashlib.sha1(campaign_id.encode("utf-8")).hexdigest()[:4], 16) % ALLOCATION_BUCKETS
-    return "explore" if ((cycle + offset) % ALLOCATION_BUCKETS) == 0 else "exploit"
-
-
-def _evaluation(champion: Dict[str, Any], challenger: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    if not challenger:
-        return {"status": "single_arm", "winner": str(champion.get("id") or ""), "reason": "no_challenger"}
-    cp = _perf(champion)
-    xp = _perf(challenger)
-    if cp["clicks"] < MIN_EVALUATION_CLICKS or xp["clicks"] < MIN_EVALUATION_CLICKS:
-        return {"status": "testing", "winner": None, "reason": "minimum_exposure_not_reached"}
-    if xp["verified_companies"] > cp["verified_companies"]:
-        return {"status": "supported", "winner": str(challenger.get("id") or ""), "reason": "more_verified_companies"}
-    if xp["leads"] >= MIN_WIN_LEADS and xp["lead_rate"] >= cp["lead_rate"] + 0.05:
-        return {"status": "supported", "winner": str(challenger.get("id") or ""), "reason": "material_lead_rate_lift"}
-    if xp["leads"] == 0 and cp["leads"] > 0:
-        return {"status": "demoted", "winner": str(champion.get("id") or ""), "reason": "challenger_zero_leads_after_minimum_exposure"}
-    return {"status": "testing", "winner": None, "reason": "no_material_difference_yet"}
-
-
-def _payloads(campaign: Dict[str, Any], variant: Dict[str, Any]) -> List[Dict[str, Any]]:
-    try:
-        import acquisition_campaigns
-
-        return [dict(x) for x in acquisition_campaigns._channel_payloads(campaign, variant)]
-    except Exception:
-        return []
-
-
-def _activate_variant_queue(
-    state: Dict[str, Any],
-    campaign: Dict[str, Any],
-    variant: Dict[str, Any],
-    experiment_id: str,
-    phase: str,
-) -> int:
-    cid = str(campaign.get("id") or "")
-    vid = str(variant.get("id") or "")
-    queue = [x for x in _safe_list(state.get("acquisition_distribution_queue")) if isinstance(x, dict)]
-    queue = [x for x in queue if str(x.get("campaign_id") or "") != cid]
-    added = 0
-    for payload in _payloads(campaign, variant):
-        channel = str(payload.get("channel") or "")
-        key = f"{cid}|{vid}|{channel}"
-        queue.append({
-            "key": key,
-            "campaign_id": cid,
-            "variant_id": vid,
-            "audience": campaign.get("audience"),
-            "channel": channel,
-            "payload": payload,
-            "status": "ready_for_authorized_connector" if payload.get("requires_authorized_connector") else "ready_owned_or_existing_channel",
-            "experiment_id": experiment_id,
-            "experiment_phase": phase,
-            "experiment_active": True,
-            "experiment_allocation": EXPLORE_SHARE if phase == "explore" else EXPLOIT_SHARE,
-            "updated_at": _now(),
-        })
-        added += 1
+    queue.append({
+        "key": key,
+        "campaign_id": candidate["campaign_id"],
+        "variant_id": candidate["variant_id"],
+        "audience": candidate["audience"],
+        "channel": channel,
+        "payload": payload,
+        "status": "ready_owned_or_existing_channel",
+        "experiment_id": experiment["id"],
+        "experiment_mode": experiment["mode"],
+        "created_at": _now(),
+        "updated_at": _now(),
+    })
     state["acquisition_distribution_queue"] = queue[-300:]
+    return {"queued": True, "channel": channel, "reason": "governed_canary_scheduled", "key": key}
 
-    active_keys = {str(x.get("key") or "") for x in queue}
-    kept_jobs = []
-    for job in _safe_list(state.get("distribution_operator_jobs")):
-        if not isinstance(job, dict):
+
+def _roles(candidate: Dict[str, Any]) -> List[str]:
+    audience = candidate.get("audience")
+    if audience == "buyer":
+        return ["market_manager", "buyer_hunter", "revops"]
+    if audience == "supplier":
+        return ["market_manager", "supplier_hunter", "revops"]
+    return ["market_manager", "revops", "research_analyst"]
+
+
+def _merge_boosts(base: Dict[str, Any], candidate: Dict[str, Any], mode: str) -> Dict[str, float]:
+    out = {str(k): min(director.ROLE_BOOST_CAP, max(0.0, _f(v))) for k, v in _d(base).items()}
+    amount = 0.09 if mode == "exploit" else 0.06
+    for role in _roles(candidate):
+        out[role] = round(min(director.ROLE_BOOST_CAP, max(_f(out.get(role)), amount)), 4)
+    return out
+
+
+def _refresh_history(state: Dict[str, Any], history: List[Dict[str, Any]]) -> None:
+    current = {(x["campaign_id"], x["variant_id"]): x for x in _candidates(state)}
+    for row in history[-25:]:
+        key = (str(row.get("campaign_id") or ""), str(row.get("variant_id") or ""))
+        now = current.get(key)
+        if not now:
             continue
-        key = str(job.get("queue_key") or "")
-        if key in active_keys or str(job.get("campaign_id") or "") != cid:
-            kept_jobs.append(job)
-            continue
-        terminal = str(job.get("status") or "") in {"verified_published", "email_sent_verified", "live_first_party"}
-        irreversible = bool(job.get("outbox_id"))
-        if terminal or irreversible:
-            job["experiment_active"] = False
-            job["experiment_status"] = "historical_inactive_arm"
-            kept_jobs.append(job)
-    state["distribution_operator_jobs"] = kept_jobs[-500:]
-    return added
+        row["observed_clicks"] = now["clicks"]
+        row["observed_leads"] = now["leads"]
+        row["observed_verified_companies"] = now["verified_companies"]
+        row["observed_conversion_rate"] = round(now["conversion_rate"], 4)
+        row["lead_delta"] = max(0, now["leads"] - _i(row.get("baseline_leads")))
+        row["verified_delta"] = max(0, now["verified_companies"] - _i(row.get("baseline_verified_companies")))
+        if row["lead_delta"] > 0 or row["verified_delta"] > 0:
+            row["result"] = "commercial_progress_observed"
+        elif _i(state.get("ticks")) > _i(row.get("cycle")):
+            row.setdefault("result", "observing")
+        row["observed_at"] = _now()
 
 
-def _cognitive_focus(state: Dict[str, Any]) -> Dict[str, Any]:
-    snap = _safe_dict(state.get("cognitive_director_learning"))
-    top_product = _safe_dict(snap.get("top_product")) or None
-    top_channel = _safe_dict(snap.get("top_channel")) or None
+def _build_experiment(state: Dict[str, Any], candidate: Dict[str, Any], mode: str, sequence: int, bottleneck: str, target_metric: str) -> Dict[str, Any]:
+    cycle = max(0, _i(state.get("ticks")))
+    cognitive = _cognitive_truth(state)
+    evidence = (
+        f"clicks={candidate['clicks']}, leads={candidate['leads']}, verified={candidate['verified_companies']}, "
+        f"conversion={candidate['conversion_rate']:.1%}"
+    )
+    if mode == "exploit":
+        decision = f"Explotar {candidate['variant_id']} y medir lead verificado/cobro sin ampliar gasto."
+        hypothesis = f"La variante con mejor señal comercial actual debería convertir mejor que una alternativa menos probada ({evidence})."
+    else:
+        decision = f"Explorar {candidate['variant_id']} con capacidad acotada para buscar una alternativa superior."
+        hypothesis = f"Una variante menos expuesta puede superar al champion sin abandonar la vía principal ({evidence})."
+
     return {
-        "status": snap.get("status") or "unavailable",
-        "top_product": top_product,
-        "top_channel": top_channel,
-        "eligible_product_signals": _i(snap.get("eligible_product_signals")),
-        "eligible_channel_signals": _i(snap.get("eligible_channel_signals")),
+        "id": _experiment_id(cycle, sequence, candidate),
+        "version": VERSION,
+        "created_at": _now(),
+        "cycle": cycle,
+        "sequence": sequence,
+        "mode": mode,
+        "policy": POLICY,
+        "campaign_id": candidate["campaign_id"],
+        "variant_id": candidate["variant_id"],
+        "audience": candidate["audience"],
+        "angle": candidate["angle"],
+        "headline": candidate["headline"],
+        "tracking_path": candidate["tracking_path"],
+        "hypothesis": hypothesis,
+        "next_decision": decision,
+        "bottleneck": bottleneck,
+        "target_metric": target_metric,
+        "baseline_clicks": candidate["clicks"],
+        "baseline_leads": candidate["leads"],
+        "baseline_verified_companies": candidate["verified_companies"],
+        "baseline_conversion_rate": round(candidate["conversion_rate"], 4),
+        "product_winner": cognitive["product_slug"],
+        "channel_winner": cognitive["channel"],
+        "channel_winner_campaign": cognitive["channel_campaign"],
+        "verified_settlements": cognitive["settled_count"],
+        "verified_revenue_usd": cognitive["realized_revenue_usd"],
+        "outcome_samples": cognitive["outcome_samples"],
+        "status": "scheduled",
+        "spend_usd": 0,
+        "binding": False,
+        "paid_media": False,
+        "hard_bottleneck_override": False,
     }
 
 
 def experiment_engine_tick(state: Dict[str, Any]) -> Dict[str, Any]:
-    cycle = _cycle(state)
-    experiments: List[Dict[str, Any]] = []
-    distribution_entries = 0
-    campaigns = [x for x in _safe_list(state.get("acquisition_campaigns")) if isinstance(x, dict) and x.get("status") == "active"]
+    previous = _d(state.get("experiment_engine"))
+    history = [dict(x) for x in _l(previous.get("history")) if isinstance(x, dict)]
+    _refresh_history(state, history)
+    sequence = max(0, _i(previous.get("decision_sequence"))) + 1
+    mode = _mode_for_sequence(sequence)
+    director_state = _d(state.get("autonomous_director"))
+    bottleneck = str(director_state.get("bottleneck") or "")
+    target_metric = str(director_state.get("target_metric") or "")
+    candidate = _select_candidate(state, mode, bottleneck)
 
-    for campaign in campaigns:
-        champion = _champion(campaign)
-        if not champion:
-            continue
-        challenger = _challenger(campaign, champion)
-        evaluation = _evaluation(champion, challenger)
-        if evaluation.get("status") == "supported" and challenger and evaluation.get("winner") == str(challenger.get("id") or ""):
-            campaign["champion_variant_id"] = str(challenger.get("id") or "")
-            champion = challenger
-            challenger = _challenger(campaign, champion)
-            evaluation = {"status": "promoted", "winner": str(champion.get("id") or ""), "reason": "challenger_became_champion"}
-        else:
-            campaign["champion_variant_id"] = str(champion.get("id") or "")
-
-        phase = _allocation_phase(str(campaign.get("id") or ""), cycle)
-        selected = challenger if phase == "explore" and challenger else champion
-        exp_id = f"EXP-{str(campaign.get('id') or 'ACQ')}-{str(champion.get('id') or 'A')}-{str((challenger or {}).get('id') or 'NONE')}"
-        experiment = {
-            "id": exp_id,
-            "campaign_id": campaign.get("id"),
-            "audience": campaign.get("audience"),
-            "hypothesis": f"La variante {str((challenger or {}).get('id') or 'sin_challenger')} puede superar a {str(champion.get('id') or '')} en leads/empresas verificadas sin ampliar autoridad.",
-            "phase": phase,
-            "allocation": EXPLORE_SHARE if phase == "explore" else EXPLOIT_SHARE,
-            "champion_variant_id": champion.get("id"),
-            "challenger_variant_id": (challenger or {}).get("id"),
-            "selected_variant_id": selected.get("id"),
-            "champion_performance": _perf(champion),
-            "challenger_performance": _perf(challenger) if challenger else None,
-            "evaluation": evaluation,
-            "status": "testing" if evaluation.get("status") in {"testing", "single_arm"} else evaluation.get("status"),
+    if not candidate:
+        report = {
+            "version": VERSION,
+            "status": "waiting_for_acquisition_variants",
             "updated_at": _now(),
+            "policy": POLICY,
+            "exploit_share": 0.80,
+            "explore_share": 0.20,
+            "decision_sequence": sequence,
+            "current_experiment": None,
+            "history": history[-MAX_HISTORY:],
+            "winner_product": None,
+            "winner_channel": None,
+            "verified_settlements": 0,
+            "verified_revenue_usd": 0,
+            "bottleneck": bottleneck or None,
+            "next_decision": "Esperar variantes atribuibles antes de asignar capacidad experimental.",
+            "guardrails": {"monetary_budget_usd": 0, "paid_media_authority_changed": False, "binding_authority_changed": False, "search_budget_increased": False, "hard_bottleneck_override": False},
         }
-        campaign["experiment_engine"] = {
-            "experiment_id": exp_id,
-            "phase": phase,
-            "selected_variant_id": selected.get("id"),
-            "allocation_policy": "80_exploit_20_explore",
-            "updated_at": experiment["updated_at"],
-        }
-        distribution_entries += _activate_variant_queue(state, campaign, selected, exp_id, phase)
-        experiments.append(experiment)
+        state["experiment_engine"] = report
+        return report
 
-    cognitive = _cognitive_focus(state)
-    active = [x for x in experiments if x.get("status") in {"testing", "promoted"}]
-    hard_bottleneck = _safe_dict(state.get("autonomous_director")).get("bottleneck")
+    experiment = _build_experiment(state, candidate, mode, sequence, bottleneck, target_metric)
+    experiment["dispatch"] = _queue_governed_canary(state, experiment, candidate)
+    history.append(dict(experiment))
+    cognitive = _cognitive_truth(state)
     report = {
         "version": VERSION,
-        "status": "active" if experiments else "waiting_for_campaigns",
+        "status": "active",
         "updated_at": _now(),
-        "cycle": cycle,
-        "allocation_policy": {
-            "exploit_share": EXPLOIT_SHARE,
-            "explore_share": EXPLORE_SHARE,
-            "deterministic_buckets": ALLOCATION_BUCKETS,
-        },
-        "experiments_active": len(active),
-        "experiments_total": len(experiments),
-        "experiments": experiments[:MAX_EXPERIMENTS],
-        "distribution_entries_active": distribution_entries,
-        "cognitive_focus": cognitive,
-        "hard_bottleneck": hard_bottleneck,
-        "next_decision": (
-            f"Mantener {int(EXPLOIT_SHARE*100)}% en ganadores y reservar {int(EXPLORE_SHARE*100)}% para challengers hasta reunir evidencia suficiente."
-            if experiments else "Crear tráfico real y resultados atribuibles antes de optimizar."
-        ),
-        "guardrails": {
-            "monetary_budget_usd": 0,
-            "paid_media_autonomous": False,
-            "search_budget_increased": False,
-            "binding_authority_changed": False,
-            "new_connector_authority": False,
-            "production_self_modify": False,
-            "hard_bottleneck_override": False,
-        },
+        "policy": POLICY,
+        "exploit_share": 0.80,
+        "explore_share": 0.20,
+        "decision_sequence": sequence,
+        "exploit_decisions": max(0, _i(previous.get("exploit_decisions"))) + (1 if mode == "exploit" else 0),
+        "explore_decisions": max(0, _i(previous.get("explore_decisions"))) + (1 if mode == "explore" else 0),
+        "current_experiment": experiment,
+        "history": history[-MAX_HISTORY:],
+        "winner_product": cognitive["product_slug"],
+        "winner_channel": cognitive["channel"],
+        "verified_settlements": cognitive["settled_count"],
+        "verified_revenue_usd": cognitive["realized_revenue_usd"],
+        "outcome_samples": cognitive["outcome_samples"],
+        "bottleneck": bottleneck or None,
+        "next_decision": experiment["next_decision"],
+        "guardrails": {"monetary_budget_usd": 0, "paid_media_authority_changed": False, "binding_authority_changed": False, "search_budget_increased": False, "hard_bottleneck_override": False, "governed_outbound_caps_preserved": True},
     }
     state["experiment_engine"] = report
-    history = [x for x in _safe_list(state.get("experiment_engine_history")) if isinstance(x, dict)]
-    history.append({
-        "updated_at": report["updated_at"],
-        "cycle": cycle,
-        "experiments_active": report["experiments_active"],
-        "phase_counts": {
-            "exploit": sum(1 for x in experiments if x.get("phase") == "exploit"),
-            "explore": sum(1 for x in experiments if x.get("phase") == "explore"),
-        },
-        "top_product": _safe_dict(cognitive.get("top_product")).get("product_slug"),
-        "top_channel": _safe_dict(cognitive.get("top_channel")).get("source"),
-        "hard_bottleneck": hard_bottleneck,
-    })
-    state["experiment_engine_history"] = history[-MAX_HISTORY:]
     return report
 
 
-def _merge_boosts(base: Dict[str, Any], additions: Dict[str, float]) -> Dict[str, float]:
-    merged = {str(k): min(ROLE_BOOST_CAP, max(0.0, _f(v))) for k, v in base.items()}
-    for role, value in additions.items():
-        merged[role] = min(ROLE_BOOST_CAP, max(_f(merged.get(role)), value))
-    return merged
+def _experiment_task(engine: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    experiment = _d(engine.get("current_experiment"))
+    if not experiment:
+        return None
+    candidate_stub = {"audience": str(experiment.get("audience") or "")}
+    strong = _i(experiment.get("baseline_leads")) > 0 or _f(experiment.get("verified_revenue_usd")) > 0
+    mode = str(experiment.get("mode") or "exploit")
+    priority = 97 if mode == "exploit" and strong else (92 if mode == "exploit" else 86)
+    return {
+        "id": "DIR-EXPERIMENT-ENGINE",
+        "title": f"{mode.upper()} {experiment.get('campaign_id')} / {experiment.get('variant_id')}",
+        "priority": min(MAX_DIRECTOR_PRIORITY, priority),
+        "roles": _roles(candidate_stub),
+        "action": experiment.get("next_decision"),
+        "success_metric": "qualified_lead_or_verified_settlement",
+        "mode": f"experiment_{mode}",
+        "autonomous": True,
+        "spend_usd": 0,
+        "binding": False,
+        "experiment_id": experiment.get("id"),
+        "campaign_id": experiment.get("campaign_id"),
+        "variant_id": experiment.get("variant_id"),
+        "hard_bottleneck_override": False,
+    }
 
 
-def director_tick_with_experiment_engine(state: Dict[str, Any], adaptive_report: Dict[str, Any] | None = None) -> Dict[str, Any]:
+def director_tick_with_experiments(state: Dict[str, Any], adaptive_report: Dict[str, Any] | None = None) -> Dict[str, Any]:
     report = dict(_ORIGINAL_DIRECTOR_TICK(state, adaptive_report) or {})
-    engine = _safe_dict(state.get("experiment_engine"))
-    experiments = [x for x in _safe_list(engine.get("experiments")) if isinstance(x, dict)]
-    active = [x for x in experiments if x.get("status") in {"testing", "promoted"}]
-    phases = [str(x.get("phase") or "") for x in active]
-    phase = "explore" if "explore" in phases else "exploit" if active else "waiting"
+    engine = _d(state.get("experiment_engine"))
+    task = _experiment_task(engine)
+    if not task:
+        report["experiment_engine"] = {"version": VERSION, "status": engine.get("status") or "not_initialized", "policy": POLICY, "hard_bottleneck_preserved": True, "monetary_budget_usd": 0}
+        return report
 
-    boosts = dict(_safe_dict(report.get("role_boosts")))
-    if phase == "explore":
-        boosts = _merge_boosts(boosts, {"research_analyst": 0.04, "market_manager": 0.04})
-    elif phase == "exploit":
-        boosts = _merge_boosts(boosts, {"revops": 0.04, "buyer_hunter": 0.03})
-    report["role_boosts"] = boosts
-
-    plan = [dict(x) for x in _safe_list(report.get("plan")) if isinstance(x, dict)]
-    if active and not any(str(x.get("id") or "") == "DIR-EXPERIMENT-ENGINE" for x in plan):
-        plan.append({
-            "id": "DIR-EXPERIMENT-ENGINE",
-            "priority": 86,
-            "roles": ["research_analyst", "market_manager", "revops"],
-            "action": "Ejecutar la asignación 80/20 del Experiment Engine usando únicamente canales orgánicos/propios o conectores ya autorizados; medir leads y resultados verificables.",
-            "success_metric": "experiment_verified_conversion_progress",
-            "mode": phase,
-            "reason": "Aprender qué variante/canal genera mejor avance comercial sin desplazar el cuello de botella canónico.",
-            "binding": False,
-            "spend_usd": 0,
-        })
-        plan.sort(key=lambda x: _i(x.get("priority")), reverse=True)
-        report["plan"] = plan[:MAX_PLAN]
-
+    plan = [dict(x) for x in _l(report.get("plan")) if isinstance(x, dict) and x.get("id") != "DIR-EXPERIMENT-ENGINE"]
+    plan.append(task)
+    plan.sort(key=lambda row: _i(row.get("priority")), reverse=True)
+    report["plan"] = plan[: int(getattr(director, "MAX_PLAN", 6))]
+    experiment = _d(engine.get("current_experiment"))
+    report["role_boosts"] = _merge_boosts(_d(report.get("role_boosts")), {"audience": experiment.get("audience")}, str(experiment.get("mode") or "exploit"))
     report["experiment_engine"] = {
         "version": VERSION,
-        "status": engine.get("status") or "not_initialized",
-        "phase": phase,
-        "experiments_active": len(active),
-        "exploit_share": EXPLOIT_SHARE,
-        "explore_share": EXPLORE_SHARE,
+        "status": engine.get("status") or "active",
+        "policy": POLICY,
+        "mode": experiment.get("mode"),
+        "experiment_id": experiment.get("id"),
+        "campaign_id": experiment.get("campaign_id"),
+        "variant_id": experiment.get("variant_id"),
+        "dispatch": experiment.get("dispatch"),
+        "next_decision": experiment.get("next_decision"),
         "hard_bottleneck_preserved": True,
         "monetary_budget_usd": 0,
-        "search_budget_increased": False,
-        "binding_authority_changed": False,
     }
-    authority = dict(_safe_dict(report.get("authority")))
-    authority.update({
-        "experiment_engine_authority": "reversible_attention_and_variant_allocation_only",
-        "experiment_engine_monetary_budget_usd": 0,
-        "experiment_engine_search_budget_increased": False,
-        "experiment_engine_hard_bottleneck_override": False,
-    })
+    authority = dict(_d(report.get("authority")))
+    authority.update({"experiment_engine_authority": "reversible_zero_cost_testing_only", "experiment_engine_monetary_budget_usd": 0, "experiment_engine_paid_media_authority_changed": False, "experiment_engine_binding_authority_changed": False, "experiment_engine_search_budget_increased": False, "experiment_engine_hard_bottleneck_override": False})
     report["authority"] = authority
     state["autonomous_director"] = report
     return report
 
 
-# The Cognitive Director bridge is installed first in worker_entry. Wrap that final decision surface
-# so Experiment Engine adds only bounded reversible allocation on top of it.
-director.director_tick = director_tick_with_experiment_engine
+def acquisition_tick_with_experiments(state: Dict[str, Any]) -> Dict[str, Any]:
+    report = dict(_ORIGINAL_ACQUISITION_TICK(state) or {})
+    engine = experiment_engine_tick(state)
+    current = _d(engine.get("current_experiment"))
+    report["experiment_engine"] = {"version": VERSION, "status": engine.get("status"), "policy": POLICY, "mode": current.get("mode"), "experiment_id": current.get("id"), "variant_id": current.get("variant_id"), "dispatch": current.get("dispatch"), "monetary_budget_usd": 0}
+    return report
 
-# Acquisition Campaigns already refreshes performance and canonical tracking on every Meta-LUMEN
-# cycle. Wrap that tick rather than adding another scheduler: experimentation runs immediately after
-# fresh campaign metrics and before Creative Distribution / Distribution Operator consume the queue.
-try:
-    import acquisition_campaigns as _acquisition_campaigns
 
-    _ORIGINAL_ACQUISITION_TICK = _acquisition_campaigns.acquisition_campaign_tick
+# Acquisition is wrapped so the experiment is selected after canonical campaign performance refresh
+# and before distribution runs. Director is wrapped after Cognitive learning in worker_entry.
+director.director_tick = director_tick_with_experiments
+acquisition.acquisition_campaign_tick = acquisition_tick_with_experiments
 
-    def _acquisition_tick_with_experiments(state: Dict[str, Any]) -> Dict[str, Any]:
-        acquisition = dict(_ORIGINAL_ACQUISITION_TICK(state) or {})
-        experiment = dict(experiment_engine_tick(state) or {})
-        acquisition["experiment_engine"] = {
-            "version": experiment.get("version"),
-            "status": experiment.get("status"),
-            "experiments_active": experiment.get("experiments_active"),
-            "experiments_total": experiment.get("experiments_total"),
-            "distribution_entries_active": experiment.get("distribution_entries_active"),
-            "allocation_policy": experiment.get("allocation_policy"),
-        }
-        return acquisition
-
-    _acquisition_campaigns.acquisition_campaign_tick = _acquisition_tick_with_experiments
-except Exception as exc:
-    print({"experiment_engine_acquisition_bridge": {"status": "degraded_fail_open", "error": f"{type(exc).__name__}: {str(exc)[:220]}"}}, flush=True)
-
-print({
-    "experiment_engine_runtime": {
-        "version": VERSION,
-        "status": "installed",
-        "allocation": "80_exploit_20_explore",
-        "minimum_evaluation_clicks_per_arm": MIN_EVALUATION_CLICKS,
-        "monetary_budget_usd": 0,
-        "search_budget_increased": False,
-        "binding_authority_changed": False,
-        "hard_bottleneck_override": False,
-    }
-}, flush=True)
+print({"experiment_engine_runtime": {"version": VERSION, "status": "installed", "policy": POLICY, "exploit_share": 0.80, "explore_share": 0.20, "dispatch_channel": DISPATCH_CHANNEL, "monetary_budget_usd": 0, "paid_media_authority_changed": False, "binding_authority_changed": False, "search_budget_increased": False, "hard_bottleneck_override": False}}, flush=True)
