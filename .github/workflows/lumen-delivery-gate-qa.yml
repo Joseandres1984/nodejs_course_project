@@ -1,0 +1,134 @@
+name: LUMEN Delivery Gate QA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/lumen-delivery-gate-qa.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  delivery-gate-qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout LUMEN Zero
+        uses: actions/checkout@v4
+        with:
+          ref: lumen-zero
+
+      - name: Set up runtimes
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install PDF validators
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-save playwright@1.55.0 pdf-lib@1.17.1
+          npx playwright install --with-deps chromium
+          python -m pip install --disable-pip-version-check pypdf==5.9.0 pillow==11.3.0
+          command -v pdftotext >/dev/null || { sudo apt-get update; sudo apt-get install -y poppler-utils; }
+
+      - name: Create production-like local fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/lumen-gate
+          mkdir -p /tmp/lumen-gate/previews
+          cat > /tmp/lumen-gate/report.json <<'JSON'
+          {
+            "template_key":"supplier-snapshot",
+            "product_or_service_id":"supplier-snapshot",
+            "report_id":"LUMEN-GATE-001",
+            "client":"Industria Sur SA",
+            "generated_at":"2026-09-21T21:30:00-03:00",
+            "evidence_cutoff":"2026-09-21T21:25:00-03:00",
+            "client_request":"Revisar la presencia pública de un proveedor tecnológico antes de iniciar un contacto comercial y señalar qué puntos deberían verificarse directamente.",
+            "answer":"La presencia pública revisada es consistente para una primera aproximación comercial, aunque la información visible no permite inferir solvencia, stock, capacidad futura ni cumplimiento contractual.",
+            "confidence":"media",
+            "findings":[
+              {"title":"Presencia corporativa visible","detail":"Se observan canales públicos y documentación institucional suficientes para identificar una actividad tecnológica verificable.","confidence":"alta"},
+              {"title":"Validación comercial necesaria","detail":"Las fuentes públicas no reemplazan una confirmación directa de alcance, disponibilidad, condiciones y capacidad para el requerimiento concreto.","confidence":"alta"}
+            ],
+            "tables":[{"title":"Señales revisadas","columns":["Señal","Resultado","Evidencia"],"rows":[
+              ["Identidad pública","Consistente","Sitio institucional accesible y documentación pública"],
+              ["Canal corporativo","Visible","Canales oficiales disponibles para validación directa"]
+            ]}],
+            "risks":[{"level":"medio","title":"Capacidad no inferible","detail":"La presencia pública no demuestra por sí sola capacidad, precio, disponibilidad ni cumplimiento futuro."}],
+            "evidence":[
+              {"title":"Cloudflare","url":"https://www.cloudflare.com/","note":"Fuente pública para comprobar presencia institucional y acceso a información corporativa.","observed_at":"2026-09-21"},
+              {"title":"GitHub","url":"https://github.com/","note":"Fuente pública adicional para comprobar presencia tecnológica y trazabilidad de información pública.","observed_at":"2026-09-21"}
+            ],
+            "next_steps":["Confirmar directamente alcance, disponibilidad y condiciones comerciales antes de tomar una decisión."],
+            "recommendation":"Usar esta revisión como filtro inicial y realizar una validación comercial directa antes de asumir capacidad, disponibilidad o condiciones futuras."
+          }
+          JSON
+          cat > /tmp/lumen-gate/context.json <<'JSON'
+          {
+            "receipt":{"id":"X402R-GATE001A","product_id":"MP-SUPPLIER-SNAPSHOT","service_id":"SRV-SUPPLIERCHECK","amount_usd":5,"currency":"USD","network":"eip155:8453","pay_to":"0x04285DE6A083CEb28fb0C254a2ed0F5fdB2eeD28","status":"redeemed_queued","request_metadata":{"conversion":{"brief_id":"CL-GATE001A"},"settlement":{"success":true,"transaction":"0x1111111111111111111111111111111111111111111111111111111111111111","network":"eip155:8453"}}},
+            "order":{"id":"MORD-GATE001A","item_type":"product","item_id":"MP-SUPPLIER-SNAPSHOT","service_id":"SRV-SUPPLIERCHECK","amount_usd":5,"status":"x402_paid_queued","remote_metadata":{"payment_verified":"true","payment_settled":"true","x402_receipt_id":"X402R-GATE001A","brief_id":"CL-GATE001A"}},
+            "brief":{"id":"CL-GATE001A","product_id":"MP-SUPPLIER-SNAPSHOT","product_slug":"supplier-snapshot","email":"compras@lumen-b2b.workers.dev","company":"Industria Sur SA","details":"Revisar la presencia pública de un proveedor tecnológico antes de iniciar un contacto comercial y señalar qué puntos deberían verificarse directamente.","status":"paid_queued","technical_canary":0}
+          }
+          JSON
+
+      - name: Produce quality-approved PDF
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .lumen/reporting/validate_report_input.py /tmp/lumen-gate/report.json
+          node .lumen/reporting/render_report.mjs --input /tmp/lumen-gate/report.json --output /tmp/lumen-gate/report.html
+          node .lumen/reporting/render_pdf.mjs --input /tmp/lumen-gate/report.html --output /tmp/lumen-gate/report.pdf --report-id LUMEN-GATE-001 --title "Supplier Snapshot"
+          python .lumen/reporting/validate_pdf.py /tmp/lumen-gate/report.pdf --report-id LUMEN-GATE-001 --title "Supplier Snapshot" --tier micro --preview-dir /tmp/lumen-gate/previews > /tmp/lumen-gate/quality.json
+          jq -e '.ok == true and .quality_gate == "client_delivery_ready" and .pages >= 1 and .pages <= 3' /tmp/lumen-gate/quality.json >/dev/null
+
+      - name: Approve exact paid delivery
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .lumen/reporting/approve_delivery.py --context /tmp/lumen-gate/context.json --report-json /tmp/lumen-gate/report.json --pdf /tmp/lumen-gate/report.pdf --quality-json /tmp/lumen-gate/quality.json --manifest /tmp/lumen-gate/manifest.json > /tmp/lumen-gate/approval.json
+          jq -e '.ok == true and .delivery_status == "ready_for_delivery" and .outgoing_spend == false' /tmp/lumen-gate/approval.json >/dev/null
+          jq -e '.approval_status == "quality_approved" and .delivery_status == "ready_for_delivery" and .safety.payment_settled == true and .safety.outgoing_spend == false' /tmp/lumen-gate/manifest.json >/dev/null
+
+      - name: Prove approval is idempotent
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .lumen/reporting/approve_delivery.py --context /tmp/lumen-gate/context.json --report-json /tmp/lumen-gate/report.json --pdf /tmp/lumen-gate/report.pdf --quality-json /tmp/lumen-gate/quality.json --manifest /tmp/lumen-gate/manifest.json > /tmp/lumen-gate/reapproval.json
+          jq -e '.ok == true and .duplicateSafe == true and .delivery_status == "ready_for_delivery"' /tmp/lumen-gate/reapproval.json >/dev/null
+
+      - name: Prove unsettled payment is blocked
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq '.receipt.status="verified_pending_settlement" | .receipt.request_metadata.settlement.success=false' /tmp/lumen-gate/context.json > /tmp/lumen-gate/pending.json
+          rm -f /tmp/lumen-gate/blocked.json
+          if python .lumen/reporting/approve_delivery.py --context /tmp/lumen-gate/pending.json --report-json /tmp/lumen-gate/report.json --pdf /tmp/lumen-gate/report.pdf --quality-json /tmp/lumen-gate/quality.json --manifest /tmp/lumen-gate/blocked.json; then
+            echo 'ERROR: unsettled payment was approved'
+            exit 1
+          fi
+          test ! -e /tmp/lumen-gate/blocked.json
+
+      - name: Summary
+        shell: bash
+        run: |
+          {
+            echo "## LUMEN Delivery Gate QA"
+            echo "- Settled payment required: PASS"
+            echo "- Order / receipt / brief continuity: PASS"
+            echo "- Purchased product / report match: PASS"
+            echo "- PDF quality approval required: PASS"
+            echo "- SHA-256 manifest generated: PASS"
+            echo "- Duplicate approval idempotent: PASS"
+            echo "- Unsettled payment blocked: PASS"
+            echo "- No email, payment or outgoing spend performed: PASS"
+          } >> "$GITHUB_STEP_SUMMARY"
