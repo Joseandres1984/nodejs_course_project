@@ -13,7 +13,7 @@ permissions:
 jobs:
   audit-domain:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     steps:
       - name: Checkout LUMEN Zero
         uses: actions/checkout@v4
@@ -27,24 +27,79 @@ jobs:
           set -euo pipefail
           OLD='joseandresceol1-jac.workers.dev'
           NEW='lumen-b2b.workers.dev'
+
           echo '=== OLD DOMAIN REFERENCES ==='
-          git grep -n -F "$OLD" -- . ':!*.lock' || true
+          old_matches=$(git grep -I -n -F "$OLD" -- . ':!*.lock' || true)
+          if [[ -n "$old_matches" ]]; then printf '%s\n' "$old_matches"; fi
+
           echo '=== NEW DOMAIN REFERENCES ==='
-          git grep -n -F "$NEW" -- . ':!*.lock' || true
-          old_count=$(git grep -I -F -l "$OLD" -- . ':!*.lock' | wc -l | tr -d ' ')
-          new_count=$(git grep -I -F -l "$NEW" -- . ':!*.lock' | wc -l | tr -d ' ')
-          echo "OLD_DOMAIN_FILES=$old_count"
-          echo "NEW_DOMAIN_FILES=$new_count"
-          if [[ "$old_count" -gt 0 ]]; then
+          new_matches=$(git grep -I -n -F "$NEW" -- . ':!*.lock' || true)
+          if [[ -n "$new_matches" ]]; then printf '%s\n' "$new_matches"; fi
+
+          old_count=$(printf '%s\n' "$old_matches" | sed '/^$/d' | wc -l | tr -d ' ')
+          new_count=$(printf '%s\n' "$new_matches" | sed '/^$/d' | wc -l | tr -d ' ')
+          echo "OLD_DOMAIN_REFERENCES=$old_count"
+          echo "NEW_DOMAIN_REFERENCES=$new_count"
+
+          if [[ "$old_count" -ne 0 ]]; then
             echo 'DOMAIN_AUDIT=STALE_REFERENCES_FOUND'
-          else
-            echo 'DOMAIN_AUDIT=CLEAN'
+            exit 1
           fi
+          if [[ "$new_count" -lt 8 ]]; then
+            echo 'DOMAIN_AUDIT=TARGET_DOMAIN_UNDERREPRESENTED'
+            exit 1
+          fi
+          echo 'DOMAIN_AUDIT=CLEAN'
+
+      - name: Verify all public LUMEN endpoints on the new domain
+        shell: bash
+        run: |
+          set -euo pipefail
+          endpoints=(
+            'https://lumen-zero-dashboard.lumen-b2b.workers.dev/'
+            'https://lumen-zero-public.lumen-b2b.workers.dev/services'
+            'https://lumen-zero-a2a.lumen-b2b.workers.dev/health'
+            'https://lumen-zero-conversion.lumen-b2b.workers.dev/health'
+            'https://lumen-zero-x402.lumen-b2b.workers.dev/health'
+          )
+
+          for url in "${endpoints[@]}"; do
+            code='000'
+            for attempt in 1 2 3 4 5; do
+              code=$(curl -sS -o /tmp/lumen-domain-body -w '%{http_code}' --max-time 15 "$url" || true)
+              if [[ "$code" == '200' ]]; then break; fi
+              sleep 2
+            done
+            echo "ENDPOINT status=$code url=$url"
+            if [[ "$code" != '200' ]]; then
+              echo "Endpoint verification failed: $url returned $code"
+              head -c 500 /tmp/lumen-domain-body 2>/dev/null || true
+              exit 1
+            fi
+          done
+          echo 'NEW_DOMAIN_ENDPOINTS=PASS'
+
+      - name: Verify unpaid x402 gate without spending
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://lumen-zero-x402.lumen-b2b.workers.dev/buy/supplier-snapshot?src=technical-canary&medium=domain-audit&campaign=domain-migration&technical_canary=1'
+          code=$(curl -sS -H 'Accept: application/json' -o /tmp/x402-domain-audit.json -w '%{http_code}' --max-time 15 "$url" || true)
+          echo "X402_UNPAID_GATE_STATUS=$code"
+          if [[ "$code" != '402' ]]; then
+            head -c 800 /tmp/x402-domain-audit.json || true
+            exit 1
+          fi
+          echo 'X402_DOMAIN_GATE=PASS payment_attempted=false outgoing_spend=false'
 
       - name: Summary
         shell: bash
         run: |
-          echo '## LUMEN workers.dev domain audit' >> "$GITHUB_STEP_SUMMARY"
-          echo '- Source branch inspected: lumen-zero' >> "$GITHUB_STEP_SUMMARY"
-          echo '- Target public suffix: lumen-b2b.workers.dev' >> "$GITHUB_STEP_SUMMARY"
-          echo '- Audit only: no payment, no spending, no secret output' >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo '## LUMEN workers.dev domain audit'
+            echo '- Old personal workers.dev suffix in lumen-zero source: 0 references'
+            echo '- Target public suffix: lumen-b2b.workers.dev'
+            echo '- Dashboard/public/A2A/conversion/x402 live checks: PASS'
+            echo '- Unpaid x402 challenge: PASS (402, no payment attempted)'
+            echo '- No autonomous spending performed: PASS'
+          } >> "$GITHUB_STEP_SUMMARY"
