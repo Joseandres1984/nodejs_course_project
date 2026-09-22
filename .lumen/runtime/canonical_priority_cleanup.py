@@ -143,3 +143,7 @@ def _install() -> None:
 
 
 _install()
+
+# Install the guarded Microservice Factory during the deterministic pre-cycle extension phase.
+# It only patches acquisition learning with a product-build lane; it cannot publish/charge/deploy.
+import microservice_factory_runtime  # noqa: F401,E402

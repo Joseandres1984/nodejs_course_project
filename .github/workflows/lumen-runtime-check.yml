@@ -77,6 +77,23 @@ jobs:
           assert sales.MAX_FOLLOWUPS_PER_TICK == 1
           print('A2A_FIRST_CASH_ACCELERATOR_ACTIVATION ok')
           PY
+      - name: Verify Microservice Factory guarded activation
+        working-directory: .lumen/runtime
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          bootstrap = Path('canonical_priority_cleanup.py').read_text(encoding='utf-8')
+          assert 'import microservice_factory_runtime' in bootstrap
+          import acquisition_campaigns
+          import experiment_engine_runtime
+          import acquisition_sprint_runtime
+          import microservice_factory_runtime as factory
+          assert factory._ORIGINAL_ACQUISITION_TICK.__module__ == 'acquisition_sprint_runtime'
+          assert acquisition_campaigns.acquisition_campaign_tick.__module__ == 'microservice_factory_runtime'
+          assert factory.LIVE_MICROPRODUCTS and len(factory.LIVE_MICROPRODUCTS) == 6
+          assert all(row['id'].startswith('CAND-') for row in factory.CANDIDATE_LIBRARY)
+          print('MICROSERVICE_FACTORY_GUARDED_ACTIVATION ok')
+          PY
       - name: Validate Cloudflare workers syntax
         run: |
           node --check .lumen/dashboard/worker.js
@@ -124,6 +141,8 @@ jobs:
         run: python -m unittest discover -s .lumen/runtime -p 'test_a2a_global_sales_runtime.py'
       - name: Verify A2A first-cash direct checkout loop
         run: python -m unittest discover -s .lumen/runtime -p 'test_a2a_first_cash_accelerator_runtime.py'
+      - name: Verify Microservice Factory release gates
+        run: python -m unittest discover -s .lumen/runtime -p 'test_microservice_factory_runtime.py'
       - name: Verify every sold service has a live runtime path
         run: python -m unittest discover -s .lumen/runtime -p 'test_commercial_runtime_coverage.py'
       - name: Run LUMEN Zero adapter unit tests
