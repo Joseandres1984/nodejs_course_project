@@ -1,10 +1,11 @@
-import app from "./pricing_worker.js";
+import app from "./experiment_worker.js";
 
 const RETRYABLE_PATHS = new Set([
   "/health",
   "/api/data",
   "/api/full-state",
   "/api/recovery-state",
+  "/api/experiments",
 ]);
 
 function sleep(ms) {
