@@ -35,6 +35,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 .lumen/migrations/apply_brief_payment_link.py
+          python3 .lumen/migrations/harden_x402_gate.py
           node --check .lumen/conversion-worker/worker.js
           node --check .lumen/x402-worker/worker-v2.js
 
