@@ -74,6 +74,8 @@ jobs:
           node --check .lumen/a2a-worker/discovery.js
           node --check .lumen/cognitive-worker/worker.js
           node --check .lumen/cognitive-shadow-worker/worker.js
+      - name: Verify Experiment dashboard live markup and state mapping
+        run: node .lumen/dashboard/test-experiment-worker.mjs
       - name: Verify global A2A and LLM discoverability surfaces
         run: node .lumen/a2a-worker/test-discovery.mjs
       - name: Verify public Revenue storefront wiring
