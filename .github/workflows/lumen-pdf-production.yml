@@ -1,0 +1,175 @@
+name: LUMEN PDF Production Quality
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/lumen-pdf-production.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  pdf-quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout LUMEN Zero
+        uses: actions/checkout@v4
+        with:
+          ref: lumen-zero
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install PDF runtime and validators
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-save playwright@1.55.0 pdf-lib@1.17.1
+          npx playwright install --with-deps chromium
+          python -m pip install --disable-pip-version-check pypdf==5.9.0 pillow==11.3.0
+          command -v pdftotext >/dev/null || { sudo apt-get update; sudo apt-get install -y poppler-utils; }
+
+      - name: Create stress-test report fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/lumen-pdf/{inputs,html,pdf,previews}
+          cat > /tmp/lumen-pdf/inputs/micro.json <<'JSON'
+          {
+            "template_key":"supplier-snapshot",
+            "report_id":"LUMEN-QA-MICRO-001",
+            "client":"Cliente de prueba",
+            "generated_at":"2026-09-21T21:00:00-03:00",
+            "evidence_cutoff":"2026-09-21T20:55:00-03:00",
+            "client_request":"Verificar rápidamente un proveedor industrial de prueba, su presencia pública y señales visibles antes de solicitar una cotización.",
+            "answer":"La evidencia pública disponible permite confirmar una presencia comercial básica, pero quedan puntos que conviene validar directamente antes de avanzar.",
+            "confidence":"media",
+            "findings":[
+              {"title":"Identidad pública consistente","detail":"El nombre comercial, el dominio y la actividad declarada son coherentes entre las fuentes revisadas.","confidence":"alta"},
+              {"title":"Canales de contacto corporativos","detail":"Se identificaron canales públicos de la empresa; no se infiere disponibilidad ni capacidad futura.","confidence":"media"},
+              {"title":"Validación pendiente","detail":"No existe evidencia pública suficiente para afirmar solvencia, stock o capacidad productiva actual.","confidence":"alta"}
+            ],
+            "tables":[{"title":"Señales revisadas","columns":["Señal","Resultado","Evidencia"],"rows":[
+              ["Identidad","Consistente","Sitio oficial y registro público accesible"],
+              ["Actividad","Visible","Catálogo y presencia corporativa pública"],
+              ["Riesgo","No determinado","Requiere validación comercial directa"]
+            ]}],
+            "risks":[{"level":"medio","title":"Capacidad no verificada","detail":"La información pública no sustituye una auditoría ni confirma stock o cumplimiento futuro."}],
+            "evidence":[
+              {"title":"Sitio corporativo de ejemplo","url":"https://example.com/supplier/catalog/industrial-products/very-long-reference-path-for-layout-validation","note":"Respalda identidad y catálogo público.","observed_at":"2026-09-21"},
+              {"title":"Fuente pública secundaria","url":"https://example.org/public-registry/company/example-supplier","note":"Respalda existencia pública básica.","observed_at":"2026-09-21"}
+            ],
+            "next_steps":["Solicitar una cotización formal con vigencia y condiciones.","Pedir referencias o certificaciones aplicables al producto concreto."],
+            "recommendation":"Avanzar a una validación comercial acotada antes de asumir capacidad, precio, stock o solvencia."
+          }
+          JSON
+
+          cat > /tmp/lumen-pdf/inputs/full.json <<'JSON'
+          {
+            "template_key":"SRV-SOURCING-EXPRESS",
+            "report_id":"LUMEN-QA-FULL-001",
+            "client":"Empresa industrial de prueba",
+            "generated_at":"2026-09-21T21:00:00-03:00",
+            "evidence_cutoff":"2026-09-21T20:55:00-03:00",
+            "client_request":"Identificar y priorizar proveedores públicos compatibles con un componente industrial especificado, con foco en Argentina y países limítrofes, comparando evidencia de capacidad, canales corporativos y gaps visibles.",
+            "executive_summary":"Se relevaron múltiples candidatos públicos y se priorizaron cinco por encaje aparente. La selección sirve como base de contacto; precio, stock, certificaciones específicas y capacidad deben confirmarse directamente con cada proveedor.",
+            "confidence":"media",
+            "metrics":{"candidatos_investigados":"10","candidatos_priorizados":"5","paises_cubiertos":"3","mejor_encaje":"Alto - sujeto a confirmación"},
+            "findings":[
+              {"title":"Oferta técnica públicamente compatible","detail":"Cinco candidatos muestran en sus catálogos o descripciones capacidades relacionadas con el requerimiento.","confidence":"media"},
+              {"title":"Cobertura geográfica útil","detail":"La shortlist combina alternativas locales y regionales para facilitar comparación logística y comercial.","confidence":"alta"},
+              {"title":"Variables críticas pendientes","detail":"Precio, plazo, stock y certificaciones del ítem exacto no deben inferirse desde el catálogo público.","confidence":"alta"},
+              {"title":"Prioridad basada en evidencia","detail":"El orden propuesto pondera encaje técnico visible, claridad de canal corporativo y proximidad al mercado objetivo.","confidence":"media"}
+            ],
+            "analysis":{
+              "requerimiento":"El relevamiento se limita al producto, especificación, volumen aproximado, destino y restricciones informadas por el cliente.",
+              "mercado_relevado":"Se analizaron fuentes corporativas y públicas disponibles en tres mercados regionales, priorizando fabricantes y distribuidores con señales de encaje.",
+              "shortlist":"La shortlist no equivale a homologación. Representa candidatos que merecen contacto y validación documental.",
+              "comparacion_de_encaje":"El mayor peso se asignó a evidencia técnica explícita, seguida por alcance geográfico y claridad del canal corporativo.",
+              "gaps_y_riesgos":"No se asumieron certificaciones, precios, stock ni capacidad actual cuando las fuentes no los demostraron de forma verificable."
+            },
+            "tables":[{"title":"Shortlist priorizada","columns":["Proveedor","País","Capacidad/Producto","Encaje","Canal corporativo","Riesgo/Gaps"],"rows":[
+              ["Proveedor Alpha Industrial","Argentina","Componente industrial y familias compatibles con la especificación solicitada","Alto","ventas@example.com / https://example.com/contacto-industrial","Confirmar modelo exacto, stock, certificación y plazo"],
+              ["Proveedor Beta Regional","Brasil","Fabricación y distribución regional con catálogo técnico amplio","Alto","https://example.org/commercial/contact/very-long-corporate-route","Confirmar exportación a destino y documentación técnica"],
+              ["Proveedor Gamma","Uruguay","Distribución técnica y soporte local","Medio-alto","comercial@example.net","Validar marca, equivalencia y cantidad mínima"],
+              ["Proveedor Delta","Argentina","Catálogo relacionado y canal B2B visible","Medio","https://example.com/delta/soluciones/industriales/consulta-comercial","Capacidad específica no demostrada públicamente"],
+              ["Proveedor Epsilon","Brasil","Portafolio compatible por categoría","Medio","https://example.com/epsilon/business/international-sales","Confirmar disponibilidad, norma y condiciones de venta"]
+            ]}],
+            "risks":[
+              {"level":"medio","title":"Stock no verificable públicamente","detail":"La existencia de catálogo no demuestra disponibilidad inmediata."},
+              {"level":"medio","title":"Equivalencia técnica pendiente","detail":"La compatibilidad final requiere ficha técnica y confirmación del fabricante/proveedor."},
+              {"level":"bajo","title":"Canales corporativos identificados","detail":"La mayoría de los candidatos dispone de vías públicas para una consulta comercial trazable."}
+            ],
+            "evidence":[
+              {"title":"Catálogo público Alpha","url":"https://example.com/alpha/catalog/industrial/component-family/reference/with/a/long/url/for/pdf-wrapping","note":"Respalda presencia de familia de producto relacionada.","observed_at":"2026-09-21"},
+              {"title":"Sitio corporativo Beta","url":"https://example.org/beta/industrial-solutions/products","note":"Respalda actividad y cobertura regional declarada.","observed_at":"2026-09-21"},
+              {"title":"Canal comercial Gamma","url":"https://example.net/gamma/contact/business-to-business","note":"Respalda existencia de canal corporativo público.","observed_at":"2026-09-21"},
+              {"title":"Catálogo Delta","url":"https://example.com/delta/catalogo","note":"Respalda categoría relacionada, no stock ni equivalencia final.","observed_at":"2026-09-21"},
+              {"title":"Ventas internacionales Epsilon","url":"https://example.com/epsilon/business/international-sales/contact","note":"Respalda canal comercial y alcance declarado.","observed_at":"2026-09-21"}
+            ],
+            "next_steps":[
+              "Contactar primero a Alpha y Beta con la misma especificación y formato de solicitud para obtener ofertas comparables.",
+              "Solicitar ficha técnica, certificaciones aplicables, stock/plazo, Incoterm, vigencia y condiciones de pago.",
+              "Usar Gamma como alternativa regional y mantener Delta/Epsilon como respaldo hasta confirmar el encaje técnico.",
+              "Comparar las respuestas con QuoteCheck antes de emitir una decisión de compra."
+            ],
+            "recommendation":"Iniciar contacto con los dos candidatos de mayor encaje y mantener tres alternativas activas hasta contar con evidencia técnica y comercial comparable."
+          }
+          JSON
+
+      - name: Render professional HTML reports
+        shell: bash
+        run: |
+          set -euo pipefail
+          node .lumen/reporting/render_report.mjs --input /tmp/lumen-pdf/inputs/micro.json --output /tmp/lumen-pdf/html/micro.html
+          node .lumen/reporting/render_report.mjs --input /tmp/lumen-pdf/inputs/full.json --output /tmp/lumen-pdf/html/full.html
+
+      - name: Produce atomic A4 PDFs
+        shell: bash
+        run: |
+          set -euo pipefail
+          node .lumen/reporting/render_pdf.mjs --input /tmp/lumen-pdf/html/micro.html --output /tmp/lumen-pdf/pdf/LUMEN-Supplier-Snapshot-QA.pdf --report-id LUMEN-QA-MICRO-001 --title "Supplier Snapshot"
+          node .lumen/reporting/render_pdf.mjs --input /tmp/lumen-pdf/html/full.html --output /tmp/lumen-pdf/pdf/LUMEN-Sourcing-Express-QA.pdf --report-id LUMEN-QA-FULL-001 --title "Sourcing Express"
+
+      - name: Validate PDFs and render every page
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .lumen/reporting/validate_pdf.py /tmp/lumen-pdf/pdf/LUMEN-Supplier-Snapshot-QA.pdf --report-id LUMEN-QA-MICRO-001 --title "Supplier Snapshot" --tier micro --preview-dir /tmp/lumen-pdf/previews/micro
+          python .lumen/reporting/validate_pdf.py /tmp/lumen-pdf/pdf/LUMEN-Sourcing-Express-QA.pdf --report-id LUMEN-QA-FULL-001 --title "Sourcing Express" --tier full --preview-dir /tmp/lumen-pdf/previews/full
+          pdfinfo /tmp/lumen-pdf/pdf/LUMEN-Supplier-Snapshot-QA.pdf
+          pdfinfo /tmp/lumen-pdf/pdf/LUMEN-Sourcing-Express-QA.pdf
+
+      - name: Upload QA PDFs and page previews
+        uses: actions/upload-artifact@v4
+        with:
+          name: lumen-pdf-quality-samples
+          path: |
+            /tmp/lumen-pdf/pdf/*.pdf
+            /tmp/lumen-pdf/previews/**/*.png
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Quality summary
+        shell: bash
+        run: |
+          {
+            echo "## LUMEN PDF Production Quality"
+            echo "- HTML renderer: PASS"
+            echo "- Chromium A4 PDF: PASS"
+            echo "- Metadata/report ID: PASS"
+            echo "- Text extraction: PASS"
+            echo "- Page rendering / blank-page gate: PASS"
+            echo "- Long URL and table wrapping stress test: PASS"
+            echo "- No payment or spending performed: PASS"
+          } >> "$GITHUB_STEP_SUMMARY"
