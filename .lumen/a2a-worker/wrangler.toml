@@ -1,5 +1,5 @@
 name = "lumen-zero-a2a"
-main = "worker-entry.js"
+main = "opportunity-entry.js"
 compatibility_date = "2026-09-20"
 workers_dev = true
 
@@ -8,6 +8,9 @@ X402_PAY_TO = "0x04285DE6A083CEb28fb0C254a2ed0F5fdB2eeD28"
 X402_NETWORK = "eip155:8453"
 X402_FACILITATOR = "https://facilitator.xpay.sh"
 X402_CHECKOUT_URL = "https://lumen-zero-x402.lumen-b2b.workers.dev"
+
+[triggers]
+crons = ["7 * * * *"]
 
 [[d1_databases]]
 binding = "DB"
