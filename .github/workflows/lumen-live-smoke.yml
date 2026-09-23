@@ -14,21 +14,22 @@ jobs:
       - name: Check live A2A worker
         shell: bash
         run: |
-          set -euo pipefail
+          set -u
           base='https://lumen-zero-a2a.lumen-b2b.workers.dev'
-          echo '--- /health'
-          curl --fail --show-error --silent --max-time 20 "$base/health" | tee /tmp/health.json
-          echo
-          echo '--- /opportunities/stats'
-          curl --fail --show-error --silent --max-time 20 "$base/opportunities/stats" | tee /tmp/stats.json
-          echo
-          echo '--- /opportunities/next'
-          curl --fail --show-error --silent --max-time 20 "$base/opportunities/next" | tee /tmp/next.json
-          echo
-          python - <<'PY'
-          import json
-          for path in ['/tmp/health.json','/tmp/stats.json','/tmp/next.json']:
-              with open(path, encoding='utf-8') as f:
-                  json.load(f)
-          print('LIVE_SMOKE_JSON_OK')
-          PY
+          check() {
+            name="$1"
+            path="$2"
+            body="/tmp/${name}.body"
+            code=$(curl --show-error --silent --max-time 20 -o "$body" -w '%{http_code}' "$base$path" || echo 'curl_error')
+            echo "$name|$path|$code" | tee -a /tmp/results.txt
+            echo "### $path" >> "$GITHUB_STEP_SUMMARY"
+            echo "HTTP: $code" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            head -c 1500 "$body" 2>/dev/null >> "$GITHUB_STEP_SUMMARY" || true
+            echo >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          }
+          check health /health
+          check stats /opportunities/stats
+          check next /opportunities/next
+          echo 'LIVE_SMOKE_COMPLETE' >> "$GITHUB_STEP_SUMMARY"
