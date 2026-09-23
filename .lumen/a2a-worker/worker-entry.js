@@ -9,12 +9,11 @@ export function applyRegistryIdentity(card) {
   const metadata = base.metadata && typeof base.metadata === "object" ? base.metadata : {};
   return {
     ...base,
-    package_name: REGISTRY_PACKAGE_NAME,
     metadata: {
       ...metadata,
       registryPackageName: REGISTRY_PACKAGE_NAME,
       registryIdentityProvider: "github",
-      registryOwner: "Joseandres1984"
+      registryIdentity: "Joseandres1984"
     }
   };
 }
@@ -135,7 +134,7 @@ export default {
         headers: {
           "content-type": "text/html; charset=utf-8",
           "cache-control": "public, max-age=300",
-          "x-content-type-options": "nosniff"
+          "x-content-type-options":"nosniff"
         }
       });
     }
