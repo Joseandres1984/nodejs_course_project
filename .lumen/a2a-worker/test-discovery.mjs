@@ -43,10 +43,9 @@ assert.ok(card.skills.filter(x => x.id !== "existing").every(x => Array.isArray(
 
 const registryCard = applyRegistryIdentity(card);
 assert.equal(REGISTRY_PACKAGE_NAME, "github.Joseandres1984.lumen_b2b_agent");
-assert.equal(registryCard.package_name, REGISTRY_PACKAGE_NAME);
 assert.equal(registryCard.metadata.registryPackageName, REGISTRY_PACKAGE_NAME);
 assert.equal(registryCard.metadata.registryIdentityProvider, "github");
-assert.equal(registryCard.metadata.registryOwner, "Joseandres1984");
+assert.equal(registryCard.metadata.registryIdentity, "Joseandres1984");
 assert.equal(registryCard.metadata.autonomousSpend, false);
 assert.equal(registryCard.metadata.bindingActionsHumanGated, true);
 
@@ -102,5 +101,6 @@ console.log("A2A_GLOBAL_DISCOVERY ok", {
   skills: card.skills.length,
   targetAudience: card.metadata.targetAudience,
   geographicCoverage: card.metadata.geographicCoverage,
-  registryPackageName: registryCard.package_name
+  registryPackageName: registryCard.metadata.registryPackageName,
+  registryIdentity: registryCard.metadata.registryIdentity
 });
