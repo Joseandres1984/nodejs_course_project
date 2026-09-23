@@ -21,15 +21,11 @@ jobs:
             path="$2"
             body="/tmp/${name}.body"
             code=$(curl --show-error --silent --max-time 20 -o "$body" -w '%{http_code}' "$base$path" || echo 'curl_error')
+            echo "===== $path HTTP $code ====="
+            cat "$body" 2>/dev/null || true
+            echo
             echo "$name|$path|$code" | tee -a /tmp/results.txt
-            echo "### $path" >> "$GITHUB_STEP_SUMMARY"
-            echo "HTTP: $code" >> "$GITHUB_STEP_SUMMARY"
-            echo '```' >> "$GITHUB_STEP_SUMMARY"
-            head -c 1500 "$body" 2>/dev/null >> "$GITHUB_STEP_SUMMARY" || true
-            echo >> "$GITHUB_STEP_SUMMARY"
-            echo '```' >> "$GITHUB_STEP_SUMMARY"
           }
           check health /health
           check stats /opportunities/stats
           check next /opportunities/next
-          echo 'LIVE_SMOKE_COMPLETE' >> "$GITHUB_STEP_SUMMARY"
