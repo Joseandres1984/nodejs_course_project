@@ -11,6 +11,7 @@ import {
   sitemapXml
 } from "./discovery.js";
 import { REGISTRY_PACKAGE_NAME, applyRegistryIdentity } from "./worker-entry.js";
+import opportunityWorker from "./opportunity-entry.js";
 
 const origin = "https://lumen-zero-a2a.lumen-b2b.workers.dev";
 const baseCard = {
@@ -26,6 +27,9 @@ const baseCard = {
   skills: [{ id: "existing", name: "Existing skill", description: "existing", tags: ["existing"] }],
   metadata: { sellerMode: "receive_revenue_only", autonomousSpend: false }
 };
+
+assert.equal(typeof opportunityWorker.fetch, "function");
+assert.equal(typeof opportunityWorker.scheduled, "function");
 
 const card = enhanceAgentCard(baseCard, origin);
 assert.equal(card.protocolVersion, "1.0");
@@ -102,5 +106,6 @@ console.log("A2A_GLOBAL_DISCOVERY ok", {
   targetAudience: card.metadata.targetAudience,
   geographicCoverage: card.metadata.geographicCoverage,
   registryPackageName: registryCard.metadata.registryPackageName,
-  registryIdentity: registryCard.metadata.registryIdentity
+  registryIdentity: registryCard.metadata.registryIdentity,
+  opportunityWorker: true
 });
