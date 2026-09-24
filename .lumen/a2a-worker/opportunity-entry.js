@@ -19,6 +19,7 @@ import { handleDelegationEngine, planLatestSynthesizedCouncil } from "./delegati
 import { handleDelegationQualityGate, reviewPendingDelegationTasks } from "./delegation-quality-gate.js";
 import { handleDelegationResultQuality, reviewDelegationResults } from "./delegation-result-quality.js";
 import { handleDelegationRuntime, pollDelegationTasks } from "./delegation-runtime.js";
+import { handleObservedPartnerReputation, recomputeObservedReputation } from "./partner-observed-reputation.js";
 import { handleCouncilRuntime, pollCouncilRuntime } from "./council-runtime.js";
 
 export default {
@@ -74,6 +75,9 @@ export default {
     const delegationRuntimeResponse = await handleDelegationRuntime(request, env);
     if (delegationRuntimeResponse) return delegationRuntimeResponse;
 
+    const observedReputationResponse = await handleObservedPartnerReputation(request, env);
+    if (observedReputationResponse) return observedReputationResponse;
+
     const councilRuntimeResponse = await handleCouncilRuntime(request, env);
     if (councilRuntimeResponse) return councilRuntimeResponse;
 
@@ -113,6 +117,8 @@ export default {
       await pollDelegationTasks(env);
       // Results must pass their own quality gate before they are considered valid work.
       await reviewDelegationResults(env);
+      // Recompute confidence-aware reputation only from observed operational evidence.
+      await recomputeObservedReputation(env);
 
       await prepareTopProposal(env);
       await reviewNextProposal(env);
