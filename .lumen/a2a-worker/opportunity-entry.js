@@ -5,6 +5,7 @@ import { handleProposalEngine, prepareTopProposal } from "./proposal-engine.js";
 import { handleQualityGate, reviewNextProposal } from "./quality-gate.js";
 import { handleA2AOutreach, pollOutstandingResponses, sendNextApproved } from "./a2a-outreach.js";
 import { handleFollowupEngine, processFollowupCycle } from "./followup-engine.js";
+import { handleCommercialReplyEngine, runCommercialReplyEngine, pollCommercialReplyTasks } from "./commercial-reply-engine.js";
 import { handleFirstCashCloser, runFirstCashCloser } from "./first-cash-closer.js";
 import { handleX402RevenueBridge, syncX402SettlementsToRevenue } from "./x402-revenue-bridge.js";
 import { handleRevenueDirector, recomputeRevenueDirector } from "./revenue-director.js";
@@ -53,6 +54,7 @@ export default {
     const qualityResponse = await handleQualityGate(request, env); if (qualityResponse) return qualityResponse;
     const outreachResponse = await handleA2AOutreach(request, env); if (outreachResponse) return outreachResponse;
     const followupResponse = await handleFollowupEngine(request, env); if (followupResponse) return followupResponse;
+    const commercialReplyResponse = await handleCommercialReplyEngine(request, env); if (commercialReplyResponse) return commercialReplyResponse;
     const firstCashResponse = await handleFirstCashCloser(request, env); if (firstCashResponse) return firstCashResponse;
     const x402RevenueBridgeResponse = await handleX402RevenueBridge(request, env); if (x402RevenueBridgeResponse) return x402RevenueBridgeResponse;
     const revenueDirectorResponse = await handleRevenueDirector(request, env); if (revenueDirectorResponse) return revenueDirectorResponse;
@@ -100,10 +102,16 @@ export default {
       await runOpportunityScan(env, { trigger: "cloudflare_cron", scheduledTime: controller?.scheduledTime || null });
       await runCommercialReassessment(env);
 
-      // Revenue comes first: poll existing buyer conversations and close only on strong buying intent.
+      // Revenue conversations come first. Poll old messages, then async commercial replies, then close hot intent.
       await pollOutstandingResponses(env);
+      await pollCommercialReplyTasks(env);
       const firstCash = await runFirstCashCloser(env, { force: false });
       const firstCashExternalMessageSent = Boolean(firstCash?.sent);
+      const commercialReply = firstCashExternalMessageSent
+        ? { sent: false, reason: "first_cash_conversion_has_external_priority" }
+        : await runCommercialReplyEngine(env, { force: false });
+      const commercialReplyExternalMessageSent = Boolean(commercialReply?.sent);
+      const conversionExternalMessageSent = firstCashExternalMessageSent || commercialReplyExternalMessageSent;
 
       const scheduledAt = new Date(controller?.scheduledTime || Date.now());
       if (scheduledAt.getUTCHours() % 6 === 0) await runPartnerDiscovery(env, { trigger: "cloudflare_cron", scheduledTime: controller?.scheduledTime || null });
@@ -113,8 +121,8 @@ export default {
       await pollCouncilRuntime(env);
       await reviewActiveCouncilContributions(env);
       await sanitizeCouncilInputs(env);
-      const councilRound = firstCashExternalMessageSent
-        ? { acted: false, reason: "first_cash_conversion_has_external_priority" }
+      const councilRound = conversionExternalMessageSent
+        ? { acted: false, reason: "commercial_conversion_has_external_priority" }
         : await runCouncilRoundManager(env, { force: false });
       const councilExternalMessageSent = Boolean(councilRound?.invite?.sent);
       await planLatestSynthesizedCouncil(env);
@@ -138,13 +146,12 @@ export default {
       await recomputePartnerEconomicPerformance(env);
       await recomputeObservedReputation(env);
       await recomputeProfitFeedback(env);
-      // Before first cash, choose the next commercial lane adaptively; after cash, Profit Feedback dominates.
       await recomputeRevenueDirector(env);
       await pollNegotiationTermResponses(env);
       await recomputeNegotiator(env);
       await planNegotiationTermRequests(env);
       let termsExternalMessageSent = false;
-      if (!firstCashExternalMessageSent && !councilExternalMessageSent) {
+      if (!conversionExternalMessageSent && !councilExternalMessageSent) {
         const termInquiry = await sendNegotiationTermRequests(env, { force: false, limit: 1 });
         termsExternalMessageSent = Number(termInquiry?.sent || 0) > 0;
       }
@@ -156,7 +163,7 @@ export default {
       await prepareTopProposal(env);
       await reviewNextProposal(env);
 
-      if (!firstCashExternalMessageSent && !councilExternalMessageSent && !termsExternalMessageSent) {
+      if (!conversionExternalMessageSent && !councilExternalMessageSent && !termsExternalMessageSent) {
         const followup = await processFollowupCycle(env);
         if (!followup?.send?.sent) await sendNextApproved(env, { force: false });
       }
