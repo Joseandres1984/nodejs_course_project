@@ -1,0 +1,85 @@
+name: LUMEN World Launch Cycle
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-world-launch-cycle.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  launch-one-commercial-cycle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      BASE_URL: https://lumen-zero-a2a.lumen-b2b.workers.dev
+      OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+    steps:
+      - name: Verify protected token
+        run: test -n "${OPPORTUNITY_ADMIN_TOKEN:-}"
+
+      - name: Poll outstanding commercial responses
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 45 \
+            -X POST "$BASE_URL/outreach/poll" \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'content-type: application/json' -d '{}' > /tmp/outreach-poll.json
+          curl --fail --show-error --silent --max-time 45 \
+            -X POST "$BASE_URL/commercial-reply/poll" \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'content-type: application/json' -d '{}' > /tmp/reply-poll.json
+
+      - name: Execute one guarded revenue action
+        shell: bash
+        run: |
+          set -euo pipefail
+          post() {
+            local path="$1" out="$2"
+            curl --fail --show-error --silent --max-time 60 \
+              -X POST "$BASE_URL$path" \
+              -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+              -H 'content-type: application/json' -d '{}' > "$out"
+          }
+
+          # 1) Hot purchase intent always wins.
+          post /first-cash/run /tmp/first-cash.json
+          cat /tmp/first-cash.json
+          if jq -e '.sent == true' /tmp/first-cash.json >/dev/null; then
+            echo 'LUMEN_ACTION=FIRST_CASH_CLOSE' >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          # 2) Answer a real commercial question if one exists.
+          post /commercial-reply/run /tmp/commercial-reply.json
+          cat /tmp/commercial-reply.json
+          if jq -e '.sent == true' /tmp/commercial-reply.json >/dev/null; then
+            echo 'LUMEN_ACTION=COMMERCIAL_REPLY' >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          # 3) Respect due follow-ups before new cold outreach.
+          post /followup/run /tmp/followup.json
+          cat /tmp/followup.json
+          if jq -e '.send.sent == true' /tmp/followup.json >/dev/null; then
+            echo 'LUMEN_ACTION=FOLLOWUP' >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          # 4) Otherwise send exactly one approved Quality-PASS proposal.
+          post /outreach/send-next /tmp/outreach.json
+          cat /tmp/outreach.json
+          if jq -e '.sent == true' /tmp/outreach.json >/dev/null; then
+            echo 'LUMEN_ACTION=NEW_OUTREACH' >> "$GITHUB_ENV"
+          else
+            echo 'LUMEN_ACTION=NO_ELIGIBLE_EXTERNAL_ACTION' >> "$GITHUB_ENV"
+          fi
+
+      - name: Launch summary
+        run: |
+          echo "Selected action: ${LUMEN_ACTION:-UNKNOWN}"
+          echo 'Guardrails: max 1 external commercial message, USD 0 autonomous spend, no autonomous contract, no autonomous discount.'
