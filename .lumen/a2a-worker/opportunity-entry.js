@@ -5,6 +5,8 @@ import { handleProposalEngine, prepareTopProposal } from "./proposal-engine.js";
 import { handleQualityGate, reviewNextProposal } from "./quality-gate.js";
 import { handleA2AOutreach, pollOutstandingResponses, sendNextApproved } from "./a2a-outreach.js";
 import { handleFollowupEngine, processFollowupCycle } from "./followup-engine.js";
+import { handleFirstCashCloser, runFirstCashCloser } from "./first-cash-closer.js";
+import { handleX402RevenueBridge, syncX402SettlementsToRevenue } from "./x402-revenue-bridge.js";
 import { handlePartnerNetwork, runPartnerDiscovery } from "./partner-network.js";
 import { handlePartnerCouncilQuality, buildQualityPartnerMatches } from "./partner-council-quality.js";
 import { handlePartnerVentureBoard } from "./partner-venture-board.js";
@@ -50,6 +52,8 @@ export default {
     const qualityResponse = await handleQualityGate(request, env); if (qualityResponse) return qualityResponse;
     const outreachResponse = await handleA2AOutreach(request, env); if (outreachResponse) return outreachResponse;
     const followupResponse = await handleFollowupEngine(request, env); if (followupResponse) return followupResponse;
+    const firstCashResponse = await handleFirstCashCloser(request, env); if (firstCashResponse) return firstCashResponse;
+    const x402RevenueBridgeResponse = await handleX402RevenueBridge(request, env); if (x402RevenueBridgeResponse) return x402RevenueBridgeResponse;
     const recruitmentResponse = await handleRecruitmentEngine(request, env); if (recruitmentResponse) return recruitmentResponse;
     const councilReplacementResponse = await handleCouncilReplacement(request, env); if (councilReplacementResponse) return councilReplacementResponse;
     const councilJsonRpcResponse = await handleCouncilJsonRpcFallback(request, env); if (councilJsonRpcResponse) return councilJsonRpcResponse;
@@ -93,6 +97,12 @@ export default {
     ctx.waitUntil((async () => {
       await runOpportunityScan(env, { trigger: "cloudflare_cron", scheduledTime: controller?.scheduledTime || null });
       await runCommercialReassessment(env);
+
+      // Revenue comes first: poll existing buyer conversations and close only on strong buying intent.
+      await pollOutstandingResponses(env);
+      const firstCash = await runFirstCashCloser(env, { force: false });
+      const firstCashExternalMessageSent = Boolean(firstCash?.sent);
+
       const scheduledAt = new Date(controller?.scheduledTime || Date.now());
       if (scheduledAt.getUTCHours() % 6 === 0) await runPartnerDiscovery(env, { trigger: "cloudflare_cron", scheduledTime: controller?.scheduledTime || null });
       await recomputeTrust(env, { limit: 6 });
@@ -101,7 +111,9 @@ export default {
       await pollCouncilRuntime(env);
       await reviewActiveCouncilContributions(env);
       await sanitizeCouncilInputs(env);
-      const councilRound = await runCouncilRoundManager(env, { force: false });
+      const councilRound = firstCashExternalMessageSent
+        ? { acted: false, reason: "first_cash_conversion_has_external_priority" }
+        : await runCouncilRoundManager(env, { force: false });
       const councilExternalMessageSent = Boolean(councilRound?.invite?.sent);
       await planLatestSynthesizedCouncil(env);
       await reviewPendingDelegationTasks(env);
@@ -117,6 +129,9 @@ export default {
       await reviewInboundReferrals(env);
       await planOutboundReferrals(env);
       await syncReferralSettlements(env);
+
+      // Canonical cash truth: settled x402 receipt -> verified revenue event -> attribution -> learning.
+      await syncX402SettlementsToRevenue(env);
       await recomputeRevenueAttribution(env);
       await recomputePartnerEconomicPerformance(env);
       await recomputeObservedReputation(env);
@@ -125,7 +140,7 @@ export default {
       await recomputeNegotiator(env);
       await planNegotiationTermRequests(env);
       let termsExternalMessageSent = false;
-      if (!councilExternalMessageSent) {
+      if (!firstCashExternalMessageSent && !councilExternalMessageSent) {
         const termInquiry = await sendNegotiationTermRequests(env, { force: false, limit: 1 });
         termsExternalMessageSent = Number(termInquiry?.sent || 0) > 0;
       }
@@ -136,8 +151,8 @@ export default {
       await recomputeRedundancy(env);
       await prepareTopProposal(env);
       await reviewNextProposal(env);
-      await pollOutstandingResponses(env);
-      if (!councilExternalMessageSent && !termsExternalMessageSent) {
+
+      if (!firstCashExternalMessageSent && !councilExternalMessageSent && !termsExternalMessageSent) {
         const followup = await processFollowupCycle(env);
         if (!followup?.send?.sent) await sendNextApproved(env, { force: false });
       }
