@@ -29,6 +29,9 @@ export async function dispatchNextTrustedDelegation(env,{force=false}={}){
 
 export async function handleTrustedDelegationDispatch(request,env){
   const url=new URL(request.url);
+  if(request.method==="GET"&&url.pathname==="/delegation/trust-policy"){
+    return json({version:VERSION,trustGateRequired:true,purpose:"delegation",requiredTrustLevel:"ALLOW",minimumTrustScore:70,blocks:{restricted:true,quarantine:true,authRequired:true,manipulationSignals:true,unassessed:true},fallbackOnHardBlock:"redundancy_engine_prepare_replacement",autonomousOutgoingSpend:false,bindingActionsHumanGated:true});
+  }
   if(request.method!=="POST"||url.pathname!=="/delegation/dispatch-next")return null;
   if(!authorized(request,env))return json({ok:false,error:"admin_token_required"},403);
   let b={};try{b=await request.json();}catch{}
