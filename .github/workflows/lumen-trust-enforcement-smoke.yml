@@ -1,0 +1,114 @@
+name: LUMEN Trust Enforcement Smoke
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-trust-enforcement-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  trust-enforcement-smoke:
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: https://lumen-zero-a2a.lumen-b2b.workers.dev
+      OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+    steps:
+      - name: Verify protected token
+        run: test -n "${OPPORTUNITY_ADMIN_TOKEN:-}"
+
+      - name: Wait for trust-aware runtime versions
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 40); do
+            fw=$(curl --show-error --silent --max-time 10 "$BASE_URL/security/firewall/stats" || true)
+            dt=$(curl --show-error --silent --max-time 10 "$BASE_URL/dynamic-teams/stats" || true)
+            red=$(curl --show-error --silent --max-time 10 "$BASE_URL/redundancy/stats" || true)
+            echo "$fw"
+            echo "$dt"
+            echo "$red"
+            if echo "$fw" | grep -q '1.0-untrusted-input-firewall' \
+              && echo "$dt" | grep -q '1.2-dynamic-team-engine' \
+              && echo "$red" | grep -q '1.1-redundancy-engine'; then exit 0; fi
+            sleep 5
+          done
+          exit 1
+
+      - name: Run input firewall safely
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 20); do
+            code=$(curl --show-error --silent --max-time 45 -o /tmp/fw.json -w '%{http_code}' \
+              -X POST "$BASE_URL/security/firewall/run" \
+              -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+              -H 'content-type: application/json' \
+              -d '{}' || true)
+            cat /tmp/fw.json 2>/dev/null || true
+            echo
+            if [ "$code" = '202' ] && grep -q '1.0-untrusted-input-firewall' /tmp/fw.json; then break; fi
+            sleep 3
+          done
+          jq -e '.ok == true and .council.policy.rejectedInputNeverPropagates == true and .council.policy.manipulationOverridesSemanticQuality == true and .council.policy.rawAuditLogPreserved == true and .delegation.integrationRequiresCleanResult == true' /tmp/fw.json >/dev/null
+
+      - name: Verify council matching trust policy
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 20); do
+            code=$(curl --show-error --silent --max-time 45 -o /tmp/match.json -w '%{http_code}' \
+              -X POST "$BASE_URL/partners/match" \
+              -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+              -H 'content-type: application/json' \
+              -d '{}' || true)
+            cat /tmp/match.json 2>/dev/null || true
+            echo
+            if [ "$code" = '202' ] && grep -q '1.4-partner-council-quality' /tmp/match.json; then break; fi
+            sleep 3
+          done
+          jq -e '.ok == true and .trustPolicy.restrictedExcluded == true and .trustPolicy.quarantineExcluded == true and .trustPolicy.authRequiredExcluded == true and .trustPolicy.unassessedAllowed == true' /tmp/match.json >/dev/null
+          jq -e '[.matches[] | select(.trustLevel == "RESTRICTED" or .trustLevel == "QUARANTINE")] | length == 0' /tmp/match.json >/dev/null
+
+      - name: Rebuild trust-gated dynamic teams
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 20); do
+            code=$(curl --show-error --silent --max-time 60 -o /tmp/teams.json -w '%{http_code}' \
+              -X POST "$BASE_URL/dynamic-teams/build" \
+              -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+              -H 'content-type: application/json' \
+              -d '{}' || true)
+            cat /tmp/teams.json 2>/dev/null || true
+            echo
+            if [ "$code" = '202' ] && grep -q '1.2-dynamic-team-engine' /tmp/teams.json; then break; fi
+            sleep 3
+          done
+          jq -e '.ok == true and .version == "1.2-dynamic-team-engine" and .teamsBuilt >= 1 and .excludedByTrustOrAuth >= 1 and .guardrails.externalInvitesSent == false and .guardrails.autonomousSpend == false' /tmp/teams.json >/dev/null
+          jq -e '[.results[]?.members[]? | select(.trustLevel == "RESTRICTED" or .trustLevel == "QUARANTINE")] | length == 0' /tmp/teams.json >/dev/null
+
+      - name: Recompute trust-gated redundancy
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 20); do
+            code=$(curl --show-error --silent --max-time 60 -o /tmp/red.json -w '%{http_code}' \
+              -X POST "$BASE_URL/redundancy/recompute" \
+              -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+              -H 'content-type: application/json' \
+              -d '{}' || true)
+            cat /tmp/red.json 2>/dev/null || true
+            echo
+            if [ "$code" = '202' ] && grep -q '1.1-redundancy-engine' /tmp/red.json; then break; fi
+            sleep 3
+          done
+          jq -e '.ok == true and .guardrails.trustGated == true and .guardrails.automaticExternalRedispatch == false and .guardrails.autonomousSpend == false and .guardrails.bindingAllowed == false and .excludedByTrustOrAuth >= 1' /tmp/red.json >/dev/null
+
+      - name: Verify final safety state
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 20 "$BASE_URL/security/firewall/stats" > /tmp/fwstats.json
+          curl --fail --show-error --silent --max-time 20 "$BASE_URL/dynamic-teams/stats" > /tmp/dtstats.json
+          curl --fail --show-error --silent --max-time 20 "$BASE_URL/redundancy/stats" > /tmp/redstats.json
+          cat /tmp/fwstats.json; echo
+          cat /tmp/dtstats.json; echo
+          cat /tmp/redstats.json; echo
+          jq -e '.rejectedInputNeverPropagates == true and .autonomousSpend == false and .bindingActionsHumanGated == true' /tmp/fwstats.json >/dev/null
+          jq -e '.trustGated == true and .externalInvitesSent == false and .autonomousSpend == false' /tmp/dtstats.json >/dev/null
+          jq -e '.trustGated == true and .externalRedispatches == 0 and .automaticExternalRedispatch == false and .autonomousSpend == false' /tmp/redstats.json >/dev/null
