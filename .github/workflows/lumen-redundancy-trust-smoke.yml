@@ -1,0 +1,61 @@
+name: LUMEN Redundancy + Trust Smoke
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-redundancy-trust-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  redundancy-trust-smoke:
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: https://lumen-zero-a2a.lumen-b2b.workers.dev
+      OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+    steps:
+      - name: Verify protected token
+        run: test -n "${OPPORTUNITY_ADMIN_TOKEN:-}"
+
+      - name: Wait for redundancy and trust enforcement
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 36); do
+            red=$(curl --show-error --silent --max-time 10 "$BASE_URL/redundancy/stats" || true)
+            council=$(curl --show-error --silent --max-time 10 "$BASE_URL/council-round/stats" || true)
+            delegation=$(curl --show-error --silent --max-time 10 "$BASE_URL/delegation/trust-policy" || true)
+            echo "$red"
+            echo "$council"
+            echo "$delegation"
+            if echo "$red" | grep -q '1.2-redundancy-engine' && echo "$council" | grep -q '1.1-council-round-manager' && echo "$delegation" | grep -q '1.0-trusted-delegation-dispatch'; then exit 0; fi
+            sleep 5
+          done
+          exit 1
+
+      - name: Recompute redundancy internally
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 45 \
+            -X POST "$BASE_URL/redundancy/recompute" \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'content-type: application/json' \
+            -d '{}' > /tmp/redundancy.json
+          cat /tmp/redundancy.json
+          echo
+          jq -e '.ok == true and .version == "1.2-redundancy-engine" and .guardrails.automaticInternalTaskMaterialization == true and .guardrails.taskQualityGateRequired == true and .guardrails.automaticExternalRedispatch == false and .guardrails.autonomousSpend == false and .guardrails.bindingAllowed == false' /tmp/redundancy.json >/dev/null
+
+      - name: Verify council trust gate
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 20 "$BASE_URL/council-round/stats" > /tmp/council.json
+          cat /tmp/council.json
+          echo
+          jq -e '.version == "1.1-council-round-manager" and .trustGateRequired == true' /tmp/council.json >/dev/null
+
+      - name: Verify delegation trust policy
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 20 "$BASE_URL/delegation/trust-policy" > /tmp/delegation.json
+          cat /tmp/delegation.json
+          echo
+          jq -e '.version == "1.0-trusted-delegation-dispatch" and .trustGateRequired == true and .requiredTrustLevel == "ALLOW" and .minimumTrustScore == 70 and .blocks.restricted == true and .blocks.quarantine == true and .blocks.authRequired == true and .blocks.manipulationSignals == true and .blocks.unassessed == true and .autonomousOutgoingSpend == false and .bindingActionsHumanGated == true' /tmp/delegation.json >/dev/null
