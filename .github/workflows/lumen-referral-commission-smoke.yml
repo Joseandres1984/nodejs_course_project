@@ -1,0 +1,125 @@
+name: LUMEN Referral Commission Smoke
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-referral-commission-smoke.yml'
+      - '.lumen/a2a-worker/referral-commission-engine.js'
+      - '.lumen/a2a-worker/x402-revenue-bridge.js'
+      - '.lumen/a2a-worker/opportunity-entry.js'
+  workflow_dispatch:
+
+jobs:
+  referral-commission-smoke:
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: https://lumen-zero-a2a.lumen-b2b.workers.dev
+      ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+    steps:
+      - name: Verify protected token
+        run: test -n "${ADMIN_TOKEN:-}"
+
+      - name: Wait for commission engine and referral-aware revenue bridge
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 48); do
+            policy=$(curl --show-error --silent --max-time 10 "$BASE_URL/referrals/commissions/policy" || true)
+            bridge=$(curl --show-error --silent --max-time 10 "$BASE_URL/x402-revenue-bridge/policy" || true)
+            if echo "$policy" | jq -e '.version == "1.0-referral-commission-engine"' >/dev/null 2>&1 \
+              && echo "$bridge" | jq -e '.version == "1.1-x402-revenue-bridge-referral-aware"' >/dev/null 2>&1; then
+              printf '%s' "$policy" > /tmp/commission-policy.json
+              printf '%s' "$bridge" > /tmp/bridge-policy.json
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "commission runtime did not become ready" >&2
+          exit 1
+
+      - name: Verify commission truth guardrails
+        run: |
+          set -euo pipefail
+          jq -e '
+            .internalSuggestedRatePct == 5 and
+            .rule == "commission_is_never_revenue_until_verified_settlement" and
+            .exactAmountCheckout == true and
+            .x402Settlement == true and
+            .automaticContract == false and
+            .automaticSpend == false and
+            .bindingActionsHumanGated == true and
+            (.lifecycle | index("AGREED_PENDING_CLOSE")) != null and
+            (.lifecycle | index("PAYMENT_DUE")) != null and
+            (.lifecycle | index("SETTLED")) != null
+          ' /tmp/commission-policy.json >/dev/null
+          jq -e '
+            .truthRule == "only_settled_verified_x402_receipts_become_verified_revenue_events" and
+            .exactReferralAttribution == true and
+            .referralCommissionProductId == "REFERRAL-COMMISSION" and
+            .autonomousSpend == false and
+            .bindingActionsHumanGated == true
+          ' /tmp/bridge-policy.json >/dev/null
+
+      - name: Plan commission cases without external contact
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 45 \
+            -X POST "$BASE_URL/referrals/commissions/plan" \
+            -H "x-lumen-admin: $ADMIN_TOKEN" \
+            -H 'content-type: application/json' \
+            -d '{}' > /tmp/plan.json
+          cat /tmp/plan.json
+          echo
+          jq -e '
+            .ok == true and
+            .version == "1.0-referral-commission-engine" and
+            .guardrails.proposalIsInternalOnly == true and
+            .guardrails.counterpartyNotContacted == true and
+            .guardrails.agreementRequiredBeforePayment == true and
+            .guardrails.autonomousSpend == false and
+            .guardrails.bindingActionsHumanGated == true
+          ' /tmp/plan.json >/dev/null
+
+      - name: Verify live commission ledger summary
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 30 "$BASE_URL/referrals/commissions/stats" > /tmp/stats.json
+          cat /tmp/stats.json
+          echo
+          jq -e '
+            .version == "1.0-referral-commission-engine" and
+            (.total | type) == "number" and
+            (.proposalReady | type) == "number" and
+            (.agreedPendingClose | type) == "number" and
+            (.paymentDue | type) == "number" and
+            (.settled | type) == "number" and
+            (.outstandingCommissionUsd | type) == "number" and
+            (.realizedCommissionRevenueUsd | type) == "number"
+          ' /tmp/stats.json >/dev/null
+
+      - name: Safe settlement reconciliation only
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 45 \
+            -X POST "$BASE_URL/x402-revenue-bridge/sync" \
+            -H "x-lumen-admin: $ADMIN_TOKEN" > /tmp/bridge-sync.json
+          curl --fail --show-error --silent --max-time 45 \
+            -X POST "$BASE_URL/referrals/commissions/sync" \
+            -H "x-lumen-admin: $ADMIN_TOKEN" > /tmp/commission-sync.json
+          cat /tmp/bridge-sync.json
+          echo
+          cat /tmp/commission-sync.json
+          echo
+          jq -e '.ok == true and .guardrails.settledVerifiedOnly == true and .guardrails.exactReferralAttribution == true and .guardrails.noUnverifiedRevenue == true' /tmp/bridge-sync.json >/dev/null
+          jq -e '.ok == true and .guardrails.verifiedPaymentEventRequired == true and .guardrails.underpaymentsNotRecognizedAsFullSettlement == true and .guardrails.autonomousSpend == false' /tmp/commission-sync.json >/dev/null
+
+      - name: Upload safe commission snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: referral-commission-snapshot
+          path: |
+            /tmp/plan.json
+            /tmp/stats.json
+            /tmp/bridge-sync.json
+            /tmp/commission-sync.json
+          retention-days: 1
