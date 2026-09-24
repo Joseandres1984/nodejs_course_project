@@ -58,9 +58,14 @@ Fase C: 8 → 9 → 11 → 10 → 15 (la Torre se amplía incrementalmente duran
 - Cadena: SYNTHESIS → TASK PLAN → TASK QUALITY → APPROVED_FOR_DISPATCH → TRUST GATE → DISPATCH → RESULT → RESULT QUALITY → RESULT_PASS → integración.
 
 ### #4 Reputación basada en hechos
-- Observed Partner Reputation v1.0: operativo desde evidencia real de runtime/juntas/delegaciones.
-- Primera medición: AUX 73/confidence 18; Packrift 23/27; PHION 26/18; GAIP 26/18; InsightBind 45/9.
-- Confidence <30 no altera todavía el matching. Desde confidence >=30 entra gradualmente, con peso máximo 45% de la componente reputacional.
+- Observed Partner Reputation v1.1: operativo desde evidencia real de runtime, juntas, delegaciones y performance económica verificada.
+- Primera medición operativa: AUX 73/confidence 18; Packrift 23/27; PHION 26/18; GAIP 26/18; InsightBind 45/9.
+- Partner Economic Performance v1.0: operativo. Sólo usa `payment_settled + verified` atribuible directamente al socio; no asigna crédito por simple pertenencia a un equipo.
+- Cold start económico: score 50 / confidence 0 / peso 0. No existe penalización por no haber generado revenue todavía.
+- La señal económica entra en la reputación observada con peso progresivo y máximo 20%; una venta aislada no puede dominar el ranking.
+- Estado real actual: 32 partners medidos, 0 con settlement verificable atribuido, 0 con economic confidence significativa y USD 0 de revenue atribuible a partners. LUMEN no inventó ganadores económicos.
+- Confidence operativa <30 no altera todavía el matching. Desde confidence >=30 la reputación observada entra gradualmente en el matching según la política existente.
+- Smoke Partner Economic Feedback: SUCCESS, incluyendo neutralidad cold-start, peso económico <=20% y atribución directa obligatoria.
 
 ### #5 Venture Council
 - Partner Venture Board + Venture Suggestion Intake v1.1 + Venture Council v1.1: operativos.
@@ -112,32 +117,37 @@ Fase C: 8 → 9 → 11 → 10 → 15 (la Torre se amplía incrementalmente duran
 - Las ofertas comerciales Quality PASS se registran como OFFERED_UNSETTLED / x402_receive_only; una oferta o checkout nunca cuenta como ingreso realizado.
 - Sólo lumen_revenue_events con event_type=payment_settled y status=verified pueden crear un VERIFIED_SETTLEMENT y convertir un intent de ingreso en REALIZED_INCOME.
 - Primera recomputación real: 4 income intents por USD 42 de valor potencial, USD 0 de ingreso realizado, 0 expense intents, 0 proposed expense y 0 ledger settlements verificados.
+- Revenue Attribution Engine v1.0: operativo. Vincula settlements verificados con propuesta/oferta/oportunidad/referral y sólo atribuye revenue a un partner cuando existe evidencia directa.
+- Profit Feedback Engine v1.0: operativo. Ajusta la prioridad futura de ofertas usando revenue verificado, con rango limitado de -12 a +20; no modifica precios, contratos ni gasto.
+- Proposal Engine v1.2 profit-aware: usa esa señal sólo para decidir qué oportunidad comercial priorizar primero.
 - Cuando el Negotiator produzca una recomendación comercial completa con precio real y Trust ALLOW >=70, Agent Economy puede crear internamente un EXPENSE/HUMAN_APPROVAL_REQUIRED y un DRAFT_NONBINDING; no puede ejecutarlo.
 - Presupuesto saliente autónomo: USD 0. `external_execution_allowed=0` y `binding_allowed=0` para egresos preparados.
 - Endpoint de ejecución saliente hard-blocked: prueba real POST /agent-economy/outbound/execute con USD 1 respondió HTTP 403 `outgoing_spend_disabled`.
 - Payment rails de entrada contemplan x402/settlement verificado; salida puede prepararse conceptualmente como x402_or_agreed pero outboundExecutable=false.
-- Smoke Agent Economy: SUCCESS, incluyendo prueba explícita del hard block de gasto.
+- Smokes Agent Economy, Revenue Attribution y Profit Feedback: SUCCESS.
 
 ### #11 Negotiator
 - Partner Negotiator v1.0: operativo y conectado al ciclo horario en modo recommendation-only.
 - Pondera match 25%, Trust 18%, calidad/reputación 22%, reliability 10%, responsiveness 8%, precio 10% y tiempo 7%, con penalización de riesgo de hasta 30 puntos.
 - Nunca inventa precio o plazo faltante. Términos provenientes de Recruitment se almacenan como DECLARED_UNVERIFIED y no se tratan como precio verificado.
-- Primera corrida real: 1 caso (SCVD Evidence Agent), 12 candidatos comparados, 0 precios y 0 plazos disponibles; por eso el caso queda RANKED_INCOMPLETE_TERMS / TECHNICAL_RANKING_ONLY con confidence 39, no READY_FOR_HUMAN_REVIEW.
+- Primera corrida real: 1 caso (SCVD Evidence Agent), 12 candidatos comparados, inicialmente 0 precios y 0 plazos disponibles; el caso quedó RANKED_INCOMPLETE_TERMS / TECHNICAL_RANKING_ONLY con confidence 39.
 - Ranking técnico inicial: AUX Evidence and Certification 64; BerrerGate Tool & Provider Intelligence 60; Agent Pulse Signal Retrieval Agent 58.
-- Terms Request Planner v1.0: operativo. Generó 3 borradores no vinculantes para AUX, BerrerGate y Agent Pulse solicitando precio USD/USDC, ETA, alcance/exclusiones, vigencia/constraints y evidencia de calidad.
-- Los borradores permanecen DRAFT: externalMessagesSent=0; autonomousNegotiationMessages=false.
+- Terms Request Planner v1.0: genera solicitudes estandarizadas de precio USD/USDC, ETA, alcance/exclusiones, vigencia/constraints y evidencia de calidad.
+- Negotiation Terms Runtime: operativo con `A2A_AUTONOMOUS_NEGOTIATION_TERMS=true`; puede hacer consultas A2A públicas y no vinculantes para completar datos faltantes.
+- Guardrails del runtime: máximo 1 consulta de términos por ciclo y 2 candidatos por caso; Council tiene prioridad y una consulta de términos suprime follow-up/new outreach en ese ciclo.
+- Las consultas no compran, no contratan, no aceptan términos y mantienen gasto saliente USD 0.
 - Una comparación comercial completa requiere al menos 2 candidatos y 2 precios declarados comparables antes de pasar a READY_FOR_HUMAN_REVIEW.
-- El Negotiator no contrata, no acepta términos, no paga y no envía negociación automáticamente. Cualquier hire/spend/contract sigue human-gated.
-- Smoke del Negotiator + Terms Planner: SUCCESS.
+- Smoke del Negotiator + Terms Runtime: SUCCESS.
 
 ### #12 Equipos dinámicos
-- Dynamic Team Engine v1.1: operativo en modo internal draft only.
-- Forma equipos por oportunidad usando capacidades, reputación y Agent Graph sin invitar, contratar ni gastar.
+- Dynamic Team Engine v1.2: operativo en modo internal draft only.
+- Forma equipos por oportunidad usando capacidades, reputación observada, Trust y Agent Graph sin invitar, contratar ni gastar.
+- La señal económica verificada puede influir indirectamente sólo cuando primero gana suficiente confianza dentro de Observed Reputation; no existe preferencia económica inventada en cold start.
 
 ### #13 Redundancia y reemplazo automático
 - Redundancy Engine v1.2: operativo.
 - Mantiene hasta 2 suplentes por rol y filtra candidatos por Trust, fallas de runtime, reputación observada, compatibilidad y Agent Graph.
-- Última recomputación controlada: 22 suplencias evaluadas, 19 READY, 3 WEAK y 7 agentes excluidos por Trust/Auth.
+- La Torre de Control refleja los campos vivos `readyAlternates` / `weakAlternates` y el smoke evita regresiones de nombres de campo.
 - Si una futura tarea falla o recibe RESULT_REJECTED, LUMEN puede materializar internamente una nueva tarea PLANNED para el suplente; vuelve a pasar por Delegation Task Quality Gate.
 - Automatic internal task materialization: ON. Automatic external redispatch: OFF.
 
@@ -149,26 +159,37 @@ Fase C: 8 → 9 → 11 → 10 → 15 (la Torre se amplía incrementalmente duran
 - Council Round Manager y Delegation Dispatch ya aplican la política en los puntos de salida reales.
 - Smoke conjunto Redundancy + Trust: SUCCESS.
 
+### #15 Torre de Control de la Red
+- Network Control Tower v1: operativo dentro del dashboard protegido, con lectura viva por service binding + D1.
+- Integra los 15 módulos y separa valor potencial, propuestas, revenue realizado y gasto bloqueado.
+- Ranking de agentes ahora muestra por separado reputación operativa y performance económica verificada.
+- Nuevas columnas: `Valor económico` y `Revenue atribuible`; si no existen settlements directos muestra `— / USD 0` en lugar de presentar el score neutral 50 como evidencia.
+- Módulo #4 de la Torre informa cuántos partners tienen evidencia operativa y cuántos ya tienen revenue verificado atribuible.
+- Estado actual real: 0 partners con revenue verificado atribuible y USD 0 atribuible a partners; la Torre conserva la verdad económica sin sobreclaim.
+- Smoke de Network Control Tower actualizado: SUCCESS, incluyendo pestañas exclusivas, datos económicos conservadores, Redundancia viva y guardrails USD 0.
+
 ## Guardrails activos
 - Gasto autónomo continúa en USD 0 y Agent Economy lo hard-blockea técnicamente en el endpoint de salida.
 - Contratos/hiring/compras/deuda/obligaciones continúan human-gated.
 - Delegación autónoma externa permanece OFF durante el piloto.
-- Reputación observada no sustituye de golpe la reputación declarada: usa confianza acumulativa.
+- Reputación observada no sustituye de golpe la reputación declarada: usa confianza acumulativa; la señal económica verificada tiene peso máximo 20% dentro de Observed Reputation.
+- Ausencia de revenue atribuible no penaliza a un partner.
+- Crédito económico a partners exige settlement verificado + atribución directa; pertenecer a un equipo no alcanza.
 - Venture ideas derivadas de juntas heredan el Quality Gate de su contribución fuente.
 - Venture Experiments requieren peer review independiente y permanecen de costo USD 0/no vinculantes durante el piloto.
 - Dynamic Teams son borradores internos.
 - Council invites, delegation, Marketplace matching y Referral review están Trust-gated.
 - Marketplace inbound y Referral inbound son públicos pero siempre no vinculantes y no solicitan secretos/credenciales.
 - Referral attribution no implica comisión; cualquier reparto futuro requiere política explícita, revenue settled verificado y guardrails de pago.
-- Negotiator sólo recomienda y prepara borradores de condiciones; no envía, no acepta términos ni compromete fondos.
+- Negotiator puede pedir términos no vinculantes de manera guardada; no acepta términos ni compromete fondos.
 - Agent Economy separa estrictamente valor potencial, propuestas de egreso y dinero verificado/settled.
 
 ## Próximos hitos
 - #2: obtener una segunda contribución PASS, ejecutar la primera síntesis multiagente válida y cerrar la junta piloto.
 - #3: generar el primer paquete real de tareas y hacer una primera delegación controlada cuando el #2 cierre válidamente.
-- #4: superar confidence 30 con evidencia real y validar el blend.
+- #4: obtener el primer settlement verificable atribuible a un partner y validar el primer peso económico >0 sin superar 20%.
 - #5: recibir la primera idea comercial explícita desde una contribución PASS, someterla a dos peer reviews y validar el primer experimento de costo cero.
 - #9: recibir el primer referral inbound real o validar una derivación outbound controlada; comisión sigue NOT_CONFIGURED.
 - #11: obtener al menos 2 términos/precios comparables reales, elevar un caso a READY_FOR_HUMAN_REVIEW y validar la primera recomendación comercial completa.
-- #10: validar el primer settlement de ingreso real cuando ocurra y, más adelante, una intención de egreso human-approved sin habilitar gasto autónomo.
-- #15: ampliar la Torre de Control con red, marketplace, referrals, tareas, trust, reputación, Agent Economy e ingresos verificados.
+- #10: conseguir el primer settlement de ingreso real y confirmar atribución → profit feedback → prioridad comercial en un ciclo completo.
+- #15: observar en la Torre el primer partner con revenue atribuible y verificar que la selección futura responda gradualmente a esa evidencia.
