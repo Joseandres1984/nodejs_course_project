@@ -15,8 +15,6 @@ jobs:
     name: Certify sale-to-deliverable path
     runs-on: ubuntu-latest
     timeout-minutes: 25
-    env:
-      PYTHONPATH: .lumen/runtime
     steps:
       - uses: actions/checkout@v4
 
@@ -48,9 +46,13 @@ jobs:
           grep -qi 'payment' /tmp/lumen-x402-unpaid-headers || grep -qi 'payment' /tmp/lumen-x402-unpaid-body
 
       - name: Verify every sold service has an active runtime
+        env:
+          PYTHONPATH: .lumen/runtime
         run: python -m unittest discover -s .lumen/runtime -p 'test_commercial_runtime_coverage.py' -v
 
       - name: Build isolated fulfillment reports for all six paid microproducts
+        env:
+          PYTHONPATH: .lumen/runtime
         run: |
           rm -rf /tmp/lumen-delivery-cert
           mkdir -p /tmp/lumen-delivery-cert
@@ -111,16 +113,25 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          while read -r slug; do
+          for slug in supplier-snapshot quote-sanity tender-scan sourcing-5 buyer-signals export-pulse; do
             echo "CERTIFYING $slug"
             json="/tmp/lumen-delivery-cert/$slug.json"
             html="/tmp/lumen-delivery-cert/$slug.html"
             pdf="/tmp/lumen-delivery-cert/$slug.pdf"
             quality="/tmp/lumen-delivery-cert/$slug-quality.json"
 
+            case "$slug" in
+              supplier-snapshot) title='Supplier Snapshot' ;;
+              quote-sanity) title='Quote Sanity Check' ;;
+              tender-scan) title='Tender Quick Scan' ;;
+              sourcing-5) title='Supplier Shortlist 5' ;;
+              buyer-signals) title='Buyer Signal Scan' ;;
+              export-pulse) title='Export Market Pulse' ;;
+              *) echo "unknown product slug: $slug"; exit 1 ;;
+            esac
+
             python .lumen/reporting/validate_report_input.py "$json"
             report_id=$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["report_id"])' "$json")
-            title=$(python -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d.get("template_key", "LUMEN Report"))' "$json")
             node .lumen/reporting/render_report.mjs --input "$json" --output "$html"
             node .lumen/reporting/render_pdf.mjs --input "$html" --output "$pdf" --report-id "$report_id" --title "$title"
             python .lumen/reporting/validate_pdf.py "$pdf" --report-id "$report_id" --title "$title" --tier micro > "$quality"
@@ -131,7 +142,7 @@ jobs:
           assert q['quality_gate']=='client_delivery_ready'
           print(json.dumps({'slug':sys.argv[2],'quality_gate':q['quality_gate'],'pages':q['pages'],'sources':q['visible_source_urls']}))
           PY
-          done < <(python -c 'import json; print("\n".join(x["slug"] for x in json.load(open("/tmp/lumen-delivery-cert/products.json"))))')
+          done
 
       - name: Prove fail-closed delivery approval rejects a canary
         shell: bash
