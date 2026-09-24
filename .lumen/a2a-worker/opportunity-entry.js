@@ -15,6 +15,7 @@ import { handleAgentGraph, recomputeAgentGraph } from "./agent-graph.js";
 import { handleDynamicTeamEngine, buildDynamicTeams } from "./dynamic-team-engine.js";
 import { handleRedundancyEngine, recomputeRedundancy } from "./redundancy-engine.js";
 import { handleTrustLayer, recomputeTrust } from "./trust-layer.js";
+import { handleUntrustedInputFirewall, sanitizeCouncilInputs, sanitizeDelegationResults } from "./untrusted-input-firewall.js";
 import { handleRecruitmentEngine, pollRecruitmentResponses } from "./recruitment-engine.js";
 import { handleCouncilReplacement } from "./council-replacement.js";
 import { handleCouncilJsonRpcFallback } from "./council-jsonrpc-fallback.js";
@@ -50,6 +51,7 @@ export default {
     const delegationRuntimeResponse = await handleDelegationRuntime(request, env); if (delegationRuntimeResponse) return delegationRuntimeResponse;
     const observedReputationResponse = await handleObservedPartnerReputation(request, env); if (observedReputationResponse) return observedReputationResponse;
     const trustResponse = await handleTrustLayer(request, env); if (trustResponse) return trustResponse;
+    const firewallResponse = await handleUntrustedInputFirewall(request, env); if (firewallResponse) return firewallResponse;
     const councilRuntimeResponse = await handleCouncilRuntime(request, env); if (councilRuntimeResponse) return councilRuntimeResponse;
     const ventureResponse = await handlePartnerVentureBoard(request, env); if (ventureResponse) return ventureResponse;
     const ventureIntakeResponse = await handleVentureSuggestionIntake(request, env); if (ventureIntakeResponse) return ventureIntakeResponse;
@@ -69,18 +71,21 @@ export default {
       await runCommercialReassessment(env);
       const scheduledAt = new Date(controller?.scheduledTime || Date.now());
       if (scheduledAt.getUTCHours() % 6 === 0) await runPartnerDiscovery(env, { trigger: "cloudflare_cron", scheduledTime: controller?.scheduledTime || null });
-      // Gradual card/security assessment avoids a burst of external card/JWKS fetches.
       await recomputeTrust(env, { limit: 6 });
       await buildQualityPartnerMatches(env);
       await pollRecruitmentResponses(env);
       await pollCouncilRuntime(env);
       await reviewActiveCouncilContributions(env);
+      // Rejects stay in audit logs but are removed from active peer context before another invite/synthesis.
+      await sanitizeCouncilInputs(env);
       const councilRound = await runCouncilRoundManager(env, { force: false });
       const councilExternalMessageSent = Boolean(councilRound?.invite?.sent);
       await planLatestSynthesizedCouncil(env);
       await reviewPendingDelegationTasks(env);
       await pollDelegationTasks(env);
       await reviewDelegationResults(env);
+      // A semantically plausible task result still cannot integrate if it contains manipulation/exfiltration instructions.
+      await sanitizeDelegationResults(env);
       await recomputeObservedReputation(env);
       await ingestCouncilVentureSuggestions(env);
       await runVentureCouncil(env);
