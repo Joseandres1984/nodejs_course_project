@@ -1,0 +1,22 @@
+name: LUMEN Status Now
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-status-now.yml'
+  workflow_dispatch:
+
+jobs:
+  status:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read live LUMEN state
+        run: |
+          set -euo pipefail
+          base='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          for path in health opportunities/stats commercial/stats outreach/stats outreach/next; do
+            echo "===== /$path ====="
+            curl --fail --show-error --silent --max-time 30 "$base/$path"
+            echo
+          done
