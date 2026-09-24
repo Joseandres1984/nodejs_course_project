@@ -23,9 +23,11 @@ jobs:
           for i in $(seq 1 45); do
             policy=$(curl --show-error --silent --max-time 10 "$BASE_URL/commercial-reply/policy" || true)
             cash=$(curl --show-error --silent --max-time 10 "$BASE_URL/first-cash/policy" || true)
-            if echo "$policy" | grep -q '1.1-commercial-reply-engine' && echo "$cash" | grep -q 'shared-response'; then
+            qualification=$(curl --show-error --silent --max-time 10 "$BASE_URL/response-qualification/policy" || true)
+            if echo "$policy" | grep -q '1.1-commercial-reply-engine' && echo "$cash" | grep -q 'shared-response' && echo "$qualification" | grep -q '1.0-commercial-response-qualification'; then
               echo "$policy"
               echo "$cash"
+              echo "$qualification"
               exit 0
             fi
             sleep 5
