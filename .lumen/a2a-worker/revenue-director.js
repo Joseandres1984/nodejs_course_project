@@ -1,4 +1,4 @@
-const VERSION = "1.0-first-cash-revenue-director";
+const VERSION = "1.1-first-cash-revenue-director";
 const ENTRY_OFFERS = ["MP-SUPPLIER-SNAPSHOT", "MP-QUOTE-SANITY", "MP-TENDER-SCAN"];
 const ALL_OFFERS = ["MP-SUPPLIER-SNAPSHOT","MP-QUOTE-SANITY","MP-TENDER-SCAN","MP-SOURCING-5","MP-BUYER-SIGNALS","MP-EXPORT-PULSE"];
 
@@ -36,15 +36,15 @@ async function metrics(env) {
     scalar(env, "SELECT COUNT(*) n FROM lumen_proposal_drafts p LEFT JOIN lumen_outreach_attempts x ON x.proposal_id=p.proposal_id WHERE p.status='APPROVED' AND p.quality_gate_status='PASS' AND x.proposal_id IS NULL"),
     scalar(env, "SELECT COUNT(*) n FROM lumen_outreach_attempts WHERE status IN ('SENT','SENT_TASK','WORKING','RESPONDED','TASK_TERMINAL')"),
     scalar(env, "SELECT COUNT(*) n FROM lumen_outreach_attempts WHERE status='RESPONDED'"),
-    scalar(env, "SELECT COUNT(*) n FROM lumen_sales_pipeline WHERE stage='NEGOTIATING'"),
+    scalar(env, "SELECT COUNT(*) n FROM lumen_sales_pipeline WHERE stage='NEGOTIATING' AND response_class IN ('INTERESTED','QUESTION')"),
     scalar(env, "SELECT COUNT(*) n FROM lumen_sales_pipeline WHERE stage='BLOCKED'")
   ]);
-  return { verifiedSettlements:settlements, realizedRevenueUsd:revenue, actionableOpportunities:actionable, qualityPassProposals:proposals, approvedUnsent:approved, sent, responded, negotiating, blocked };
+  return { verifiedSettlements:settlements, realizedRevenueUsd:revenue, actionableOpportunities:actionable, qualityPassProposals:proposals, approvedUnsent:approved, sent, responded, qualifiedCommercialResponses:negotiating, negotiating, blocked };
 }
 
 function progressed(previous, current) {
   if (!previous || !Object.keys(previous).length) return false;
-  const positiveKeys = ["verifiedSettlements","realizedRevenueUsd","actionableOpportunities","qualityPassProposals","approvedUnsent","sent","responded","negotiating"];
+  const positiveKeys = ["verifiedSettlements","realizedRevenueUsd","actionableOpportunities","qualityPassProposals","approvedUnsent","sent","responded","qualifiedCommercialResponses"];
   return positiveKeys.some(k => Number(current[k] || 0) > Number(previous[k] || 0));
 }
 
@@ -70,9 +70,13 @@ function decide(m, rows, noProgressCycles) {
     const winners = rows.filter(x => x.verifiedSettlements > 0).sort((a,b)=>b.verifiedRevenueUsd-a.verifiedRevenueUsd || b.verifiedSettlements-a.verifiedSettlements);
     return { bottleneck:"scale_verified_revenue", tactic:"PROFIT_FEEDBACK_AUTHORITY", targetMetric:"verifiedSettlements", preferred:winners.map(x=>x.offerId).slice(0,3), reason:"verified_settlement_exists_profit_feedback_is_authoritative" };
   }
-  if (m.negotiating > 0 || m.responded > 0) {
+  if (m.qualifiedCommercialResponses > 0) {
     const engaged = rows.filter(x => x.responded > 0).sort((a,b)=>b.responseRate-a.responseRate || a.sent-b.sent);
-    return { bottleneck:"conversion", tactic:"CONVERSION_FIRST", targetMetric:"verifiedSettlements", preferred:engaged.map(x=>x.offerId).slice(0,3), reason:"real_response_exists_prioritize_scope_checkout_and_close" };
+    return { bottleneck:"conversion", tactic:"CONVERSION_FIRST", targetMetric:"verifiedSettlements", preferred:engaged.map(x=>x.offerId).slice(0,3), reason:"qualified_commercial_response_exists_prioritize_scope_checkout_and_close" };
+  }
+  if (m.responded > 0) {
+    const responded = rows.filter(x => x.responded > 0).sort((a,b)=>b.responseRate-a.responseRate || a.sent-b.sent);
+    return { bottleneck:"response_qualification", tactic:"QUALIFY_RESPONSE_OR_MOVE_ON", targetMetric:"qualifiedCommercialResponses", preferred:responded.map(x=>x.offerId).slice(0,3), reason:"raw_response_without_qualified_commercial_intent_must_not_be_treated_as_hot_conversion" };
   }
   const entry = rows.filter(x => ENTRY_OFFERS.includes(x.offerId));
   if (noProgressCycles >= 6) {
@@ -90,7 +94,10 @@ function decide(m, rows, noProgressCycles) {
 function focusAdjustments(decision, m, noProgressCycles) {
   const out = new Map(ALL_OFFERS.map(id => [id, { adjustment:0, reason:"neutral" }]));
   if (m.verifiedSettlements > 0) return out;
-  const weights = decision.tactic === "ROTATE_ENTRY_OFFER" ? [8,5,3] : decision.tactic === "CONVERSION_FIRST" ? [5,3,1] : [7,4,2];
+  const weights = decision.tactic === "ROTATE_ENTRY_OFFER" ? [8,5,3]
+    : decision.tactic === "CONVERSION_FIRST" ? [5,3,1]
+    : decision.tactic === "QUALIFY_RESPONSE_OR_MOVE_ON" ? [2,1,0]
+    : [7,4,2];
   decision.preferred.slice(0,3).forEach((id,i)=>out.set(id,{adjustment:weights[i] || 0,reason:`${decision.tactic.toLowerCase()}:rank_${i+1}`}));
   if (noProgressCycles >= 6) {
     const preferredSet = new Set(decision.preferred.slice(0,3));
@@ -120,7 +127,7 @@ export async function recomputeRevenueDirector(env) {
   await env.DB.prepare("INSERT INTO lumen_revenue_director_state(id,updated_at,cycle,no_progress_cycles,bottleneck,tactic,target_metric,metrics_json,previous_metrics_json,preferred_offers_json,engine_version) VALUES('FIRST_CASH',?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET updated_at=excluded.updated_at,cycle=excluded.cycle,no_progress_cycles=excluded.no_progress_cycles,bottleneck=excluded.bottleneck,tactic=excluded.tactic,target_metric=excluded.target_metric,metrics_json=excluded.metrics_json,previous_metrics_json=excluded.previous_metrics_json,preferred_offers_json=excluded.preferred_offers_json,engine_version=excluded.engine_version")
     .bind(now,cycle,noProgressCycles,decision.bottleneck,decision.tactic,decision.targetMetric,JSON.stringify(current),JSON.stringify(previous),JSON.stringify(decision.preferred),VERSION).run();
 
-  return { ok:true, version:VERSION, cycle, verifiedProgress:didProgress, noProgressCycles, bottleneck:decision.bottleneck, tactic:decision.tactic, targetMetric:decision.targetMetric, preferredOffers:decision.preferred, reason:decision.reason, metrics:current, focus:[...focus.entries()].map(([offerId,x])=>({offerId,priorityAdjustment:Math.max(-4,Math.min(8,Number(x.adjustment||0))),reason:x.reason})), guardrails:{selectionPriorityOnly:true,priorityAdjustmentRange:[-4,8],priceChanges:false,externalMessagesAddedPerCycle:0,autonomousSpend:false,autonomousContract:false,bindingActionsHumanGated:true} };
+  return { ok:true, version:VERSION, cycle, verifiedProgress:didProgress, noProgressCycles, bottleneck:decision.bottleneck, tactic:decision.tactic, targetMetric:decision.targetMetric, preferredOffers:decision.preferred, reason:decision.reason, metrics:current, focus:[...focus.entries()].map(([offerId,x])=>({offerId,priorityAdjustment:Math.max(-4,Math.min(8,Number(x.adjustment||0))),reason:x.reason})), guardrails:{selectionPriorityOnly:true,priorityAdjustmentRange:[-4,8],priceChanges:false,externalMessagesAddedPerCycle:0,rawResponseIsNotCommercialIntent:true,autonomousSpend:false,autonomousContract:false,bindingActionsHumanGated:true} };
 }
 
 async function state(env) {
@@ -134,7 +141,7 @@ async function state(env) {
 
 export async function handleRevenueDirector(request, env) {
   const url = new URL(request.url);
-  if (request.method === "GET" && url.pathname === "/revenue-director/policy") return json({ version:VERSION, name:"LUMEN First-Cash Revenue Director", objective:"maximize_probability_of_first_verified_settlement_with_bounded_reversible_tactics", coldStartFocus:ENTRY_OFFERS, progressRule:"only_observed_funnel_progress_resets_stagnation", verifiedSettlementRule:"after_first_verified_settlement_profit_feedback_becomes_authoritative", selectionPriorityOnly:true, priorityAdjustmentRange:[-4,8], addsExternalMessages:false, autonomousPriceChange:false, autonomousSpend:false, autonomousContract:false, bindingActionsHumanGated:true });
+  if (request.method === "GET" && url.pathname === "/revenue-director/policy") return json({ version:VERSION, name:"LUMEN First-Cash Revenue Director", objective:"maximize_probability_of_first_verified_settlement_with_bounded_reversible_tactics", coldStartFocus:ENTRY_OFFERS, progressRule:"only_observed_funnel_progress_resets_stagnation", responseQualificationRule:"raw_response_is_not_commercial_intent; only INTERESTED or QUESTION pipeline classifications count as qualified commercial response", verifiedSettlementRule:"after_first_verified_settlement_profit_feedback_becomes_authoritative", selectionPriorityOnly:true, priorityAdjustmentRange:[-4,8], addsExternalMessages:false, autonomousPriceChange:false, autonomousSpend:false, autonomousContract:false, bindingActionsHumanGated:true });
   if (request.method === "GET" && url.pathname === "/revenue-director/state") return json(await state(env));
   if (request.method === "POST" && url.pathname === "/revenue-director/recompute") {
     if (!authorized(request, env)) return json({ ok:false, error:"admin_token_required" },403);
