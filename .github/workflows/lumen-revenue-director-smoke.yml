@@ -17,7 +17,7 @@ jobs:
       - name: Verify protected token
         run: test -n "${OPPORTUNITY_ADMIN_TOKEN:-}"
 
-      - name: Wait for Revenue Director and Proposal Engine v1.3
+      - name: Wait for Revenue Director v1.1 and Proposal Engine v1.3
         run: |
           set -euo pipefail
           for i in $(seq 1 45); do
@@ -25,20 +25,21 @@ jobs:
             proposal=$(curl --show-error --silent --max-time 10 "$BASE_URL/proposals/next" || true)
             echo "$policy"
             echo "$proposal"
-            if echo "$policy" | grep -q '1.0-first-cash-revenue-director' && echo "$proposal" | grep -q '1.3-director-aware-proposal-engine'; then exit 0; fi
+            if echo "$policy" | grep -q '1.1-first-cash-revenue-director' && echo "$proposal" | grep -q '1.3-director-aware-proposal-engine'; then exit 0; fi
             sleep 5
           done
           exit 1
 
-      - name: Verify elite Director guardrails
+      - name: Verify elite Director guardrails and response truth
         run: |
           set -euo pipefail
           curl --fail --show-error --silent --max-time 20 "$BASE_URL/revenue-director/policy" > /tmp/policy.json
           cat /tmp/policy.json
           echo
           jq -e '
-            .version == "1.0-first-cash-revenue-director" and
+            .version == "1.1-first-cash-revenue-director" and
             .objective == "maximize_probability_of_first_verified_settlement_with_bounded_reversible_tactics" and
+            (.responseQualificationRule | contains("raw_response_is_not_commercial_intent")) and
             .selectionPriorityOnly == true and
             .priorityAdjustmentRange == [-4,8] and
             .addsExternalMessages == false and
@@ -60,12 +61,14 @@ jobs:
           echo
           jq -e '
             .ok == true and
-            .version == "1.0-first-cash-revenue-director" and
+            .version == "1.1-first-cash-revenue-director" and
             (.cycle >= 1) and
             (.preferredOffers | type) == "array" and
             (.focus | type) == "array" and
             ([.focus[] | select(.priorityAdjustment < -4 or .priorityAdjustment > 8)] | length) == 0 and
+            (if ((.metrics.responded // 0) > 0 and (.metrics.qualifiedCommercialResponses // 0) == 0) then (.tactic == "QUALIFY_RESPONSE_OR_MOVE_ON" and .bottleneck == "response_qualification") else true end) and
             .guardrails.selectionPriorityOnly == true and
+            .guardrails.rawResponseIsNotCommercialIntent == true and
             .guardrails.priorityAdjustmentRange == [-4,8] and
             .guardrails.priceChanges == false and
             .guardrails.externalMessagesAddedPerCycle == 0 and
@@ -81,7 +84,7 @@ jobs:
           cat /tmp/state.json
           echo
           jq -e '
-            .version == "1.0-first-cash-revenue-director" and
+            .version == "1.1-first-cash-revenue-director" and
             .initialized == true and
             (.cycle >= 1) and
             (.focus | length) >= 3 and
