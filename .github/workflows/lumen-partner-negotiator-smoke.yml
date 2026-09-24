@@ -17,13 +17,15 @@ jobs:
       - name: Verify protected token
         run: test -n "${OPPORTUNITY_ADMIN_TOKEN:-}"
 
-      - name: Wait for Partner Negotiator v1
+      - name: Wait for Partner Negotiator and Terms Planner
         run: |
           set -euo pipefail
           for i in $(seq 1 36); do
-            body=$(curl --show-error --silent --max-time 10 "$BASE_URL/negotiator/policy" || true)
-            echo "$body"
-            if echo "$body" | grep -q '1.0-partner-negotiator'; then exit 0; fi
+            policy=$(curl --show-error --silent --max-time 10 "$BASE_URL/negotiator/policy" || true)
+            terms=$(curl --show-error --silent --max-time 10 "$BASE_URL/negotiator/terms-requests/stats" || true)
+            echo "$policy"
+            echo "$terms"
+            if echo "$policy" | grep -q '1.0-partner-negotiator' && echo "$terms" | grep -q '1.0-negotiator-terms-planner'; then exit 0; fi
             sleep 5
           done
           exit 1
@@ -32,8 +34,6 @@ jobs:
         run: |
           set -euo pipefail
           curl --fail --show-error --silent --max-time 20 "$BASE_URL/negotiator/policy" > /tmp/policy.json
-          cat /tmp/policy.json
-          echo
           jq -e '.version == "1.0-partner-negotiator" and .mode == "non_binding_recommendation" and .unknownPricePolicy == "unknown_price_is_neutral_not_invented_and_prevents_full_commercial_confidence" and .autonomousNegotiationMessages == false and .autonomousHiring == false and .autonomousSpend == false and .bindingActionsHumanGated == true' /tmp/policy.json >/dev/null
 
       - name: Recompute real negotiation cases
@@ -47,6 +47,26 @@ jobs:
           cat /tmp/recompute.json
           echo
           jq -e '.ok == true and .version == "1.0-partner-negotiator" and .cases >= 1 and (.topCases | length) >= 1 and ([.topCases[] | select(.candidates >= 2)] | length) >= 1 and ([.topCases[] | select(.status == "READY_FOR_HUMAN_REVIEW" and (.pricedCandidates < 2 or .candidates < 2))] | length) == 0 and ([.topCases[] | select(.pricedCandidates < 2 and .decisionMode != "TECHNICAL_RANKING_ONLY")] | length) == 0 and .guardrails.recommendationOnly == true and .guardrails.pricesDeclaredNotVerified == true and .guardrails.autonomousNegotiationMessages == false and .guardrails.autonomousHiring == false and .guardrails.autonomousSpend == false and .guardrails.bindingActionsHumanGated == true' /tmp/recompute.json >/dev/null
+
+      - name: Plan missing commercial terms without sending
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 45 \
+            -X POST "$BASE_URL/negotiator/terms-requests/plan" \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'content-type: application/json' \
+            -d '{}' > /tmp/terms-plan.json
+          cat /tmp/terms-plan.json
+          echo
+          jq -e '.ok == true and .version == "1.0-negotiator-terms-planner" and .drafts >= 1 and .guardrails.draftOnly == true and .guardrails.externalMessagesSent == 0 and .guardrails.autonomousNegotiationMessages == false and .guardrails.autonomousSpend == false and .guardrails.bindingActionsHumanGated == true' /tmp/terms-plan.json >/dev/null
+
+      - name: Verify terms requests remain unsent
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 20 "$BASE_URL/negotiator/terms-requests/stats" > /tmp/terms-stats.json
+          cat /tmp/terms-stats.json
+          echo
+          jq -e '.version == "1.0-negotiator-terms-planner" and .drafts >= 1 and .externalMessagesSent == 0 and .draftOnly == true and .autonomousNegotiationMessages == false and .autonomousSpend == false and .bindingActionsHumanGated == true' /tmp/terms-stats.json >/dev/null
 
       - name: Verify negotiator state
         run: |
@@ -62,6 +82,8 @@ jobs:
           mkdir -p /tmp/negotiator-snapshot
           jq '{version,cases,readyForHumanReview,incompleteTerms,insufficientCompetition,topCases,guardrails}' /tmp/recompute.json > /tmp/negotiator-snapshot/recompute.json
           jq '{version,totalCases,readyForHumanReview,incompleteTerms,insufficientCompetition,rankedCandidates,pricedCandidates,maxRecommendationConfidence,recommendationOnly,autonomousNegotiationMessages,autonomousHiring,autonomousSpend,bindingActionsHumanGated}' /tmp/stats.json > /tmp/negotiator-snapshot/stats.json
+          jq '{version,drafts,requests,guardrails}' /tmp/terms-plan.json > /tmp/negotiator-snapshot/terms-plan.json
+          jq '{version,total,drafts,externalMessagesSent,draftOnly,autonomousNegotiationMessages,autonomousSpend,bindingActionsHumanGated}' /tmp/terms-stats.json > /tmp/negotiator-snapshot/terms-stats.json
 
       - name: Upload negotiator snapshot
         uses: actions/upload-artifact@v4
