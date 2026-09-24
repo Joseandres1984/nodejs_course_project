@@ -1,0 +1,96 @@
+name: LUMEN First Cash Smoke
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-first-cash-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  first-cash-smoke:
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: https://lumen-zero-a2a.lumen-b2b.workers.dev
+      ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+    steps:
+      - name: Verify protected token
+        run: test -n "${ADMIN_TOKEN:-}"
+
+      - name: Wait for First Cash runtime
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 30); do
+            if curl --fail --silent --max-time 20 "$BASE_URL/first-cash/policy" > /tmp/policy.json; then
+              if jq -e '.version == "1.0-first-cash-closer"' /tmp/policy.json >/dev/null; then exit 0; fi
+            fi
+            sleep 3
+          done
+          echo "First Cash runtime did not become ready" >&2
+          exit 1
+
+      - name: Verify elite conversion guardrails
+        run: |
+          set -euo pipefail
+          jq -e '
+            .positiveIntentRequired == true and
+            .technicalAckIsNotIntent == true and
+            .exactOfferCheckout == true and
+            .trackedAttribution == true and
+            .maxExternalMessagesPerRun == 1 and
+            .autonomousDiscounting == false and
+            .autonomousSpend == false and
+            .autonomousContract == false and
+            .bindingActionsHumanGated == true
+          ' /tmp/policy.json >/dev/null
+
+      - name: Verify First Cash live state
+        run: |
+          set -euo pipefail
+          curl --fail --silent --max-time 30 "$BASE_URL/first-cash/stats" > /tmp/first-cash.json
+          cat /tmp/first-cash.json
+          echo
+          jq -e '
+            .version == "1.0-first-cash-closer" and
+            .autonomousEnabled == true and
+            (.total | type) == "number" and
+            (.sent | type) == "number" and
+            (.readyToClose | type) == "boolean"
+          ' /tmp/first-cash.json >/dev/null
+
+      - name: Verify x402 revenue bridge truth policy
+        run: |
+          set -euo pipefail
+          curl --fail --silent --max-time 30 "$BASE_URL/x402-revenue-bridge/policy" > /tmp/bridge-policy.json
+          jq -e '
+            .version == "1.0-x402-revenue-bridge" and
+            .truthRule == "only_settled_verified_x402_receipts_become_verified_revenue_events" and
+            .exactProposalAttributionPreferred == true and
+            .autonomousSpend == false and
+            .bindingActionsHumanGated == true
+          ' /tmp/bridge-policy.json >/dev/null
+
+      - name: Safely sync verified x402 settlements
+        run: |
+          set -euo pipefail
+          curl --fail --silent --max-time 60 \
+            -X POST -H "x-lumen-admin: $ADMIN_TOKEN" \
+            "$BASE_URL/x402-revenue-bridge/sync" > /tmp/bridge-sync.json
+          cat /tmp/bridge-sync.json
+          echo
+          jq -e '.ok == true and .guardrails.settledVerifiedOnly == true and .guardrails.noUnverifiedRevenue == true' /tmp/bridge-sync.json >/dev/null
+
+      - name: Prepare safe snapshot
+        run: |
+          jq -n \
+            --argjson firstCash "$(cat /tmp/first-cash.json)" \
+            --argjson bridge "$(cat /tmp/bridge-sync.json)" \
+            '{firstCash:$firstCash,bridge:{ok:$bridge.ok,version:$bridge.version,processed:$bridge.processed,attributable:$bridge.attributable,guardrails:$bridge.guardrails}}' \
+            > /tmp/first-cash-snapshot.json
+
+      - name: Upload safe snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: first-cash-snapshot
+          path: /tmp/first-cash-snapshot.json
+          retention-days: 1
