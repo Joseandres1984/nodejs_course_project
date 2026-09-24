@@ -1,0 +1,33 @@
+name: LUMEN x402 Commission Smoke
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-x402-commission-smoke.yml'
+      - '.lumen/x402-worker/commission-checkout.js'
+      - '.lumen/x402-worker/entry.js'
+  workflow_dispatch:
+
+jobs:
+  x402-commission-smoke:
+    runs-on: ubuntu-latest
+    env:
+      X402_BASE_URL: https://lumen-zero-x402.lumen-b2b.workers.dev
+    steps:
+      - name: Verify commission router is live without payment
+        run: |
+          set -euo pipefail
+          code=$(curl --silent --show-error --max-time 20 -o /tmp/commission-missing.json -w '%{http_code}' "$X402_BASE_URL/commission/LUMEN-SAFE-NONEXISTENT")
+          test "$code" = "404"
+          jq -e '.ok == false and .error == "commission_not_found"' /tmp/commission-missing.json >/dev/null
+
+      - name: Verify existing product checkout remains payment-gated
+        run: |
+          set -euo pipefail
+          code=$(curl --silent --show-error --max-time 30 -o /dev/null -w '%{http_code}' "$X402_BASE_URL/buy/supplier-snapshot")
+          test "$code" = "402"
+
+      - name: Confirm no payment was attempted
+        run: |
+          echo 'SAFE_SMOKE_OK: commission route live; existing product route remains 402-gated; no payment signature supplied.'
