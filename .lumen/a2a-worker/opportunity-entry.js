@@ -15,6 +15,7 @@ import { handleCouncilTransportRecovery } from "./council-transport-recovery.js"
 import { handleCouncilContributionQuality, reviewActiveCouncilContributions } from "./council-contribution-quality.js";
 import { handleCouncilQualitySynthesis } from "./council-quality-synthesis.js";
 import { handleCouncilRoundManager, runCouncilRoundManager } from "./council-round-manager.js";
+import { handleDelegationEngine, planLatestSynthesizedCouncil } from "./delegation-engine.js";
 import { handleCouncilRuntime, pollCouncilRuntime } from "./council-runtime.js";
 
 export default {
@@ -58,6 +59,9 @@ export default {
     const councilRoundResponse = await handleCouncilRoundManager(request, env);
     if (councilRoundResponse) return councilRoundResponse;
 
+    const delegationResponse = await handleDelegationEngine(request, env);
+    if (delegationResponse) return delegationResponse;
+
     const councilRuntimeResponse = await handleCouncilRuntime(request, env);
     if (councilRuntimeResponse) return councilRuntimeResponse;
 
@@ -89,6 +93,10 @@ export default {
       await reviewActiveCouncilContributions(env);
       const councilRound = await runCouncilRoundManager(env, { force: false });
       const councilExternalMessageSent = Boolean(councilRound?.invite?.sent);
+
+      // Delegation planning is internal-only. It can prepare work only after a quality-gated council synthesis.
+      // No external delegated task is dispatched by this planner.
+      await planLatestSynthesizedCouncil(env);
 
       await prepareTopProposal(env);
       await reviewNextProposal(env);
