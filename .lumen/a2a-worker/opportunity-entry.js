@@ -3,7 +3,8 @@ import { handleOpportunityEngine, runOpportunityScan } from "./opportunity-engin
 import { handleCommercialIntelligence, runCommercialReassessment } from "./commercial-intelligence.js";
 import { handleProposalEngine, prepareTopProposal } from "./proposal-engine.js";
 import { handleQualityGate, reviewNextProposal } from "./quality-gate.js";
-import { handleA2AOutreach, processOutreachCycle } from "./a2a-outreach.js";
+import { handleA2AOutreach, pollOutstandingResponses, sendNextApproved } from "./a2a-outreach.js";
+import { handleFollowupEngine, processFollowupCycle } from "./followup-engine.js";
 
 export default {
   async fetch(request, env, ctx) {
@@ -22,6 +23,9 @@ export default {
     const outreachResponse = await handleA2AOutreach(request, env);
     if (outreachResponse) return outreachResponse;
 
+    const followupResponse = await handleFollowupEngine(request, env);
+    if (followupResponse) return followupResponse;
+
     return baseWorker.fetch(request, env, ctx);
   },
 
@@ -31,7 +35,13 @@ export default {
       await runCommercialReassessment(env);
       await prepareTopProposal(env);
       await reviewNextProposal(env);
-      await processOutreachCycle(env);
+
+      // First observe existing conversations. Then prefer a due follow-up over a new cold outreach.
+      await pollOutstandingResponses(env);
+      const followup = await processFollowupCycle(env);
+      if (!followup?.send?.sent) {
+        await sendNextApproved(env, { force: false });
+      }
     })());
   }
 };
