@@ -5,6 +5,7 @@ import { handleProposalEngine, prepareTopProposal } from "./proposal-engine.js";
 import { handleQualityGate, reviewNextProposal } from "./quality-gate.js";
 import { handleA2AOutreach, pollOutstandingResponses, sendNextApproved } from "./a2a-outreach.js";
 import { handleFollowupEngine, processFollowupCycle } from "./followup-engine.js";
+import { handleResponseQualification } from "./response-qualification.js";
 import { handleCommercialReplyEngine, runCommercialReplyEngine, pollCommercialReplyTasks } from "./commercial-reply-engine.js";
 import { handleFirstCashCloser, runFirstCashCloser } from "./first-cash-closer.js";
 import { handleX402RevenueBridge, syncX402SettlementsToRevenue } from "./x402-revenue-bridge.js";
@@ -54,6 +55,7 @@ export default {
     const qualityResponse = await handleQualityGate(request, env); if (qualityResponse) return qualityResponse;
     const outreachResponse = await handleA2AOutreach(request, env); if (outreachResponse) return outreachResponse;
     const followupResponse = await handleFollowupEngine(request, env); if (followupResponse) return followupResponse;
+    const responseQualificationResponse = await handleResponseQualification(request, env); if (responseQualificationResponse) return responseQualificationResponse;
     const commercialReplyResponse = await handleCommercialReplyEngine(request, env); if (commercialReplyResponse) return commercialReplyResponse;
     const firstCashResponse = await handleFirstCashCloser(request, env); if (firstCashResponse) return firstCashResponse;
     const x402RevenueBridgeResponse = await handleX402RevenueBridge(request, env); if (x402RevenueBridgeResponse) return x402RevenueBridgeResponse;
