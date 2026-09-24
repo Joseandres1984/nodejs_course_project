@@ -27,6 +27,7 @@ import { handleCouncilRoundManager, runCouncilRoundManager } from "./council-rou
 import { handleDelegationEngine, planLatestSynthesizedCouncil } from "./delegation-engine.js";
 import { handleDelegationQualityGate, reviewPendingDelegationTasks } from "./delegation-quality-gate.js";
 import { handleDelegationResultQuality, reviewDelegationResults } from "./delegation-result-quality.js";
+import { handleTrustedDelegationDispatch } from "./trusted-delegation-dispatch.js";
 import { handleDelegationRuntime, pollDelegationTasks } from "./delegation-runtime.js";
 import { handleObservedPartnerReputation, recomputeObservedReputation } from "./partner-observed-reputation.js";
 import { handleCouncilRuntime, pollCouncilRuntime } from "./council-runtime.js";
@@ -49,6 +50,7 @@ export default {
     const delegationResponse = await handleDelegationEngine(request, env); if (delegationResponse) return delegationResponse;
     const delegationQualityResponse = await handleDelegationQualityGate(request, env); if (delegationQualityResponse) return delegationQualityResponse;
     const delegationResultQualityResponse = await handleDelegationResultQuality(request, env); if (delegationResultQualityResponse) return delegationResultQualityResponse;
+    const trustedDelegationResponse = await handleTrustedDelegationDispatch(request, env); if (trustedDelegationResponse) return trustedDelegationResponse;
     const delegationRuntimeResponse = await handleDelegationRuntime(request, env); if (delegationRuntimeResponse) return delegationRuntimeResponse;
     const observedReputationResponse = await handleObservedPartnerReputation(request, env); if (observedReputationResponse) return observedReputationResponse;
     const trustResponse = await handleTrustLayer(request, env); if (trustResponse) return trustResponse;
