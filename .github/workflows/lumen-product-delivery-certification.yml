@@ -33,7 +33,7 @@ jobs:
           sudo apt-get update -y
           sudo apt-get install -y poppler-utils
           python -m pip install --upgrade pip
-          python -m pip install pypdf pillow
+          python -m pip install -r .lumen/runtime/requirements.txt
           npm install --no-save playwright pdf-lib
           npx playwright install --with-deps chromium
 
