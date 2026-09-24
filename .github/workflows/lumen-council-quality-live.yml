@@ -1,0 +1,51 @@
+name: LUMEN Council Quality Live
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-council-quality-live.yml'
+  workflow_dispatch:
+
+jobs:
+  quality-live:
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: https://lumen-zero-a2a.lumen-b2b.workers.dev
+      OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+      ROOM_ID: ROOM-4582354AD86443
+    steps:
+      - name: Verify protected token
+        run: test -n "${OPPORTUNITY_ADMIN_TOKEN:-}"
+
+      - name: Wait for contribution quality gate
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 30); do
+            body=$(curl --show-error --silent --max-time 10 "$BASE_URL/council-quality/stats" || true)
+            echo "$body"
+            if echo "$body" | grep -q '1.0-council-contribution-quality'; then exit 0; fi
+            sleep 5
+          done
+          exit 1
+
+      - name: Review live council contributions
+        run: |
+          set -euo pipefail
+          payload=$(jq -nc --arg room "$ROOM_ID" '{roomId:$room}')
+          curl --fail --show-error --silent --max-time 30 \
+            -X POST "$BASE_URL/council-quality/review" \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'content-type: application/json' \
+            -d "$payload" > /tmp/review.json
+          cat /tmp/review.json
+          echo
+          jq -e '.ok == true and .reviewed >= 2' /tmp/review.json >/dev/null
+
+      - name: Read contribution quality detail
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 20 \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            "$BASE_URL/council-quality/room?id=$ROOM_ID"
+          echo
