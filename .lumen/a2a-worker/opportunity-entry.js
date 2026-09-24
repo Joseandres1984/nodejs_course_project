@@ -13,6 +13,7 @@ import { handleCouncilReplacement } from "./council-replacement.js";
 import { handleCouncilJsonRpcFallback } from "./council-jsonrpc-fallback.js";
 import { handleCouncilTransportRecovery } from "./council-transport-recovery.js";
 import { handleCouncilContributionQuality, reviewActiveCouncilContributions } from "./council-contribution-quality.js";
+import { handleCouncilQualitySynthesis } from "./council-quality-synthesis.js";
 import { handleCouncilRuntime, pollCouncilRuntime } from "./council-runtime.js";
 
 export default {
@@ -49,6 +50,9 @@ export default {
 
     const councilContributionQualityResponse = await handleCouncilContributionQuality(request, env);
     if (councilContributionQualityResponse) return councilContributionQualityResponse;
+
+    const councilQualitySynthesisResponse = await handleCouncilQualitySynthesis(request, env);
+    if (councilQualitySynthesisResponse) return councilQualitySynthesisResponse;
 
     const councilRuntimeResponse = await handleCouncilRuntime(request, env);
     if (councilRuntimeResponse) return councilRuntimeResponse;
