@@ -1,0 +1,68 @@
+name: LUMEN Revenue Attribution Smoke
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-revenue-attribution-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  revenue-attribution-smoke:
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: https://lumen-zero-a2a.lumen-b2b.workers.dev
+      OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+    steps:
+      - name: Verify protected token
+        run: test -n "${OPPORTUNITY_ADMIN_TOKEN:-}"
+
+      - name: Wait for attribution runtime
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 36); do
+            p=$(curl --show-error --silent --max-time 10 "$BASE_URL/revenue-attribution/policy" || true)
+            echo "$p"
+            if echo "$p" | grep -q '1.0-revenue-attribution'; then exit 0; fi
+            sleep 5
+          done
+          exit 1
+
+      - name: Verify attribution truth policy
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 20 "$BASE_URL/revenue-attribution/policy" > /tmp/policy.json
+          cat /tmp/policy.json
+          jq -e '.version == "1.0-revenue-attribution" and .truthRule == "only_verified_payment_settled_events_are_attributed" and .partnerCreditRule == "partner_credit_requires_direct_referral_or_explicit_partner_identifier_evidence" and .teamCreditRule == "draft_or_planned_team_membership_does_not_receive_revenue_credit" and .autonomousSpend == false and .bindingActionsHumanGated == true' /tmp/policy.json >/dev/null
+
+      - name: Recompute verified attribution
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 60 \
+            -X POST "$BASE_URL/revenue-attribution/recompute" \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'content-type: application/json' \
+            -d '{}' > /tmp/recompute.json
+          cat /tmp/recompute.json
+          jq -e '.ok == true and .version == "1.0-revenue-attribution" and .processed >= 0 and .guardrails.verifiedSettlementsOnly == true and .guardrails.directEvidenceOnly == true and .guardrails.noInferredTeamCredit == true and .guardrails.autonomousSpend == false and .guardrails.bindingActionsHumanGated == true' /tmp/recompute.json >/dev/null
+
+      - name: Verify attribution accounting invariants
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 20 "$BASE_URL/revenue-attribution/stats" > /tmp/stats.json
+          cat /tmp/stats.json
+          jq -e '.version == "1.0-revenue-attribution" and .attributedSettlements >= 0 and .attributedRevenueUsd >= 0 and .partnerAttributedSettlements >= 0 and .sourceAttributedSettlements >= 0 and .unattributedSettlements >= 0 and .partnerAttributedRevenueUsd >= 0 and .partnerAttributedSettlements <= .attributedSettlements and .partnerAttributedRevenueUsd <= .attributedRevenueUsd and .verifiedSettlementsOnly == true and .directEvidenceOnly == true' /tmp/stats.json >/dev/null
+
+      - name: Prepare safe snapshot
+        run: |
+          mkdir -p /tmp/revenue-attribution
+          jq '{version,processed,partnerValuesUpdated,state,guardrails}' /tmp/recompute.json > /tmp/revenue-attribution/recompute.json
+          jq '.' /tmp/stats.json > /tmp/revenue-attribution/stats.json
+          jq '.' /tmp/policy.json > /tmp/revenue-attribution/policy.json
+
+      - name: Upload snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: revenue-attribution-snapshot
+          path: /tmp/revenue-attribution
+          retention-days: 1
