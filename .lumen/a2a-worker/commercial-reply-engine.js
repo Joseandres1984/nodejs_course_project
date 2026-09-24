@@ -1,6 +1,6 @@
 import { classifyCommercialResponse } from "./response-qualification.js";
 
-const VERSION = "1.0-commercial-reply-engine";
+const VERSION = "1.1-commercial-reply-engine";
 const SEND_TIMEOUT_MS = 15000;
 
 const OFFER_SCOPES = {
@@ -17,6 +17,7 @@ function clean(value,limit=6000){return String(value??"").trim().replace(/\s+/g,
 function boolVar(value,fallback=false){const v=clean(value,20).toLowerCase();if(!v)return fallback;return ["1","true","yes","on"].includes(v);}
 function authorized(request,env){const a=clean(env?.OPPORTUNITY_ADMIN_TOKEN,500),b=clean(request.headers.get("x-lumen-admin"),500);return Boolean(a&&b&&a===b);}
 function isHttps(value){try{return new URL(value).protocol==="https:";}catch{return false;}}
+function normalizeBaseUrl(value){const u=new URL(value);u.hash="";u.search="";return u.toString().replace(/\/$/,"");}
 function withTimeout(ms){const controller=new AbortController();const timer=setTimeout(()=>controller.abort("timeout"),ms);return{signal:controller.signal,clear:()=>clearTimeout(timer)};}
 
 async function ensureSchema(env){
@@ -91,7 +92,19 @@ function extractResponse(body,binding){
   const value=clean(binding,40).toUpperCase()==="JSONRPC"?(body?.result||body||{}):(body||{});
   const task=value?.task||(value?.id&&value?.status?value:null);const message=value?.message||null;
   const parts=message?.parts||task?.status?.message?.parts||task?.artifacts?.flatMap?.(a=>a?.parts||[])||[];
-  return{taskId:clean(task?.id,300)||null,contextId:clean(task?.contextId,300)||clean(message?.contextId,300)||null,responseText:clean((Array.isArray(parts)?parts:[]).map(p=>p?.text||"").filter(Boolean).join(" "),5000)||null};
+  return{taskId:clean(task?.id,300)||null,contextId:clean(task?.contextId,300)||clean(message?.contextId,300)||null,state:clean(task?.status?.state,100)||null,responseText:clean((Array.isArray(parts)?parts:[]).map(p=>p?.text||"").filter(Boolean).join(" "),5000)||null};
+}
+
+async function promoteConversationResponse(env,proposalId,responseText,originalReply){
+  const text=clean(responseText,5000);if(!text)return null;
+  const c=classifyCommercialResponse(text,originalReply||"");
+  if(["TECHNICAL_ACK","ECHO"].includes(c.responseClass))return c;
+  const now=new Date().toISOString();
+  try{await env.DB.prepare("UPDATE lumen_outreach_attempts SET response_text=?,updated_at=? WHERE proposal_id=?").bind(text,now,proposalId).run();}catch{}
+  try{await env.DB.prepare("UPDATE lumen_proposal_drafts SET status='RESPONDED',updated_at=? WHERE proposal_id=?").bind(now,proposalId).run();}catch{}
+  try{await env.DB.prepare("UPDATE lumen_sales_pipeline SET stage=?,response_class=?,next_action=?,next_action_at=NULL,updated_at=? WHERE proposal_id=?")
+    .bind(c.stage||"RESPONDED",c.responseClass,c.nextAction||"qualify_response",now,proposalId).run();}catch{}
+  return c;
 }
 
 async function record(env,row,values){
@@ -113,21 +126,50 @@ export async function runCommercialReplyEngine(env,{force=false}={}){
     let body={};try{body=JSON.parse(raw);}catch{}
     const info=extractResponse(body,candidate.protocol_binding);const status=info.responseText?"RESPONDED":info.taskId?"SENT_TASK":"SENT";
     await record(env,candidate,{status,...info});
-    return{ok:true,sent:true,version:VERSION,proposalId:candidate.proposal_id,opportunityId:candidate.opportunity_id,offerId:candidate.offer_id,status,taskId:info.taskId,questionType:questionType(candidate.response_text),guardrails:{commercialQuestionOnly:true,oneReplyPerProposal:true,knownOfferFactsOnly:true,unknownEtaNotInvented:true,autonomousDiscounting:false,autonomousSpend:false,autonomousContract:false,bindingActionsHumanGated:true}};
+    const followOnClassification=info.responseText?await promoteConversationResponse(env,candidate.proposal_id,info.responseText,candidate.replyText):null;
+    return{ok:true,sent:true,version:VERSION,proposalId:candidate.proposal_id,opportunityId:candidate.opportunity_id,offerId:candidate.offer_id,status,taskId:info.taskId,questionType:questionType(candidate.response_text),followOnClassification:followOnClassification?.responseClass||null,guardrails:{commercialQuestionOnly:true,oneReplyPerProposal:true,knownOfferFactsOnly:true,unknownEtaNotInvented:true,autonomousDiscounting:false,autonomousSpend:false,autonomousContract:false,bindingActionsHumanGated:true}};
   }catch(error){const err=clean(error?.message||error,500);await record(env,candidate,{status:"SEND_FAILED",error:err});return{ok:false,sent:false,version:VERSION,proposalId:candidate.proposal_id,status:"SEND_FAILED",error:err};}
   finally{timeout.clear();}
 }
 
+export async function pollCommercialReplyTasks(env){
+  if(!(await ensureSchema(env)))return{ok:false,polled:0,error:"persistence_unavailable",version:VERSION};
+  let rows=[];try{const r=await env.DB.prepare("SELECT r.proposal_id,r.task_id,r.reply_text,x.agent_url,x.protocol_binding,x.protocol_version FROM lumen_commercial_replies r JOIN lumen_outreach_attempts x ON x.proposal_id=r.proposal_id WHERE r.status IN ('SENT_TASK','WORKING') AND r.task_id IS NOT NULL ORDER BY r.updated_at ASC LIMIT 5").all();rows=r.results||[];}catch{return{ok:true,polled:0,results:[],version:VERSION};}
+  const results=[];
+  for(const row of rows){
+    if(!isHttps(row.agent_url))continue;
+    const version=clean(row.protocol_version,20)||"0.3.0",isV1=version.startsWith("1."),timeout=withTimeout(SEND_TIMEOUT_MS);
+    try{
+      let response;
+      if(clean(row.protocol_binding,40).toUpperCase()==="HTTP+JSON"){
+        response=await fetch(`${normalizeBaseUrl(row.agent_url)}/tasks/${encodeURIComponent(row.task_id)}`,{method:"GET",headers:{"accept":"application/a2a+json, application/json","a2a-version":version},signal:timeout.signal});
+      }else{
+        response=await fetch(row.agent_url,{method:"POST",headers:{"content-type":"application/json","accept":"application/json","a2a-version":version},body:JSON.stringify({jsonrpc:"2.0",id:`commercial-reply-poll-${crypto.randomUUID()}`,method:isV1?"GetTask":"tasks/get",params:{id:row.task_id,historyLength:5}}),signal:timeout.signal});
+      }
+      const raw=await response.text();if(!response.ok)throw new Error(`commercial_reply_poll_http_${response.status}`);
+      let body={};try{body=JSON.parse(raw);}catch{}
+      const info=extractResponse(body,row.protocol_binding);
+      const terminal=["TASK_STATE_COMPLETED","TASK_STATE_FAILED","TASK_STATE_CANCELED","TASK_STATE_REJECTED","completed","failed","canceled","rejected"].includes(info.state);
+      const status=info.responseText?"RESPONDED":terminal?"TASK_TERMINAL":"WORKING";
+      await env.DB.prepare("UPDATE lumen_commercial_replies SET updated_at=?,status=?,response_text=COALESCE(?,response_text),error=NULL WHERE proposal_id=?").bind(new Date().toISOString(),status,info.responseText,row.proposal_id).run();
+      const classification=info.responseText?await promoteConversationResponse(env,row.proposal_id,info.responseText,row.reply_text):null;
+      results.push({proposalId:row.proposal_id,status,responseClass:classification?.responseClass||null});
+    }catch(error){results.push({proposalId:row.proposal_id,status:"POLL_FAILED",error:clean(error?.message||error,300)});}finally{timeout.clear();}
+  }
+  return{ok:true,polled:results.length,results,version:VERSION};
+}
+
 async function statsData(env){
-  await ensureSchema(env);let row=null;try{row=await env.DB.prepare("SELECT COUNT(*) total,SUM(CASE WHEN status IN ('SENT','SENT_TASK','RESPONDED') THEN 1 ELSE 0 END) sent,SUM(CASE WHEN status='RESPONDED' THEN 1 ELSE 0 END) responded,SUM(CASE WHEN status='SEND_FAILED' THEN 1 ELSE 0 END) failed FROM lumen_commercial_replies").first();}catch{}
+  await ensureSchema(env);let row=null;try{row=await env.DB.prepare("SELECT COUNT(*) total,SUM(CASE WHEN status IN ('SENT','SENT_TASK','WORKING','RESPONDED') THEN 1 ELSE 0 END) sent,SUM(CASE WHEN status='RESPONDED' THEN 1 ELSE 0 END) responded,SUM(CASE WHEN status='SEND_FAILED' THEN 1 ELSE 0 END) failed,SUM(CASE WHEN status IN ('SENT_TASK','WORKING') THEN 1 ELSE 0 END) async_pending FROM lumen_commercial_replies").first();}catch{}
   const candidate=await findCandidate(env);
-  return{total:Number(row?.total||0),sent:Number(row?.sent||0),responded:Number(row?.responded||0),failed:Number(row?.failed||0),readyToReply:Boolean(candidate),readyProposalId:candidate?.proposal_id||null,autonomousEnabled:boolVar(env?.A2A_AUTONOMOUS_OUTREACH,false)&&boolVar(env?.A2A_AUTONOMOUS_COMMERCIAL_REPLY,false)};
+  return{total:Number(row?.total||0),sent:Number(row?.sent||0),responded:Number(row?.responded||0),failed:Number(row?.failed||0),asyncPending:Number(row?.async_pending||0),readyToReply:Boolean(candidate),readyProposalId:candidate?.proposal_id||null,autonomousEnabled:boolVar(env?.A2A_AUTONOMOUS_OUTREACH,false)&&boolVar(env?.A2A_AUTONOMOUS_COMMERCIAL_REPLY,false)};
 }
 
 export async function handleCommercialReplyEngine(request,env){
   const url=new URL(request.url);
-  if(request.method==="GET"&&url.pathname==="/commercial-reply/policy")return json({version:VERSION,name:"LUMEN Commercial Reply Engine",handles:["COMMERCIAL_QUESTION"],purchaseIntentHandledBy:"First Cash Closer",knownOfferFactsOnly:true,unknownEtaNotInvented:true,maxExternalMessagesPerRun:1,oneReplyPerProposal:true,autonomousDiscounting:false,autonomousSpend:false,autonomousContract:false,bindingActionsHumanGated:true});
+  if(request.method==="GET"&&url.pathname==="/commercial-reply/policy")return json({version:VERSION,name:"LUMEN Commercial Reply Engine",handles:["COMMERCIAL_QUESTION"],purchaseIntentHandledBy:"First Cash Closer",knownOfferFactsOnly:true,unknownEtaNotInvented:true,asyncConversationPolling:true,maxExternalMessagesPerRun:1,oneReplyPerProposal:true,autonomousDiscounting:false,autonomousSpend:false,autonomousContract:false,bindingActionsHumanGated:true});
   if(request.method==="GET"&&url.pathname==="/commercial-reply/stats")return json({version:VERSION,...await statsData(env)});
   if(request.method==="POST"&&url.pathname==="/commercial-reply/run"){if(!authorized(request,env))return json({ok:false,error:"admin_token_required"},403);return json(await runCommercialReplyEngine(env,{force:false}),202);}
+  if(request.method==="POST"&&url.pathname==="/commercial-reply/poll"){if(!authorized(request,env))return json({ok:false,error:"admin_token_required"},403);return json(await pollCommercialReplyTasks(env),202);}
   return null;
 }
