@@ -1,0 +1,46 @@
+name: LUMEN Council Round Manager Smoke
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-council-round-manager-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  round-manager-smoke:
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: https://lumen-zero-a2a.lumen-b2b.workers.dev
+      OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+    steps:
+      - name: Verify protected token
+        run: test -n "${OPPORTUNITY_ADMIN_TOKEN:-}"
+
+      - name: Wait for council round manager
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 30); do
+            body=$(curl --show-error --silent --max-time 10 "$BASE_URL/council-round/stats" || true)
+            echo "$body"
+            if echo "$body" | grep -q '1.0-council-round-manager'; then exit 0; fi
+            sleep 5
+          done
+          exit 1
+
+      - name: Run one guarded manager cycle without force
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 30 \
+            -X POST "$BASE_URL/council-round/run" \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'content-type: application/json' \
+            -d '{"force":false}' > /tmp/result.json
+          cat /tmp/result.json
+          echo
+          jq -e '.ok == true' /tmp/result.json >/dev/null
+
+      - name: Read manager state
+        run: |
+          curl --fail --show-error --silent --max-time 20 "$BASE_URL/council-round/stats"
+          echo
