@@ -106,6 +106,18 @@ Fase C: 8 → 9 → 11 → 10 → 15 (la Torre se amplía incrementalmente duran
 - Commission status permanece NOT_CONFIGURED: la atribución se registra, pero no existe promesa ni pago automático de comisión.
 - Smoke Referral Network: SUCCESS. Estado inicial: 1 outbound candidate, 0 inbound, 0 settlements, USD 0 settled referral revenue.
 
+### #10 Economía entre agentes
+- Agent Economy v1.0: operativo y conectado al ciclo horario.
+- Mantiene un ledger de dos direcciones: INCOME para servicios/ofertas de LUMEN y EXPENSE para posibles servicios de partners.
+- Las ofertas comerciales Quality PASS se registran como OFFERED_UNSETTLED / x402_receive_only; una oferta o checkout nunca cuenta como ingreso realizado.
+- Sólo lumen_revenue_events con event_type=payment_settled y status=verified pueden crear un VERIFIED_SETTLEMENT y convertir un intent de ingreso en REALIZED_INCOME.
+- Primera recomputación real: 4 income intents por USD 42 de valor potencial, USD 0 de ingreso realizado, 0 expense intents, 0 proposed expense y 0 ledger settlements verificados.
+- Cuando el Negotiator produzca una recomendación comercial completa con precio real y Trust ALLOW >=70, Agent Economy puede crear internamente un EXPENSE/HUMAN_APPROVAL_REQUIRED y un DRAFT_NONBINDING; no puede ejecutarlo.
+- Presupuesto saliente autónomo: USD 0. `external_execution_allowed=0` y `binding_allowed=0` para egresos preparados.
+- Endpoint de ejecución saliente hard-blocked: prueba real POST /agent-economy/outbound/execute con USD 1 respondió HTTP 403 `outgoing_spend_disabled`.
+- Payment rails de entrada contemplan x402/settlement verificado; salida puede prepararse conceptualmente como x402_or_agreed pero outboundExecutable=false.
+- Smoke Agent Economy: SUCCESS, incluyendo prueba explícita del hard block de gasto.
+
 ### #11 Negotiator
 - Partner Negotiator v1.0: operativo y conectado al ciclo horario en modo recommendation-only.
 - Pondera match 25%, Trust 18%, calidad/reputación 22%, reliability 10%, responsiveness 8%, precio 10% y tiempo 7%, con penalización de riesgo de hasta 30 puntos.
@@ -138,7 +150,7 @@ Fase C: 8 → 9 → 11 → 10 → 15 (la Torre se amplía incrementalmente duran
 - Smoke conjunto Redundancy + Trust: SUCCESS.
 
 ## Guardrails activos
-- Gasto autónomo continúa en USD 0.
+- Gasto autónomo continúa en USD 0 y Agent Economy lo hard-blockea técnicamente en el endpoint de salida.
 - Contratos/hiring/compras/deuda/obligaciones continúan human-gated.
 - Delegación autónoma externa permanece OFF durante el piloto.
 - Reputación observada no sustituye de golpe la reputación declarada: usa confianza acumulativa.
@@ -149,6 +161,7 @@ Fase C: 8 → 9 → 11 → 10 → 15 (la Torre se amplía incrementalmente duran
 - Marketplace inbound y Referral inbound son públicos pero siempre no vinculantes y no solicitan secretos/credenciales.
 - Referral attribution no implica comisión; cualquier reparto futuro requiere política explícita, revenue settled verificado y guardrails de pago.
 - Negotiator sólo recomienda y prepara borradores de condiciones; no envía, no acepta términos ni compromete fondos.
+- Agent Economy separa estrictamente valor potencial, propuestas de egreso y dinero verificado/settled.
 
 ## Próximos hitos
 - #2: obtener una segunda contribución PASS, ejecutar la primera síntesis multiagente válida y cerrar la junta piloto.
@@ -157,5 +170,5 @@ Fase C: 8 → 9 → 11 → 10 → 15 (la Torre se amplía incrementalmente duran
 - #5: recibir la primera idea comercial explícita desde una contribución PASS, someterla a dos peer reviews y validar el primer experimento de costo cero.
 - #9: recibir el primer referral inbound real o validar una derivación outbound controlada; comisión sigue NOT_CONFIGURED.
 - #11: obtener al menos 2 términos/precios comparables reales, elevar un caso a READY_FOR_HUMAN_REVIEW y validar la primera recomendación comercial completa.
-- #10: economía entre agentes y micropagos sólo después de validar Referral + Negotiator y manteniendo human gate para gasto.
-- #15: ampliar la Torre de Control con red, marketplace, referrals, tareas, trust, reputación y revenue verificado.
+- #10: validar el primer settlement de ingreso real cuando ocurra y, más adelante, una intención de egreso human-approved sin habilitar gasto autónomo.
+- #15: ampliar la Torre de Control con red, marketplace, referrals, tareas, trust, reputación, Agent Economy e ingresos verificados.
