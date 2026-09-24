@@ -14,6 +14,7 @@ import { handleVenturePeerReview, planVenturePeerReviews } from "./venture-peer-
 import { handleCapabilityGapEngine, recomputeCapabilityGaps } from "./capability-gap-engine.js";
 import { handlePartnerMarketplace, syncPartnerMarketplace, reviewMarketplaceInterests } from "./partner-marketplace.js";
 import { handlePartnerMarketplacePublicCatalog } from "./partner-marketplace-public-catalog.js";
+import { handleReferralNetwork, reviewInboundReferrals, planOutboundReferrals, syncReferralSettlements } from "./referral-network.js";
 import { handleAgentGraph, recomputeAgentGraph } from "./agent-graph.js";
 import { handleDynamicTeamEngine, buildDynamicTeams } from "./dynamic-team-engine.js";
 import { handleRedundancyEngine, recomputeRedundancy } from "./redundancy-engine.js";
@@ -65,6 +66,7 @@ export default {
     const capabilityGapResponse = await handleCapabilityGapEngine(request, env); if (capabilityGapResponse) return capabilityGapResponse;
     const marketplaceCatalogResponse = await handlePartnerMarketplacePublicCatalog(request, env); if (marketplaceCatalogResponse) return marketplaceCatalogResponse;
     const marketplaceResponse = await handlePartnerMarketplace(request, env); if (marketplaceResponse) return marketplaceResponse;
+    const referralResponse = await handleReferralNetwork(request, env); if (referralResponse) return referralResponse;
     const agentGraphResponse = await handleAgentGraph(request, env); if (agentGraphResponse) return agentGraphResponse;
     const dynamicTeamResponse = await handleDynamicTeamEngine(request, env); if (dynamicTeamResponse) return dynamicTeamResponse;
     const redundancyResponse = await handleRedundancyEngine(request, env); if (redundancyResponse) return redundancyResponse;
@@ -99,6 +101,10 @@ export default {
       await recomputeCapabilityGaps(env);
       await syncPartnerMarketplace(env);
       await reviewMarketplaceInterests(env);
+      // Referral Network is attribution-first: inbound review and outbound planning do not send messages or promise commissions.
+      await reviewInboundReferrals(env);
+      await planOutboundReferrals(env);
+      await syncReferralSettlements(env);
       await recomputeAgentGraph(env);
       await buildDynamicTeams(env);
       await recomputeRedundancy(env);
