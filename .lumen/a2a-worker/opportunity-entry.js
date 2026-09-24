@@ -12,6 +12,7 @@ import { handleVentureSuggestionIntake, ingestCouncilVentureSuggestions } from "
 import { handleVentureCouncil, runVentureCouncil } from "./venture-council-engine.js";
 import { handleCapabilityGapEngine, recomputeCapabilityGaps } from "./capability-gap-engine.js";
 import { handleAgentGraph, recomputeAgentGraph } from "./agent-graph.js";
+import { handleDynamicTeamEngine, buildDynamicTeams } from "./dynamic-team-engine.js";
 import { handleRecruitmentEngine, pollRecruitmentResponses } from "./recruitment-engine.js";
 import { handleCouncilReplacement } from "./council-replacement.js";
 import { handleCouncilJsonRpcFallback } from "./council-jsonrpc-fallback.js";
@@ -100,6 +101,9 @@ export default {
     const agentGraphResponse = await handleAgentGraph(request, env);
     if (agentGraphResponse) return agentGraphResponse;
 
+    const dynamicTeamResponse = await handleDynamicTeamEngine(request, env);
+    if (dynamicTeamResponse) return dynamicTeamResponse;
+
     const partnerQualityResponse = await handlePartnerCouncilQuality(request, env);
     if (partnerQualityResponse) return partnerQualityResponse;
 
@@ -143,6 +147,8 @@ export default {
       await recomputeCapabilityGaps(env);
       // Maintain an observational graph of agent relationships and combination outcomes.
       await recomputeAgentGraph(env);
+      // Build temporary internal-only coalitions from roles, trust and observed pair history.
+      await buildDynamicTeams(env);
 
       await prepareTopProposal(env);
       await reviewNextProposal(env);
