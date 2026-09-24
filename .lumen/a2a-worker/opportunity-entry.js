@@ -12,6 +12,7 @@ import { handleRecruitmentEngine, pollRecruitmentResponses } from "./recruitment
 import { handleCouncilReplacement } from "./council-replacement.js";
 import { handleCouncilJsonRpcFallback } from "./council-jsonrpc-fallback.js";
 import { handleCouncilTransportRecovery } from "./council-transport-recovery.js";
+import { handleCouncilContributionQuality, reviewActiveCouncilContributions } from "./council-contribution-quality.js";
 import { handleCouncilRuntime, pollCouncilRuntime } from "./council-runtime.js";
 
 export default {
@@ -46,6 +47,9 @@ export default {
     const councilRecoveryResponse = await handleCouncilTransportRecovery(request, env);
     if (councilRecoveryResponse) return councilRecoveryResponse;
 
+    const councilContributionQualityResponse = await handleCouncilContributionQuality(request, env);
+    if (councilContributionQualityResponse) return councilContributionQualityResponse;
+
     const councilRuntimeResponse = await handleCouncilRuntime(request, env);
     if (councilRuntimeResponse) return councilRuntimeResponse;
 
@@ -74,6 +78,7 @@ export default {
 
       await pollRecruitmentResponses(env);
       await pollCouncilRuntime(env);
+      await reviewActiveCouncilContributions(env);
 
       await prepareTopProposal(env);
       await reviewNextProposal(env);
