@@ -8,7 +8,7 @@ X402_PAY_TO = "0x04285DE6A083CEb28fb0C254a2ed0F5fdB2eeD28"
 X402_NETWORK = "eip155:8453"
 X402_FACILITATOR = "https://facilitator.xpay.sh"
 X402_CHECKOUT_URL = "https://lumen-zero-x402.lumen-b2b.workers.dev"
-A2A_AUTONOMOUS_OUTREACH = "false"
+A2A_AUTONOMOUS_OUTREACH = "true"
 
 [triggers]
 crons = ["7 * * * *"]
