@@ -1,8 +1,11 @@
 import app from "./worker-v2.js";
+import { handleCommissionCheckout } from "./commission-checkout.js";
 
 export default {
   async fetch(request, env, ctx) {
     try {
+      const commissionResponse = await handleCommissionCheckout(request, env);
+      if (commissionResponse) return commissionResponse;
       return await app.fetch(request, env, ctx);
     } catch (error) {
       const url = new URL(request.url);
