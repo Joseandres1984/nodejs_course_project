@@ -1,0 +1,49 @@
+name: LUMEN Venture Intake Smoke
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-venture-intake-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  venture-intake-smoke:
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: https://lumen-zero-a2a.lumen-b2b.workers.dev
+      OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+    steps:
+      - name: Verify protected token
+        run: test -n "${OPPORTUNITY_ADMIN_TOKEN:-}"
+
+      - name: Wait for Venture Intake v1
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 30); do
+            body=$(curl --show-error --silent --max-time 10 "$BASE_URL/venture-intake/stats" || true)
+            echo "$body"
+            if echo "$body" | grep -q '1.0-venture-suggestion-intake'; then exit 0; fi
+            sleep 5
+          done
+          exit 1
+
+      - name: Process existing grounded council contributions
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 45 \
+            -X POST "$BASE_URL/venture-intake/run" \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'content-type: application/json' \
+            -d '{}' > /tmp/intake.json
+          cat /tmp/intake.json
+          echo
+          jq -e '.ok == true and .version == "1.0-venture-suggestion-intake" and .policy.explicitPartnerLanguageRequired == true and .policy.inventMissingCustomer == false and .policy.inventMissingRevenue == false and .policy.autonomousSpend == false' /tmp/intake.json >/dev/null
+
+      - name: Verify intake safety state
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 20 "$BASE_URL/venture-intake/stats" > /tmp/stats.json
+          cat /tmp/stats.json
+          echo
+          jq -e '.version == "1.0-venture-suggestion-intake" and .explicitPartnerLanguageRequired == true and .autonomousSpend == false and .bindingActionsHumanGated == true' /tmp/stats.json >/dev/null
