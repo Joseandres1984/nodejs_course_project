@@ -56,6 +56,11 @@ Fase C: 8 → 9 → 11 → 10 → 15 (la Torre se amplía incrementalmente duran
 - Si un agente no aporta dentro del timeout, LUMEN lo reemplaza por el siguiente candidato apto; si una contribución es REJECT, puede reemplazarla por baja calidad.
 - Si la junta alcanza 2 aportes PASS, el Round Manager puede ejecutar la síntesis quality-gated sin generar nuevas invitaciones.
 - Si una invitación de junta sale en un ciclo, ese ciclo no envía además un outreach comercial nuevo: una sola acción externa saliente desde este flujo por ciclo.
+- Delegation Engine v1.0: instalada y operativa en modo planner interno.
+- La Delegation Engine sólo puede generar tareas desde una sala SYNTHESIZED con al menos 2 contribuciones PASS; cada tarea incluye rol, objetivo, entregable esperado, exigencia de evidencia y guardrails de no gasto/no contrato.
+- La planificación de delegación se ejecutará automáticamente de forma interna cuando aparezca una nueva síntesis válida; no envía tareas externas por sí sola.
+- Delegación autónoma externa: desactivada durante el piloto. Prueba live correcta: con la sala aún DELIBERATING respondió room_not_synthesized y creó 0 tareas.
 - Gasto autónomo continúa en USD 0 y contratos/hiring/obligaciones continúan human-gated.
 - Reemplazo y reputación operativa ya empiezan a anticipar los futuros puntos #4 y #13.
 - Próximo hito del #2: obtener una segunda contribución PASS, ejecutar la primera síntesis multiagente válida y cerrar la junta piloto.
+- Próximo hito del #3: una vez sintetizada la junta, generar el primer paquete real de tareas y validar su calidad antes de habilitar cualquier dispatch externo.
