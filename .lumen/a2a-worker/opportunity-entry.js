@@ -8,6 +8,7 @@ import { handleFollowupEngine, processFollowupCycle } from "./followup-engine.js
 import { handlePartnerNetwork, runPartnerDiscovery } from "./partner-network.js";
 import { handlePartnerCouncilQuality, buildQualityPartnerMatches } from "./partner-council-quality.js";
 import { handlePartnerVentureBoard } from "./partner-venture-board.js";
+import { handleRecruitmentEngine, pollRecruitmentResponses } from "./recruitment-engine.js";
 
 export default {
   async fetch(request, env, ctx) {
@@ -28,6 +29,9 @@ export default {
 
     const followupResponse = await handleFollowupEngine(request, env);
     if (followupResponse) return followupResponse;
+
+    const recruitmentResponse = await handleRecruitmentEngine(request, env);
+    if (recruitmentResponse) return recruitmentResponse;
 
     const ventureResponse = await handlePartnerVentureBoard(request, env);
     if (ventureResponse) return ventureResponse;
@@ -54,10 +58,13 @@ export default {
       }
       await buildQualityPartnerMatches(env);
 
+      // Recruitment responses may be polled autonomously; new recruitment invites remain separately gated.
+      await pollRecruitmentResponses(env);
+
       await prepareTopProposal(env);
       await reviewNextProposal(env);
 
-      // First observe existing conversations. Then prefer a due follow-up over a new cold outreach.
+      // First observe existing commercial conversations. Then prefer a due follow-up over a new cold outreach.
       await pollOutstandingResponses(env);
       const followup = await processFollowupCycle(env);
       if (!followup?.send?.sent) {
