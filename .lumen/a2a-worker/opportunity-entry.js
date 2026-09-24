@@ -13,6 +13,7 @@ import { handleVentureCouncil, runVentureCouncil } from "./venture-council-engin
 import { handleCapabilityGapEngine, recomputeCapabilityGaps } from "./capability-gap-engine.js";
 import { handleAgentGraph, recomputeAgentGraph } from "./agent-graph.js";
 import { handleDynamicTeamEngine, buildDynamicTeams } from "./dynamic-team-engine.js";
+import { handleRedundancyEngine, recomputeRedundancy } from "./redundancy-engine.js";
 import { handleRecruitmentEngine, pollRecruitmentResponses } from "./recruitment-engine.js";
 import { handleCouncilReplacement } from "./council-replacement.js";
 import { handleCouncilJsonRpcFallback } from "./council-jsonrpc-fallback.js";
@@ -104,6 +105,9 @@ export default {
     const dynamicTeamResponse = await handleDynamicTeamEngine(request, env);
     if (dynamicTeamResponse) return dynamicTeamResponse;
 
+    const redundancyResponse = await handleRedundancyEngine(request, env);
+    if (redundancyResponse) return redundancyResponse;
+
     const partnerQualityResponse = await handlePartnerCouncilQuality(request, env);
     if (partnerQualityResponse) return partnerQualityResponse;
 
@@ -130,25 +134,18 @@ export default {
       const councilRound = await runCouncilRoundManager(env, { force: false });
       const councilExternalMessageSent = Boolean(councilRound?.invite?.sent);
 
-      // Internal-only chain: synthesized council -> task plan -> task quality gate.
       await planLatestSynthesizedCouncil(env);
       await reviewPendingDelegationTasks(env);
-      // Polling only observes already-dispatched delegation tasks; it never creates spend or new dispatches.
       await pollDelegationTasks(env);
-      // Results must pass their own quality gate before they are considered valid work.
       await reviewDelegationResults(env);
-      // Recompute confidence-aware reputation only from observed operational evidence.
       await recomputeObservedReputation(env);
-      // Capture only explicit business suggestions grounded in PASS partner council contributions.
       await ingestCouncilVentureSuggestions(env);
-      // Promote structured ideas into zero-spend venture cases and capability maps.
       await runVentureCouncil(env);
-      // Convert opportunity/venture capability coverage into an internal recruitment-demand queue.
       await recomputeCapabilityGaps(env);
-      // Maintain an observational graph of agent relationships and combination outcomes.
       await recomputeAgentGraph(env);
-      // Build temporary internal-only coalitions from roles, trust and observed pair history.
       await buildDynamicTeams(env);
+      // Maintain two alternates per role and prepare, but never externally dispatch, fallback plans.
+      await recomputeRedundancy(env);
 
       await prepareTopProposal(env);
       await reviewNextProposal(env);
