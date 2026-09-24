@@ -1,0 +1,45 @@
+name: LUMEN Dashboard v2 deploy
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/dashboard/**'
+      - '.github/workflows/lumen-dashboard-v2-deploy.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy-dashboard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validate dashboard bundle
+        working-directory: .lumen/dashboard
+        run: npx --yes wrangler@latest deploy --dry-run --config wrangler.toml
+      - name: Verify required secrets before touching live dashboard
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          DASH_PASSWORD: ${{ secrets.LUMEN_DASHBOARD_PASSWORD }}
+        run: |
+          if [ -z "$CF_TOKEN" ] || [ -z "$CF_ACCOUNT" ] || [ -z "$DASH_PASSWORD" ]; then
+            echo 'DASHBOARD_DEPLOY_SECRETS_MISSING_NO_LIVE_CHANGE'
+            exit 2
+          fi
+          echo 'DASHBOARD_DEPLOY_SECRETS_PRESENT'
+      - name: Deploy lumen-zero-dashboard
+        working-directory: .lumen/dashboard
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx --yes wrangler@latest deploy --config wrangler.toml
+      - name: Restore dashboard password secret
+        working-directory: .lumen/dashboard
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          DASH_PASSWORD: ${{ secrets.LUMEN_DASHBOARD_PASSWORD }}
+        run: printf '%s' "$DASH_PASSWORD" | npx --yes wrangler@latest secret put LUMEN_DASHBOARD_PASSWORD --config wrangler.toml
