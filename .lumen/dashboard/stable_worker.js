@@ -19,9 +19,34 @@ function isRetryable(request) {
   return RETRYABLE_PATHS.has(url.pathname);
 }
 
+async function normalizeInjectedTabs(request, response) {
+  if (request.method !== "GET" || response.status !== 200) return response;
+  const url = new URL(request.url);
+  if (!["/", "/index.html", "/full"].includes(url.pathname)) return response;
+  if (!String(response.headers.get("content-type") || "").includes("text/html")) return response;
+
+  let html = await response.text();
+  html = html
+    .replace(/data-p=(['"])experiments\1/g, 'data-tab="experiments"')
+    .replace(/data-p=(['"])controlv2\1/g, 'data-tab="controlv2"');
+
+  const headers = new Headers(response.headers);
+  headers.delete("content-length");
+  headers.set("cache-control", "no-store");
+  headers.set("x-lumen-tab-normalization", "v1");
+
+  return new Response(html, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
 export default {
   async fetch(request, env, ctx) {
-    if (!isRetryable(request)) return app.fetch(request, env, ctx);
+    if (!isRetryable(request)) {
+      return normalizeInjectedTabs(request, await app.fetch(request, env, ctx));
+    }
 
     const delays = [0, 80, 180, 350, 700];
     let lastResponse = null;
@@ -35,11 +60,11 @@ export default {
         const headers = new Headers(response.headers);
         headers.set("x-lumen-dashboard-read-attempts", String(attempt + 1));
         headers.set("x-lumen-dashboard-read-status", attempt === 0 ? "direct" : "recovered");
-        return new Response(response.body, {
+        return normalizeInjectedTabs(request, new Response(response.body, {
           status: response.status,
           statusText: response.statusText,
           headers,
-        });
+        }));
       }
     }
 
