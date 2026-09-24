@@ -7,6 +7,7 @@ import { handleA2AOutreach, pollOutstandingResponses, sendNextApproved } from ".
 import { handleFollowupEngine, processFollowupCycle } from "./followup-engine.js";
 import { handleFirstCashCloser, runFirstCashCloser } from "./first-cash-closer.js";
 import { handleX402RevenueBridge, syncX402SettlementsToRevenue } from "./x402-revenue-bridge.js";
+import { handleRevenueDirector, recomputeRevenueDirector } from "./revenue-director.js";
 import { handlePartnerNetwork, runPartnerDiscovery } from "./partner-network.js";
 import { handlePartnerCouncilQuality, buildQualityPartnerMatches } from "./partner-council-quality.js";
 import { handlePartnerVentureBoard } from "./partner-venture-board.js";
@@ -54,6 +55,7 @@ export default {
     const followupResponse = await handleFollowupEngine(request, env); if (followupResponse) return followupResponse;
     const firstCashResponse = await handleFirstCashCloser(request, env); if (firstCashResponse) return firstCashResponse;
     const x402RevenueBridgeResponse = await handleX402RevenueBridge(request, env); if (x402RevenueBridgeResponse) return x402RevenueBridgeResponse;
+    const revenueDirectorResponse = await handleRevenueDirector(request, env); if (revenueDirectorResponse) return revenueDirectorResponse;
     const recruitmentResponse = await handleRecruitmentEngine(request, env); if (recruitmentResponse) return recruitmentResponse;
     const councilReplacementResponse = await handleCouncilReplacement(request, env); if (councilReplacementResponse) return councilReplacementResponse;
     const councilJsonRpcResponse = await handleCouncilJsonRpcFallback(request, env); if (councilJsonRpcResponse) return councilJsonRpcResponse;
@@ -136,6 +138,8 @@ export default {
       await recomputePartnerEconomicPerformance(env);
       await recomputeObservedReputation(env);
       await recomputeProfitFeedback(env);
+      // Before first cash, choose the next commercial lane adaptively; after cash, Profit Feedback dominates.
+      await recomputeRevenueDirector(env);
       await pollNegotiationTermResponses(env);
       await recomputeNegotiator(env);
       await planNegotiationTermRequests(env);
