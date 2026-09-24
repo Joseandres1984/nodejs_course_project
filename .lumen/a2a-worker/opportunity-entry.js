@@ -17,6 +17,7 @@ import { handleCouncilQualitySynthesis } from "./council-quality-synthesis.js";
 import { handleCouncilRoundManager, runCouncilRoundManager } from "./council-round-manager.js";
 import { handleDelegationEngine, planLatestSynthesizedCouncil } from "./delegation-engine.js";
 import { handleDelegationQualityGate, reviewPendingDelegationTasks } from "./delegation-quality-gate.js";
+import { handleDelegationResultQuality, reviewDelegationResults } from "./delegation-result-quality.js";
 import { handleDelegationRuntime, pollDelegationTasks } from "./delegation-runtime.js";
 import { handleCouncilRuntime, pollCouncilRuntime } from "./council-runtime.js";
 
@@ -67,6 +68,9 @@ export default {
     const delegationQualityResponse = await handleDelegationQualityGate(request, env);
     if (delegationQualityResponse) return delegationQualityResponse;
 
+    const delegationResultQualityResponse = await handleDelegationResultQuality(request, env);
+    if (delegationResultQualityResponse) return delegationResultQualityResponse;
+
     const delegationRuntimeResponse = await handleDelegationRuntime(request, env);
     if (delegationRuntimeResponse) return delegationRuntimeResponse;
 
@@ -107,6 +111,8 @@ export default {
       await reviewPendingDelegationTasks(env);
       // Polling only observes already-dispatched delegation tasks; it never creates spend or new dispatches.
       await pollDelegationTasks(env);
+      // Results must pass their own quality gate before they are considered valid work.
+      await reviewDelegationResults(env);
 
       await prepareTopProposal(env);
       await reviewNextProposal(env);
