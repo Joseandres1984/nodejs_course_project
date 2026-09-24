@@ -70,7 +70,13 @@ jobs:
             exit 0
           fi
 
-          # 4) Otherwise send exactly one approved Quality-PASS proposal.
+          # 4) Prepare the best current opportunity and force it through the proposal Quality Gate.
+          post /proposals/prepare-top /tmp/proposal.json
+          cat /tmp/proposal.json
+          post /quality/review-next /tmp/quality.json
+          cat /tmp/quality.json
+
+          # 5) Only an APPROVED / Quality-PASS proposal may leave LUMEN.
           post /outreach/send-next /tmp/outreach.json
           cat /tmp/outreach.json
           if jq -e '.sent == true' /tmp/outreach.json >/dev/null; then
@@ -82,4 +88,4 @@ jobs:
       - name: Launch summary
         run: |
           echo "Selected action: ${LUMEN_ACTION:-UNKNOWN}"
-          echo 'Guardrails: max 1 external commercial message, USD 0 autonomous spend, no autonomous contract, no autonomous discount.'
+          echo 'Guardrails: max 1 external commercial message, Quality-PASS required, USD 0 autonomous spend, no autonomous contract, no autonomous discount.'
