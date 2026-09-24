@@ -1,0 +1,65 @@
+name: LUMEN Council Replace and Invite
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-council-replace-and-invite.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  replace-and-invite:
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: https://lumen-zero-a2a.lumen-b2b.workers.dev
+      OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+    steps:
+      - name: Verify protected token
+        run: test -n "${OPPORTUNITY_ADMIN_TOKEN:-}"
+
+      - name: Wait for replacement endpoint and replace failed member
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 30); do
+            code=$(curl --show-error --silent --max-time 20 -o /tmp/replace.json -w '%{http_code}' \
+              -X POST "$BASE_URL/council-runtime/replace-failed" \
+              -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+              -H 'content-type: application/json' \
+              -d '{}' || true)
+            if [ "$code" = '202' ]; then
+              cat /tmp/replace.json
+              echo
+              jq -e '.ok == true and .replaced == true' /tmp/replace.json >/dev/null
+              jq -r '.roomId' /tmp/replace.json > /tmp/room_id
+              exit 0
+            fi
+            echo "Replacement endpoint not ready (HTTP $code), waiting..."
+            sleep 5
+          done
+          exit 1
+
+      - name: Invite replacement with existing council context
+        run: |
+          set -euo pipefail
+          room=$(cat /tmp/room_id)
+          payload=$(jq -nc --arg room "$room" '{roomId:$room,forceGuest:true}')
+          curl --fail --show-error --silent --max-time 45 \
+            -X POST "$BASE_URL/council-runtime/invite-next" \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'content-type: application/json' \
+            -d "$payload" > /tmp/invite.json
+          cat /tmp/invite.json
+          echo
+          jq -e '.ok == true' /tmp/invite.json >/dev/null
+
+      - name: Read final room state
+        run: |
+          set -euo pipefail
+          room=$(cat /tmp/room_id)
+          curl --fail --show-error --silent --max-time 20 \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            "$BASE_URL/council-runtime/room?id=$room"
+          echo
