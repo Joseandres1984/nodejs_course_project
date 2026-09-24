@@ -28,22 +28,32 @@ jobs:
           done
           exit 1
 
-      - name: Recompute real capability gaps
+      - name: Recompute real capability gaps with retry
         run: |
           set -euo pipefail
-          curl --fail --show-error --silent --max-time 60 \
-            -X POST "$BASE_URL/capability-gaps/recompute" \
-            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
-            -H 'content-type: application/json' \
-            -d '{}' > /tmp/gaps.json
-          cat /tmp/gaps.json
-          echo
+          for i in $(seq 1 20); do
+            code=$(curl --show-error --silent --max-time 60 -o /tmp/gaps.json -w '%{http_code}' \
+              -X POST "$BASE_URL/capability-gaps/recompute" \
+              -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+              -H 'content-type: application/json' \
+              -d '{}' || true)
+            cat /tmp/gaps.json 2>/dev/null || true
+            echo
+            if [ "$code" = '202' ] && grep -q '1.0-capability-gap-engine' /tmp/gaps.json; then break; fi
+            sleep 3
+          done
           jq -e '.ok == true and .version == "1.0-capability-gap-engine" and .guardrails.autonomousRecruitmentContact == false and .guardrails.autonomousSpend == false and .guardrails.bindingActionsHumanGated == true' /tmp/gaps.json >/dev/null
 
-      - name: Verify live gap state
+      - name: Verify stable live gap state
         run: |
           set -euo pipefail
-          curl --fail --show-error --silent --max-time 20 "$BASE_URL/capability-gaps/stats" > /tmp/stats.json
-          cat /tmp/stats.json
-          echo
+          for i in $(seq 1 20); do
+            body=$(curl --show-error --silent --max-time 10 "$BASE_URL/capability-gaps/stats" || true)
+            echo "$body"
+            if echo "$body" | grep -q '1.0-capability-gap-engine'; then
+              echo "$body" > /tmp/stats.json
+              break
+            fi
+            sleep 3
+          done
           jq -e '.version == "1.0-capability-gap-engine" and .autonomousRecruitmentContact == false and .autonomousSpend == false and .bindingActionsHumanGated == true' /tmp/stats.json >/dev/null
