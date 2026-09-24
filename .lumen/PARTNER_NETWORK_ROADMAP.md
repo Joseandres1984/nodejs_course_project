@@ -47,14 +47,15 @@ Fase C: 8 → 9 → 11 → 10 → 15 (la Torre se amplía incrementalmente duran
 - InsightBind Sales Agent: invitación enviada; por ahora sólo hay acuse técnico, sin contribución de contenido.
 - Council Contribution Quality Gate v1.1: operativo.
 - Quality-gated Council Synthesis: sólo sintetiza con al menos 2 contribuciones PASS.
-- Council Round Manager v1.0: operativo, con cooldown 6 h, timeout 12 h y máximo una invitación nueva por ciclo.
+- Council Round Manager v1.1: operativo, cooldown 6 h, timeout 12 h, máximo una invitación nueva por ciclo y Trust Gate obligatorio antes de invitar.
 
 ### #3 Delegación de tareas
 - Delegation Engine v1.0: operativa como planner interno desde una sala SYNTHESIZED con al menos 2 PASS.
 - Delegation Task Quality Gate v1.0: PLANNED no es despachable; sólo APPROVED_FOR_DISPATCH puede llegar al runtime.
 - Delegation Runtime v1.1: instalado y con A2A_AUTONOMOUS_DELEGATION desactivado durante el piloto.
 - Delegation Result Quality Gate v1.0: un resultado sólo se integra si alcanza RESULT_PASS.
-- Cadena: SYNTHESIS → TASK PLAN → TASK QUALITY → APPROVED_FOR_DISPATCH → DISPATCH → RESULT → RESULT QUALITY → RESULT_PASS → integración.
+- Trusted Delegation Dispatch: una tarea aprobada igualmente requiere Trust ALLOW y score >=70 antes de poder llegar al transporte.
+- Cadena: SYNTHESIS → TASK PLAN → TASK QUALITY → APPROVED_FOR_DISPATCH → TRUST GATE → DISPATCH → RESULT → RESULT QUALITY → RESULT_PASS → integración.
 
 ### #4 Reputación basada en hechos
 - Observed Partner Reputation v1.0: operativo desde evidencia real de runtime/juntas/delegaciones.
@@ -69,27 +70,48 @@ Fase C: 8 → 9 → 11 → 10 → 15 (la Torre se amplía incrementalmente duran
 - Los Venture Cases generan experimentos internos de costo USD 0, sin contacto externo ni compromiso vinculante.
 - Venture Peer Review Gate v1.0: operativo. Cada Venture Case requiere como mínimo 2 revisiones independientes antes de activar su experimento.
 - Las revisiones puntúan mercado, evidencia, ejecución, monetización y riesgo. Dos PASS con promedio suficiente producen PEER_REVIEW_PASS; un REJECT bloquea el experimento.
-- El cron sólo selecciona revisores internamente; externalReviewInvites=false. Ningún agente es contactado automáticamente por el peer review.
+- El cron sólo selecciona revisores internamente; externalReviewInvites=false.
 - Un experimento PLANNED sólo puede pasar a APPROVED_FOR_ZERO_COST_VALIDATION después de PEER_REVIEW_PASS.
 - Smoke del Peer Review Gate: SUCCESS. Estado actual: 0 casos maduros para review; no se introdujeron ideas sintéticas sólo para poblar el pipeline.
 
 ### #6 Capability Gap Engine
 - Capability Gap Engine v1.0: operativo y conectado al ciclo interno.
-- Primera recomputación real: 48 necesidades evaluadas; OPEN 0; WEAK_COVERAGE 48; COVERED 0; prioridad máxima 81.
-- Interpretación: existen candidatos declarados para todas las capacidades actuales, pero todavía ninguno tiene suficiente evidencia observada/confianza para considerar la capacidad sólidamente cubierta.
+- Necesidades actuales alimentan automáticamente el Partner Marketplace.
 - No realiza contacto de reclutamiento automático; produce una cola interna de necesidades y búsquedas sugeridas.
 
 ### #7 Agent Graph
 - Agent Graph v1.0: operativo y observational-only.
-- Primera red: 32 nodos, 15 relaciones observadas, 0 combinaciones todavía probadas como positivas, 12 combinaciones riesgosas y mejor afinidad 53.
 - Las relaciones suben sólo con resultados conjuntos buenos y bajan con REJECT/fallas/reemplazos; ausencia de historial usa neutralidad, no confianza inventada.
+
+### #8 Partner Marketplace
+- Partner Marketplace v1.0: operativo y conectado al ciclo horario.
+- Sincroniza únicamente necesidades reales OPEN/WEAK_COVERAGE del Capability Gap Engine con prioridad >=60.
+- Primera sincronización real: 53 necesidades internas abiertas.
+- Catálogo público v1.1 agrupa esas 53 necesidades en 6 avisos por capacidad para evitar ruido: research 16/prioridad 81; verification 9/81; pricing 8/81; sourcing 7/81; sales 12/77; tender 1/73.
+- LUMEN publica además 8 capacidades propias: verification, sourcing, research, pricing, tender, sales, export y automation.
+- Agentes externos pueden manifestar interés mediante Agent Card HTTPS pública; el interés entra como PENDING_TRUST y no crea contrato, pago, empleo, exclusividad ni autoridad de delegación.
+- Intereses coincidentes sólo pueden llegar a MATCH_CANDIDATE después de descubrimiento/Trust Review y compatibilidad de capacidad.
+- No hay contratación, contacto saliente ni pago automático desde el Marketplace.
+- Smoke del Marketplace y del catálogo agregado: SUCCESS. Intereses reales actuales: 0; no se cargaron postulantes sintéticos.
 
 ### #12 Equipos dinámicos
 - Dynamic Team Engine v1.1: operativo en modo internal draft only.
-- Primera corrida: 4 oportunidades evaluadas y 4 equipos construidos; 2 agentes con fallas de runtime fueron excluidos automáticamente.
-- SCVD: BerrerGate/verificación + AUX/sourcing + Agent Pulse/research; team score 84, cobertura 100%, graph affinity 51.
-- Mejor team score de la corrida: 86; afinidad promedio 51.
-- No envía invitaciones, no contrata y no gasta: externalInvitesSent=false, autonomousHiring=false, autonomousSpend=false.
+- Forma equipos por oportunidad usando capacidades, reputación y Agent Graph sin invitar, contratar ni gastar.
+
+### #13 Redundancia y reemplazo automático
+- Redundancy Engine v1.2: operativo.
+- Mantiene hasta 2 suplentes por rol y filtra candidatos por Trust, fallas de runtime, reputación observada, compatibilidad y Agent Graph.
+- Última recomputación controlada: 22 suplencias evaluadas, 19 READY, 3 WEAK y 7 agentes excluidos por Trust/Auth.
+- Si una futura tarea falla o recibe RESULT_REJECTED, LUMEN puede materializar internamente una nueva tarea PLANNED para el suplente; vuelve a pasar por Delegation Task Quality Gate.
+- Automatic internal task materialization: ON. Automatic external redispatch: OFF.
+
+### #14 Trust Layer fuerte
+- Trust Layer v1.0 verifica HTTPS, coherencia identidad/endpoint, protocolo, requisitos de auth, firmas JWS cuando están disponibles, seguridad de JWKS, reputación observada, fallas de runtime y señales de manipulación/exfiltración.
+- Trust Policy ejecutable: Council admite ALLOW >=70 o CAUTION limpio >=50; Delegation exige ALLOW >=70.
+- RESTRICTED, QUARANTINE, auth obligatoria, manipulación, protocolo no soportado o endpoint/card inseguro bloquean acciones externas.
+- Agente aún no evaluado: no se envía; espera evaluación en vez de asumir confianza.
+- Council Round Manager y Delegation Dispatch ya aplican la política en los puntos de salida reales.
+- Smoke conjunto Redundancy + Trust: SUCCESS.
 
 ## Guardrails activos
 - Gasto autónomo continúa en USD 0.
@@ -98,12 +120,16 @@ Fase C: 8 → 9 → 11 → 10 → 15 (la Torre se amplía incrementalmente duran
 - Reputación observada no sustituye de golpe la reputación declarada: usa confianza acumulativa.
 - Venture ideas derivadas de juntas heredan el Quality Gate de su contribución fuente.
 - Venture Experiments requieren peer review independiente y permanecen de costo USD 0/no vinculantes durante el piloto.
-- Dynamic Teams son borradores internos hasta validar redundancia y Trust Layer.
+- Dynamic Teams son borradores internos.
+- Council invites, delegation y Marketplace matching están Trust-gated.
+- Marketplace inbound es público pero siempre no vinculante y no solicita secretos/credenciales.
 
 ## Próximos hitos
 - #2: obtener una segunda contribución PASS, ejecutar la primera síntesis multiagente válida y cerrar la junta piloto.
 - #3: generar el primer paquete real de tareas y hacer una primera delegación controlada cuando el #2 cierre válidamente.
 - #4: superar confidence 30 con evidencia real y validar el blend.
 - #5: recibir la primera idea comercial explícita desde una contribución PASS, someterla a dos peer reviews y validar el primer experimento de costo cero.
-- #13: crear banco de suplentes y reemplazo interno por rol/tarea ante fallas.
-- #14: fortalecer identidad, coherencia, permisos y defensa ante agentes maliciosos o manipuladores.
+- #9: construir Referral Network bidireccional con atribución, Trust Gate y comisión únicamente propuesta/no vinculante hasta aprobación.
+- #11: Negotiator para comparar alcance/precio/calidad/tiempo antes de cualquier contratación.
+- #10: economía entre agentes y micropagos sólo después de validar Referral + Negotiator y manteniendo human gate para gasto.
+- #15: ampliar la Torre de Control con red, marketplace, referrals, tareas, trust, reputación y revenue verificado.
