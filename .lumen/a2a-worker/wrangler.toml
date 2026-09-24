@@ -9,6 +9,9 @@ X402_NETWORK = "eip155:8453"
 X402_FACILITATOR = "https://facilitator.xpay.sh"
 X402_CHECKOUT_URL = "https://lumen-zero-x402.lumen-b2b.workers.dev"
 A2A_AUTONOMOUS_OUTREACH = "true"
+A2A_AUTONOMOUS_FOLLOWUP = "true"
+A2A_FOLLOWUP_COOLDOWN_DAYS = "4"
+A2A_FOLLOWUP_MAX = "2"
 
 [triggers]
 crons = ["7 * * * *"]
