@@ -1,6 +1,7 @@
 import { buildTrackedCheckoutUrl } from "./commercial-checkout-link.js";
+import { classifyCommercialResponse } from "./response-qualification.js";
 
-const VERSION = "1.0-first-cash-closer";
+const VERSION = "1.1-shared-response-first-cash-closer";
 const SEND_TIMEOUT_MS = 15000;
 
 function json(data, status = 200) {
@@ -33,50 +34,6 @@ async function ensureSchema(env) {
   return true;
 }
 
-function tokenSet(text) {
-  return new Set(clean(text, 8000).toLowerCase().split(/[^a-z0-9]+/).filter(x => x.length >= 3));
-}
-function echoRatio(response, original) {
-  const r = [...tokenSet(response)], o = tokenSet(original);
-  if (!r.length) return 0;
-  return r.filter(x => o.has(x)).length / r.length;
-}
-function classifyCommercialIntent(responseText, originalMessage) {
-  const raw = clean(responseText, 8000);
-  const t = raw.toLowerCase();
-  if (!t) return { eligible: false, responseClass: "EMPTY" };
-
-  if (["not interested", "no thanks", "no thank you", "decline", "do not contact", "stop contacting", "unsubscribe", "not relevant", "wrong fit", "wrong agent", "wrong contact"].some(x => t.includes(x))) {
-    return { eligible: false, responseClass: "DECLINED" };
-  }
-
-  const purchasePhrases = [
-    "send checkout", "checkout link", "payment link", "where can i pay", "ready to buy", "ready to purchase",
-    "would like to buy", "would like to purchase", "purchase this", "buy this", "let's proceed", "lets proceed",
-    "go ahead", "proceed with", "please proceed"
-  ];
-  const interestPhrases = [
-    "i am interested", "i'm interested", "we are interested", "we're interested", "interested in", "sounds good",
-    "need this", "send details", "please send details", "send a quote", "please quote", "what is the price",
-    "how much", "price?", "can we buy", "can i buy"
-  ];
-  const exactPositive = ["yes", "yes please", "interested", "proceed", "go ahead"].includes(t.replace(/[.!]+$/g, "").trim());
-
-  const purchase = purchasePhrases.some(x => t.includes(x));
-  const interest = interestPhrases.some(x => t.includes(x)) || exactPositive;
-  if (!purchase && !interest) return { eligible: false, responseClass: "NO_STRONG_BUYING_SIGNAL" };
-
-  if (raw.length > 220 && echoRatio(raw, originalMessage) >= 0.72) {
-    return { eligible: false, responseClass: "ECHO_OR_ACK" };
-  }
-
-  if (!purchase && ["accepted", "received", "queued", "task created", "acknowledged"].some(x => t.includes(x)) && raw.length < 220) {
-    return { eligible: false, responseClass: "TECHNICAL_ACK" };
-  }
-
-  return { eligible: true, responseClass: purchase ? "PURCHASE_INTENT" : "COMMERCIAL_INTEREST" };
-}
-
 async function candidateRows(env) {
   const primary = `SELECT p.proposal_id,p.opportunity_id,p.offer_id,p.offer_name,p.amount_usd,p.message,p.quality_gate_status,
     o.name AS target,x.agent_url,x.protocol_binding,x.protocol_version,x.context_id,
@@ -104,18 +61,19 @@ async function candidateRows(env) {
 async function findEligibleCandidate(env) {
   const rows = await candidateRows(env);
   for (const row of rows) {
-    const intent = classifyCommercialIntent(row.response_text, row.message);
-    if (!intent.eligible) continue;
+    const qualification = classifyCommercialResponse(row.response_text, row.message);
+    const closeEligible = ["PURCHASE_INTENT", "COMMERCIAL_INTEREST"].includes(qualification.responseClass);
+    if (!closeEligible) continue;
     const checkoutUrl = buildTrackedCheckoutUrl(env, {
       offerId: row.offer_id,
       proposalId: row.proposal_id,
       opportunityId: row.opportunity_id,
       source: "lumen_a2a",
       medium: "first_cash_closer",
-      creative: intent.responseClass.toLowerCase()
+      creative: qualification.responseClass.toLowerCase()
     });
     if (!checkoutUrl || !isHttps(row.agent_url)) continue;
-    return { ...row, ...intent, checkoutUrl };
+    return { ...row, responseClass: qualification.responseClass, qualificationReason: qualification.reason, checkoutUrl };
   }
   return null;
 }
@@ -210,10 +168,11 @@ export async function runFirstCashCloser(env, { force = false } = {}) {
       offerId: candidate.offer_id,
       amountUsd: Number(candidate.amount_usd || 0),
       responseClass: candidate.responseClass,
+      qualificationReason: candidate.qualificationReason,
       status,
       taskId: info.taskId,
       checkoutUrl: candidate.checkoutUrl,
-      guardrails: { positiveIntentRequired: true, exactOfferCheckout: true, autonomousDiscounting: false, autonomousSpend: false, bindingActionsHumanGated: true }
+      guardrails: { positiveIntentRequired: true, sharedResponseQualification: true, exactOfferCheckout: true, autonomousDiscounting: false, autonomousSpend: false, bindingActionsHumanGated: true }
     };
   } catch (error) {
     const err = clean(error?.message || error, 500);
@@ -242,7 +201,7 @@ async function statsData(env) {
 export async function handleFirstCashCloser(request, env) {
   const url = new URL(request.url);
   if (request.method === "GET" && url.pathname === "/first-cash/policy") {
-    return json({ version: VERSION, name: "LUMEN First Cash Closer", positiveIntentRequired: true, technicalAckIsNotIntent: true, exactOfferCheckout: true, trackedAttribution: true, maxExternalMessagesPerRun: 1, autonomousDiscounting: false, autonomousSpend: false, autonomousContract: false, bindingActionsHumanGated: true });
+    return json({ version: VERSION, name: "LUMEN First Cash Closer", positiveIntentRequired: true, sharedResponseQualification: true, checkoutEligibleClasses:["PURCHASE_INTENT","COMMERCIAL_INTEREST"], technicalAckIsNotIntent: true, echoIsNotIntent:true, genericResponseIsNotIntent:true, exactOfferCheckout: true, trackedAttribution: true, maxExternalMessagesPerRun: 1, autonomousDiscounting: false, autonomousSpend: false, autonomousContract: false, bindingActionsHumanGated: true });
   }
   if (request.method === "GET" && url.pathname === "/first-cash/stats") return json({ version: VERSION, ...await statsData(env) });
   if (request.method === "POST" && url.pathname === "/first-cash/run") {
