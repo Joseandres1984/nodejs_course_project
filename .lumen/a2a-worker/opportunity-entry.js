@@ -14,6 +14,7 @@ import { handleCouncilJsonRpcFallback } from "./council-jsonrpc-fallback.js";
 import { handleCouncilTransportRecovery } from "./council-transport-recovery.js";
 import { handleCouncilContributionQuality, reviewActiveCouncilContributions } from "./council-contribution-quality.js";
 import { handleCouncilQualitySynthesis } from "./council-quality-synthesis.js";
+import { handleCouncilRoundManager, runCouncilRoundManager } from "./council-round-manager.js";
 import { handleCouncilRuntime, pollCouncilRuntime } from "./council-runtime.js";
 
 export default {
@@ -54,6 +55,9 @@ export default {
     const councilQualitySynthesisResponse = await handleCouncilQualitySynthesis(request, env);
     if (councilQualitySynthesisResponse) return councilQualitySynthesisResponse;
 
+    const councilRoundResponse = await handleCouncilRoundManager(request, env);
+    if (councilRoundResponse) return councilRoundResponse;
+
     const councilRuntimeResponse = await handleCouncilRuntime(request, env);
     if (councilRuntimeResponse) return councilRuntimeResponse;
 
@@ -83,14 +87,18 @@ export default {
       await pollRecruitmentResponses(env);
       await pollCouncilRuntime(env);
       await reviewActiveCouncilContributions(env);
+      const councilRound = await runCouncilRoundManager(env, { force: false });
+      const councilExternalMessageSent = Boolean(councilRound?.invite?.sent);
 
       await prepareTopProposal(env);
       await reviewNextProposal(env);
 
       await pollOutstandingResponses(env);
-      const followup = await processFollowupCycle(env);
-      if (!followup?.send?.sent) {
-        await sendNextApproved(env, { force: false });
+      if (!councilExternalMessageSent) {
+        const followup = await processFollowupCycle(env);
+        if (!followup?.send?.sent) {
+          await sendNextApproved(env, { force: false });
+        }
       }
     })());
   }
