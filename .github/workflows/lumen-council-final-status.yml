@@ -1,0 +1,26 @@
+name: LUMEN Council Final Status
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-council-final-status.yml'
+  workflow_dispatch:
+
+jobs:
+  final-status:
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: https://lumen-zero-a2a.lumen-b2b.workers.dev
+    steps:
+      - name: Read final live council state
+        run: |
+          set -euo pipefail
+          echo '===== council round ====='
+          curl --fail --show-error --silent --max-time 20 "$BASE_URL/council-round/stats" | tee /tmp/round.json
+          echo
+          echo '===== council quality ====='
+          curl --fail --show-error --silent --max-time 20 "$BASE_URL/council-quality/stats" | tee /tmp/quality.json
+          echo
+          jq -e '.version == "1.0-council-round-manager" and .autonomousInvites == true and .cooldownHours == 6 and .responseTimeoutHours == 12' /tmp/round.json >/dev/null
+          jq -e '.version == "1.1-council-contribution-quality"' /tmp/quality.json >/dev/null
