@@ -8,6 +8,7 @@ import { handleFollowupEngine, processFollowupCycle } from "./followup-engine.js
 import { handlePartnerNetwork, runPartnerDiscovery } from "./partner-network.js";
 import { handlePartnerCouncilQuality, buildQualityPartnerMatches } from "./partner-council-quality.js";
 import { handlePartnerVentureBoard } from "./partner-venture-board.js";
+import { handleVentureSuggestionIntake, ingestCouncilVentureSuggestions } from "./venture-suggestion-intake.js";
 import { handleVentureCouncil, runVentureCouncil } from "./venture-council-engine.js";
 import { handleRecruitmentEngine, pollRecruitmentResponses } from "./recruitment-engine.js";
 import { handleCouncilReplacement } from "./council-replacement.js";
@@ -85,6 +86,9 @@ export default {
     const ventureResponse = await handlePartnerVentureBoard(request, env);
     if (ventureResponse) return ventureResponse;
 
+    const ventureIntakeResponse = await handleVentureSuggestionIntake(request, env);
+    if (ventureIntakeResponse) return ventureIntakeResponse;
+
     const ventureCouncilResponse = await handleVentureCouncil(request, env);
     if (ventureCouncilResponse) return ventureCouncilResponse;
 
@@ -123,7 +127,9 @@ export default {
       await reviewDelegationResults(env);
       // Recompute confidence-aware reputation only from observed operational evidence.
       await recomputeObservedReputation(env);
-      // Promote structured partner ideas into zero-spend venture cases and capability-gap maps.
+      // Capture only explicit business suggestions grounded in partner council contributions.
+      await ingestCouncilVentureSuggestions(env);
+      // Promote structured ideas into zero-spend venture cases and capability-gap maps.
       await runVentureCouncil(env);
 
       await prepareTopProposal(env);
