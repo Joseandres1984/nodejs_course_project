@@ -18,7 +18,7 @@ jobs:
       - name: Verify dashboard credential exists
         run: test -n "${DASHBOARD_PASSWORD:-}"
 
-      - name: Verify exclusive dashboard tabs
+      - name: Verify exclusive dashboard tabs and economic columns hook
         run: |
           set -euo pipefail
           curl --fail --show-error --silent --max-time 30 \
@@ -34,6 +34,9 @@ jobs:
           grep -q 'id="controlv2"' /tmp/dashboard.html
           grep -q 'id="networktower"' /tmp/dashboard.html
           grep -q 'Red de Agentes' /tmp/dashboard.html
+          grep -q 'id="lumenEconomicPartnerColumns"' /tmp/dashboard.html
+          grep -q 'Valor económico' /tmp/dashboard.html
+          grep -q 'Revenue atribuible' /tmp/dashboard.html
 
       - name: Verify live Network Control API
         run: |
@@ -56,8 +59,23 @@ jobs:
             (.economy.realizedIncomeUsd // 0) <= (.economy.potentialIncomeUsd // 0) and
             (.topPartners | type) == "array" and
             (.rooms | type) == "array" and
-            (.gapRows | type) == "array"
+            (.gapRows | type) == "array" and
+            (.partnerEconomic | type) == "object" and
+            (.partnerEconomic.revenueProducingPartners // 0) >= 0 and
+            (.partnerEconomic.totalPartnerAttributedRevenueUsd // 0) >= 0
           ' /tmp/network.json >/dev/null
+
+      - name: Verify partner economic fields are complete and conservative
+        run: |
+          set -euo pipefail
+          jq -e '
+            ([.topPartners[]? | select((has("economic_score")|not) or (has("economic_confidence")|not) or (has("verified_revenue_usd")|not) or (has("verified_settlements")|not))] | length) == 0 and
+            ([.topPartners[]? | select((.verified_settlements // 0) == 0 and ((.economic_confidence // 0) != 0 or (.verified_revenue_usd // 0) != 0))] | length) == 0 and
+            ([.topPartners[]? | select((.verified_settlements // 0) > 0 and (.economic_score // 0) < 50)] | length) == 0
+          ' /tmp/network.json >/dev/null
+          detail=$(jq -r '.modules[] | select(.id == 4) | .detail' /tmp/network.json)
+          echo "$detail" | grep -q 'revenue verificado'
+          echo "$detail" | grep -q 'atribuible'
 
       - name: Verify redundancy metrics map to live engine
         run: |
@@ -76,8 +94,9 @@ jobs:
             ((.economy.realizedIncomeUsd // 0) >= 0) and
             ((.economy.potentialIncomeUsd // 0) >= (.economy.realizedIncomeUsd // 0)) and
             ((.economy.proposedExpenseUsd // 0) >= 0) and
-            (.guardrails.outgoingBudgetUsd == 0)
+            (.guardrails.outgoingBudgetUsd == 0) and
+            ((.partnerEconomic.totalPartnerAttributedRevenueUsd // 0) >= 0)
           ' /tmp/network.json >/dev/null
 
       - name: Complete job
-        run: echo "Network Control Tower live smoke passed"
+        run: echo "Network Control Tower live smoke passed with verified partner economics"
