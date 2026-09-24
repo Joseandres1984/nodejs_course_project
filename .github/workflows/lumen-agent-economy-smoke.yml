@@ -34,7 +34,7 @@ jobs:
           curl --fail --show-error --silent --max-time 20 "$BASE_URL/agent-economy/policy" > /tmp/policy.json
           cat /tmp/policy.json
           echo
-          jq -e '.version == "1.0-agent-economy" and .mode == "receive_and_account_with_outgoing_spend_hard_blocked" and .outgoingBudgetUsd == 0 and .outgoingSpendHardBlocked == true and .autonomousOutgoingSpend == false and .autonomousPurchase == false and .autonomousContract == false and .bindingActionsHumanGated == true and .paymentRails.outboundExecutable == false' /tmp/policy.json >/dev/null
+          jq -e '.version == "1.0-agent-economy" and .mode == "receive_and_account_with_outgoing_spend_hard_blocked" and .outgoingBudgetUsd == 0 and .outgoingSpendHardBlocked == true and .autonomousOutgoingSpend == false and .autonomousPurchase == false and .autonomousContract == false and .bindingActionsHumanGated == true and .paymentRails.outboundExecutable == false and (.truthRules | index("offer_is_not_revenue")) != null and (.truthRules | index("only_payment_settled_verified_counts_as_realized_income")) != null' /tmp/policy.json >/dev/null
 
       - name: Recompute real agent economy
         run: |
@@ -46,7 +46,7 @@ jobs:
             -d '{}' > /tmp/economy.json
           cat /tmp/economy.json
           echo
-          jq -e '.ok == true and .version == "1.0-agent-economy" and .state.incomeIntents >= 1 and .state.potentialIncomeUsd >= 0 and .state.realizedIncomeUsd >= 0 and .state.contractDraftMessagesSent == 0 and .guardrails.outgoingBudgetUsd == 0 and .guardrails.outgoingSpendHardBlocked == true and .guardrails.autonomousOutgoingSpend == false and .guardrails.autonomousPurchase == false and .guardrails.autonomousContract == false and .guardrails.bindingActionsHumanGated == true and .guardrails.verifiedSettlementRequiredForIncome == true' /tmp/economy.json >/dev/null
+          jq -e '.ok == true and .version == "1.0-agent-economy" and .state.incomeIntents >= 1 and .state.potentialIncomeUsd >= 0 and .state.realizedIncomeUsd >= 0 and .state.realizedIncomeUsd <= .state.potentialIncomeUsd and .state.contractDraftMessagesSent == 0 and .guardrails.outgoingBudgetUsd == 0 and .guardrails.outgoingSpendHardBlocked == true and .guardrails.autonomousOutgoingSpend == false and .guardrails.autonomousPurchase == false and .guardrails.autonomousContract == false and .guardrails.bindingActionsHumanGated == true and .guardrails.verifiedSettlementRequiredForIncome == true' /tmp/economy.json >/dev/null
 
       - name: Prove outbound payment execution is hard blocked
         run: |
@@ -66,4 +66,4 @@ jobs:
           curl --fail --show-error --silent --max-time 20 "$BASE_URL/agent-economy/stats" > /tmp/stats.json
           cat /tmp/stats.json
           echo
-          jq -e '.version == "1.0-agent-economy" and .incomeIntents >= 1 and .contractDraftMessagesSent == 0 and .outgoingBudgetUsd == 0 and .outgoingSpendHardBlocked == true and .autonomousOutgoingSpend == false and .bindingActionsHumanGated == true' /tmp/stats.json >/dev/null
+          jq -e '.version == "1.0-agent-economy" and .incomeIntents >= 1 and .realizedIncomeUsd <= .potentialIncomeUsd and .contractDraftMessagesSent == 0 and .outgoingBudgetUsd == 0 and .outgoingSpendHardBlocked == true and .autonomousOutgoingSpend == false and .bindingActionsHumanGated == true' /tmp/stats.json >/dev/null
