@@ -9,6 +9,7 @@ import { handlePartnerNetwork, runPartnerDiscovery } from "./partner-network.js"
 import { handlePartnerCouncilQuality, buildQualityPartnerMatches } from "./partner-council-quality.js";
 import { handlePartnerVentureBoard } from "./partner-venture-board.js";
 import { handleRecruitmentEngine, pollRecruitmentResponses } from "./recruitment-engine.js";
+import { handleCouncilRuntime, pollCouncilRuntime } from "./council-runtime.js";
 
 export default {
   async fetch(request, env, ctx) {
@@ -32,6 +33,9 @@ export default {
 
     const recruitmentResponse = await handleRecruitmentEngine(request, env);
     if (recruitmentResponse) return recruitmentResponse;
+
+    const councilRuntimeResponse = await handleCouncilRuntime(request, env);
+    if (councilRuntimeResponse) return councilRuntimeResponse;
 
     const ventureResponse = await handlePartnerVentureBoard(request, env);
     if (ventureResponse) return ventureResponse;
@@ -58,8 +62,10 @@ export default {
       }
       await buildQualityPartnerMatches(env);
 
-      // Recruitment responses may be polled autonomously; new recruitment invites remain separately gated.
+      // Existing recruitment and council tasks may be polled autonomously.
+      // New recruitment invites and new council invitations remain separately human/admin gated.
       await pollRecruitmentResponses(env);
+      await pollCouncilRuntime(env);
 
       await prepareTopProposal(env);
       await reviewNextProposal(env);
