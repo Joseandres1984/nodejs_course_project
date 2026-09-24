@@ -35,8 +35,7 @@ Fase C: 8 → 9 → 11 → 10 → 15 (la Torre se amplía incrementalmente duran
 ## Estado actual
 - Partner Discovery: operativo.
 - Capability Registry: operativo.
-- Partner matching/reputation inicial: operativo.
-- Council Builder v1.2: operativo, no vinculante.
+- Council Builder / Partner Matching v1.3: operativo, no vinculante y preparado para reputación observada confidence-aware.
 - Partner Venture Board: operativo.
 - Recruitment Engine v1.0.1: operativo, con primer contacto real enviado a un candidato fuerte.
 - Reclutamiento autónomo continuo: desactivado hasta validar calidad de respuestas y cadencia.
@@ -56,13 +55,38 @@ Fase C: 8 → 9 → 11 → 10 → 15 (la Torre se amplía incrementalmente duran
 - Si un agente no aporta dentro del timeout, LUMEN lo reemplaza por el siguiente candidato apto; si una contribución es REJECT, puede reemplazarla por baja calidad.
 - Si la junta alcanza 2 aportes PASS, el Round Manager puede ejecutar la síntesis quality-gated sin generar nuevas invitaciones.
 - Si una invitación de junta sale en un ciclo, ese ciclo no envía además un outreach comercial nuevo: una sola acción externa saliente desde este flujo por ciclo.
+
+### #3 Delegación de tareas
 - Delegation Engine v1.0: instalada y operativa en modo planner interno.
-- La Delegation Engine sólo puede generar tareas desde una sala SYNTHESIZED con al menos 2 contribuciones PASS; cada tarea incluye rol, objetivo, entregable esperado, exigencia de evidencia y guardrails de no gasto/no contrato.
-- La planificación de delegación se ejecutará automáticamente de forma interna cuando aparezca una nueva síntesis válida; no envía tareas externas por sí sola.
-- Delegation Runtime v1.0: instalado. Puede despachar y seguir tareas A2A no vinculantes y de gasto cero, pero la llave A2A_AUTONOMOUS_DELEGATION permanece desactivada durante el piloto.
-- El runtime puede observar/pollear tareas ya despachadas sin crear nuevos envíos; cualquier dispatch sigue bloqueado mientras la llave de delegación esté apagada.
-- Smoke test del #3: planner y runtime desplegados; sala DELIBERATING bloqueada correctamente, 0 tareas creadas y dispatch devolvió autonomous_delegation_disabled sin enviar nada.
-- Gasto autónomo continúa en USD 0 y contratos/hiring/obligaciones continúan human-gated.
-- Reemplazo y reputación operativa ya empiezan a anticipar los futuros puntos #4 y #13.
-- Próximo hito del #2: obtener una segunda contribución PASS, ejecutar la primera síntesis multiagente válida y cerrar la junta piloto.
-- Próximo hito del #3: una vez sintetizada la junta, generar el primer paquete real de tareas, revisar su calidad y recién entonces habilitar una primera delegación controlada.
+- Sólo puede generar tareas desde una sala SYNTHESIZED con al menos 2 contribuciones PASS.
+- Cada tarea incluye rol, objetivo, entregable esperado, exigencia de evidencia y guardrails de no gasto/no contrato.
+- Delegation Task Quality Gate v1.0: operativo. PLANNED no es despachable; sólo APPROVED_FOR_DISPATCH puede llegar al runtime.
+- Delegation Runtime v1.1: instalado. Puede despachar y seguir tareas A2A no vinculantes y de gasto cero, pero A2A_AUTONOMOUS_DELEGATION permanece desactivado durante el piloto.
+- Delegation Result Quality Gate v1.0: operativo. Un resultado recibido no se integra automáticamente; debe alcanzar RESULT_PASS.
+- Cadena preparada: SYNTHESIS → TASK PLAN → TASK QUALITY → APPROVED_FOR_DISPATCH → DISPATCH → RESULT → RESULT QUALITY → RESULT_PASS → integración.
+- Smoke de seguridad del #3: SUCCESS. Sala DELIBERATING bloqueada correctamente, 0 tareas creadas, task gate exige APPROVED_FOR_DISPATCH, result gate exige RESULT_PASS y dispatch continúa autonomous_delegation_disabled.
+
+### #4 Reputación basada en hechos
+- Observed Partner Reputation v1.0: operativo y recomputado desde evidencia real de runtime/juntas/delegaciones.
+- Mantiene separada la reputación declarada del Agent Card de la reputación observada por LUMEN.
+- Primera medición: 32 partners registrados y 5 con evidencia operativa real.
+- AUX: observed 73 / confidence 18.
+- Packrift: observed 23 / confidence 27.
+- PHION: observed 26 / confidence 18.
+- GAIP: observed 26 / confidence 18.
+- InsightBind: observed 45 / confidence 9 mientras espera respuesta de contenido.
+- Todavía ningún partner alcanza confidence 30, por lo que la reputación observada NO modifica aún las selecciones.
+- Partner Matching v1.3 aplica un blend conservador sólo desde confidence >= 30 y limita el peso observado a un máximo del 45% de la componente reputacional.
+- Esto permite que la experiencia real gane peso gradualmente sin sobreajustar por uno o dos eventos.
+
+## Guardrails activos
+- Gasto autónomo continúa en USD 0.
+- Contratos/hiring/compras/deuda/obligaciones continúan human-gated.
+- Delegación autónoma externa permanece OFF durante el piloto.
+- Reputación observada no sustituye de golpe la reputación declarada: usa confianza acumulativa.
+
+## Próximos hitos
+- #2: obtener una segunda contribución PASS, ejecutar la primera síntesis multiagente válida y cerrar la junta piloto.
+- #3: generar automáticamente el primer paquete real de tareas, pasarlo por Task Quality Gate y hacer una primera delegación controlada.
+- #4: acumular evidencia hasta superar confidence 30 en partners reales y validar que el blend mejore la selección.
+- #5: profundizar Venture Council para convertir ideas de agentes en oportunidades investigables y puntuadas.
