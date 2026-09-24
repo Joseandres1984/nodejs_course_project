@@ -5,6 +5,7 @@ on:
     branches: [lumen-zero]
     paths:
       - '.lumen/a2a-worker/referral-network.js'
+      - '.lumen/a2a-worker/referral-commission-engine.js'
       - '.lumen/a2a-worker/opportunity-entry.js'
       - '.github/workflows/lumen-referral-network-smoke.yml'
   workflow_dispatch:
@@ -19,13 +20,12 @@ jobs:
       - name: Verify protected token
         run: test -n "${OPPORTUNITY_ADMIN_TOKEN:-}"
 
-      - name: Wait for Referral Network v1
+      - name: Wait for commission-aware Referral Network
         run: |
           set -euo pipefail
-          for i in $(seq 1 36); do
+          for i in $(seq 1 48); do
             body=$(curl --show-error --silent --max-time 10 "$BASE_URL/referrals/policy" || true)
-            echo "$body"
-            if echo "$body" | grep -q '1.0-referral-network'; then exit 0; fi
+            if echo "$body" | jq -e '.version == "1.1-referral-network-commission-aware" and .commissionLifecycle == "managed_by_referral_commission_engine"' >/dev/null 2>&1; then exit 0; fi
             sleep 5
           done
           exit 1
@@ -36,7 +36,20 @@ jobs:
           curl --fail --show-error --silent --max-time 20 "$BASE_URL/referrals/policy" > /tmp/policy.json
           cat /tmp/policy.json
           echo
-          jq -e '.version == "1.0-referral-network" and (.directions | index("INBOUND_TO_LUMEN")) != null and (.directions | index("OUTBOUND_TO_PARTNER")) != null and .commissionStatus == "NOT_CONFIGURED" and .autonomousReferralMessages == false and .autonomousPayout == false and .autonomousSpend == false and .bindingActionsHumanGated == true and (.rules | index("verified_payment_settlement_required_before_revenue_credit")) != null' /tmp/policy.json >/dev/null
+          jq -e '
+            .version == "1.1-referral-network-commission-aware" and
+            (.directions | index("INBOUND_TO_LUMEN")) != null and
+            (.directions | index("OUTBOUND_TO_PARTNER")) != null and
+            .commissionEngine == "1.0-referral-commission-engine" and
+            .commissionLifecycle == "managed_by_referral_commission_engine" and
+            (.rules | index("commission_requires_explicit_agreement")) != null and
+            (.rules | index("deal_completion_evidence_required_before_commission_due")) != null and
+            (.rules | index("verified_payment_settlement_required_before_revenue_credit")) != null and
+            .autonomousReferralMessages == false and
+            .autonomousPayout == false and
+            .autonomousSpend == false and
+            .bindingActionsHumanGated == true
+          ' /tmp/policy.json >/dev/null
 
       - name: Plan outbound referrals from real opportunities
         run: |
@@ -48,7 +61,16 @@ jobs:
             -d '{}' > /tmp/outbound.json
           cat /tmp/outbound.json
           echo
-          jq -e '.ok == true and .version == "1.0-referral-network" and .guardrails.outboundMessagesSent == 0 and .guardrails.automaticCommission == false and .guardrails.automaticPayment == false and .guardrails.bindingAllowed == false and .guardrails.autonomousSpend == false' /tmp/outbound.json >/dev/null
+          jq -e '
+            .ok == true and
+            .version == "1.1-referral-network-commission-aware" and
+            .commissionLifecycle == "managed_by_referral_commission_engine" and
+            .guardrails.outboundMessagesSent == 0 and
+            .guardrails.automaticBindingCommission == false and
+            .guardrails.automaticPayment == false and
+            .guardrails.bindingAllowed == false and
+            .guardrails.autonomousSpend == false
+          ' /tmp/outbound.json >/dev/null
 
       - name: Review inbound queue without contacting anyone
         run: |
@@ -60,7 +82,14 @@ jobs:
             -d '{}' > /tmp/review.json
           cat /tmp/review.json
           echo
-          jq -e '.ok == true and .guardrails.automaticAcceptance == false and .guardrails.automaticPayment == false and .guardrails.commissionConfigured == false and .guardrails.externalContactSent == false' /tmp/review.json >/dev/null
+          jq -e '
+            .ok == true and
+            .commissionLifecycle == "managed_by_referral_commission_engine" and
+            .guardrails.automaticAcceptance == false and
+            .guardrails.automaticPayment == false and
+            .guardrails.commissionAgreementRequired == true and
+            .guardrails.externalContactSent == false
+          ' /tmp/review.json >/dev/null
 
       - name: Verify settlement attribution gate
         run: |
@@ -72,12 +101,29 @@ jobs:
             -d '{}' > /tmp/settlement.json
           cat /tmp/settlement.json
           echo
-          jq -e '.ok == true and .commissionStatus == "NOT_CONFIGURED" and .guardrails.verifiedSettlementRequired == true and .guardrails.commissionNotPromised == true and .guardrails.automaticPayout == false' /tmp/settlement.json >/dev/null
+          jq -e '
+            .ok == true and
+            .commissionLifecycle == "managed_by_referral_commission_engine" and
+            .guardrails.verifiedSettlementRequired == true and
+            .guardrails.explicitCommissionAgreementRequired == true and
+            .guardrails.automaticPayout == false
+          ' /tmp/settlement.json >/dev/null
 
-      - name: Verify referral state
+      - name: Verify referral and commission state
         run: |
           set -euo pipefail
           curl --fail --show-error --silent --max-time 20 "$BASE_URL/referrals/stats" > /tmp/stats.json
           cat /tmp/stats.json
           echo
-          jq -e '.version == "1.0-referral-network" and .bidirectional == true and .attributionPreserved == true and .commissionStatus == "NOT_CONFIGURED" and .autonomousReferralMessages == false and .autonomousPayout == false and .autonomousSpend == false and .bindingActionsHumanGated == true' /tmp/stats.json >/dev/null
+          jq -e '
+            .version == "1.1-referral-network-commission-aware" and
+            .bidirectional == true and
+            .attributionPreserved == true and
+            .commissionLifecycle == "managed_by_referral_commission_engine" and
+            (.commission.total | type) == "number" and
+            (.commission.realizedCommissionRevenueUsd | type) == "number" and
+            .autonomousReferralMessages == false and
+            .autonomousPayout == false and
+            .autonomousSpend == false and
+            .bindingActionsHumanGated == true
+          ' /tmp/stats.json >/dev/null
