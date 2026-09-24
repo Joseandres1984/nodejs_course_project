@@ -1,4 +1,4 @@
-const VERSION = "1.0-partner-recruitment";
+const VERSION = "1.0.1-partner-recruitment";
 const CARD_TIMEOUT_MS = 8000;
 const SEND_TIMEOUT_MS = 15000;
 
@@ -82,15 +82,15 @@ function envelope(row,iface){
 }
 
 function extract(body,binding){
-  const value=binding==="JSONRPC"?(body?.result||body):body||{};
+  const value=body?.result||body||{};
   const task=value?.task||(value?.id&&value?.status?value:null);
-  const msg=value?.message||null;
+  const msg=value?.message||(Array.isArray(value?.parts)&&value?.role?value:null);
   const taskId=clean(task?.id,300)||null;
   const contextId=clean(task?.contextId,300)||clean(msg?.contextId,300)||null;
   const state=clean(task?.status?.state,100)||null;
   const parts=msg?.parts||task?.status?.message?.parts||task?.artifacts?.flatMap?.(a=>a?.parts||[])||[];
-  const responseText=clean((Array.isArray(parts)?parts:[]).map(p=>p?.text||"").filter(Boolean).join(" "),6000)||null;
-  return{taskId,contextId,state,responseText,hasMessage:Boolean(msg||responseText)};
+  const responseText=clean((Array.isArray(parts)?parts:[]).map(p=>p?.text||p?.data?.text||"").filter(Boolean).join(" "),6000)||null;
+  return{taskId,contextId,state,responseText,hasEnvelope:Boolean(msg||task)};
 }
 
 function classify(text){
@@ -103,6 +103,22 @@ function classify(text){
   if(positive.some(x=>t.includes(x)))return{responseClass:"interested",stage:"INTERESTED"};
   if(question.some(x=>t.includes(x)))return{responseClass:"question",stage:"ENGAGED"};
   return{responseClass:"response",stage:"ENGAGED"};
+}
+
+async function reconcileResponses(env){
+  if(!(await ensureSchema(env)))return;
+  const r=await env.DB.prepare("SELECT partner_id,protocol_binding,task_id,response_json FROM lumen_partner_recruitment WHERE status='RESPONDED' AND (response_text IS NULL OR TRIM(response_text)='') LIMIT 20").all();
+  for(const row of r.results||[]){
+    let body={};try{body=JSON.parse(row.response_json||"{}");}catch{}
+    const info=extract(body,row.protocol_binding);
+    const now=new Date().toISOString();
+    if(info.responseText){
+      const c=classify(info.responseText);
+      await env.DB.prepare("UPDATE lumen_partner_recruitment SET updated_at=?,stage=?,status='RESPONDED',response_text=?,response_class=?,engine_version=? WHERE partner_id=?").bind(now,c.stage,info.responseText,c.responseClass,VERSION,row.partner_id).run();
+    }else{
+      await env.DB.prepare("UPDATE lumen_partner_recruitment SET updated_at=?,stage='CONTACTED',status=?,response_class='none',engine_version=? WHERE partner_id=?").bind(now,row.task_id?"SENT_TASK":"SENT",VERSION,row.partner_id).run();
+    }
+  }
 }
 
 async function storeProbe(env,row,probe){
@@ -135,8 +151,8 @@ async function sendReady(env,row){
     const resp=await fetch(e.url,{method:"POST",headers:e.headers,body:JSON.stringify(e.payload),signal:t.signal});http=resp.status;raw=await resp.text();if(!resp.ok)throw new Error(`send_http_${resp.status}`);
     let body={};try{body=JSON.parse(raw);}catch{}
     const info=extract(body,probe.selected.binding);const c=classify(info.responseText);const now=new Date().toISOString();
-    const status=info.hasMessage?"RESPONDED":info.taskId?"SENT_TASK":"SENT";
-    const stage=info.hasMessage?c.stage:"CONTACTED";
+    const status=info.responseText?"RESPONDED":info.taskId?"SENT_TASK":"SENT";
+    const stage=info.responseText?c.stage:"CONTACTED";
     await env.DB.prepare("UPDATE lumen_partner_recruitment SET updated_at=?,stage=?,status=?,agent_url=?,protocol_binding=?,protocol_version=?,task_id=?,context_id=?,response_text=?,response_class=?,invite_text=?,request_json=?,response_json=?,error=NULL,contact_count=contact_count+1,last_contact_at=?,next_action_at=NULL,engine_version=? WHERE partner_id=?")
       .bind(now,stage,status,probe.selected.url,probe.selected.binding,probe.selected.version,info.taskId,info.contextId,info.responseText,c.responseClass,e.text,JSON.stringify(e.payload),clean(raw,12000),now,VERSION,row.partner_id).run();
     return{ok:true,sent:true,version:VERSION,partnerId:row.partner_id,target:row.name,stage,status,taskId:info.taskId,responseClass:c.responseClass,responseText:info.responseText,guardrails:{bindingAllowed:false,spendAllowed:false,contractAllowed:false}};
@@ -163,25 +179,28 @@ async function pollOne(env,row){
     const raw=await resp.text();if(!resp.ok)throw new Error(`poll_http_${resp.status}`);let body={};try{body=JSON.parse(raw);}catch{}
     const info=extract(body,row.protocol_binding);if(!info.responseText)return{polled:true,responded:false,state:info.state};
     const c=classify(info.responseText);const now=new Date().toISOString();
-    await env.DB.prepare("UPDATE lumen_partner_recruitment SET updated_at=?,stage=?,status='RESPONDED',response_text=?,response_class=?,response_json=?,error=NULL WHERE partner_id=?").bind(now,c.stage,info.responseText,c.responseClass,clean(raw,12000),row.partner_id).run();
+    await env.DB.prepare("UPDATE lumen_partner_recruitment SET updated_at=?,stage=?,status='RESPONDED',response_text=?,response_class=?,response_json=?,error=NULL,engine_version=? WHERE partner_id=?").bind(now,c.stage,info.responseText,c.responseClass,clean(raw,12000),VERSION,row.partner_id).run();
     return{polled:true,responded:true,partnerId:row.partner_id,stage:c.stage,responseClass:c.responseClass,responseText:info.responseText};
   }catch(e){return{polled:true,responded:false,error:clean(e?.message||e,300)};}finally{t.clear();}
 }
 
 export async function pollRecruitmentResponses(env){
   if(!(await ensureSchema(env)))return{ok:false,error:"persistence_unavailable",version:VERSION};
+  await reconcileResponses(env);
   const r=await env.DB.prepare("SELECT * FROM lumen_partner_recruitment WHERE status='SENT_TASK' AND task_id IS NOT NULL ORDER BY updated_at ASC LIMIT 5").all();
   const results=[];for(const row of r.results||[])results.push(await pollOne(env,row));
   return{ok:true,version:VERSION,polled:results.length,results};
 }
 
 async function stats(env){
-  await ensureSchema(env);const row=await env.DB.prepare("SELECT COUNT(*) total,SUM(CASE WHEN stage='QUALIFIED' THEN 1 ELSE 0 END) qualified,SUM(CASE WHEN stage='CONTACTED' THEN 1 ELSE 0 END) contacted,SUM(CASE WHEN stage='ENGAGED' THEN 1 ELSE 0 END) engaged,SUM(CASE WHEN stage='INTERESTED' THEN 1 ELSE 0 END) interested,SUM(CASE WHEN stage='PARTNER' THEN 1 ELSE 0 END) partners,SUM(CASE WHEN stage='DECLINED' THEN 1 ELSE 0 END) declined FROM lumen_partner_recruitment").first();
+  await reconcileResponses(env);
+  const row=await env.DB.prepare("SELECT COUNT(*) total,SUM(CASE WHEN stage='QUALIFIED' THEN 1 ELSE 0 END) qualified,SUM(CASE WHEN stage='CONTACTED' THEN 1 ELSE 0 END) contacted,SUM(CASE WHEN stage='ENGAGED' THEN 1 ELSE 0 END) engaged,SUM(CASE WHEN stage='INTERESTED' THEN 1 ELSE 0 END) interested,SUM(CASE WHEN stage='PARTNER' THEN 1 ELSE 0 END) partners,SUM(CASE WHEN stage='DECLINED' THEN 1 ELSE 0 END) declined FROM lumen_partner_recruitment").first();
   return{version:VERSION,total:Number(row?.total||0),qualified:Number(row?.qualified||0),contacted:Number(row?.contacted||0),engaged:Number(row?.engaged||0),interested:Number(row?.interested||0),partners:Number(row?.partners||0),declined:Number(row?.declined||0),autonomousRecruitment:String(env?.A2A_AUTONOMOUS_RECRUITMENT||"false").toLowerCase()==="true",autonomousHiring:false,autonomousOutgoingSpend:false};
 }
 
 async function next(env){
-  await ensureSchema(env);const row=await env.DB.prepare("SELECT r.partner_id,p.name,r.stage,r.status,r.response_class,r.response_text,r.last_contact_at,r.error,p.reputation_score,p.compatibility_score FROM lumen_partner_recruitment r JOIN lumen_partner_agents p ON p.id=r.partner_id ORDER BY r.updated_at DESC LIMIT 1").first();
+  await reconcileResponses(env);
+  const row=await env.DB.prepare("SELECT r.partner_id,p.name,r.stage,r.status,r.response_class,r.response_text,r.last_contact_at,r.error,p.reputation_score,p.compatibility_score FROM lumen_partner_recruitment r JOIN lumen_partner_agents p ON p.id=r.partner_id ORDER BY r.updated_at DESC LIMIT 1").first();
   return{version:VERSION,recruitment:row||null};
 }
 
