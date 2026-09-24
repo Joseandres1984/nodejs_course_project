@@ -59,6 +59,16 @@ jobs:
             (.gapRows | type) == "array"
           ' /tmp/network.json >/dev/null
 
+      - name: Verify redundancy metrics map to live engine
+        run: |
+          set -euo pipefail
+          ready=$(jq -r '.redundancy.readyAlternates // 0' /tmp/network.json)
+          weak=$(jq -r '.redundancy.weakAlternates // 0' /tmp/network.json)
+          metric=$(jq -r '.modules[] | select(.id == 13) | .metric' /tmp/network.json)
+          detail=$(jq -r '.modules[] | select(.id == 13) | .detail' /tmp/network.json)
+          test "$metric" = "$ready fallbacks listos"
+          test "$detail" = "$weak débiles"
+
       - name: Verify truth separation and safe economics
         run: |
           set -euo pipefail
