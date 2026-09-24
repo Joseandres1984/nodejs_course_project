@@ -1,0 +1,69 @@
+name: LUMEN Partner Network Cycle
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-partner-network-cycle.yml'
+
+jobs:
+  partner-cycle:
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: https://lumen-zero-a2a.lumen-b2b.workers.dev
+      OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+    steps:
+      - name: Verify protected token
+        run: |
+          if [ -z "${OPPORTUNITY_ADMIN_TOKEN:-}" ]; then
+            echo 'OPPORTUNITY_ADMIN_TOKEN_MISSING'
+            exit 2
+          fi
+      - name: Discover partner candidates
+        run: |
+          set -euo pipefail
+          code=$(curl --show-error --silent --max-time 180 -o /tmp/discover.json -w '%{http_code}' \
+            -X POST "$BASE_URL/partners/discover" \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'accept: application/json')
+          echo "===== discover HTTP $code ====="
+          cat /tmp/discover.json
+          echo
+          test "$code" = '202'
+      - name: Match partners to best opportunity
+        run: |
+          set -euo pipefail
+          code=$(curl --show-error --silent --max-time 90 -o /tmp/match.json -w '%{http_code}' \
+            -X POST "$BASE_URL/partners/match" \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'content-type: application/json' \
+            -d '{}')
+          echo "===== match HTTP $code ====="
+          cat /tmp/match.json
+          echo
+          test "$code" = '202'
+      - name: Assemble first nonbinding council
+        run: |
+          set -euo pipefail
+          code=$(curl --show-error --silent --max-time 90 -o /tmp/council.json -w '%{http_code}' \
+            -X POST "$BASE_URL/partners/council" \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'content-type: application/json' \
+            -d '{}')
+          echo "===== council HTTP $code ====="
+          cat /tmp/council.json
+          echo
+          test "$code" = '202'
+      - name: Read network state
+        run: |
+          set -euo pipefail
+          echo '===== /partners/stats ====='
+          curl --fail --show-error --silent --max-time 30 "$BASE_URL/partners/stats"
+          echo
+          echo '===== /partners/top ====='
+          curl --fail --show-error --silent --max-time 30 "$BASE_URL/partners/top"
+          echo
+          echo '===== /partners/councils ====='
+          curl --fail --show-error --silent --max-time 30 "$BASE_URL/partners/councils"
+          echo
