@@ -1,4 +1,4 @@
-import app from "./network_control_tower_worker.js";
+import app from "./network_control_tower_fix_worker.js";
 
 const RETRYABLE_PATHS = new Set([
   "/health",
