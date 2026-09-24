@@ -18,20 +18,22 @@ jobs:
       - name: Verify protected token
         run: test -n "${OPPORTUNITY_ADMIN_TOKEN:-}"
 
-      - name: Wait for Delegation Quality Gate and Runtime v1.1
+      - name: Wait for Delegation Quality Gates and Runtime v1.1
         run: |
           set -euo pipefail
           for i in $(seq 1 30); do
             quality=$(curl --show-error --silent --max-time 10 "$BASE_URL/delegation/quality-stats" || true)
+            result_quality=$(curl --show-error --silent --max-time 10 "$BASE_URL/delegation/result-quality-stats" || true)
             runtime=$(curl --show-error --silent --max-time 10 "$BASE_URL/delegation/runtime-stats" || true)
             echo "$quality"
+            echo "$result_quality"
             echo "$runtime"
-            if echo "$quality" | grep -q '1.0-delegation-quality-gate' && echo "$runtime" | grep -q '1.1-delegation-runtime'; then exit 0; fi
+            if echo "$quality" | grep -q '1.0-delegation-quality-gate' && echo "$result_quality" | grep -q '1.0-delegation-result-quality' && echo "$runtime" | grep -q '1.1-delegation-runtime'; then exit 0; fi
             sleep 5
           done
           exit 1
 
-      - name: Confirm quality gate is a hard dispatch barrier
+      - name: Confirm task quality gate is a hard dispatch barrier
         run: |
           set -euo pipefail
           curl --fail --show-error --silent --max-time 20 "$BASE_URL/delegation/quality-stats" > /tmp/quality.json
@@ -42,6 +44,14 @@ jobs:
           echo
           jq -e '.version == "1.0-delegation-quality-gate" and .dispatchRequires == "APPROVED_FOR_DISPATCH" and .autonomousOutgoingSpend == false and .bindingActionsHumanGated == true' /tmp/quality.json >/dev/null
           jq -e '.version == "1.1-delegation-runtime" and .dispatchRequires == "APPROVED_FOR_DISPATCH" and .autonomousDelegation == false and .autonomousOutgoingSpend == false and .bindingActionsHumanGated == true' /tmp/runtime.json >/dev/null
+
+      - name: Confirm result quality gate is a hard integration barrier
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 20 "$BASE_URL/delegation/result-quality-stats" > /tmp/result-quality.json
+          cat /tmp/result-quality.json
+          echo
+          jq -e '.version == "1.0-delegation-result-quality" and .integrationRequires == "RESULT_PASS" and .autonomousOutgoingSpend == false and .bindingActionsHumanGated == true' /tmp/result-quality.json >/dev/null
 
       - name: Confirm unsynthesized council cannot create delegation plan
         run: |
