@@ -6,6 +6,10 @@ workers_dev = true
 [vars]
 LUMEN_DASHBOARD_USER = "socio"
 
+[[services]]
+binding = "A2A"
+service = "lumen-zero-a2a"
+
 [[d1_databases]]
 binding = "DB"
 database_name = "lumen-zero"
