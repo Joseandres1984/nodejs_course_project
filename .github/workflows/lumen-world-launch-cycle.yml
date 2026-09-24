@@ -70,20 +70,31 @@ jobs:
             exit 0
           fi
 
-          # 4) Prepare the best current opportunity and force it through the proposal Quality Gate.
-          post /proposals/prepare-top /tmp/proposal.json
-          cat /tmp/proposal.json
-          post /quality/review-next /tmp/quality.json
-          cat /tmp/quality.json
+          # 4) Internally scan up to five opportunities. Failed QA candidates are skipped until revised.
+          for attempt in 1 2 3 4 5; do
+            echo "candidate_attempt=$attempt"
+            post /proposals/prepare-top "/tmp/proposal-$attempt.json"
+            cat "/tmp/proposal-$attempt.json"
+            if ! jq -e '.prepared == true' "/tmp/proposal-$attempt.json" >/dev/null; then
+              break
+            fi
 
-          # 5) Only an APPROVED / Quality-PASS proposal may leave LUMEN.
-          post /outreach/send-next /tmp/outreach.json
-          cat /tmp/outreach.json
-          if jq -e '.sent == true' /tmp/outreach.json >/dev/null; then
-            echo 'LUMEN_ACTION=NEW_OUTREACH' >> "$GITHUB_ENV"
-          else
-            echo 'LUMEN_ACTION=NO_ELIGIBLE_EXTERNAL_ACTION' >> "$GITHUB_ENV"
-          fi
+            post /quality/review-next "/tmp/quality-$attempt.json"
+            cat "/tmp/quality-$attempt.json"
+            if ! jq -e '.status == "PASS"' "/tmp/quality-$attempt.json" >/dev/null; then
+              continue
+            fi
+
+            # Only PASS can reach transport. If transport cannot use this candidate, try another internally.
+            post /outreach/send-next "/tmp/outreach-$attempt.json"
+            cat "/tmp/outreach-$attempt.json"
+            if jq -e '.sent == true' "/tmp/outreach-$attempt.json" >/dev/null; then
+              echo 'LUMEN_ACTION=NEW_OUTREACH' >> "$GITHUB_ENV"
+              exit 0
+            fi
+          done
+
+          echo 'LUMEN_ACTION=NO_ELIGIBLE_EXTERNAL_ACTION' >> "$GITHUB_ENV"
 
       - name: Launch summary
         run: |
