@@ -1,0 +1,57 @@
+name: LUMEN Partner Negotiator Smoke
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-partner-negotiator-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  negotiator-smoke:
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: https://lumen-zero-a2a.lumen-b2b.workers.dev
+      OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+    steps:
+      - name: Verify protected token
+        run: test -n "${OPPORTUNITY_ADMIN_TOKEN:-}"
+
+      - name: Wait for Partner Negotiator v1
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 36); do
+            body=$(curl --show-error --silent --max-time 10 "$BASE_URL/negotiator/policy" || true)
+            echo "$body"
+            if echo "$body" | grep -q '1.0-partner-negotiator'; then exit 0; fi
+            sleep 5
+          done
+          exit 1
+
+      - name: Verify negotiation policy guardrails
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 20 "$BASE_URL/negotiator/policy" > /tmp/policy.json
+          cat /tmp/policy.json
+          echo
+          jq -e '.version == "1.0-partner-negotiator" and .mode == "non_binding_recommendation" and .unknownPricePolicy == "unknown_price_is_neutral_not_invented_and_prevents_full_commercial_confidence" and .autonomousNegotiationMessages == false and .autonomousHiring == false and .autonomousSpend == false and .bindingActionsHumanGated == true' /tmp/policy.json >/dev/null
+
+      - name: Recompute real negotiation cases
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 60 \
+            -X POST "$BASE_URL/negotiator/recompute" \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'content-type: application/json' \
+            -d '{}' > /tmp/recompute.json
+          cat /tmp/recompute.json
+          echo
+          jq -e '.ok == true and .version == "1.0-partner-negotiator" and .guardrails.recommendationOnly == true and .guardrails.pricesDeclaredNotVerified == true and .guardrails.autonomousNegotiationMessages == false and .guardrails.autonomousHiring == false and .guardrails.autonomousSpend == false and .guardrails.bindingActionsHumanGated == true' /tmp/recompute.json >/dev/null
+
+      - name: Verify negotiator state
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 20 "$BASE_URL/negotiator/stats" > /tmp/stats.json
+          cat /tmp/stats.json
+          echo
+          jq -e '.version == "1.0-partner-negotiator" and .recommendationOnly == true and .autonomousNegotiationMessages == false and .autonomousHiring == false and .autonomousSpend == false and .bindingActionsHumanGated == true' /tmp/stats.json >/dev/null
