@@ -1,0 +1,57 @@
+name: LUMEN Council Round 2
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-council-round2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  council-round2:
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: https://lumen-zero-a2a.lumen-b2b.workers.dev
+      OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+    steps:
+      - name: Verify protected token
+        run: test -n "${OPPORTUNITY_ADMIN_TOKEN:-}"
+
+      - name: Reuse active council room
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 30 \
+            -X POST "$BASE_URL/council-runtime/create" \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'content-type: application/json' \
+            -d '{}' > /tmp/create.json
+          cat /tmp/create.json
+          echo
+          jq -e '.ok == true and (.roomId | length > 0)' /tmp/create.json >/dev/null
+          jq -r '.roomId' /tmp/create.json > /tmp/room_id
+
+      - name: Invite next specialist with prior council context
+        run: |
+          set -euo pipefail
+          room=$(cat /tmp/room_id)
+          payload=$(jq -nc --arg room "$room" '{roomId:$room,forceGuest:true}')
+          curl --fail --show-error --silent --max-time 45 \
+            -X POST "$BASE_URL/council-runtime/invite-next" \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'content-type: application/json' \
+            -d "$payload" > /tmp/invite.json
+          cat /tmp/invite.json
+          echo
+          jq -e '.ok == true' /tmp/invite.json >/dev/null
+
+      - name: Read deliberation state
+        run: |
+          set -euo pipefail
+          room=$(cat /tmp/room_id)
+          curl --fail --show-error --silent --max-time 20 \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            "$BASE_URL/council-runtime/room?id=$room"
+          echo
