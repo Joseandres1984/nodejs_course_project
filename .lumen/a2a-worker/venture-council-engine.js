@@ -1,4 +1,4 @@
-const VERSION = "1.0-venture-council-engine";
+const VERSION = "1.1-venture-council-engine";
 
 function json(data,status=200){return Response.json(data,{status,headers:{"cache-control":"no-store","x-content-type-options":"nosniff","access-control-allow-origin":"*"}});}
 function clean(v,n=8000){return String(v??"").trim().replace(/\s+/g," ").slice(0,n);}
@@ -80,23 +80,31 @@ async function promoteIdea(env,idea){
   return{id,ideaId:idea.id,title:idea.title,status,readinessScore:readiness,coverageScore,gapCount:gaps,capabilities:coverage.map(x=>({capability:x.capability,status:x.partner?.coverageStatus||"GAP",partner:x.partner?.name||null,observedConfidence:Number(x.partner?.observed_confidence||0)})),experiment:{id:experimentId,type:exp.type,costLimitUsd:0,externalContactAllowed:false}};
 }
 
+async function revokeRejectedCases(env){
+  try{
+    await env.DB.prepare("UPDATE lumen_venture_cases SET status='SOURCE_REJECTED',updated_at=? WHERE idea_id IN (SELECT id FROM lumen_partner_ideas WHERE status='SOURCE_REJECTED') AND status<>'SOURCE_REJECTED'").bind(new Date().toISOString()).run();
+    await env.DB.prepare("UPDATE lumen_venture_experiments SET status='CANCELLED_SOURCE_REJECTED' WHERE venture_case_id IN (SELECT id FROM lumen_venture_cases WHERE status='SOURCE_REJECTED') AND status='PLANNED'").run();
+  }catch{}
+}
+
 export async function runVentureCouncil(env){
   if(!(await ensureSchema(env)))return{ok:false,error:"persistence_unavailable",version:VERSION};
+  await revokeRejectedCases(env);
   let ideas=[];
   try{
-    const r=await env.DB.prepare("SELECT * FROM lumen_partner_ideas WHERE status IN ('HIGH_POTENTIAL','REVIEW') AND total_score>=60 ORDER BY total_score DESC,evidence_score DESC,created_at ASC LIMIT 20").all();
+    const r=await env.DB.prepare("SELECT i.* FROM lumen_partner_ideas i LEFT JOIN lumen_venture_suggestion_intake v ON v.idea_id=i.id WHERE i.status IN ('HIGH_POTENTIAL','REVIEW') AND i.total_score>=60 AND (v.idea_id IS NULL OR v.status='INGESTED_PASS') ORDER BY i.total_score DESC,i.evidence_score DESC,i.created_at ASC LIMIT 20").all();
     ideas=r.results||[];
   }catch{return{ok:false,error:"venture_board_not_ready",version:VERSION};}
   const cases=[];
   for(const idea of ideas)cases.push(await promoteIdea(env,idea));
-  return{ok:true,version:VERSION,ideasEvaluated:ideas.length,cases,guardrails:{autonomousSpend:false,autonomousContract:false,autonomousHiring:false,externalValidation:false,experimentsCostLimitUsd:0}};
+  return{ok:true,version:VERSION,ideasEvaluated:ideas.length,cases,sourceQualityGateRequired:true,guardrails:{autonomousSpend:false,autonomousContract:false,autonomousHiring:false,externalValidation:false,experimentsCostLimitUsd:0}};
 }
 
 async function stats(env){
   await ensureSchema(env);
-  const c=await env.DB.prepare("SELECT COUNT(*) total,SUM(CASE WHEN status='READY_TO_VALIDATE' THEN 1 ELSE 0 END) ready,SUM(CASE WHEN status='VALIDATION_REQUIRED' THEN 1 ELSE 0 END) validation_required,SUM(CASE WHEN status='HOLD' THEN 1 ELSE 0 END) hold,COALESCE(MAX(readiness_score),0) best_readiness FROM lumen_venture_cases").first();
-  const g=await env.DB.prepare("SELECT SUM(CASE WHEN status='GAP' THEN 1 ELSE 0 END) gaps,SUM(CASE WHEN status='WEAK' THEN 1 ELSE 0 END) weak,SUM(CASE WHEN status='COVERED' THEN 1 ELSE 0 END) covered FROM lumen_venture_capability_gaps").first();
-  return json({version:VERSION,total:Number(c?.total||0),readyToValidate:Number(c?.ready||0),validationRequired:Number(c?.validation_required||0),hold:Number(c?.hold||0),bestReadiness:Number(c?.best_readiness||0),capabilityCoverage:{covered:Number(g?.covered||0),weak:Number(g?.weak||0),gaps:Number(g?.gaps||0)},autonomousSpend:false,externalValidation:false,bindingActionsHumanGated:true});
+  const c=await env.DB.prepare("SELECT COUNT(*) total,SUM(CASE WHEN status='READY_TO_VALIDATE' THEN 1 ELSE 0 END) ready,SUM(CASE WHEN status='VALIDATION_REQUIRED' THEN 1 ELSE 0 END) validation_required,SUM(CASE WHEN status='HOLD' THEN 1 ELSE 0 END) hold,SUM(CASE WHEN status='SOURCE_REJECTED' THEN 1 ELSE 0 END) source_rejected,COALESCE(MAX(CASE WHEN status<>'SOURCE_REJECTED' THEN readiness_score ELSE 0 END),0) best_readiness FROM lumen_venture_cases").first();
+  const g=await env.DB.prepare("SELECT SUM(CASE WHEN status='GAP' THEN 1 ELSE 0 END) gaps,SUM(CASE WHEN status='WEAK' THEN 1 ELSE 0 END) weak,SUM(CASE WHEN status='COVERED' THEN 1 ELSE 0 END) covered FROM lumen_venture_capability_gaps WHERE venture_case_id NOT IN (SELECT id FROM lumen_venture_cases WHERE status='SOURCE_REJECTED')").first();
+  return json({version:VERSION,total:Number(c?.total||0),readyToValidate:Number(c?.ready||0),validationRequired:Number(c?.validation_required||0),hold:Number(c?.hold||0),sourceRejected:Number(c?.source_rejected||0),bestReadiness:Number(c?.best_readiness||0),capabilityCoverage:{covered:Number(g?.covered||0),weak:Number(g?.weak||0),gaps:Number(g?.gaps||0)},sourceQualityGateRequired:true,autonomousSpend:false,externalValidation:false,bindingActionsHumanGated:true});
 }
 
 export async function handleVentureCouncil(request,env){
@@ -109,13 +117,13 @@ export async function handleVentureCouncil(request,env){
   if(request.method==="GET"&&url.pathname==="/venture-council/cases"){
     if(!authorized(request,env))return json({ok:false,error:"admin_token_required"},403);
     await ensureSchema(env);
-    const r=await env.DB.prepare("SELECT * FROM lumen_venture_cases ORDER BY readiness_score DESC,updated_at DESC LIMIT 50").all();
+    const r=await env.DB.prepare("SELECT * FROM lumen_venture_cases ORDER BY CASE WHEN status='SOURCE_REJECTED' THEN 1 ELSE 0 END,readiness_score DESC,updated_at DESC LIMIT 50").all();
     return json({version:VERSION,cases:(r.results||[]).map(x=>({...x,requiredCapabilities:parseArray(x.required_capabilities_json)}))});
   }
   if(request.method==="GET"&&url.pathname==="/venture-council/gaps"){
     if(!authorized(request,env))return json({ok:false,error:"admin_token_required"},403);
     await ensureSchema(env);
-    const r=await env.DB.prepare("SELECT * FROM lumen_venture_capability_gaps ORDER BY CASE status WHEN 'GAP' THEN 0 WHEN 'WEAK' THEN 1 ELSE 2 END,updated_at DESC LIMIT 100").all();
+    const r=await env.DB.prepare("SELECT * FROM lumen_venture_capability_gaps WHERE venture_case_id NOT IN (SELECT id FROM lumen_venture_cases WHERE status='SOURCE_REJECTED') ORDER BY CASE status WHEN 'GAP' THEN 0 WHEN 'WEAK' THEN 1 ELSE 2 END,updated_at DESC LIMIT 100").all();
     return json({version:VERSION,gaps:r.results||[]});
   }
   return null;
