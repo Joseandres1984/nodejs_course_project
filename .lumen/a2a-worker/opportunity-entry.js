@@ -20,6 +20,7 @@ import { handleCapabilityGapEngine, recomputeCapabilityGaps } from "./capability
 import { handlePartnerMarketplace, syncPartnerMarketplace, reviewMarketplaceInterests } from "./partner-marketplace.js";
 import { handlePartnerMarketplacePublicCatalog } from "./partner-marketplace-public-catalog.js";
 import { handleReferralNetwork, reviewInboundReferrals, planOutboundReferrals, syncReferralSettlements } from "./referral-network.js";
+import { handleReferralCommissionEngine, planReferralCommissions, syncReferralCommissionSettlements } from "./referral-commission-engine.js";
 import { handleRevenueAttribution, recomputeRevenueAttribution } from "./revenue-attribution-engine.js";
 import { handleProfitFeedback, recomputeProfitFeedback } from "./profit-feedback-engine.js";
 import { handlePartnerEconomicPerformance, recomputePartnerEconomicPerformance } from "./partner-economic-performance.js";
@@ -84,6 +85,7 @@ export default {
     const marketplaceCatalogResponse = await handlePartnerMarketplacePublicCatalog(request, env); if (marketplaceCatalogResponse) return marketplaceCatalogResponse;
     const marketplaceResponse = await handlePartnerMarketplace(request, env); if (marketplaceResponse) return marketplaceResponse;
     const referralResponse = await handleReferralNetwork(request, env); if (referralResponse) return referralResponse;
+    const referralCommissionResponse = await handleReferralCommissionEngine(request, env); if (referralCommissionResponse) return referralCommissionResponse;
     const revenueAttributionResponse = await handleRevenueAttribution(request, env); if (revenueAttributionResponse) return revenueAttributionResponse;
     const profitFeedbackResponse = await handleProfitFeedback(request, env); if (profitFeedbackResponse) return profitFeedbackResponse;
     const partnerEconomicResponse = await handlePartnerEconomicPerformance(request, env); if (partnerEconomicResponse) return partnerEconomicResponse;
@@ -140,10 +142,12 @@ export default {
       await reviewMarketplaceInterests(env);
       await reviewInboundReferrals(env);
       await planOutboundReferrals(env);
-      await syncReferralSettlements(env);
+      await planReferralCommissions(env);
 
-      // Canonical cash truth: settled x402 receipt -> verified revenue event -> attribution -> learning.
+      // Canonical cash truth: settled x402 receipt -> verified revenue event -> commission/referral settlement -> attribution -> learning.
       await syncX402SettlementsToRevenue(env);
+      await syncReferralCommissionSettlements(env);
+      await syncReferralSettlements(env);
       await recomputeRevenueAttribution(env);
       await recomputePartnerEconomicPerformance(env);
       await recomputeObservedReputation(env);
