@@ -23,9 +23,11 @@ jobs:
           for i in $(seq 1 36); do
             policy=$(curl --show-error --silent --max-time 10 "$BASE_URL/negotiator/policy" || true)
             terms=$(curl --show-error --silent --max-time 10 "$BASE_URL/negotiator/terms-requests/stats" || true)
+            runtime=$(curl --show-error --silent --max-time 10 "$BASE_URL/negotiator/terms-runtime/stats" || true)
             echo "$policy"
             echo "$terms"
-            if echo "$policy" | grep -q '1.0-partner-negotiator' && echo "$terms" | grep -q '1.0-negotiator-terms-planner'; then exit 0; fi
+            echo "$runtime"
+            if echo "$policy" | grep -q '1.0-partner-negotiator' && echo "$terms" | grep -q '1.0-negotiator-terms-planner' && echo "$runtime" | grep -q '1.0-negotiator-terms-runtime'; then exit 0; fi
             sleep 5
           done
           exit 1
@@ -60,13 +62,21 @@ jobs:
           echo
           jq -e '.ok == true and .version == "1.0-negotiator-terms-planner" and .drafts >= 1 and .guardrails.draftOnly == true and .guardrails.externalMessagesSent == 0 and .guardrails.autonomousNegotiationMessages == false and .guardrails.autonomousSpend == false and .guardrails.bindingActionsHumanGated == true' /tmp/terms-plan.json >/dev/null
 
-      - name: Verify terms requests remain unsent
+      - name: Verify planner remains non-sending
         run: |
           set -euo pipefail
           curl --fail --show-error --silent --max-time 20 "$BASE_URL/negotiator/terms-requests/stats" > /tmp/terms-stats.json
           cat /tmp/terms-stats.json
           echo
-          jq -e '.version == "1.0-negotiator-terms-planner" and .drafts >= 1 and .externalMessagesSent == 0 and .draftOnly == true and .autonomousNegotiationMessages == false and .autonomousSpend == false and .bindingActionsHumanGated == true' /tmp/terms-stats.json >/dev/null
+          jq -e '.version == "1.0-negotiator-terms-planner" and .total >= 1 and .externalMessagesSent >= 0 and .draftOnly == true and .autonomousNegotiationMessages == false and .autonomousSpend == false and .bindingActionsHumanGated == true' /tmp/terms-stats.json >/dev/null
+
+      - name: Verify guarded terms runtime
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 20 "$BASE_URL/negotiator/terms-runtime/stats" > /tmp/runtime.json
+          cat /tmp/runtime.json
+          echo
+          jq -e '.version == "1.0-negotiator-terms-runtime" and .maxMessagesPerCase == 2 and .autonomousNegotiationMessages == true and .autonomousSpend == false and .autonomousPurchase == false and .autonomousContract == false and .bindingActionsHumanGated == true' /tmp/runtime.json >/dev/null
 
       - name: Verify negotiator state
         run: |
@@ -84,6 +94,7 @@ jobs:
           jq '{version,totalCases,readyForHumanReview,incompleteTerms,insufficientCompetition,rankedCandidates,pricedCandidates,maxRecommendationConfidence,recommendationOnly,autonomousNegotiationMessages,autonomousHiring,autonomousSpend,bindingActionsHumanGated}' /tmp/stats.json > /tmp/negotiator-snapshot/stats.json
           jq '{version,drafts,requests,guardrails}' /tmp/terms-plan.json > /tmp/negotiator-snapshot/terms-plan.json
           jq '{version,total,drafts,externalMessagesSent,draftOnly,autonomousNegotiationMessages,autonomousSpend,bindingActionsHumanGated}' /tmp/terms-stats.json > /tmp/negotiator-snapshot/terms-stats.json
+          jq '{version,total,externalMessagesSent,responsesWithTerms,pricedResponses,timedResponses,pendingTasks,maxMessagesPerCase,autonomousNegotiationMessages,autonomousSpend,autonomousPurchase,autonomousContract,bindingActionsHumanGated}' /tmp/runtime.json > /tmp/negotiator-snapshot/runtime.json
 
       - name: Upload negotiator snapshot
         uses: actions/upload-artifact@v4
