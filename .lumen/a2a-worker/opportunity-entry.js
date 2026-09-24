@@ -5,6 +5,7 @@ import { handleProposalEngine, prepareTopProposal } from "./proposal-engine.js";
 import { handleQualityGate, reviewNextProposal } from "./quality-gate.js";
 import { handleA2AOutreach, pollOutstandingResponses, sendNextApproved } from "./a2a-outreach.js";
 import { handleFollowupEngine, processFollowupCycle } from "./followup-engine.js";
+import { handlePartnerNetwork, runPartnerDiscovery, buildPartnerMatches } from "./partner-network.js";
 
 export default {
   async fetch(request, env, ctx) {
@@ -26,6 +27,9 @@ export default {
     const followupResponse = await handleFollowupEngine(request, env);
     if (followupResponse) return followupResponse;
 
+    const partnerResponse = await handlePartnerNetwork(request, env);
+    if (partnerResponse) return partnerResponse;
+
     return baseWorker.fetch(request, env, ctx);
   },
 
@@ -33,6 +37,15 @@ export default {
     ctx.waitUntil((async () => {
       await runOpportunityScan(env, { trigger: "cloudflare_cron", scheduledTime: controller?.scheduledTime || null });
       await runCommercialReassessment(env);
+
+      // Partner discovery is intentionally slower than commercial discovery: every 6 hours.
+      // Matching is local/D1-only and can refresh each commercial cycle.
+      const scheduledAt = new Date(controller?.scheduledTime || Date.now());
+      if (scheduledAt.getUTCHours() % 6 === 0) {
+        await runPartnerDiscovery(env, { trigger: "cloudflare_cron", scheduledTime: controller?.scheduledTime || null });
+      }
+      await buildPartnerMatches(env);
+
       await prepareTopProposal(env);
       await reviewNextProposal(env);
 
