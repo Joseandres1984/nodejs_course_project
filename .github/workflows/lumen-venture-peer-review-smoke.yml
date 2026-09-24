@@ -1,0 +1,49 @@
+name: LUMEN Venture Peer Review Smoke
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-venture-peer-review-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  venture-peer-review-smoke:
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: https://lumen-zero-a2a.lumen-b2b.workers.dev
+      OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+    steps:
+      - name: Verify protected token
+        run: test -n "${OPPORTUNITY_ADMIN_TOKEN:-}"
+
+      - name: Wait for Venture Peer Review v1
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 30); do
+            body=$(curl --show-error --silent --max-time 10 "$BASE_URL/venture-review/stats" || true)
+            echo "$body"
+            if echo "$body" | grep -q '1.0-venture-peer-review'; then exit 0; fi
+            sleep 5
+          done
+          exit 1
+
+      - name: Verify hard review gate
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 20 "$BASE_URL/venture-review/stats" > /tmp/stats.json
+          cat /tmp/stats.json
+          echo
+          jq -e '.version == "1.0-venture-peer-review" and .experimentActivationRequires == "PEER_REVIEW_PASS" and .minimumIndependentReviews == 2 and .externalReviewInvites == false and .autonomousSpend == false and .bindingActionsHumanGated == true' /tmp/stats.json >/dev/null
+
+      - name: Plan reviewers internally only
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 30 \
+            -X POST "$BASE_URL/venture-review/plan" \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'content-type: application/json' \
+            -d '{"limit":6}' > /tmp/plan.json
+          cat /tmp/plan.json
+          echo
+          jq -e '.ok == true and .guardrails.externalContactSent == false and .guardrails.autonomousSpend == false and .guardrails.bindingAllowed == false' /tmp/plan.json >/dev/null
