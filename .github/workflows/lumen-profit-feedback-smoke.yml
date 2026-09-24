@@ -1,0 +1,76 @@
+name: LUMEN Profit Feedback Smoke
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-profit-feedback-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  profit-feedback-smoke:
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: https://lumen-zero-a2a.lumen-b2b.workers.dev
+      OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+    steps:
+      - name: Verify protected token
+        run: test -n "${OPPORTUNITY_ADMIN_TOKEN:-}"
+
+      - name: Wait for profit feedback runtime
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 36); do
+            p=$(curl --show-error --silent --max-time 10 "$BASE_URL/profit-feedback/policy" || true)
+            echo "$p"
+            if echo "$p" | grep -q '1.0-profit-feedback'; then exit 0; fi
+            sleep 5
+          done
+          exit 1
+
+      - name: Verify learning policy
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 20 "$BASE_URL/profit-feedback/policy" > /tmp/policy.json
+          cat /tmp/policy.json
+          jq -e '.version == "1.0-profit-feedback" and .learningTarget == "offer_priority_only" and .revenueTruth == "verified_payment_settled_only" and .coldStart == "neutral" and .priorityAdjustmentRange == [-12,20] and .autonomousPriceChange == false and .autonomousSpend == false and .bindingActionsHumanGated == true' /tmp/policy.json >/dev/null
+
+      - name: Recompute profit feedback
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 90 \
+            -X POST "$BASE_URL/profit-feedback/recompute" \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'content-type: application/json' \
+            -d '{}' > /tmp/recompute.json
+          cat /tmp/recompute.json
+          jq -e '.ok == true and .version == "1.0-profit-feedback" and .offers >= 6 and (.ranking | length) >= 6 and ([.ranking[] | select(.priorityAdjustment < -12 or .priorityAdjustment > 20)] | length) == 0 and .guardrails.verifiedRevenueOnly == true and .guardrails.coldStartNeutral == true and .guardrails.noAutonomousPriceChange == true and .guardrails.noAutonomousSpend == true and .guardrails.bindingActionsHumanGated == true' /tmp/recompute.json >/dev/null
+
+      - name: Verify live performance state
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 20 "$BASE_URL/profit-feedback/stats" > /tmp/stats.json
+          cat /tmp/stats.json
+          jq -e '.version == "1.0-profit-feedback" and .offers >= 6 and .winners >= 0 and .penalized >= 0 and .verifiedOffers >= 0 and .totalVerifiedRevenueUsd >= 0 and .verifiedRevenueOnly == true and .coldStartNeutral == true and ([.ranking[] | select(.priority_adjustment < -12 or .priority_adjustment > 20)] | length) == 0' /tmp/stats.json >/dev/null
+
+      - name: Verify profit-aware proposal engine is live
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 20 "$BASE_URL/proposals/next" > /tmp/proposal.json
+          cat /tmp/proposal.json
+          jq -e '.version == "1.2-profit-aware-proposal-engine"' /tmp/proposal.json >/dev/null
+
+      - name: Prepare safe snapshot
+        run: |
+          mkdir -p /tmp/profit-feedback
+          jq '{version,offers,ranking,guardrails}' /tmp/recompute.json > /tmp/profit-feedback/recompute.json
+          jq '.' /tmp/stats.json > /tmp/profit-feedback/stats.json
+          jq '.' /tmp/policy.json > /tmp/profit-feedback/policy.json
+          jq '{version,proposal:{offerId:.proposal.offerId,status:.proposal.status,qualityGateStatus:.proposal.qualityGateStatus,metadata:.proposal.metadata.profit_feedback}}' /tmp/proposal.json > /tmp/profit-feedback/proposal.json
+
+      - name: Upload snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: profit-feedback-snapshot
+          path: /tmp/profit-feedback
+          retention-days: 1
