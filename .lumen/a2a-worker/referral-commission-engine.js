@@ -1,4 +1,4 @@
-const VERSION = "1.0-referral-commission-engine";
+const VERSION = "1.1-referral-commission-engine-rate-based";
 const DEFAULT_PROPOSED_RATE_PCT = 5;
 
 function json(data, status = 200) {
@@ -71,11 +71,14 @@ export async function recordCommissionAgreement(env, body = {}) {
   const dealValue = Math.max(0, num(body.dealValueUsd || body.deal_value_usd));
   const rate = Math.max(0, num(body.agreedRatePct || body.agreed_rate_pct));
   let amount = Math.max(0, num(body.agreedAmountUsd || body.agreed_amount_usd));
-  if (!amount && dealValue > 0 && rate > 0) amount = Math.round((dealValue * rate / 100) * 100) / 100;
   if (!referralId) return { ok:false, error:"referral_id_required", version:VERSION };
   if (evidence.length < 8) return { ok:false, error:"explicit_agreement_evidence_required", version:VERSION };
-  if (!(amount > 0)) return { ok:false, error:"agreed_commission_amount_required", version:VERSION };
+  if (!(rate > 0) && !(amount > 0)) return { ok:false, error:"agreed_commission_rate_or_amount_required", version:VERSION };
   if (rate > 50) return { ok:false, error:"agreed_rate_out_of_policy_range", version:VERSION };
+
+  // Percentage success fees are intentionally rate-based until the final deal value is confirmed.
+  // A displayed estimate may exist, but the payable amount is fixed only when the deal closes.
+  if (rate > 0) amount = 0;
 
   const referral = await env.DB.prepare("SELECT id FROM lumen_referrals WHERE id=? LIMIT 1").bind(referralId).first();
   if (!referral) return { ok:false, error:"referral_not_found", version:VERSION };
@@ -85,36 +88,46 @@ export async function recordCommissionAgreement(env, body = {}) {
   const basis = rate > 0 ? "SUCCESS_FEE_PERCENT" : "FIXED_SUCCESS_FEE";
   if (existing) {
     await env.DB.prepare("UPDATE lumen_referral_commissions SET updated_at=?,basis_type=?,deal_value_usd=?,agreed_rate_pct=?,agreed_amount_usd=?,status='AGREED_PENDING_CLOSE',agreement_source=?,agreement_evidence=?,agreement_at=?,engine_version=? WHERE referral_id=?")
-      .bind(now,basis,dealValue || existing.deal_value_usd || null,rate || null,amount,source,evidence,now,VERSION,referralId).run();
+      .bind(now,basis,dealValue || existing.deal_value_usd || null,rate || null,amount || null,source,evidence,now,VERSION,referralId).run();
   } else {
     await env.DB.prepare("INSERT INTO lumen_referral_commissions(id,referral_id,created_at,updated_at,basis_type,deal_value_usd,proposed_rate_pct,proposed_amount_usd,agreed_rate_pct,agreed_amount_usd,currency,status,agreement_source,agreement_evidence,agreement_at,engine_version) VALUES(?,?,?,?,?,?,?,?,?,?,'USD','AGREED_PENDING_CLOSE',?,?,?,?)")
-      .bind(id,referralId,now,now,basis,dealValue || null,null,null,rate || null,amount,source,evidence,now,VERSION).run();
+      .bind(id,referralId,now,now,basis,dealValue || null,null,null,rate || null,amount || null,source,evidence,now,VERSION).run();
   }
   await env.DB.prepare("UPDATE lumen_referrals SET commission_status='AGREED_PENDING_CLOSE',updated_at=? WHERE id=?").bind(now,referralId).run();
-  await logReferralEvent(env, referralId, "COMMISSION_AGREED", `amount_usd=${amount};rate_pct=${rate || "fixed"};source=${source}`, amount, false);
-  return { ok:true, version:VERSION, referralId, commissionId:id, status:"AGREED_PENDING_CLOSE", agreedAmountUsd:amount, agreedRatePct:rate || null, paymentDue:false, checkoutUrl:null, guardrails:{ explicitAgreementEvidenceRequired:true, noRevenueRecognizedYet:true, autonomousSpend:false, bindingActionsHumanGated:true } };
+  await logReferralEvent(env, referralId, "COMMISSION_AGREED", `rate_pct=${rate || "fixed"};fixed_amount_usd=${amount || "pending_final_deal_value"};source=${source}`, amount || null, false);
+  return { ok:true, version:VERSION, referralId, commissionId:id, status:"AGREED_PENDING_CLOSE", agreedAmountUsd:amount || null, agreedRatePct:rate || null, paymentDue:false, checkoutUrl:null, guardrails:{ explicitAgreementEvidenceRequired:true, percentageFeeUsesFinalDealValue:true, noRevenueRecognizedYet:true, autonomousSpend:false, bindingActionsHumanGated:true } };
 }
 
 export async function markCommissionDue(env, body = {}) {
   if (!(await ensureSchema(env))) return { ok:false, error:"persistence_unavailable", version:VERSION };
   const referralId = clean(body.referralId || body.referral_id, 100);
   const completionEvidence = clean(body.completionEvidence || body.completion_evidence, 4000);
+  const finalDealValue = Math.max(0, num(body.finalDealValueUsd || body.final_deal_value_usd));
   if (!referralId) return { ok:false, error:"referral_id_required", version:VERSION };
   if (completionEvidence.length < 8) return { ok:false, error:"deal_completion_evidence_required", version:VERSION };
   const row = await env.DB.prepare("SELECT * FROM lumen_referral_commissions WHERE referral_id=? LIMIT 1").bind(referralId).first();
   if (!row) return { ok:false, error:"commission_case_not_found", version:VERSION };
   if (row.status === "SETTLED") return { ok:true, version:VERSION, referralId, status:"SETTLED", duplicateSafe:true };
   if (row.status !== "AGREED_PENDING_CLOSE" && row.status !== "PAYMENT_DUE") return { ok:false, error:"commission_must_be_agreed_before_becoming_due", currentStatus:row.status, version:VERSION };
-  const amount = Math.max(0, num(row.agreed_amount_usd));
+
+  const rate = Math.max(0, num(row.agreed_rate_pct));
+  let amount = Math.max(0, num(row.agreed_amount_usd));
+  let payableDealValue = Math.max(0, finalDealValue || num(row.deal_value_usd));
+  if (rate > 0) {
+    if (!(finalDealValue > 0)) return { ok:false, error:"final_deal_value_required_for_percentage_commission", agreedRatePct:rate, version:VERSION };
+    payableDealValue = finalDealValue;
+    amount = Math.round((payableDealValue * rate / 100) * 100) / 100;
+  }
   if (!(amount > 0)) return { ok:false, error:"agreed_amount_missing", version:VERSION };
+
   const now = new Date().toISOString();
   const checkout = checkoutUrl(env, referralId);
   if (!checkout) return { ok:false, error:"x402_checkout_base_not_configured", version:VERSION };
-  await env.DB.prepare("UPDATE lumen_referral_commissions SET status='PAYMENT_DUE',completion_evidence=?,payment_due_at=?,checkout_url=?,updated_at=?,engine_version=? WHERE referral_id=?")
-    .bind(completionEvidence,now,checkout,now,VERSION,referralId).run();
-  await env.DB.prepare("UPDATE lumen_referrals SET commission_status='PAYMENT_DUE',updated_at=? WHERE id=?").bind(now,referralId).run();
-  await logReferralEvent(env, referralId, "COMMISSION_PAYMENT_DUE", `agreed_amount_usd=${amount};checkout_ready=true`, amount, false);
-  return { ok:true, version:VERSION, referralId, commissionId:row.id, status:"PAYMENT_DUE", amountUsd:amount, checkoutUrl:checkout, guardrails:{ completionEvidenceRequired:true, exactAgreedAmount:true, revenueRecognizedOnlyAfterVerifiedSettlement:true, autonomousSpend:false } };
+  await env.DB.prepare("UPDATE lumen_referral_commissions SET status='PAYMENT_DUE',deal_value_usd=?,agreed_amount_usd=?,completion_evidence=?,payment_due_at=?,checkout_url=?,updated_at=?,engine_version=? WHERE referral_id=?")
+    .bind(payableDealValue || null,amount,completionEvidence,now,checkout,now,VERSION,referralId).run();
+  await env.DB.prepare("UPDATE lumen_referrals SET commission_status='PAYMENT_DUE',estimated_value_usd=?,updated_at=? WHERE id=?").bind(payableDealValue || 0,now,referralId).run();
+  await logReferralEvent(env, referralId, "COMMISSION_PAYMENT_DUE", `final_deal_value_usd=${payableDealValue};agreed_rate_pct=${rate || "fixed"};agreed_amount_usd=${amount};checkout_ready=true`, amount, false);
+  return { ok:true, version:VERSION, referralId, commissionId:row.id, status:"PAYMENT_DUE", finalDealValueUsd:payableDealValue, agreedRatePct:rate || null, amountUsd:amount, checkoutUrl:checkout, guardrails:{ completionEvidenceRequired:true, exactAgreedAmount:true, finalDealValueRequiredForPercentageFee:true, revenueRecognizedOnlyAfterVerifiedSettlement:true, autonomousSpend:false } };
 }
 
 export async function syncReferralCommissionSettlements(env) {
@@ -130,7 +143,7 @@ export async function syncReferralCommissionSettlements(env) {
     if (!event) continue;
     const paid = Math.max(0, num(event.amount_usd));
     const expected = Math.max(0, num(row.agreed_amount_usd));
-    if (!(paid > 0) || (expected > 0 && paid + 0.01 < expected)) continue;
+    if (!(paid > 0) || !(expected > 0) || paid + 0.01 < expected) continue;
     const now = new Date().toISOString();
     await env.DB.prepare("UPDATE lumen_referral_commissions SET status='SETTLED',settlement_event_id=?,settled_amount_usd=?,updated_at=?,engine_version=? WHERE referral_id=?")
       .bind(event.id,paid,now,VERSION,row.referral_id).run();
@@ -150,12 +163,11 @@ async function statsData(env) {
 
 export async function handleReferralCommissionEngine(request, env) {
   const url = new URL(request.url);
-  if (request.method === "GET" && url.pathname === "/referrals/commissions/policy") return json({ version:VERSION, lifecycle:["BASIS_REQUIRED","PROPOSAL_READY","AGREED_PENDING_CLOSE","PAYMENT_DUE","SETTLED"], internalSuggestedRatePct:DEFAULT_PROPOSED_RATE_PCT, rule:"commission_is_never_revenue_until_verified_settlement", exactAmountCheckout:true, x402Settlement:true, automaticContract:false, automaticSpend:false, bindingActionsHumanGated:true });
+  if (request.method === "GET" && url.pathname === "/referrals/commissions/policy") return json({ version:VERSION, lifecycle:["BASIS_REQUIRED","PROPOSAL_READY","AGREED_PENDING_CLOSE","PAYMENT_DUE","SETTLED"], internalSuggestedRatePct:DEFAULT_PROPOSED_RATE_PCT, rule:"commission_is_never_revenue_until_verified_settlement", percentageFeeUsesFinalDealValue:true, exactAmountCheckout:true, x402Settlement:true, automaticContract:false, automaticSpend:false, bindingActionsHumanGated:true });
   if (request.method === "GET" && url.pathname === "/referrals/commissions/stats") return json({ version:VERSION, ...await statsData(env) });
   if (request.method === "POST" && url.pathname === "/referrals/commissions/plan") { if (!authorized(request,env)) return json({ok:false,error:"admin_token_required"},403); return json(await planReferralCommissions(env),202); }
-  if (request.method === "POST" && url.pathname === "/referrals/commissions/agree") { if (!authorized(request,env)) return json({ok:false,error:"admin_token_required"},403); return json(await recordCommissionAgreement(env,await bodyJson(request)),202); }
-  if (request.method === "POST" && url.pathname === "/referrals/commissions/mark-due") { if (!authorized(request,env)) return json({ok:false,error:"admin_token_required"},403); return json(await markCommissionDue(env,await bodyJson(request)),202); }
+  if (request.method === "POST" && url.pathname === "/referrals/commissions/agreement") { if (!authorized(request,env)) return json({ok:false,error:"admin_token_required"},403); const result=await recordCommissionAgreement(env,await bodyJson(request)); return json(result,result.ok?200:409); }
+  if (request.method === "POST" && url.pathname === "/referrals/commissions/due") { if (!authorized(request,env)) return json({ok:false,error:"admin_token_required"},403); const result=await markCommissionDue(env,await bodyJson(request)); return json(result,result.ok?200:409); }
   if (request.method === "POST" && url.pathname === "/referrals/commissions/sync") { if (!authorized(request,env)) return json({ok:false,error:"admin_token_required"},403); return json(await syncReferralCommissionSettlements(env),202); }
-  if (request.method === "GET" && url.pathname === "/referrals/commissions/ledger") { if (!authorized(request,env)) return json({ok:false,error:"admin_token_required"},403); await ensureSchema(env); const result=await env.DB.prepare("SELECT * FROM lumen_referral_commissions ORDER BY updated_at DESC LIMIT 150").all(); return json({version:VERSION,cases:result.results || []}); }
   return null;
 }
