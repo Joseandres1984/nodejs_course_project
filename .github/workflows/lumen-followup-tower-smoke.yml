@@ -1,0 +1,47 @@
+name: LUMEN Follow-up + Tower v2 smoke
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-followup-tower-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    env:
+      A2A_URL: https://lumen-zero-a2a.lumen-b2b.workers.dev
+      DASH_URL: https://lumen-zero-dashboard.lumen-b2b.workers.dev
+      OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+      DASH_PASSWORD: ${{ secrets.LUMEN_DASHBOARD_PASSWORD }}
+    steps:
+      - name: Verify protected secrets
+        run: |
+          test -n "$OPPORTUNITY_ADMIN_TOKEN"
+          test -n "$DASH_PASSWORD"
+      - name: Run follow-up cycle safely
+        run: |
+          set -euo pipefail
+          code=$(curl --show-error --silent --max-time 60 -o /tmp/followup.json -w '%{http_code}' \
+            -X POST "$A2A_URL/followup/run" \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'accept: application/json')
+          echo "===== follow-up HTTP $code ====="
+          cat /tmp/followup.json
+          echo
+          test "$code" = '202'
+      - name: Read follow-up policy
+        run: |
+          curl --fail --show-error --silent --max-time 30 "$A2A_URL/followup/stats"
+          echo
+      - name: Verify protected Control Tower v2 API
+        run: |
+          set -euo pipefail
+          code=$(curl --show-error --silent --max-time 60 -o /tmp/tower.json -w '%{http_code}' \
+            -u "socio:$DASH_PASSWORD" \
+            "$DASH_URL/api/control-tower-v2")
+          echo "===== tower HTTP $code ====="
+          cat /tmp/tower.json
+          echo
+          test "$code" = '200'
