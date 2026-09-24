@@ -1,6 +1,4 @@
-import { getBestCommercialOpportunity } from "./commercial-intelligence.js";
-
-const VERSION = "1.0-nonbinding-proposal-engine";
+const VERSION = "1.1-nonbinding-proposal-engine";
 
 const OFFERS = {
   "MP-SUPPLIER-SNAPSHOT": { name: "Supplier Snapshot", priceUsd: 5, outcome: "a compact supplier verification snapshot" },
@@ -26,6 +24,25 @@ function clean(value, limit = 4000) {
   return String(value ?? "").trim().replace(/\s+/g, " ").slice(0, limit);
 }
 
+function safeParse(value, fallback = {}) {
+  try { return JSON.parse(value || ""); } catch { return fallback; }
+}
+
+function completeExcerpt(value, limit = 420) {
+  const text = clean(value, 5000);
+  if (!text) return "";
+  if (text.length <= limit) return /[.!?]$/.test(text) ? text : `${text}.`;
+
+  const slice = text.slice(0, limit);
+  const sentenceEnds = [slice.lastIndexOf(". "), slice.lastIndexOf("! "), slice.lastIndexOf("? ")];
+  const bestEnd = Math.max(...sentenceEnds);
+  if (bestEnd >= Math.floor(limit * 0.45)) return slice.slice(0, bestEnd + 1).trim();
+
+  const lastSpace = slice.lastIndexOf(" ");
+  const fallback = (lastSpace > 80 ? slice.slice(0, lastSpace) : slice).replace(/[,:;\-]+$/, "").trim();
+  return /[.!?]$/.test(fallback) ? fallback : `${fallback}.`;
+}
+
 async function ensureSchema(env) {
   if (!env?.DB) return false;
   await env.DB.batch([
@@ -35,41 +52,46 @@ async function ensureSchema(env) {
   return true;
 }
 
+async function getBestProposalCandidate(env) {
+  const row = await env.DB.prepare("SELECT o.id,o.name,o.description,o.remote_id,o.endpoint,o.evidence,o.score AS discovery_score,o.fit AS discovery_fit,o.demand_signal,o.revenue_offer_id,o.status,a.assessed_at,a.commercial_score,a.commercial_fit,a.evidence_strength,a.commercially_actionable,a.synthetic_or_test_only,a.reasons_json,p.proposal_id AS existing_proposal_id,p.created_at AS existing_created_at,p.status AS existing_proposal_status,p.quality_gate_status AS existing_quality_gate_status FROM lumen_opportunities o JOIN lumen_opportunity_assessments a ON a.opportunity_id=o.id LEFT JOIN lumen_proposal_drafts p ON p.opportunity_id=o.id WHERE a.commercially_actionable=1 AND a.synthetic_or_test_only=0 AND (p.opportunity_id IS NULL OR (p.status='DRAFT' AND p.quality_gate_status IN ('PENDING_QUALITY_GATE','NEEDS_REVISION'))) ORDER BY a.commercial_score DESC,o.score DESC,o.updated_at DESC LIMIT 1").first();
+  if (!row) return null;
+  return { ...row, reasons: safeParse(row.reasons_json, []) };
+}
+
 function makeDraft(opportunity) {
   const offer = OFFERS[opportunity.revenue_offer_id] || OFFERS["MP-BUYER-SIGNALS"];
   const target = clean(opportunity.name || opportunity.remote_id, 180);
-  const evidence = clean(opportunity.description, 360);
-  const subject = `Possible fit: ${offer.name} for ${target}`;
-  const message = clean([
+  const evidence = completeExcerpt(opportunity.description, 420);
+  const subject = clean(`Possible fit: ${offer.name} for ${target}`, 180);
+  const message = [
     `Hi ${target},`,
-    `LUMEN detected a public commercial signal that may fit ${offer.name}.`,
-    evidence ? `Observed context: ${evidence}` : "The signal appears related to an active B2B requirement.",
+    `LUMEN found a public commercial signal that appears relevant to ${offer.name}.`,
+    evidence ? `Observed context: ${evidence}` : "Observed context: the public signal appears related to an active B2B requirement.",
     `We can provide ${offer.outcome} for USD ${offer.priceUsd}.`,
-    "This is a non-binding draft only. No order, payment, contract or commitment is created by this message.",
-    "If useful, the next step would be to confirm the requirement and receive the exact scope before checkout."
-  ].join("\n\n"), 3500);
+    "This is a non-binding commercial introduction. No order, payment, contract or commitment is created by this message.",
+    "If useful, reply with the requirement or scope you want checked. LUMEN can then confirm the exact deliverable and provide the x402 checkout. If this is not relevant, no action is needed."
+  ].join("\n\n");
 
   return {
     offerId: opportunity.revenue_offer_id || "MP-BUYER-SIGNALS",
     offerName: offer.name,
     amountUsd: offer.priceUsd,
     subject,
-    message
+    message: clean(message, 1800)
   };
 }
 
 export async function prepareTopProposal(env) {
   if (!(await ensureSchema(env))) return { ok: false, error: "persistence_unavailable" };
-  const opportunity = await getBestCommercialOpportunity(env);
+  const opportunity = await getBestProposalCandidate(env);
   if (!opportunity) {
-    return { ok: true, prepared: false, reason: "no_commercially_actionable_opportunity", version: VERSION };
+    return { ok: true, prepared: false, reason: "no_unprocessed_commercial_candidate", version: VERSION };
   }
 
   const draft = makeDraft(opportunity);
-  const existing = await env.DB.prepare("SELECT proposal_id,created_at FROM lumen_proposal_drafts WHERE opportunity_id=? LIMIT 1").bind(opportunity.id).first();
   const now = new Date().toISOString();
-  const proposalId = existing?.proposal_id || `PROP-${crypto.randomUUID().replaceAll("-", "").slice(0, 12).toUpperCase()}`;
-  const createdAt = existing?.created_at || now;
+  const proposalId = opportunity.existing_proposal_id || `PROP-${crypto.randomUUID().replaceAll("-", "").slice(0, 12).toUpperCase()}`;
+  const createdAt = opportunity.existing_created_at || now;
   const metadata = {
     commercial_score: opportunity.commercial_score,
     commercial_fit: opportunity.commercial_fit,
@@ -105,7 +127,7 @@ export async function prepareTopProposal(env) {
       chargeCreated: false,
       contractCreated: false,
       autonomousOutgoingSpend: false,
-      autonomousOutreach: false,
+      autonomousContract: false,
       bindingActionsHumanGated: true
     }
   };
@@ -113,10 +135,9 @@ export async function prepareTopProposal(env) {
 
 async function getNextProposal(env) {
   await ensureSchema(env);
-  const row = await env.DB.prepare("SELECT p.opportunity_id,p.proposal_id,p.created_at,p.updated_at,p.status,p.offer_id,p.offer_name,p.amount_usd,p.subject,p.message,p.quality_gate_status,p.autonomous_send,p.metadata_json,o.name,o.endpoint,o.description FROM lumen_proposal_drafts p JOIN lumen_opportunities o ON o.id=p.opportunity_id WHERE p.status='DRAFT' ORDER BY p.updated_at DESC LIMIT 1").first();
+  const row = await env.DB.prepare("SELECT p.opportunity_id,p.proposal_id,p.created_at,p.updated_at,p.status,p.offer_id,p.offer_name,p.amount_usd,p.subject,p.message,p.quality_gate_status,p.autonomous_send,p.metadata_json,o.name,o.endpoint,o.description FROM lumen_proposal_drafts p JOIN lumen_opportunities o ON o.id=p.opportunity_id WHERE p.status IN ('DRAFT','APPROVED') ORDER BY CASE WHEN p.status='APPROVED' THEN 0 ELSE 1 END,p.updated_at DESC LIMIT 1").first();
   if (!row) return json({ version: VERSION, proposal: null, nextAction: "prepare_top_proposal" });
-  let metadata = {};
-  try { metadata = JSON.parse(row.metadata_json || "{}"); } catch {}
+  const metadata = safeParse(row.metadata_json, {});
   return json({
     version: VERSION,
     proposal: {
@@ -129,25 +150,28 @@ async function getNextProposal(env) {
       amountUsd: Number(row.amount_usd || 0),
       subject: row.subject,
       message: row.message,
+      status: row.status,
       qualityGateStatus: row.quality_gate_status,
       autonomousSend: Boolean(row.autonomous_send),
       metadata
     },
-    nextAction: "quality_gate_review_before_any_external_send",
-    guardrails: { autonomousOutgoingSpend: false, autonomousOutreach: false, bindingActionsHumanGated: true }
+    nextAction: row.status === "APPROVED" ? "probe_a2a_endpoint_before_contact" : "quality_gate_review_before_any_external_send",
+    guardrails: { autonomousOutgoingSpend: false, autonomousContract: false, bindingActionsHumanGated: true }
   });
 }
 
-async function manualPrepare(request, env) {
+function authorized(request, env) {
   const configured = clean(env?.OPPORTUNITY_ADMIN_TOKEN, 500);
   const provided = clean(request.headers.get("x-lumen-admin"), 500);
-  if (!configured || !provided || configured !== provided) return json({ ok: false, error: "admin_token_required" }, 403);
-  return json(await prepareTopProposal(env), 202);
+  return Boolean(configured && provided && configured === provided);
 }
 
 export async function handleProposalEngine(request, env) {
   const url = new URL(request.url);
   if (request.method === "GET" && url.pathname === "/proposals/next") return getNextProposal(env);
-  if (request.method === "POST" && url.pathname === "/proposals/prepare-top") return manualPrepare(request, env);
+  if (request.method === "POST" && url.pathname === "/proposals/prepare-top") {
+    if (!authorized(request, env)) return json({ ok: false, error: "admin_token_required" }, 403);
+    return json(await prepareTopProposal(env), 202);
+  }
   return null;
 }
