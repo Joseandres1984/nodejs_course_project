@@ -115,7 +115,8 @@ export async function recomputeObservedReputation(env){
 
 async function stats(env){
   await ensureSchema(env);
-  const x=await env.DB.prepare("SELECT COUNT(*) total,SUM(CASE WHEN o.evidence_events>0 THEN 1 ELSE 0 END) with_evidence,SUM(CASE WHEN o.confidence>=30 THEN 1 ELSE 0 END) meaningful_confidence,AVG(CASE WHEN o.evidence_events>0 THEN o.score END) avg_observed,SUM(CASE WHEN e.verified_settlements>0 THEN 1 ELSE 0 END) economic_evidence FROM lumen_partner_observed_reputation o LEFT JOIN lumen_partner_economic_performance e ON e.partner_id=o.partner_id").first();
+  let x=await safeFirst(env,"SELECT COUNT(*) total,SUM(CASE WHEN o.evidence_events>0 THEN 1 ELSE 0 END) with_evidence,SUM(CASE WHEN o.confidence>=30 THEN 1 ELSE 0 END) meaningful_confidence,AVG(CASE WHEN o.evidence_events>0 THEN o.score END) avg_observed,SUM(CASE WHEN e.verified_settlements>0 THEN 1 ELSE 0 END) economic_evidence FROM lumen_partner_observed_reputation o LEFT JOIN lumen_partner_economic_performance e ON e.partner_id=o.partner_id");
+  if(!x)x=await safeFirst(env,"SELECT COUNT(*) total,SUM(CASE WHEN evidence_events>0 THEN 1 ELSE 0 END) with_evidence,SUM(CASE WHEN confidence>=30 THEN 1 ELSE 0 END) meaningful_confidence,AVG(CASE WHEN evidence_events>0 THEN score END) avg_observed,0 economic_evidence FROM lumen_partner_observed_reputation");
   return json({version:VERSION,total:Number(x?.total||0),withEvidence:Number(x?.with_evidence||0),meaningfulConfidence:Number(x?.meaningful_confidence||0),withVerifiedEconomicEvidence:Number(x?.economic_evidence||0),averageObserved:x?.avg_observed==null?null:Math.round(Number(x.avg_observed)),replacesDeclaredReputation:false,confidenceAware:true,economicSignalVerifiedOnly:true,economicWeightMaxPercent:20});
 }
 
@@ -127,8 +128,9 @@ export async function handleObservedPartnerReputation(request,env){
   }
   if(request.method==='GET'&&url.pathname==='/partners/observed-reputation'){
     if(!authorized(request,env))return json({ok:false,error:'admin_token_required'},403);await ensureSchema(env);
-    const r=await env.DB.prepare("SELECT o.*,p.name,p.reputation_score AS declared_reputation,p.compatibility_score,e.economic_score,e.economic_confidence,e.verified_revenue_usd,e.verified_settlements,e.verified_referral_settlements FROM lumen_partner_observed_reputation o JOIN lumen_partner_agents p ON p.id=o.partner_id LEFT JOIN lumen_partner_economic_performance e ON e.partner_id=o.partner_id ORDER BY o.confidence DESC,o.score DESC LIMIT 100").all();
-    return json({version:VERSION,partners:(r.results||[]).map(x=>({...x,reasons:(()=>{try{return JSON.parse(x.reasons_json||'[]');}catch{return[];}})()}))});
+    let rows=await safeAll(env,"SELECT o.*,p.name,p.reputation_score AS declared_reputation,p.compatibility_score,e.economic_score,e.economic_confidence,e.verified_revenue_usd,e.verified_settlements,e.verified_referral_settlements FROM lumen_partner_observed_reputation o JOIN lumen_partner_agents p ON p.id=o.partner_id LEFT JOIN lumen_partner_economic_performance e ON e.partner_id=o.partner_id ORDER BY o.confidence DESC,o.score DESC LIMIT 100");
+    if(!rows.length)rows=await safeAll(env,"SELECT o.*,p.name,p.reputation_score AS declared_reputation,p.compatibility_score,NULL economic_score,NULL economic_confidence,NULL verified_revenue_usd,NULL verified_settlements,NULL verified_referral_settlements FROM lumen_partner_observed_reputation o JOIN lumen_partner_agents p ON p.id=o.partner_id ORDER BY o.confidence DESC,o.score DESC LIMIT 100");
+    return json({version:VERSION,partners:rows.map(x=>({...x,reasons:(()=>{try{return JSON.parse(x.reasons_json||'[]');}catch{return[];}})()}))});
   }
   return null;
 }
