@@ -1,0 +1,53 @@
+name: LUMEN Dynamic Teams Smoke
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-dynamic-teams-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  dynamic-teams-smoke:
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: https://lumen-zero-a2a.lumen-b2b.workers.dev
+      OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+    steps:
+      - name: Verify protected token
+        run: test -n "${OPPORTUNITY_ADMIN_TOKEN:-}"
+
+      - name: Wait for Dynamic Team Engine v1.1
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 30); do
+            body=$(curl --show-error --silent --max-time 10 "$BASE_URL/dynamic-teams/stats" || true)
+            echo "$body"
+            if echo "$body" | grep -q '1.1-dynamic-team-engine'; then exit 0; fi
+            sleep 5
+          done
+          exit 1
+
+      - name: Build internal teams with retry
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 20); do
+            code=$(curl --show-error --silent --max-time 60 -o /tmp/teams.json -w '%{http_code}' \
+              -X POST "$BASE_URL/dynamic-teams/build" \
+              -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+              -H 'content-type: application/json' \
+              -d '{}' || true)
+            cat /tmp/teams.json 2>/dev/null || true
+            echo
+            if [ "$code" = '202' ] && grep -q '1.1-dynamic-team-engine' /tmp/teams.json; then break; fi
+            sleep 3
+          done
+          jq -e '.ok == true and .version == "1.1-dynamic-team-engine" and .teamsBuilt >= 1 and .guardrails.internalDraftOnly == true and .guardrails.externalInvitesSent == false and .guardrails.autonomousHiring == false and .guardrails.autonomousSpend == false and .guardrails.bindingAllowed == false' /tmp/teams.json >/dev/null
+
+      - name: Verify live team state
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 20 "$BASE_URL/dynamic-teams/stats" > /tmp/stats.json
+          cat /tmp/stats.json
+          echo
+          jq -e '.version == "1.1-dynamic-team-engine" and .activeDraftTeams >= 1 and .internalDraftOnly == true and .externalInvitesSent == false and .autonomousSpend == false and .bindingActionsHumanGated == true' /tmp/stats.json >/dev/null
