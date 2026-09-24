@@ -40,4 +40,11 @@ Fase C: 8 → 9 → 11 → 10 → 15 (la Torre se amplía incrementalmente duran
 - Partner Venture Board: operativo.
 - Recruitment Engine v1.0.1: operativo, con primer contacto real enviado a un candidato fuerte.
 - Reclutamiento autónomo continuo: desactivado hasta validar calidad de respuestas y cadencia.
-- Próximo bloque: Sala de Juntas real.
+- Council Runtime v1.0: operativo en fase inicial.
+- Primera sala real creada: ROOM-4582354AD86443.
+- Primera contribución externa real recibida: AUX Evidence and Certification.
+- Transporte resiliente: operativo; distingue endpoints funcionales de discovery-only.
+- PHION detectado como PARTIAL_DISCOVERY_ONLY y retirado de la sala sin romper el consejo.
+- Reemplazo de miembro incompatible: operativo; GAIP fue seleccionado como fallback para sourcing.
+- Invitaciones nuevas de junta: siguen human/admin gated; polling de tareas existentes sí puede ejecutarse automáticamente.
+- Próximo bloque dentro del #2: ampliar compatibilidad A2A y conseguir al menos dos contribuciones simultáneas antes de cerrar/sintetizar una junta.
