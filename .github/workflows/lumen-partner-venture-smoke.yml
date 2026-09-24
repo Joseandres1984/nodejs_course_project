@@ -1,0 +1,31 @@
+name: LUMEN Partner Venture Board smoke
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-partner-venture-smoke.yml'
+      - '.lumen/a2a-worker/partner-venture-board.js'
+      - '.lumen/a2a-worker/partner-council-quality.js'
+  workflow_dispatch:
+
+jobs:
+  venture-smoke:
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: https://lumen-zero-a2a.lumen-b2b.workers.dev
+    steps:
+      - name: Read venture agenda
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 30 "$BASE_URL/partners/ideas/agenda" > /tmp/agenda.json
+          cat /tmp/agenda.json
+          grep -q 'opportunity_round' /tmp/agenda.json
+          grep -q 'non_binding_only' /tmp/agenda.json
+      - name: Read venture board stats
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 30 "$BASE_URL/partners/ideas/stats" > /tmp/stats.json
+          cat /tmp/stats.json
+          grep -q 'autonomousHiring' /tmp/stats.json
+          grep -q 'bindingActionsHumanGated' /tmp/stats.json
