@@ -1,0 +1,67 @@
+name: LUMEN Recruitment Live Smoke
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-recruitment-live-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  recruitment-live:
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: https://lumen-zero-a2a.lumen-b2b.workers.dev
+      OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+    steps:
+      - name: Verify protected token
+        run: |
+          if [ -z "${OPPORTUNITY_ADMIN_TOKEN:-}" ]; then
+            echo 'OPPORTUNITY_ADMIN_TOKEN_MISSING'
+            exit 2
+          fi
+      - name: Wait for Recruitment Engine deployment
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 24); do
+            code=$(curl --show-error --silent --max-time 10 -o /tmp/stats.json -w '%{http_code}' "$BASE_URL/recruitment/stats" || true)
+            if [ "$code" = '200' ]; then
+              cat /tmp/stats.json
+              exit 0
+            fi
+            echo "Recruitment Engine not live yet (HTTP $code), waiting..."
+            sleep 5
+          done
+          echo 'RECRUITMENT_ENGINE_NOT_READY'
+          exit 1
+      - name: Probe best partner candidate
+        run: |
+          set -euo pipefail
+          code=$(curl --show-error --silent --max-time 45 -o /tmp/probe.json -w '%{http_code}' \
+            -X POST "$BASE_URL/recruitment/probe-next" \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'accept: application/json')
+          echo "===== recruitment probe HTTP $code ====="
+          cat /tmp/probe.json
+          echo
+          test "$code" = '202'
+      - name: Send one nonbinding partner invitation
+        run: |
+          set -euo pipefail
+          code=$(curl --show-error --silent --max-time 45 -o /tmp/send.json -w '%{http_code}' \
+            -X POST "$BASE_URL/recruitment/send-next" \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'accept: application/json')
+          echo "===== recruitment send HTTP $code ====="
+          cat /tmp/send.json
+          echo
+          test "$code" = '202'
+      - name: Read recruitment state
+        run: |
+          set -euo pipefail
+          echo '===== /recruitment/stats ====='
+          curl --fail --show-error --silent --max-time 20 "$BASE_URL/recruitment/stats"
+          echo
+          echo '===== /recruitment/next ====='
+          curl --fail --show-error --silent --max-time 20 "$BASE_URL/recruitment/next"
+          echo
