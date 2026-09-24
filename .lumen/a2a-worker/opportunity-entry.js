@@ -13,6 +13,7 @@ import { handleVentureCouncil, runVentureCouncil } from "./venture-council-engin
 import { handleVenturePeerReview, planVenturePeerReviews } from "./venture-peer-review.js";
 import { handleCapabilityGapEngine, recomputeCapabilityGaps } from "./capability-gap-engine.js";
 import { handlePartnerMarketplace, syncPartnerMarketplace, reviewMarketplaceInterests } from "./partner-marketplace.js";
+import { handlePartnerMarketplacePublicCatalog } from "./partner-marketplace-public-catalog.js";
 import { handleAgentGraph, recomputeAgentGraph } from "./agent-graph.js";
 import { handleDynamicTeamEngine, buildDynamicTeams } from "./dynamic-team-engine.js";
 import { handleRedundancyEngine, recomputeRedundancy } from "./redundancy-engine.js";
@@ -62,6 +63,7 @@ export default {
     const ventureCouncilResponse = await handleVentureCouncil(request, env); if (ventureCouncilResponse) return ventureCouncilResponse;
     const venturePeerReviewResponse = await handleVenturePeerReview(request, env); if (venturePeerReviewResponse) return venturePeerReviewResponse;
     const capabilityGapResponse = await handleCapabilityGapEngine(request, env); if (capabilityGapResponse) return capabilityGapResponse;
+    const marketplaceCatalogResponse = await handlePartnerMarketplacePublicCatalog(request, env); if (marketplaceCatalogResponse) return marketplaceCatalogResponse;
     const marketplaceResponse = await handlePartnerMarketplace(request, env); if (marketplaceResponse) return marketplaceResponse;
     const agentGraphResponse = await handleAgentGraph(request, env); if (agentGraphResponse) return agentGraphResponse;
     const dynamicTeamResponse = await handleDynamicTeamEngine(request, env); if (dynamicTeamResponse) return dynamicTeamResponse;
@@ -95,7 +97,6 @@ export default {
       await runVentureCouncil(env);
       await planVenturePeerReviews(env, { limit: 6 });
       await recomputeCapabilityGaps(env);
-      // Marketplace publishes only current internal needs; reviewing inbound interest never contacts candidates.
       await syncPartnerMarketplace(env);
       await reviewMarketplaceInterests(env);
       await recomputeAgentGraph(env);
