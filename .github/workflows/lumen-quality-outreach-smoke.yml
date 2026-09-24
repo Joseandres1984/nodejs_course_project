@@ -1,0 +1,67 @@
+name: LUMEN Quality + A2A Probe
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-quality-outreach-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  quality-outreach-smoke:
+    runs-on: ubuntu-latest
+    env:
+      OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+      BASE_URL: https://lumen-zero-a2a.lumen-b2b.workers.dev
+    steps:
+      - name: Verify protected token
+        run: |
+          if [ -z "${OPPORTUNITY_ADMIN_TOKEN:-}" ]; then
+            echo 'OPPORTUNITY_ADMIN_TOKEN_MISSING'
+            exit 2
+          fi
+      - name: Refresh best proposal copy
+        run: |
+          set -euo pipefail
+          code=$(curl --show-error --silent --max-time 60 -o /tmp/proposal.json -w '%{http_code}' \
+            -X POST "$BASE_URL/proposals/prepare-top" \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'accept: application/json')
+          echo "===== proposal HTTP $code ====="
+          cat /tmp/proposal.json
+          echo
+          test "$code" = '202'
+      - name: Run quality gate
+        run: |
+          set -euo pipefail
+          code=$(curl --show-error --silent --max-time 60 -o /tmp/quality.json -w '%{http_code}' \
+            -X POST "$BASE_URL/quality/review-next" \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'accept: application/json')
+          echo "===== quality HTTP $code ====="
+          cat /tmp/quality.json
+          echo
+          test "$code" = '202'
+      - name: Probe approved A2A target without sending
+        run: |
+          set -euo pipefail
+          code=$(curl --show-error --silent --max-time 60 -o /tmp/probe.json -w '%{http_code}' \
+            -X POST "$BASE_URL/outreach/probe-next" \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'accept: application/json')
+          echo "===== probe HTTP $code ====="
+          cat /tmp/probe.json
+          echo
+          test "$code" = '202'
+      - name: Read pipeline state
+        run: |
+          set -euo pipefail
+          echo '===== /quality/stats ====='
+          curl --fail --show-error --silent --max-time 30 "$BASE_URL/quality/stats"
+          echo
+          echo '===== /outreach/stats ====='
+          curl --fail --show-error --silent --max-time 30 "$BASE_URL/outreach/stats"
+          echo
+          echo '===== /outreach/next ====='
+          curl --fail --show-error --silent --max-time 30 "$BASE_URL/outreach/next"
+          echo
