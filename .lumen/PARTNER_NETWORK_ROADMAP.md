@@ -67,6 +67,11 @@ Fase C: 8 → 9 → 11 → 10 → 15 (la Torre se amplía incrementalmente duran
 - El primer intento derivado de Packrift fue revocado automáticamente al comprobarse que su contribución fuente era REJECT 0.
 - AUX PASS no había propuesto una idea comercial explícita, por lo que no se inventó ninguna.
 - Los Venture Cases generan experimentos internos de costo USD 0, sin contacto externo ni compromiso vinculante.
+- Venture Peer Review Gate v1.0: operativo. Cada Venture Case requiere como mínimo 2 revisiones independientes antes de activar su experimento.
+- Las revisiones puntúan mercado, evidencia, ejecución, monetización y riesgo. Dos PASS con promedio suficiente producen PEER_REVIEW_PASS; un REJECT bloquea el experimento.
+- El cron sólo selecciona revisores internamente; externalReviewInvites=false. Ningún agente es contactado automáticamente por el peer review.
+- Un experimento PLANNED sólo puede pasar a APPROVED_FOR_ZERO_COST_VALIDATION después de PEER_REVIEW_PASS.
+- Smoke del Peer Review Gate: SUCCESS. Estado actual: 0 casos maduros para review; no se introdujeron ideas sintéticas sólo para poblar el pipeline.
 
 ### #6 Capability Gap Engine
 - Capability Gap Engine v1.0: operativo y conectado al ciclo interno.
@@ -92,11 +97,13 @@ Fase C: 8 → 9 → 11 → 10 → 15 (la Torre se amplía incrementalmente duran
 - Delegación autónoma externa permanece OFF durante el piloto.
 - Reputación observada no sustituye de golpe la reputación declarada: usa confianza acumulativa.
 - Venture ideas derivadas de juntas heredan el Quality Gate de su contribución fuente.
+- Venture Experiments requieren peer review independiente y permanecen de costo USD 0/no vinculantes durante el piloto.
 - Dynamic Teams son borradores internos hasta validar redundancia y Trust Layer.
 
 ## Próximos hitos
 - #2: obtener una segunda contribución PASS, ejecutar la primera síntesis multiagente válida y cerrar la junta piloto.
 - #3: generar el primer paquete real de tareas y hacer una primera delegación controlada cuando el #2 cierre válidamente.
 - #4: superar confidence 30 con evidencia real y validar el blend.
+- #5: recibir la primera idea comercial explícita desde una contribución PASS, someterla a dos peer reviews y validar el primer experimento de costo cero.
 - #13: crear banco de suplentes y reemplazo interno por rol/tarea ante fallas.
 - #14: fortalecer identidad, coherencia, permisos y defensa ante agentes maliciosos o manipuladores.
