@@ -1,5 +1,7 @@
 import baseWorker from "./worker-entry.js";
 import { handleOpportunityEngine, runOpportunityScan } from "./opportunity-engine.js";
+import { handleOpportunityFactory, runOpportunityFactory } from "./opportunity-factory.js";
+import { handlePortfolioGovernor, recomputePortfolioGovernor } from "./portfolio-governor.js";
 import { handleCommercialIntelligence, runCommercialReassessment } from "./commercial-intelligence.js";
 import { handleProposalEngine, prepareTopProposal } from "./proposal-engine.js";
 import { handleQualityGate, reviewNextProposal } from "./quality-gate.js";
@@ -49,9 +51,23 @@ import { handleDelegationRuntime, pollDelegationTasks } from "./delegation-runti
 import { handleObservedPartnerReputation, recomputeObservedReputation } from "./partner-observed-reputation.js";
 import { handleCouncilRuntime, pollCouncilRuntime } from "./council-runtime.js";
 
+function consumedExternalSlot(result) {
+  return Boolean(
+    result?.sent ||
+    result?.externalAttempted ||
+    result?.attempted ||
+    result?.status === "SEND_FAILED" ||
+    result?.send?.sent ||
+    result?.send?.externalAttempted ||
+    result?.send?.status === "SEND_FAILED"
+  );
+}
+
 export default {
   async fetch(request, env, ctx) {
     const opportunityResponse = await handleOpportunityEngine(request, env); if (opportunityResponse) return opportunityResponse;
+    const factoryResponse = await handleOpportunityFactory(request, env); if (factoryResponse) return factoryResponse;
+    const portfolioResponse = await handlePortfolioGovernor(request, env); if (portfolioResponse) return portfolioResponse;
     const commercialResponse = await handleCommercialIntelligence(request, env); if (commercialResponse) return commercialResponse;
     const proposalResponse = await handleProposalEngine(request, env); if (proposalResponse) return proposalResponse;
     const qualityResponse = await handleQualityGate(request, env); if (qualityResponse) return qualityResponse;
@@ -111,13 +127,6 @@ export default {
       await pollOutstandingResponses(env);
       await pollCommercialReplyTasks(env);
       await pollReferralCommissionAutopilot(env);
-      const firstCash = await runFirstCashCloser(env, { force: false });
-      const firstCashExternalMessageSent = Boolean(firstCash?.sent);
-      const commercialReply = firstCashExternalMessageSent
-        ? { sent: false, reason: "first_cash_conversion_has_external_priority" }
-        : await runCommercialReplyEngine(env, { force: false });
-      const commercialReplyExternalMessageSent = Boolean(commercialReply?.sent);
-      let conversionExternalMessageSent = firstCashExternalMessageSent || commercialReplyExternalMessageSent;
 
       const scheduledAt = new Date(controller?.scheduledTime || Date.now());
       if (scheduledAt.getUTCHours() % 6 === 0) await runPartnerDiscovery(env, { trigger: "cloudflare_cron", scheduledTime: controller?.scheduledTime || null });
@@ -142,15 +151,47 @@ export default {
       await planOutboundReferrals(env);
       await planReferralCommissions(env);
 
-      if (!conversionExternalMessageSent) {
-        const commissionAction = await runReferralCommissionAutopilot(env, { force: false });
-        conversionExternalMessageSent = Boolean(commissionAction?.sent || commissionAction?.externalAttempted);
+      await runOpportunityFactory(env);
+      const portfolio = await recomputePortfolioGovernor(env);
+      const preferredExternalAction = portfolio?.recommendedExternalAction || "NONE";
+
+      let conversionExternalMessageSent = false;
+      let firstCash = null;
+      let commercialReply = null;
+      let commissionAction = null;
+      let priorityFollowup = null;
+
+      if (preferredExternalAction === "COMMISSION_AUTOPILOT") {
+        commissionAction = await runReferralCommissionAutopilot(env, { force: false });
+        conversionExternalMessageSent = consumedExternalSlot(commissionAction);
+      } else if (preferredExternalAction === "FIRST_CASH") {
+        firstCash = await runFirstCashCloser(env, { force: false });
+        conversionExternalMessageSent = consumedExternalSlot(firstCash);
+      } else if (preferredExternalAction === "COMMERCIAL_REPLY") {
+        commercialReply = await runCommercialReplyEngine(env, { force: false });
+        conversionExternalMessageSent = consumedExternalSlot(commercialReply);
+      } else if (preferredExternalAction === "FOLLOWUP") {
+        priorityFollowup = await processFollowupCycle(env);
+        conversionExternalMessageSent = consumedExternalSlot(priorityFollowup);
+      }
+
+      if (!conversionExternalMessageSent && !firstCash) {
+        firstCash = await runFirstCashCloser(env, { force: false });
+        conversionExternalMessageSent = consumedExternalSlot(firstCash);
+      }
+      if (!conversionExternalMessageSent && !commercialReply) {
+        commercialReply = await runCommercialReplyEngine(env, { force: false });
+        conversionExternalMessageSent = consumedExternalSlot(commercialReply);
+      }
+      if (!conversionExternalMessageSent && !commissionAction) {
+        commissionAction = await runReferralCommissionAutopilot(env, { force: false });
+        conversionExternalMessageSent = consumedExternalSlot(commissionAction);
       }
 
       const councilRound = conversionExternalMessageSent
-        ? { acted: false, reason: "commercial_conversion_has_external_priority" }
+        ? { acted: false, reason: "commercial_portfolio_has_external_priority" }
         : await runCouncilRoundManager(env, { force: false });
-      const councilExternalMessageSent = Boolean(councilRound?.invite?.sent);
+      const councilExternalMessageSent = Boolean(councilRound?.invite?.sent || councilRound?.invite?.status === "SEND_FAILED");
 
       await syncX402SettlementsToRevenue(env);
       await syncReferralCommissionSettlements(env);
@@ -166,7 +207,7 @@ export default {
       let termsExternalMessageSent = false;
       if (!conversionExternalMessageSent && !councilExternalMessageSent) {
         const termInquiry = await sendNegotiationTermRequests(env, { force: false, limit: 1 });
-        termsExternalMessageSent = Number(termInquiry?.sent || 0) > 0;
+        termsExternalMessageSent = Number(termInquiry?.sent || 0) > 0 || Number(termInquiry?.attempted || 0) > 0;
       }
       await recomputeAgentEconomy(env);
       await recomputeAgentGraph(env);
@@ -176,9 +217,12 @@ export default {
       await reviewNextProposal(env);
 
       if (!conversionExternalMessageSent && !councilExternalMessageSent && !termsExternalMessageSent) {
-        const followup = await processFollowupCycle(env);
-        if (!followup?.send?.sent) await sendNextApproved(env, { force: false });
+        const followup = priorityFollowup || await processFollowupCycle(env);
+        if (!consumedExternalSlot(followup)) await sendNextApproved(env, { force: false });
       }
+
+      await runOpportunityFactory(env);
+      await recomputePortfolioGovernor(env);
     })());
   }
 };
