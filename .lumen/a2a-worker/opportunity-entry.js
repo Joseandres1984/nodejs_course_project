@@ -9,6 +9,7 @@ import { handlePartnerNetwork, runPartnerDiscovery } from "./partner-network.js"
 import { handlePartnerCouncilQuality, buildQualityPartnerMatches } from "./partner-council-quality.js";
 import { handlePartnerVentureBoard } from "./partner-venture-board.js";
 import { handleRecruitmentEngine, pollRecruitmentResponses } from "./recruitment-engine.js";
+import { handleCouncilJsonRpcFallback } from "./council-jsonrpc-fallback.js";
 import { handleCouncilTransportRecovery } from "./council-transport-recovery.js";
 import { handleCouncilRuntime, pollCouncilRuntime } from "./council-runtime.js";
 
@@ -34,6 +35,9 @@ export default {
 
     const recruitmentResponse = await handleRecruitmentEngine(request, env);
     if (recruitmentResponse) return recruitmentResponse;
+
+    const councilJsonRpcResponse = await handleCouncilJsonRpcFallback(request, env);
+    if (councilJsonRpcResponse) return councilJsonRpcResponse;
 
     const councilRecoveryResponse = await handleCouncilTransportRecovery(request, env);
     if (councilRecoveryResponse) return councilRecoveryResponse;
