@@ -11,6 +11,7 @@ import { handlePartnerVentureBoard } from "./partner-venture-board.js";
 import { handleVentureSuggestionIntake, ingestCouncilVentureSuggestions } from "./venture-suggestion-intake.js";
 import { handleVentureCouncil, runVentureCouncil } from "./venture-council-engine.js";
 import { handleCapabilityGapEngine, recomputeCapabilityGaps } from "./capability-gap-engine.js";
+import { handleAgentGraph, recomputeAgentGraph } from "./agent-graph.js";
 import { handleRecruitmentEngine, pollRecruitmentResponses } from "./recruitment-engine.js";
 import { handleCouncilReplacement } from "./council-replacement.js";
 import { handleCouncilJsonRpcFallback } from "./council-jsonrpc-fallback.js";
@@ -96,6 +97,9 @@ export default {
     const capabilityGapResponse = await handleCapabilityGapEngine(request, env);
     if (capabilityGapResponse) return capabilityGapResponse;
 
+    const agentGraphResponse = await handleAgentGraph(request, env);
+    if (agentGraphResponse) return agentGraphResponse;
+
     const partnerQualityResponse = await handlePartnerCouncilQuality(request, env);
     if (partnerQualityResponse) return partnerQualityResponse;
 
@@ -137,6 +141,8 @@ export default {
       await runVentureCouncil(env);
       // Convert opportunity/venture capability coverage into an internal recruitment-demand queue.
       await recomputeCapabilityGaps(env);
+      // Maintain an observational graph of agent relationships and combination outcomes.
+      await recomputeAgentGraph(env);
 
       await prepareTopProposal(env);
       await reviewNextProposal(env);
