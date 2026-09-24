@@ -144,7 +144,7 @@ export default {
 
       if (!conversionExternalMessageSent) {
         const commissionAction = await runReferralCommissionAutopilot(env, { force: false });
-        conversionExternalMessageSent = Boolean(commissionAction?.sent);
+        conversionExternalMessageSent = Boolean(commissionAction?.sent || commissionAction?.externalAttempted);
       }
 
       const councilRound = conversionExternalMessageSent
