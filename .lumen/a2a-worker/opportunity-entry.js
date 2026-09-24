@@ -9,6 +9,7 @@ import { handlePartnerNetwork, runPartnerDiscovery } from "./partner-network.js"
 import { handlePartnerCouncilQuality, buildQualityPartnerMatches } from "./partner-council-quality.js";
 import { handlePartnerVentureBoard } from "./partner-venture-board.js";
 import { handleRecruitmentEngine, pollRecruitmentResponses } from "./recruitment-engine.js";
+import { handleCouncilTransportRecovery } from "./council-transport-recovery.js";
 import { handleCouncilRuntime, pollCouncilRuntime } from "./council-runtime.js";
 
 export default {
@@ -33,6 +34,9 @@ export default {
 
     const recruitmentResponse = await handleRecruitmentEngine(request, env);
     if (recruitmentResponse) return recruitmentResponse;
+
+    const councilRecoveryResponse = await handleCouncilTransportRecovery(request, env);
+    if (councilRecoveryResponse) return councilRecoveryResponse;
 
     const councilRuntimeResponse = await handleCouncilRuntime(request, env);
     if (councilRuntimeResponse) return councilRuntimeResponse;
