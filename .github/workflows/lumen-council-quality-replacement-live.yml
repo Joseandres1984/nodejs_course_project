@@ -1,0 +1,68 @@
+name: LUMEN Council Quality Replacement Live
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-council-quality-replacement-live.yml'
+  workflow_dispatch:
+
+jobs:
+  replace-low-quality:
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: https://lumen-zero-a2a.lumen-b2b.workers.dev
+      OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+      ROOM_ID: ROOM-4582354AD86443
+    steps:
+      - name: Verify protected token
+        run: test -n "${OPPORTUNITY_ADMIN_TOKEN:-}"
+
+      - name: Wait for replacement v1.1 and replace one rejected contribution
+        run: |
+          set -euo pipefail
+          payload=$(jq -nc --arg room "$ROOM_ID" '{roomId:$room}')
+          for i in $(seq 1 30); do
+            code=$(curl --show-error --silent --max-time 20 -o /tmp/replace.json -w '%{http_code}' \
+              -X POST "$BASE_URL/council-runtime/replace-low-quality" \
+              -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+              -H 'content-type: application/json' \
+              -d "$payload" || true)
+            if [ "$code" = '202' ]; then
+              cat /tmp/replace.json
+              echo
+              jq -e '.ok == true and .replaced == true' /tmp/replace.json >/dev/null
+              exit 0
+            fi
+            sleep 5
+          done
+          exit 1
+
+      - name: Invite exactly one quality replacement
+        run: |
+          set -euo pipefail
+          payload=$(jq -nc --arg room "$ROOM_ID" '{roomId:$room,forceGuest:true}')
+          curl --fail --show-error --silent --max-time 45 \
+            -X POST "$BASE_URL/council-runtime/invite-next" \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'content-type: application/json' \
+            -d "$payload" > /tmp/invite.json
+          cat /tmp/invite.json
+          echo
+          jq -e '.sent == true' /tmp/invite.json >/dev/null
+
+      - name: Re-run contribution quality gate
+        if: always()
+        run: |
+          set -euo pipefail
+          payload=$(jq -nc --arg room "$ROOM_ID" '{roomId:$room}')
+          curl --fail --show-error --silent --max-time 30 \
+            -X POST "$BASE_URL/council-quality/review" \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'content-type: application/json' \
+            -d "$payload"
+          echo
+          curl --fail --show-error --silent --max-time 20 \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            "$BASE_URL/council-quality/room?id=$ROOM_ID"
+          echo
