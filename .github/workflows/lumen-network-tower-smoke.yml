@@ -1,0 +1,73 @@
+name: LUMEN Network Tower Smoke
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-network-tower-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  network-tower-smoke:
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: https://lumen-zero-dashboard.lumen-b2b.workers.dev
+      DASHBOARD_USER: socio
+      DASHBOARD_PASSWORD: ${{ secrets.LUMEN_DASHBOARD_PASSWORD }}
+    steps:
+      - name: Verify dashboard credential exists
+        run: test -n "${DASHBOARD_PASSWORD:-}"
+
+      - name: Verify exclusive dashboard tabs
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 30 \
+            -u "$DASHBOARD_USER:$DASHBOARD_PASSWORD" \
+            "$BASE_URL/" > /tmp/dashboard.html
+          test "$(grep -o 'data-tab="experiments"' /tmp/dashboard.html | wc -l)" -eq 1
+          test "$(grep -o 'data-tab="controlv2"' /tmp/dashboard.html | wc -l)" -eq 1
+          test "$(grep -o 'data-tab="networktower"' /tmp/dashboard.html | wc -l)" -eq 1
+          ! grep -q 'data-p="experiments"' /tmp/dashboard.html
+          ! grep -q 'data-p="controlv2"' /tmp/dashboard.html
+          ! grep -q 'data-p="networktower"' /tmp/dashboard.html
+          grep -q 'id="experiments"' /tmp/dashboard.html
+          grep -q 'id="controlv2"' /tmp/dashboard.html
+          grep -q 'id="networktower"' /tmp/dashboard.html
+          grep -q 'Red de Agentes' /tmp/dashboard.html
+
+      - name: Verify live Network Control API
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 60 \
+            -u "$DASHBOARD_USER:$DASHBOARD_PASSWORD" \
+            "$BASE_URL/api/network-control-v1" > /tmp/network.json
+          cat /tmp/network.json
+          echo
+          jq -e '
+            .version == "1.0-network-control-tower" and
+            (.modules | length) == 15 and
+            .guardrails.outgoingBudgetUsd == 0 and
+            .guardrails.outgoingSpendHardBlocked == true and
+            .guardrails.autonomousOutgoingSpend == false and
+            .guardrails.autonomousPurchase == false and
+            .guardrails.autonomousContract == false and
+            .guardrails.bindingActionsHumanGated == true and
+            .guardrails.verifiedSettlementRequiredForIncome == true and
+            (.economy.realizedIncomeUsd // 0) <= (.economy.potentialIncomeUsd // 0) and
+            (.topPartners | type) == "array" and
+            (.rooms | type) == "array" and
+            (.gapRows | type) == "array"
+          ' /tmp/network.json >/dev/null
+
+      - name: Verify truth separation and safe economics
+        run: |
+          set -euo pipefail
+          jq -e '
+            ((.economy.realizedIncomeUsd // 0) >= 0) and
+            ((.economy.potentialIncomeUsd // 0) >= (.economy.realizedIncomeUsd // 0)) and
+            ((.economy.proposedExpenseUsd // 0) >= 0) and
+            (.guardrails.outgoingBudgetUsd == 0)
+          ' /tmp/network.json >/dev/null
+
+      - name: Complete job
+        run: echo "Network Control Tower live smoke passed"
