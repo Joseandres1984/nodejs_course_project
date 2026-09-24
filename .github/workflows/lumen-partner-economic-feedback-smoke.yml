@@ -1,0 +1,95 @@
+name: LUMEN Partner Economic Feedback Smoke
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-partner-economic-feedback-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  partner-economic-feedback-smoke:
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: https://lumen-zero-a2a.lumen-b2b.workers.dev
+      OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+    steps:
+      - name: Verify protected token
+        run: test -n "${OPPORTUNITY_ADMIN_TOKEN:-}"
+
+      - name: Wait for economic feedback runtime
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 40); do
+            econ=$(curl --show-error --silent --max-time 10 "$BASE_URL/partners/economic-performance/policy" || true)
+            rep=$(curl --show-error --silent --max-time 10 "$BASE_URL/partners/observed-reputation/stats" || true)
+            echo "$econ"
+            echo "$rep"
+            if echo "$econ" | grep -q '1.0-partner-economic-performance' && echo "$rep" | grep -q '1.1-observed-partner-reputation'; then exit 0; fi
+            sleep 5
+          done
+          exit 1
+
+      - name: Verify economic truth policy
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 20 "$BASE_URL/partners/economic-performance/policy" > /tmp/policy.json
+          cat /tmp/policy.json
+          echo
+          jq -e '.version == "1.0-partner-economic-performance" and .truthRule == "verified_partner_attributed_payment_settled_only" and .coldStart == "neutral_50_weight_0" and .maxObservedReputationWeightPercent == 20 and .noRevenuePenalty == true and .directAttributionOnly == true and .autonomousSpend == false and .bindingActionsHumanGated == true' /tmp/policy.json >/dev/null
+
+      - name: Recompute verified economic performance
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 60 \
+            -X POST "$BASE_URL/partners/economic-performance/recompute" \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'content-type: application/json' \
+            -d '{}' > /tmp/econ.json
+          cat /tmp/econ.json
+          echo
+          jq -e '.ok == true and .version == "1.0-partner-economic-performance" and .partners >= 1 and .guardrails.verifiedSettlementsOnly == true and .guardrails.directAttributionOnly == true and .guardrails.noPenaltyForNoRevenue == true and .guardrails.maxObservedReputationWeightPercent == 20 and .guardrails.autonomousSpend == false' /tmp/econ.json >/dev/null
+
+      - name: Verify cold partners remain neutral
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 30 \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            "$BASE_URL/partners/economic-performance" > /tmp/all-econ.json
+          jq -e '([.partners[] | select((.verified_settlements|tonumber) == 0 and ((.economic_score|tonumber) != 50 or (.economic_confidence|tonumber) != 0))] | length) == 0' /tmp/all-econ.json >/dev/null
+          jq -e '([.partners[] | select((.verified_settlements|tonumber) > 0 and ((.economic_score|tonumber) < 50 or (.economic_confidence|tonumber) <= 0))] | length) == 0' /tmp/all-econ.json >/dev/null
+
+      - name: Recompute observed reputation with economic blend
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 60 \
+            -X POST "$BASE_URL/partners/observed-reputation/recompute" \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'content-type: application/json' \
+            -d '{}' > /tmp/rep.json
+          cat /tmp/rep.json
+          echo
+          jq -e '.ok == true and .version == "1.1-observed-partner-reputation" and .partners >= 1 and .guardrails.economicSignalVerifiedOnly == true and .guardrails.economicWeightMaxPercent == 20 and .guardrails.noRevenuePenalty == true and .guardrails.directPartnerAttributionRequired == true and ([.topObserved[]? | select(.economicWeightPercent > 20)] | length) == 0' /tmp/rep.json >/dev/null
+
+      - name: Verify public reputation state
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 20 "$BASE_URL/partners/observed-reputation/stats" > /tmp/stats.json
+          cat /tmp/stats.json
+          echo
+          jq -e '.version == "1.1-observed-partner-reputation" and .economicSignalVerifiedOnly == true and .economicWeightMaxPercent == 20 and .replacesDeclaredReputation == false and .confidenceAware == true' /tmp/stats.json >/dev/null
+
+      - name: Prepare safe snapshot
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/partner-economic-feedback
+          jq '{version,partners,revenueProducingPartners,meaningfulEconomicConfidence,top,guardrails}' /tmp/econ.json > /tmp/partner-economic-feedback/economic.json
+          jq '{version,partners,withEvidence,withVerifiedEconomicEvidence,topObserved,guardrails}' /tmp/rep.json > /tmp/partner-economic-feedback/reputation.json
+          jq '{version,total,withEvidence,meaningfulConfidence,withVerifiedEconomicEvidence,averageObserved,economicSignalVerifiedOnly,economicWeightMaxPercent}' /tmp/stats.json > /tmp/partner-economic-feedback/stats.json
+
+      - name: Upload safe snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: partner-economic-feedback-snapshot
+          path: /tmp/partner-economic-feedback
+          retention-days: 1
