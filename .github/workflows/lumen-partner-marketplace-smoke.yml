@@ -21,9 +21,11 @@ jobs:
         run: |
           set -euo pipefail
           for i in $(seq 1 36); do
-            body=$(curl --show-error --silent --max-time 10 "$BASE_URL/partner-marketplace/stats" || true)
-            echo "$body"
-            if echo "$body" | grep -q '1.0-partner-marketplace'; then exit 0; fi
+            stats=$(curl --show-error --silent --max-time 10 "$BASE_URL/partner-marketplace/stats" || true)
+            catalog=$(curl --show-error --silent --max-time 10 "$BASE_URL/partner-marketplace/catalog" || true)
+            echo "$stats"
+            echo "$catalog"
+            if echo "$stats" | grep -q '1.0-partner-marketplace' && echo "$catalog" | grep -q '1.1-partner-marketplace-catalog'; then exit 0; fi
             sleep 5
           done
           exit 1
@@ -40,13 +42,13 @@ jobs:
           echo
           jq -e '.ok == true and .version == "1.0-partner-marketplace" and .guardrails.publicListingsNonBinding == true and .guardrails.autonomousSpend == false and .guardrails.autonomousHiring == false and .guardrails.externalContactSent == false' /tmp/sync.json >/dev/null
 
-      - name: Verify public catalog safety
+      - name: Verify aggregated public catalog safety
         run: |
           set -euo pipefail
           curl --fail --show-error --silent --max-time 20 "$BASE_URL/partner-marketplace/catalog" > /tmp/catalog.json
           cat /tmp/catalog.json
           echo
-          jq -e '.version == "1.0-partner-marketplace" and .mode == "non_binding_discovery" and (.lumenOffers | length) >= 1 and .autonomousSpend == false and .bindingActionsHumanGated == true and (.rules | index("trust_review_required")) != null and (.rules | index("no_payment_or_contract_created")) != null' /tmp/catalog.json >/dev/null
+          jq -e '.version == "1.1-partner-marketplace-catalog" and .mode == "non_binding_discovery" and (.lumenOffers | length) >= 1 and .granularNeedCount >= .publicListingCount and .publicListingCount >= 1 and .autonomousSpend == false and .bindingActionsHumanGated == true and (.rules | index("trust_review_required")) != null and (.rules | index("no_payment_or_contract_created")) != null' /tmp/catalog.json >/dev/null
 
       - name: Verify marketplace state
         run: |
