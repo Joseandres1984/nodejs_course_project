@@ -18,13 +18,15 @@ jobs:
       - name: Verify protected token
         run: test -n "${OPPORTUNITY_ADMIN_TOKEN:-}"
 
-      - name: Wait for Delegation Engine v1
+      - name: Wait for Delegation Engine and Runtime v1
         run: |
           set -euo pipefail
           for i in $(seq 1 30); do
-            body=$(curl --show-error --silent --max-time 10 "$BASE_URL/delegation/stats" || true)
-            echo "$body"
-            if echo "$body" | grep -q '1.0-delegation-engine'; then exit 0; fi
+            planner=$(curl --show-error --silent --max-time 10 "$BASE_URL/delegation/stats" || true)
+            runtime=$(curl --show-error --silent --max-time 10 "$BASE_URL/delegation/runtime-stats" || true)
+            echo "$planner"
+            echo "$runtime"
+            if echo "$planner" | grep -q '1.0-delegation-engine' && echo "$runtime" | grep -q '1.0-delegation-runtime'; then exit 0; fi
             sleep 5
           done
           exit 1
@@ -33,9 +35,13 @@ jobs:
         run: |
           set -euo pipefail
           curl --fail --show-error --silent --max-time 20 "$BASE_URL/delegation/stats" > /tmp/stats.json
+          curl --fail --show-error --silent --max-time 20 "$BASE_URL/delegation/runtime-stats" > /tmp/runtime.json
           cat /tmp/stats.json
           echo
+          cat /tmp/runtime.json
+          echo
           jq -e '.version == "1.0-delegation-engine" and .autonomousDelegation == false and .autonomousOutgoingSpend == false and .bindingActionsHumanGated == true' /tmp/stats.json >/dev/null
+          jq -e '.version == "1.0-delegation-runtime" and .autonomousDelegation == false and .autonomousOutgoingSpend == false and .bindingActionsHumanGated == true' /tmp/runtime.json >/dev/null
 
       - name: Confirm unsynthesized council cannot create delegation plan
         run: |
@@ -49,3 +55,15 @@ jobs:
           cat /tmp/plan.json
           echo
           jq -e '.ok == true and .planned == false and (.reason == "room_not_synthesized" or .reason == "insufficient_quality_contributors")' /tmp/plan.json >/dev/null
+
+      - name: Confirm dispatch is hard-disabled during pilot
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 30 \
+            -X POST "$BASE_URL/delegation/dispatch-next" \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'content-type: application/json' \
+            -d '{"force":false}' > /tmp/dispatch.json
+          cat /tmp/dispatch.json
+          echo
+          jq -e '.ok == true and .sent == false and .reason == "autonomous_delegation_disabled" and .autonomousDelegation == false' /tmp/dispatch.json >/dev/null
