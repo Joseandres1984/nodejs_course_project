@@ -10,6 +10,7 @@ import { handlePartnerCouncilQuality, buildQualityPartnerMatches } from "./partn
 import { handlePartnerVentureBoard } from "./partner-venture-board.js";
 import { handleVentureSuggestionIntake, ingestCouncilVentureSuggestions } from "./venture-suggestion-intake.js";
 import { handleVentureCouncil, runVentureCouncil } from "./venture-council-engine.js";
+import { handleVenturePeerReview, planVenturePeerReviews } from "./venture-peer-review.js";
 import { handleCapabilityGapEngine, recomputeCapabilityGaps } from "./capability-gap-engine.js";
 import { handleAgentGraph, recomputeAgentGraph } from "./agent-graph.js";
 import { handleDynamicTeamEngine, buildDynamicTeams } from "./dynamic-team-engine.js";
@@ -56,6 +57,7 @@ export default {
     const ventureResponse = await handlePartnerVentureBoard(request, env); if (ventureResponse) return ventureResponse;
     const ventureIntakeResponse = await handleVentureSuggestionIntake(request, env); if (ventureIntakeResponse) return ventureIntakeResponse;
     const ventureCouncilResponse = await handleVentureCouncil(request, env); if (ventureCouncilResponse) return ventureCouncilResponse;
+    const venturePeerReviewResponse = await handleVenturePeerReview(request, env); if (venturePeerReviewResponse) return venturePeerReviewResponse;
     const capabilityGapResponse = await handleCapabilityGapEngine(request, env); if (capabilityGapResponse) return capabilityGapResponse;
     const agentGraphResponse = await handleAgentGraph(request, env); if (agentGraphResponse) return agentGraphResponse;
     const dynamicTeamResponse = await handleDynamicTeamEngine(request, env); if (dynamicTeamResponse) return dynamicTeamResponse;
@@ -89,6 +91,8 @@ export default {
       await recomputeObservedReputation(env);
       await ingestCouncilVentureSuggestions(env);
       await runVentureCouncil(env);
+      // Peer reviewers are only selected internally here; this does not contact them.
+      await planVenturePeerReviews(env, { limit: 6 });
       await recomputeCapabilityGaps(env);
       await recomputeAgentGraph(env);
       await buildDynamicTeams(env);
