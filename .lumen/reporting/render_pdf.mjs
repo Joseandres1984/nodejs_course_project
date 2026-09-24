@@ -45,9 +45,19 @@ try {
   page.on('requestfailed', req => browserErrors.push(`request:${req.url()}:${req.failure()?.errorText || 'failed'}`));
 
   await page.goto(pathToFileURL(inputPath).href, { waitUntil:'load', timeout:30000 });
+  await page.evaluate((id) => {
+    const footer = document.querySelector('.footer');
+    if (!footer) return;
+    if ((footer.textContent || '').includes(id)) return;
+    const marker = document.createElement('span');
+    marker.className = 'report-id-visible';
+    marker.textContent = ` · ID: ${id}`;
+    footer.appendChild(marker);
+  }, reportId);
   await page.evaluate(async () => { if (document.fonts?.ready) await document.fonts.ready; });
   await page.addStyleTag({ content:`
     * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+    .report-id-visible { overflow-wrap: anywhere !important; word-break: break-word !important; }
     @media print {
       html, body { width: 100% !important; margin: 0 !important; padding: 0 !important; }
       .report { width: 100% !important; max-width: none !important; margin: 0 !important; box-shadow: none !important; }
