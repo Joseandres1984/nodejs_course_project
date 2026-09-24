@@ -1,0 +1,80 @@
+name: LUMEN Response Qualification Smoke
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/a2a-worker/response-qualification.js'
+      - '.lumen/a2a-worker/first-cash-closer.js'
+      - '.lumen/a2a-worker/followup-engine.js'
+      - '.lumen/a2a-worker/revenue-director.js'
+      - '.github/workflows/lumen-response-qualification-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  response-qualification-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: lumen-zero
+
+      - name: Verify deterministic classification matrix
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { classifyCommercialResponse } from './.lumen/a2a-worker/response-qualification.js';
+          const original = 'LUMEN can provide a supplier snapshot for USD 5. Reply with your requirement if useful.';
+          const cases = [
+            ['Request received and queued.', 'TECHNICAL_ACK'],
+            [original, 'ECHO'],
+            ['Thanks, noted.', 'GENERIC_RESPONSE'],
+            ['What does it include?', 'COMMERCIAL_QUESTION'],
+            ["We're interested in this.", 'COMMERCIAL_INTEREST'],
+            ["Please send the checkout link. We're ready to buy.", 'PURCHASE_INTENT'],
+            ['No thanks, not interested.', 'DECLINED'],
+            ['Wrong agent, this is not relevant.', 'NOT_RELEVANT']
+          ];
+          for (const [text, expected] of cases) {
+            const got = classifyCommercialResponse(text, original);
+            console.log(JSON.stringify({ text, expected, got: got.responseClass, stage: got.stage, nextAction: got.nextAction, qualified: got.qualified }));
+            if (got.responseClass !== expected) process.exit(1);
+          }
+          NODE
+
+      - name: Wait for deployed shared qualification stack
+        run: |
+          set -euo pipefail
+          base='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          for i in $(seq 1 45); do
+            cash=$(curl --show-error --silent --max-time 10 "$base/first-cash/policy" || true)
+            follow=$(curl --show-error --silent --max-time 10 "$base/followup/stats" || true)
+            director=$(curl --show-error --silent --max-time 10 "$base/revenue-director/policy" || true)
+            if echo "$cash" | grep -q '1.1-shared-response-first-cash-closer' \
+              && echo "$follow" | grep -q '1.1-qualified-commercial-followup' \
+              && echo "$director" | grep -q '1.2-shared-response-revenue-director'; then
+              echo "$cash"
+              echo "$follow"
+              echo "$director"
+              exit 0
+            fi
+            sleep 5
+          done
+          exit 1
+
+      - name: Verify guardrails and shared semantics
+        run: |
+          set -euo pipefail
+          base='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          curl --fail --silent "$base/first-cash/policy" > /tmp/cash.json
+          curl --fail --silent "$base/followup/stats" > /tmp/follow.json
+          curl --fail --silent "$base/revenue-director/policy" > /tmp/director.json
+          jq -e '.sharedResponseQualification == true and .technicalAckIsNotIntent == true and .echoIsNotIntent == true and .genericResponseIsNotIntent == true and .autonomousSpend == false and .autonomousContract == false' /tmp/cash.json >/dev/null
+          jq -e '.sharedResponseQualification == true and .autonomousOutgoingSpend == false and .autonomousContract == false' /tmp/follow.json >/dev/null
+          jq -e '.addsExternalMessages == false and .autonomousPriceChange == false and .autonomousSpend == false and .autonomousContract == false' /tmp/director.json >/dev/null
+
+      - name: Read safe real pipeline routing
+        run: |
+          set -euo pipefail
+          base='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          curl --fail --silent "$base/followup/pipeline" | jq '{version, policy, pipeline:[.pipeline[] | {proposal_id,stage,response_class,next_action,followup_count}]}'
