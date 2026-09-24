@@ -17,6 +17,7 @@ import { handlePartnerMarketplacePublicCatalog } from "./partner-marketplace-pub
 import { handleReferralNetwork, reviewInboundReferrals, planOutboundReferrals, syncReferralSettlements } from "./referral-network.js";
 import { handleRevenueAttribution, recomputeRevenueAttribution } from "./revenue-attribution-engine.js";
 import { handleProfitFeedback, recomputeProfitFeedback } from "./profit-feedback-engine.js";
+import { handlePartnerEconomicPerformance, recomputePartnerEconomicPerformance } from "./partner-economic-performance.js";
 import { handlePartnerNegotiator, recomputeNegotiator } from "./partner-negotiator.js";
 import { handleNegotiatorTermsPlanner, planNegotiationTermRequests } from "./negotiator-terms-planner.js";
 import { handleNegotiatorTermsRuntime, pollNegotiationTermResponses, sendNegotiationTermRequests } from "./negotiator-terms-runtime.js";
@@ -75,6 +76,7 @@ export default {
     const referralResponse = await handleReferralNetwork(request, env); if (referralResponse) return referralResponse;
     const revenueAttributionResponse = await handleRevenueAttribution(request, env); if (revenueAttributionResponse) return revenueAttributionResponse;
     const profitFeedbackResponse = await handleProfitFeedback(request, env); if (profitFeedbackResponse) return profitFeedbackResponse;
+    const partnerEconomicResponse = await handlePartnerEconomicPerformance(request, env); if (partnerEconomicResponse) return partnerEconomicResponse;
     const negotiatorResponse = await handlePartnerNegotiator(request, env); if (negotiatorResponse) return negotiatorResponse;
     const negotiatorTermsResponse = await handleNegotiatorTermsPlanner(request, env); if (negotiatorTermsResponse) return negotiatorTermsResponse;
     const negotiatorTermsRuntimeResponse = await handleNegotiatorTermsRuntime(request, env); if (negotiatorTermsRuntimeResponse) return negotiatorTermsRuntimeResponse;
@@ -106,7 +108,6 @@ export default {
       await pollDelegationTasks(env);
       await reviewDelegationResults(env);
       await sanitizeDelegationResults(env);
-      await recomputeObservedReputation(env);
       await ingestCouncilVentureSuggestions(env);
       await runVentureCouncil(env);
       await planVenturePeerReviews(env, { limit: 6 });
@@ -117,6 +118,8 @@ export default {
       await planOutboundReferrals(env);
       await syncReferralSettlements(env);
       await recomputeRevenueAttribution(env);
+      await recomputePartnerEconomicPerformance(env);
+      await recomputeObservedReputation(env);
       await recomputeProfitFeedback(env);
       await pollNegotiationTermResponses(env);
       await recomputeNegotiator(env);
