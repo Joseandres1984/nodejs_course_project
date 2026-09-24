@@ -1,0 +1,45 @@
+name: LUMEN Council PHION JSONRPC
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-council-phion-jsonrpc.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  phion-jsonrpc:
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: https://lumen-zero-a2a.lumen-b2b.workers.dev
+      OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+    steps:
+      - name: Verify protected token
+        run: test -n "${OPPORTUNITY_ADMIN_TOKEN:-}"
+
+      - name: Wait and try direct JSON-RPC fallback once
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 30); do
+            code=$(curl --show-error --silent --max-time 25 -o /tmp/result.json -w '%{http_code}' \
+              -X POST "$BASE_URL/council-runtime/retry-jsonrpc" \
+              -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+              -H 'content-type: application/json' \
+              -d '{}' || true)
+            if [ "$code" = '202' ]; then
+              cat /tmp/result.json
+              echo
+              exit 0
+            fi
+            echo "JSON-RPC fallback endpoint not ready (HTTP $code), waiting..."
+            sleep 5
+          done
+          exit 1
+
+      - name: Read council stats
+        run: |
+          curl --fail --show-error --silent --max-time 20 "$BASE_URL/council-runtime/stats"
+          echo
