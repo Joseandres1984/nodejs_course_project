@@ -1,4 +1,4 @@
-const VERSION = "1.2-partner-council-quality";
+const VERSION = "1.3-partner-council-quality";
 
 const OFFER_NEEDS = {
   "MP-SUPPLIER-SNAPSHOT": ["verification", "sourcing", "research"],
@@ -60,12 +60,30 @@ function irrelevantPenalty(partner,needs){
   return 0;
 }
 
+function blendedReputation(partner){
+  const declared=Number(partner.reputation_score||0);
+  const observed=Number(partner.observed_reputation_score||0);
+  const confidence=Number(partner.observed_reputation_confidence||0);
+  if(confidence<30||!Number.isFinite(observed))return{declared,observed:null,confidence,weight:0,blended:declared};
+  const weight=Math.min(.45,Math.max(0,confidence/100*.45));
+  const blended=declared*(1-weight)+observed*weight;
+  return{declared,observed,confidence,weight,blended};
+}
+
+async function partnerRows(env){
+  try{
+    return await env.DB.prepare("SELECT p.id,p.name,p.endpoint,p.description,p.protocol_version,p.capabilities_json,p.reputation_score,p.compatibility_score,p.status,o.score AS observed_reputation_score,o.confidence AS observed_reputation_confidence FROM lumen_partner_agents p LEFT JOIN lumen_partner_observed_reputation o ON o.partner_id=p.id WHERE p.status IN ('candidate','strong_candidate') ORDER BY p.reputation_score DESC,p.compatibility_score DESC LIMIT 150").all();
+  }catch{
+    return env.DB.prepare("SELECT id,name,endpoint,description,protocol_version,capabilities_json,reputation_score,compatibility_score,status,NULL AS observed_reputation_score,0 AS observed_reputation_confidence FROM lumen_partner_agents WHERE status IN ('candidate','strong_candidate') ORDER BY reputation_score DESC,compatibility_score DESC LIMIT 150").all();
+  }
+}
+
 export async function buildQualityPartnerMatches(env,opportunityId=""){
   const opp=await resolveOpportunity(env,opportunityId);
   if(!opp)return{ok:false,error:"opportunity_not_found",version:VERSION};
   const needs=inferNeeds(opp);
   let result;
-  try{result=await env.DB.prepare("SELECT id,name,endpoint,description,protocol_version,capabilities_json,reputation_score,compatibility_score,status FROM lumen_partner_agents WHERE status IN ('candidate','strong_candidate') ORDER BY reputation_score DESC,compatibility_score DESC LIMIT 150").all();}
+  try{result=await partnerRows(env);}
   catch{return{ok:false,error:"partner_registry_not_ready",version:VERSION,opportunity:{id:opp.id,name:opp.name},needs};}
   const matches=[];
   for(const partner of result.results||[]){
@@ -75,18 +93,19 @@ export async function buildQualityPartnerMatches(env,opportunityId=""){
     const coverage=matched.length/Math.max(1,needs.length);
     const specialty=specialtyScore(partner,needs);
     const penalty=irrelevantPenalty(partner,needs);
-    const score=Math.max(0,Math.min(100,Math.round(Number(partner.reputation_score||0)*.42+Number(partner.compatibility_score||0)*.23+coverage*25+specialty*10-penalty)));
+    const rep=blendedReputation(partner);
+    const score=Math.max(0,Math.min(100,Math.round(rep.blended*.42+Number(partner.compatibility_score||0)*.23+coverage*25+specialty*10-penalty)));
     if(score<55)continue;
-    matches.push({partnerId:partner.id,name:partner.name,endpoint:partner.endpoint,protocolVersion:partner.protocol_version,reputation:Number(partner.reputation_score||0),compatibility:Number(partner.compatibility_score||0),matchScore:score,matchedCapabilities:matched,specialty:Math.round(specialty*100),penalty});
+    matches.push({partnerId:partner.id,name:partner.name,endpoint:partner.endpoint,protocolVersion:partner.protocol_version,reputation:rep.declared,observedReputation:rep.observed,observedConfidence:rep.confidence,reputationBlendWeight:Math.round(rep.weight*100),blendedReputation:Math.round(rep.blended),compatibility:Number(partner.compatibility_score||0),matchScore:score,matchedCapabilities:matched,specialty:Math.round(specialty*100),penalty});
   }
-  matches.sort((a,b)=>b.matchScore-a.matchScore||b.specialty-a.specialty||b.reputation-a.reputation);
+  matches.sort((a,b)=>b.matchScore-a.matchScore||b.specialty-a.specialty||b.blendedReputation-a.blendedReputation);
   const now=new Date().toISOString();
   for(const m of matches.slice(0,40)){
     const id=`PQM-${opp.id}-${m.partnerId}`.slice(0,180);
     await env.DB.prepare("INSERT INTO lumen_partner_matches(id,opportunity_id,partner_id,match_score,matched_capabilities_json,reason,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(opportunity_id,partner_id) DO UPDATE SET match_score=excluded.match_score,matched_capabilities_json=excluded.matched_capabilities_json,reason=excluded.reason,status=excluded.status,updated_at=excluded.updated_at")
-      .bind(id,opp.id,m.partnerId,m.matchScore,JSON.stringify(m.matchedCapabilities),`quality_v1_2; specialty=${m.specialty}; penalty=${m.penalty}`,"quality_candidate",now,now).run();
+      .bind(id,opp.id,m.partnerId,m.matchScore,JSON.stringify(m.matchedCapabilities),`quality_v1_3; specialty=${m.specialty}; penalty=${m.penalty}; declared_rep=${m.reputation}; observed_rep=${m.observedReputation??'n/a'}; observed_conf=${m.observedConfidence}; rep_blend_weight=${m.reputationBlendWeight}`,"quality_candidate",now,now).run();
   }
-  return{ok:true,version:VERSION,opportunity:{id:opp.id,name:opp.name,offerId:opp.revenue_offer_id,commercialScore:Number(opp.commercial_score||0)},needs,matches:matches.slice(0,20)};
+  return{ok:true,version:VERSION,opportunity:{id:opp.id,name:opp.name,offerId:opp.revenue_offer_id,commercialScore:Number(opp.commercial_score||0)},needs,observedReputationPolicy:{minimumConfidence:30,maxBlendWeightPercent:45},matches:matches.slice(0,20)};
 }
 
 export async function assembleQualityCouncil(env,opportunityId=""){
@@ -107,7 +126,7 @@ export async function assembleQualityCouncil(env,opportunityId=""){
   const now=new Date().toISOString();
   await env.DB.prepare("UPDATE lumen_partner_councils SET status='SUPERSEDED',updated_at=? WHERE opportunity_id=? AND status='DRAFT_COUNCIL'").bind(now,matched.opportunity.id).run();
   const id=`COUNCIL-${crypto.randomUUID().replaceAll("-","").slice(0,12).toUpperCase()}`;
-  const members=[{id:"LUMEN",name:"LUMEN",role:"coordinator",authority:"non_binding_coordination"},...selected.map(x=>({id:x.partnerId,name:x.name,role:x.role,matchScore:x.matchScore,specialty:x.specialty,protocolVersion:x.protocolVersion,endpoint:x.endpoint}))];
+  const members=[{id:"LUMEN",name:"LUMEN",role:"coordinator",authority:"non_binding_coordination"},...selected.map(x=>({id:x.partnerId,name:x.name,role:x.role,matchScore:x.matchScore,specialty:x.specialty,protocolVersion:x.protocolVersion,endpoint:x.endpoint,observedReputation:x.observedReputation,observedConfidence:x.observedConfidence}))];
   const plan=[
     {step:1,owner:"LUMEN",action:"present_problem_scope_and_nonbinding_rules"},
     ...selected.map((x,i)=>({step:i+2,owner:x.partnerId,action:`contribute_${x.role}_analysis`})),
