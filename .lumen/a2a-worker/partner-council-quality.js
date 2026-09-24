@@ -1,4 +1,4 @@
-const VERSION = "1.1-partner-council-quality";
+const VERSION = "1.2-partner-council-quality";
 
 const OFFER_NEEDS = {
   "MP-SUPPLIER-SNAPSHOT": ["verification", "sourcing", "research"],
@@ -84,7 +84,7 @@ export async function buildQualityPartnerMatches(env,opportunityId=""){
   for(const m of matches.slice(0,40)){
     const id=`PQM-${opp.id}-${m.partnerId}`.slice(0,180);
     await env.DB.prepare("INSERT INTO lumen_partner_matches(id,opportunity_id,partner_id,match_score,matched_capabilities_json,reason,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(opportunity_id,partner_id) DO UPDATE SET match_score=excluded.match_score,matched_capabilities_json=excluded.matched_capabilities_json,reason=excluded.reason,status=excluded.status,updated_at=excluded.updated_at")
-      .bind(id,opp.id,m.partnerId,m.matchScore,JSON.stringify(m.matchedCapabilities),`quality_v1_1; specialty=${m.specialty}; penalty=${m.penalty}`,"quality_candidate",now,now).run();
+      .bind(id,opp.id,m.partnerId,m.matchScore,JSON.stringify(m.matchedCapabilities),`quality_v1_2; specialty=${m.specialty}; penalty=${m.penalty}`,"quality_candidate",now,now).run();
   }
   return{ok:true,version:VERSION,opportunity:{id:opp.id,name:opp.name,offerId:opp.revenue_offer_id,commercialScore:Number(opp.commercial_score||0)},needs,matches:matches.slice(0,20)};
 }
@@ -108,10 +108,17 @@ export async function assembleQualityCouncil(env,opportunityId=""){
   await env.DB.prepare("UPDATE lumen_partner_councils SET status='SUPERSEDED',updated_at=? WHERE opportunity_id=? AND status='DRAFT_COUNCIL'").bind(now,matched.opportunity.id).run();
   const id=`COUNCIL-${crypto.randomUUID().replaceAll("-","").slice(0,12).toUpperCase()}`;
   const members=[{id:"LUMEN",name:"LUMEN",role:"coordinator",authority:"non_binding_coordination"},...selected.map(x=>({id:x.partnerId,name:x.name,role:x.role,matchScore:x.matchScore,specialty:x.specialty,protocolVersion:x.protocolVersion,endpoint:x.endpoint}))];
-  const plan=[{step:1,owner:"LUMEN",action:"present_problem_scope_and_nonbinding_rules"},...selected.map((x,i)=>({step:i+2,owner:x.partnerId,action:`contribute_${x.role}_analysis`})),{step:selected.length+2,owner:"LUMEN",action:"compare_contributions_detect_disagreement_and_synthesize_plan"},{step:selected.length+3,owner:"human_gate",action:"approve_any_hiring_spend_contract_or_binding_commitment"}];
-  const goal=`Council for ${matched.opportunity.name}: combine ${selected.map(x=>x.role).join(", ")} expertise under LUMEN coordination`;
+  const plan=[
+    {step:1,owner:"LUMEN",action:"present_problem_scope_and_nonbinding_rules"},
+    ...selected.map((x,i)=>({step:i+2,owner:x.partnerId,action:`contribute_${x.role}_analysis`})),
+    {step:selected.length+2,owner:"all_partners",action:"opportunity_round_propose_business_ideas_market_signals_and_agent_combinations"},
+    {step:selected.length+3,owner:"LUMEN",action:"score_partner_ideas_evidence_revenue_feasibility_and_network_synergy"},
+    {step:selected.length+4,owner:"LUMEN",action:"compare_contributions_detect_disagreement_and_synthesize_plan"},
+    {step:selected.length+5,owner:"human_gate",action:"approve_any_hiring_spend_contract_or_binding_commitment"}
+  ];
+  const goal=`Council for ${matched.opportunity.name}: combine ${selected.map(x=>x.role).join(", ")} expertise under LUMEN coordination and surface new business opportunities`;
   await env.DB.prepare("INSERT INTO lumen_partner_councils(id,opportunity_id,created_at,updated_at,status,goal,members_json,plan_json,binding_allowed,spend_allowed) VALUES(?,?,?,?,?,?,?,?,0,0)").bind(id,matched.opportunity.id,now,now,"DRAFT_COUNCIL",goal,JSON.stringify(members),JSON.stringify(plan)).run();
-  return{ok:true,version:VERSION,councilId:id,status:"DRAFT_COUNCIL",opportunity:matched.opportunity,needs:matched.needs,members,plan,guardrails:{externalInvitesSent:false,bindingAllowed:false,spendAllowed:false,humanApprovalRequiredForHiring:true}};
+  return{ok:true,version:VERSION,councilId:id,status:"DRAFT_COUNCIL",opportunity:matched.opportunity,needs:matched.needs,members,plan,opportunityRound:{enabled:true,maxIdeasPerPartner:2,evidenceRequiredForHighConfidence:true},guardrails:{externalInvitesSent:false,bindingAllowed:false,spendAllowed:false,humanApprovalRequiredForHiring:true}};
 }
 
 export async function handlePartnerCouncilQuality(request,env){
