@@ -10,6 +10,7 @@ import { handlePartnerCouncilQuality, buildQualityPartnerMatches } from "./partn
 import { handlePartnerVentureBoard } from "./partner-venture-board.js";
 import { handleVentureSuggestionIntake, ingestCouncilVentureSuggestions } from "./venture-suggestion-intake.js";
 import { handleVentureCouncil, runVentureCouncil } from "./venture-council-engine.js";
+import { handleCapabilityGapEngine, recomputeCapabilityGaps } from "./capability-gap-engine.js";
 import { handleRecruitmentEngine, pollRecruitmentResponses } from "./recruitment-engine.js";
 import { handleCouncilReplacement } from "./council-replacement.js";
 import { handleCouncilJsonRpcFallback } from "./council-jsonrpc-fallback.js";
@@ -92,6 +93,9 @@ export default {
     const ventureCouncilResponse = await handleVentureCouncil(request, env);
     if (ventureCouncilResponse) return ventureCouncilResponse;
 
+    const capabilityGapResponse = await handleCapabilityGapEngine(request, env);
+    if (capabilityGapResponse) return capabilityGapResponse;
+
     const partnerQualityResponse = await handlePartnerCouncilQuality(request, env);
     if (partnerQualityResponse) return partnerQualityResponse;
 
@@ -127,10 +131,12 @@ export default {
       await reviewDelegationResults(env);
       // Recompute confidence-aware reputation only from observed operational evidence.
       await recomputeObservedReputation(env);
-      // Capture only explicit business suggestions grounded in partner council contributions.
+      // Capture only explicit business suggestions grounded in PASS partner council contributions.
       await ingestCouncilVentureSuggestions(env);
-      // Promote structured ideas into zero-spend venture cases and capability-gap maps.
+      // Promote structured ideas into zero-spend venture cases and capability maps.
       await runVentureCouncil(env);
+      // Convert opportunity/venture capability coverage into an internal recruitment-demand queue.
+      await recomputeCapabilityGaps(env);
 
       await prepareTopProposal(env);
       await reviewNextProposal(env);
