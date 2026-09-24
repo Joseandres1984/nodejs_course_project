@@ -1,4 +1,4 @@
-const VERSION = "1.0-delegation-runtime";
+const VERSION = "1.1-delegation-runtime";
 const CARD_TIMEOUT_MS = 8000;
 const SEND_TIMEOUT_MS = 15000;
 
@@ -73,8 +73,8 @@ function extract(body){
   };
 }
 
-async function nextPlanned(env){
-  return env.DB.prepare("SELECT * FROM lumen_delegation_tasks WHERE status='PLANNED' AND binding_allowed=0 AND spend_allowed=0 ORDER BY created_at ASC LIMIT 1").first();
+async function nextApproved(env){
+  return env.DB.prepare("SELECT * FROM lumen_delegation_tasks WHERE status='APPROVED_FOR_DISPATCH' AND quality_score>=75 AND binding_allowed=0 AND spend_allowed=0 ORDER BY created_at ASC LIMIT 1").first();
 }
 
 async function partner(env,partnerId){
@@ -82,14 +82,14 @@ async function partner(env,partnerId){
 }
 
 function taskPrompt(task){
-  return clean(`LUMEN is delegating a zero-spend, non-binding specialist task that was produced only after a quality-gated multi-agent council synthesis. Task ID: ${task.id}. Role: ${task.role}. Title: ${task.title}. Objective: ${task.objective}. Expected output: ${task.expected_output}. Evidence requirement: ${task.evidence_required}. Return only work relevant to this task. Separate observed evidence from assumptions. Do not place orders, spend funds, sign contracts, create debt, promise payment, or assume authority to bind LUMEN. If the task cannot be completed without payment, authentication, or a binding action, stop and report that requirement instead of proceeding.`,7000);
+  return clean(`LUMEN is delegating a zero-spend, non-binding specialist task that was produced only after a quality-gated multi-agent council synthesis and passed the delegation task quality gate. Task ID: ${task.id}. Role: ${task.role}. Title: ${task.title}. Objective: ${task.objective}. Expected output: ${task.expected_output}. Evidence requirement: ${task.evidence_required}. Return only work relevant to this task. Separate observed evidence from assumptions. Do not place orders, spend funds, sign contracts, create debt, promise payment, or assume authority to bind LUMEN. If the task cannot be completed without payment, authentication, or a binding action, stop and report that requirement instead of proceeding.`,7000);
 }
 
 function envelope(task,iface,text){
   const messageId=`lumen-delegation-${crypto.randomUUID()}`;
   const v1=String(iface.version||"").startsWith("1.");
   const message={messageId,role:v1?"ROLE_USER":"user",parts:[{text}]};
-  const metadata={lumen:{type:"delegated_task",delegationTaskId:task.id,roomId:task.room_id,opportunityId:task.opportunity_id,role:task.role,nonBinding:true,spendAllowed:false,contractAllowed:false}};
+  const metadata={lumen:{type:"delegated_task",delegationTaskId:task.id,roomId:task.room_id,opportunityId:task.opportunity_id,role:task.role,nonBinding:true,spendAllowed:false,contractAllowed:false,qualityApproved:true}};
   if(iface.binding==="HTTP+JSON"){
     const payload={message,metadata};if(iface.tenant)payload.tenant=iface.tenant;
     return{url:`${iface.url}/message:send`,headers:{"content-type":"application/a2a+json",accept:"application/a2a+json, application/json","a2a-version":iface.version||"1.0"},payload};
@@ -101,10 +101,10 @@ function envelope(task,iface,text){
 export async function dispatchNextDelegationTask(env,{force=false}={}){
   if(!(await ensureSchema(env)))return{ok:false,sent:false,error:"persistence_unavailable",version:VERSION};
   const enabled=bool(env?.A2A_AUTONOMOUS_DELEGATION);
-  if(!enabled&&!force)return{ok:true,sent:false,reason:"autonomous_delegation_disabled",version:VERSION,autonomousDelegation:false};
+  if(!enabled&&!force)return{ok:true,sent:false,reason:"autonomous_delegation_disabled",version:VERSION,autonomousDelegation:false,dispatchRequires:"APPROVED_FOR_DISPATCH"};
 
-  const task=await nextPlanned(env);
-  if(!task)return{ok:true,sent:false,reason:"no_planned_task",version:VERSION};
+  const task=await nextApproved(env);
+  if(!task)return{ok:true,sent:false,reason:"no_approved_task",version:VERSION,dispatchRequires:"APPROVED_FOR_DISPATCH"};
   if(Number(task.binding_allowed)!==0||Number(task.spend_allowed)!==0)return{ok:false,sent:false,error:"unsafe_task_guardrail_violation",taskId:task.id,version:VERSION};
 
   const p=await partner(env,task.partner_id);
@@ -159,8 +159,8 @@ export async function pollDelegationTasks(env){
 }
 
 async function stats(env){
-  await ensureSchema(env);const r=await env.DB.prepare("SELECT COUNT(*) total,SUM(CASE WHEN status='PLANNED' THEN 1 ELSE 0 END) planned,SUM(CASE WHEN status IN ('DISPATCHED','DISPATCHED_ACK') THEN 1 ELSE 0 END) active,SUM(CASE WHEN status='RESULT_RECEIVED' THEN 1 ELSE 0 END) results,SUM(CASE WHEN status='FAILED' THEN 1 ELSE 0 END) failed FROM lumen_delegation_tasks").first();
-  return json({version:VERSION,total:Number(r?.total||0),planned:Number(r?.planned||0),active:Number(r?.active||0),results:Number(r?.results||0),failed:Number(r?.failed||0),autonomousDelegation:bool(env?.A2A_AUTONOMOUS_DELEGATION),autonomousOutgoingSpend:false,bindingActionsHumanGated:true});
+  await ensureSchema(env);const r=await env.DB.prepare("SELECT COUNT(*) total,SUM(CASE WHEN status='PLANNED' THEN 1 ELSE 0 END) planned,SUM(CASE WHEN status='APPROVED_FOR_DISPATCH' THEN 1 ELSE 0 END) approved,SUM(CASE WHEN status IN ('DISPATCHED','DISPATCHED_ACK') THEN 1 ELSE 0 END) active,SUM(CASE WHEN status='RESULT_RECEIVED' THEN 1 ELSE 0 END) results,SUM(CASE WHEN status='FAILED' THEN 1 ELSE 0 END) failed FROM lumen_delegation_tasks").first();
+  return json({version:VERSION,total:Number(r?.total||0),planned:Number(r?.planned||0),approved:Number(r?.approved||0),active:Number(r?.active||0),results:Number(r?.results||0),failed:Number(r?.failed||0),autonomousDelegation:bool(env?.A2A_AUTONOMOUS_DELEGATION),dispatchRequires:"APPROVED_FOR_DISPATCH",autonomousOutgoingSpend:false,bindingActionsHumanGated:true});
 }
 
 export async function handleDelegationRuntime(request,env){
