@@ -16,6 +16,7 @@ import { handleCouncilContributionQuality, reviewActiveCouncilContributions } fr
 import { handleCouncilQualitySynthesis } from "./council-quality-synthesis.js";
 import { handleCouncilRoundManager, runCouncilRoundManager } from "./council-round-manager.js";
 import { handleDelegationEngine, planLatestSynthesizedCouncil } from "./delegation-engine.js";
+import { handleDelegationRuntime, pollDelegationTasks } from "./delegation-runtime.js";
 import { handleCouncilRuntime, pollCouncilRuntime } from "./council-runtime.js";
 
 export default {
@@ -62,6 +63,9 @@ export default {
     const delegationResponse = await handleDelegationEngine(request, env);
     if (delegationResponse) return delegationResponse;
 
+    const delegationRuntimeResponse = await handleDelegationRuntime(request, env);
+    if (delegationRuntimeResponse) return delegationRuntimeResponse;
+
     const councilRuntimeResponse = await handleCouncilRuntime(request, env);
     if (councilRuntimeResponse) return councilRuntimeResponse;
 
@@ -94,9 +98,10 @@ export default {
       const councilRound = await runCouncilRoundManager(env, { force: false });
       const councilExternalMessageSent = Boolean(councilRound?.invite?.sent);
 
-      // Delegation planning is internal-only. It can prepare work only after a quality-gated council synthesis.
-      // No external delegated task is dispatched by this planner.
+      // Delegation planning is internal-only and requires a quality-gated synthesized council.
       await planLatestSynthesizedCouncil(env);
+      // Polling only observes already-dispatched delegation tasks; it never creates spend or new dispatches.
+      await pollDelegationTasks(env);
 
       await prepareTopProposal(env);
       await reviewNextProposal(env);
