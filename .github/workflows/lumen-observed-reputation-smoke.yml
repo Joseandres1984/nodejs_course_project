@@ -1,0 +1,49 @@
+name: LUMEN Observed Reputation Smoke
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-observed-reputation-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  reputation-smoke:
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: https://lumen-zero-a2a.lumen-b2b.workers.dev
+      OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+    steps:
+      - name: Verify protected token
+        run: test -n "${OPPORTUNITY_ADMIN_TOKEN:-}"
+
+      - name: Wait for observed reputation engine
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 30); do
+            body=$(curl --show-error --silent --max-time 10 "$BASE_URL/partners/observed-reputation/stats" || true)
+            echo "$body"
+            if echo "$body" | grep -q '1.0-observed-partner-reputation'; then exit 0; fi
+            sleep 5
+          done
+          exit 1
+
+      - name: Recompute from observed evidence only
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 45 \
+            -X POST "$BASE_URL/partners/observed-reputation/recompute" \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'content-type: application/json' \
+            -d '{}' > /tmp/reputation.json
+          cat /tmp/reputation.json
+          echo
+          jq -e '.ok == true and .partners >= 1 and .withEvidence >= 1' /tmp/reputation.json >/dev/null
+
+      - name: Verify confidence-aware reputation state
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 20 "$BASE_URL/partners/observed-reputation/stats" > /tmp/stats.json
+          cat /tmp/stats.json
+          echo
+          jq -e '.version == "1.0-observed-partner-reputation" and .withEvidence >= 1 and .replacesDeclaredReputation == false and .confidenceAware == true' /tmp/stats.json >/dev/null
