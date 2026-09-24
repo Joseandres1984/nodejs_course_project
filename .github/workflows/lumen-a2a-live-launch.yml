@@ -1,0 +1,42 @@
+name: LUMEN A2A Live Launch
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-a2a-live-launch.yml'
+  workflow_dispatch:
+
+jobs:
+  live-send:
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: https://lumen-zero-a2a.lumen-b2b.workers.dev
+      OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+    steps:
+      - name: Verify protected token
+        run: |
+          if [ -z "${OPPORTUNITY_ADMIN_TOKEN:-}" ]; then
+            echo 'OPPORTUNITY_ADMIN_TOKEN_MISSING'
+            exit 2
+          fi
+      - name: Send one approved A2A proposal
+        run: |
+          set -euo pipefail
+          code=$(curl --show-error --silent --max-time 60 -o /tmp/send.json -w '%{http_code}' \
+            -X POST "$BASE_URL/outreach/send-next" \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'accept: application/json')
+          echo "===== send HTTP $code ====="
+          cat /tmp/send.json
+          echo
+          test "$code" = '202'
+      - name: Read live outreach state
+        run: |
+          set -euo pipefail
+          echo '===== /outreach/stats ====='
+          curl --fail --show-error --silent --max-time 30 "$BASE_URL/outreach/stats"
+          echo
+          echo '===== /outreach/next ====='
+          curl --fail --show-error --silent --max-time 30 "$BASE_URL/outreach/next"
+          echo
