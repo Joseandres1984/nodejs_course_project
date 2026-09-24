@@ -106,6 +106,18 @@ Fase C: 8 → 9 → 11 → 10 → 15 (la Torre se amplía incrementalmente duran
 - Commission status permanece NOT_CONFIGURED: la atribución se registra, pero no existe promesa ni pago automático de comisión.
 - Smoke Referral Network: SUCCESS. Estado inicial: 1 outbound candidate, 0 inbound, 0 settlements, USD 0 settled referral revenue.
 
+### #11 Negotiator
+- Partner Negotiator v1.0: operativo y conectado al ciclo horario en modo recommendation-only.
+- Pondera match 25%, Trust 18%, calidad/reputación 22%, reliability 10%, responsiveness 8%, precio 10% y tiempo 7%, con penalización de riesgo de hasta 30 puntos.
+- Nunca inventa precio o plazo faltante. Términos provenientes de Recruitment se almacenan como DECLARED_UNVERIFIED y no se tratan como precio verificado.
+- Primera corrida real: 1 caso (SCVD Evidence Agent), 12 candidatos comparados, 0 precios y 0 plazos disponibles; por eso el caso queda RANKED_INCOMPLETE_TERMS / TECHNICAL_RANKING_ONLY con confidence 39, no READY_FOR_HUMAN_REVIEW.
+- Ranking técnico inicial: AUX Evidence and Certification 64; BerrerGate Tool & Provider Intelligence 60; Agent Pulse Signal Retrieval Agent 58.
+- Terms Request Planner v1.0: operativo. Generó 3 borradores no vinculantes para AUX, BerrerGate y Agent Pulse solicitando precio USD/USDC, ETA, alcance/exclusiones, vigencia/constraints y evidencia de calidad.
+- Los borradores permanecen DRAFT: externalMessagesSent=0; autonomousNegotiationMessages=false.
+- Una comparación comercial completa requiere al menos 2 candidatos y 2 precios declarados comparables antes de pasar a READY_FOR_HUMAN_REVIEW.
+- El Negotiator no contrata, no acepta términos, no paga y no envía negociación automáticamente. Cualquier hire/spend/contract sigue human-gated.
+- Smoke del Negotiator + Terms Planner: SUCCESS.
+
 ### #12 Equipos dinámicos
 - Dynamic Team Engine v1.1: operativo en modo internal draft only.
 - Forma equipos por oportunidad usando capacidades, reputación y Agent Graph sin invitar, contratar ni gastar.
@@ -136,6 +148,7 @@ Fase C: 8 → 9 → 11 → 10 → 15 (la Torre se amplía incrementalmente duran
 - Council invites, delegation, Marketplace matching y Referral review están Trust-gated.
 - Marketplace inbound y Referral inbound son públicos pero siempre no vinculantes y no solicitan secretos/credenciales.
 - Referral attribution no implica comisión; cualquier reparto futuro requiere política explícita, revenue settled verificado y guardrails de pago.
+- Negotiator sólo recomienda y prepara borradores de condiciones; no envía, no acepta términos ni compromete fondos.
 
 ## Próximos hitos
 - #2: obtener una segunda contribución PASS, ejecutar la primera síntesis multiagente válida y cerrar la junta piloto.
@@ -143,6 +156,6 @@ Fase C: 8 → 9 → 11 → 10 → 15 (la Torre se amplía incrementalmente duran
 - #4: superar confidence 30 con evidencia real y validar el blend.
 - #5: recibir la primera idea comercial explícita desde una contribución PASS, someterla a dos peer reviews y validar el primer experimento de costo cero.
 - #9: recibir el primer referral inbound real o validar una derivación outbound controlada; comisión sigue NOT_CONFIGURED.
-- #11: Negotiator para comparar alcance/precio/calidad/tiempo antes de cualquier contratación o derivación con condiciones económicas.
+- #11: obtener al menos 2 términos/precios comparables reales, elevar un caso a READY_FOR_HUMAN_REVIEW y validar la primera recomendación comercial completa.
 - #10: economía entre agentes y micropagos sólo después de validar Referral + Negotiator y manteniendo human gate para gasto.
 - #15: ampliar la Torre de Control con red, marketplace, referrals, tareas, trust, reputación y revenue verificado.
