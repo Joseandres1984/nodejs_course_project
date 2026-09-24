@@ -42,9 +42,15 @@ Fase C: 8 → 9 → 11 → 10 → 15 (la Torre se amplía incrementalmente duran
 - Reclutamiento autónomo continuo: desactivado hasta validar calidad de respuestas y cadencia.
 - Council Runtime v1.0: operativo en fase inicial.
 - Primera sala real creada: ROOM-4582354AD86443.
-- Primera contribución externa real recibida: AUX Evidence and Certification.
-- Transporte resiliente: operativo; distingue endpoints funcionales de discovery-only.
-- PHION detectado como PARTIAL_DISCOVERY_ONLY y retirado de la sala sin romper el consejo.
-- Reemplazo de miembro incompatible: operativo; GAIP fue seleccionado como fallback para sourcing.
-- Invitaciones nuevas de junta: siguen human/admin gated; polling de tareas existentes sí puede ejecutarse automáticamente.
-- Próximo bloque dentro del #2: ampliar compatibilidad A2A y conseguir al menos dos contribuciones simultáneas antes de cerrar/sintetizar una junta.
+- AUX Evidence and Certification: contribución real recibida y Quality Gate PASS 71.
+- PHION: detectado como PARTIAL_DISCOVERY_ONLY y reemplazado sin romper la sala.
+- GAIP Opportunity & Procurement Broker: seleccionado como fallback, pero el runtime rechazó el formato de envío; quedó registrado como evidencia operativa.
+- Packrift A2A Packaging Procurement Router: respondió por A2A y llevó la sala a DELIBERATING, pero el Contribution Quality Gate v1.1 detectó eco de prompt + vertical fuera de foco y lo marcó REJECT 0.
+- Reemplazo por baja calidad: operativo. Packrift fue sustituido por InsightBind Sales Agent sin perder el contexto de la junta.
+- InsightBind Sales Agent: invitación enviada; por ahora sólo hay acuse técnico, sin contribución de contenido.
+- Council Contribution Quality Gate v1.1: operativo. Evalúa pertinencia, especialidad, evidencia, acción, interacción con pares, eco de prompt y desvío vertical.
+- Quality-gated Council Synthesis: operativo. Una junta sólo puede sintetizarse con al menos 2 contribuciones PASS.
+- Prueba de síntesis: correctamente bloqueada con 1 PASS disponible; LUMEN no fabrica consenso.
+- Reemplazo y reputación operativa ya empiezan a anticipar los futuros puntos #4 y #13.
+- Invitaciones nuevas de junta siguen controladas; polling y evaluación de respuestas existentes pueden ejecutarse automáticamente.
+- Próximo bloque dentro del #2: obtener una segunda contribución PASS, ejecutar la primera síntesis multiagente válida y cerrar la junta piloto.
