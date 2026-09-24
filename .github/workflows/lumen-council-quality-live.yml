@@ -18,13 +18,13 @@ jobs:
       - name: Verify protected token
         run: test -n "${OPPORTUNITY_ADMIN_TOKEN:-}"
 
-      - name: Wait for contribution quality gate
+      - name: Wait for contribution quality gate v1.1
         run: |
           set -euo pipefail
           for i in $(seq 1 30); do
             body=$(curl --show-error --silent --max-time 10 "$BASE_URL/council-quality/stats" || true)
             echo "$body"
-            if echo "$body" | grep -q '1.0-council-contribution-quality'; then exit 0; fi
+            if echo "$body" | grep -q '1.1-council-contribution-quality'; then exit 0; fi
             sleep 5
           done
           exit 1
