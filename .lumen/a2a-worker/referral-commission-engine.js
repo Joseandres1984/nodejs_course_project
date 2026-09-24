@@ -76,8 +76,6 @@ export async function recordCommissionAgreement(env, body = {}) {
   if (!(rate > 0) && !(amount > 0)) return { ok:false, error:"agreed_commission_rate_or_amount_required", version:VERSION };
   if (rate > 50) return { ok:false, error:"agreed_rate_out_of_policy_range", version:VERSION };
 
-  // Percentage success fees are intentionally rate-based until the final deal value is confirmed.
-  // A displayed estimate may exist, but the payable amount is fixed only when the deal closes.
   if (rate > 0) amount = 0;
 
   const referral = await env.DB.prepare("SELECT id FROM lumen_referrals WHERE id=? LIMIT 1").bind(referralId).first();
