@@ -1,6 +1,6 @@
 import { submitPartnerIdea } from "./partner-venture-board.js";
 
-const VERSION = "1.0-venture-suggestion-intake";
+const VERSION = "1.1-venture-suggestion-intake";
 
 function json(data,status=200){return Response.json(data,{status,headers:{"cache-control":"no-store","x-content-type-options":"nosniff","access-control-allow-origin":"*"}});}
 function clean(v,n=8000){return String(v??"").trim().replace(/\s+/g," ").slice(0,n);}
@@ -56,13 +56,27 @@ function extractSuggestion(text){
   return{title,summary,customer,revenue,evidence};
 }
 
-export async function ingestCouncilVentureSuggestions(env){
-  if(!(await ensureSchema(env)))return{ok:false,error:"persistence_unavailable",version:VERSION};
+async function revokeLowQualitySources(env){
   let rows=[];
   try{
-    const r=await env.DB.prepare("SELECT m.room_id,m.partner_id,m.name,m.role,m.contribution_text,r.council_id,r.opportunity_id FROM lumen_council_room_members m JOIN lumen_council_rooms r ON r.id=m.room_id LEFT JOIN lumen_venture_suggestion_intake i ON i.room_id=m.room_id AND i.partner_id=m.partner_id WHERE m.contribution_text IS NOT NULL AND TRIM(m.contribution_text)<>'' AND i.id IS NULL ORDER BY m.last_response_at ASC LIMIT 30").all();
+    const r=await env.DB.prepare("SELECT i.id,i.idea_id,i.room_id,i.partner_id,q.status AS quality_status FROM lumen_venture_suggestion_intake i LEFT JOIN lumen_council_contribution_quality q ON q.room_id=i.room_id AND q.partner_id=i.partner_id WHERE i.idea_id IS NOT NULL AND i.status IN ('INGESTED','INGESTED_PASS') AND COALESCE(q.status,'')<>'PASS'").all();
     rows=r.results||[];
-  }catch{return{ok:false,error:"council_runtime_not_ready",version:VERSION};}
+  }catch{return 0;}
+  for(const row of rows){
+    await env.DB.prepare("UPDATE lumen_venture_suggestion_intake SET status='REVOKED_LOW_QUALITY',reason='source_contribution_not_pass' WHERE id=?").bind(row.id).run();
+    await env.DB.prepare("UPDATE lumen_partner_ideas SET status='SOURCE_REJECTED',updated_at=? WHERE id=?").bind(new Date().toISOString(),row.idea_id).run();
+  }
+  return rows.length;
+}
+
+export async function ingestCouncilVentureSuggestions(env){
+  if(!(await ensureSchema(env)))return{ok:false,error:"persistence_unavailable",version:VERSION};
+  const revoked=await revokeLowQualitySources(env);
+  let rows=[];
+  try{
+    const r=await env.DB.prepare("SELECT m.room_id,m.partner_id,m.name,m.role,m.contribution_text,r.council_id,r.opportunity_id,q.status AS quality_status,q.score AS quality_score FROM lumen_council_room_members m JOIN lumen_council_rooms r ON r.id=m.room_id JOIN lumen_council_contribution_quality q ON q.room_id=m.room_id AND q.partner_id=m.partner_id LEFT JOIN lumen_venture_suggestion_intake i ON i.room_id=m.room_id AND i.partner_id=m.partner_id WHERE m.contribution_text IS NOT NULL AND TRIM(m.contribution_text)<>'' AND q.status='PASS' AND i.id IS NULL ORDER BY q.score DESC,m.last_response_at ASC LIMIT 30").all();
+    rows=r.results||[];
+  }catch{return{ok:false,error:"council_quality_not_ready",version:VERSION};}
   const results=[];
   for(const row of rows){
     const now=new Date().toISOString();
@@ -70,8 +84,8 @@ export async function ingestCouncilVentureSuggestions(env){
     const suggestion=extractSuggestion(row.contribution_text);
     if(!suggestion){
       await env.DB.prepare("INSERT OR IGNORE INTO lumen_venture_suggestion_intake(id,room_id,partner_id,created_at,status,explicit_signal,idea_id,excerpt,reason,engine_version) VALUES(?,?,?,?, 'NO_EXPLICIT_IDEA',0,NULL,?,?,?)")
-        .bind(iid,row.room_id,row.partner_id,now,clean(row.contribution_text,1200),"no_explicit_business_opportunity_language",VERSION).run();
-      results.push({partnerId:row.partner_id,name:row.name,ingested:false,reason:"no_explicit_idea"});
+        .bind(iid,row.room_id,row.partner_id,now,clean(row.contribution_text,1200),"pass_contribution_but_no_explicit_business_opportunity_language",VERSION).run();
+      results.push({partnerId:row.partner_id,name:row.name,qualityStatus:row.quality_status,qualityScore:Number(row.quality_score||0),ingested:false,reason:"no_explicit_idea"});
       continue;
     }
     const caps=capabilities(suggestion.summary,row.role);
@@ -83,24 +97,24 @@ export async function ingestCouncilVentureSuggestions(env){
       summary:suggestion.summary,
       customerSignal:suggestion.customer,
       revenueModel:suggestion.revenue,
-      evidence:suggestion.evidence||`Explicit business suggestion in council contribution from ${row.name}.`,
+      evidence:suggestion.evidence||`Explicit business suggestion in PASS council contribution from ${row.name}.`,
       requiredCapabilities:caps,
       estimatedRevenueUsd:0,
       estimatedCostUsd:0,
-      source:"council_explicit_partner_suggestion"
+      source:"council_explicit_pass_partner_suggestion"
     });
-    const status=submitted?.ok?"INGESTED":"INGEST_FAILED";
+    const status=submitted?.ok?"INGESTED_PASS":"INGEST_FAILED";
     await env.DB.prepare("INSERT OR REPLACE INTO lumen_venture_suggestion_intake(id,room_id,partner_id,created_at,status,explicit_signal,idea_id,excerpt,reason,engine_version) VALUES(?,?,?,?,?,1,?,?,?,?)")
-      .bind(iid,row.room_id,row.partner_id,now,status,submitted?.ideaId||null,clean(suggestion.summary,1600),submitted?.ok?"explicit_partner_idea_grounded_in_contribution":clean(submitted?.error||"submit_failed",500),VERSION).run();
-    results.push({partnerId:row.partner_id,name:row.name,ingested:Boolean(submitted?.ok),ideaId:submitted?.ideaId||null,ideaStatus:submitted?.status||null,totalScore:submitted?.totalScore??null});
+      .bind(iid,row.room_id,row.partner_id,now,status,submitted?.ideaId||null,clean(suggestion.summary,1600),submitted?.ok?`source_quality_pass:${Number(row.quality_score||0)}`:clean(submitted?.error||"submit_failed",500),VERSION).run();
+    results.push({partnerId:row.partner_id,name:row.name,qualityStatus:row.quality_status,qualityScore:Number(row.quality_score||0),ingested:Boolean(submitted?.ok),ideaId:submitted?.ideaId||null,ideaStatus:submitted?.status||null,totalScore:submitted?.totalScore??null});
   }
-  return{ok:true,version:VERSION,reviewed:rows.length,ingested:results.filter(x=>x.ingested).length,results,policy:{explicitPartnerLanguageRequired:true,inventMissingCustomer:false,inventMissingRevenue:false,autonomousSpend:false}};
+  return{ok:true,version:VERSION,revokedLowQuality:revoked,reviewed:rows.length,ingested:results.filter(x=>x.ingested).length,results,policy:{sourceContributionMustPass:true,explicitPartnerLanguageRequired:true,inventMissingCustomer:false,inventMissingRevenue:false,autonomousSpend:false}};
 }
 
 async function stats(env){
   await ensureSchema(env);
-  const r=await env.DB.prepare("SELECT COUNT(*) total,SUM(CASE WHEN status='INGESTED' THEN 1 ELSE 0 END) ingested,SUM(CASE WHEN status='NO_EXPLICIT_IDEA' THEN 1 ELSE 0 END) no_explicit,SUM(CASE WHEN status='INGEST_FAILED' THEN 1 ELSE 0 END) failed FROM lumen_venture_suggestion_intake").first();
-  return json({version:VERSION,totalReviewed:Number(r?.total||0),ingested:Number(r?.ingested||0),noExplicitIdea:Number(r?.no_explicit||0),failed:Number(r?.failed||0),explicitPartnerLanguageRequired:true,autonomousSpend:false,bindingActionsHumanGated:true});
+  const r=await env.DB.prepare("SELECT COUNT(*) total,SUM(CASE WHEN status='INGESTED_PASS' THEN 1 ELSE 0 END) ingested,SUM(CASE WHEN status='NO_EXPLICIT_IDEA' THEN 1 ELSE 0 END) no_explicit,SUM(CASE WHEN status='REVOKED_LOW_QUALITY' THEN 1 ELSE 0 END) revoked,SUM(CASE WHEN status='INGEST_FAILED' THEN 1 ELSE 0 END) failed FROM lumen_venture_suggestion_intake").first();
+  return json({version:VERSION,totalReviewed:Number(r?.total||0),ingestedPass:Number(r?.ingested||0),noExplicitIdea:Number(r?.no_explicit||0),revokedLowQuality:Number(r?.revoked||0),failed:Number(r?.failed||0),sourceContributionMustPass:true,explicitPartnerLanguageRequired:true,autonomousSpend:false,bindingActionsHumanGated:true});
 }
 
 export async function handleVentureSuggestionIntake(request,env){
