@@ -1,4 +1,4 @@
-const VERSION = "1.1-first-cash-revenue-director";
+const VERSION = "1.2-shared-response-revenue-director";
 const ENTRY_OFFERS = ["MP-SUPPLIER-SNAPSHOT", "MP-QUOTE-SANITY", "MP-TENDER-SCAN"];
 const ALL_OFFERS = ["MP-SUPPLIER-SNAPSHOT","MP-QUOTE-SANITY","MP-TENDER-SCAN","MP-SOURCING-5","MP-BUYER-SIGNALS","MP-EXPORT-PULSE"];
 
@@ -28,7 +28,7 @@ async function all(env, sql, binds = []) {
 }
 
 async function metrics(env) {
-  const [settlements, revenue, actionable, proposals, approved, sent, responded, negotiating, blocked] = await Promise.all([
+  const [settlements, revenue, actionable, proposals, approved, sent, responded, qualified, negotiating, blocked] = await Promise.all([
     scalar(env, "SELECT COUNT(*) n FROM lumen_revenue_events WHERE event_type='payment_settled' AND status='verified'"),
     scalar(env, "SELECT COALESCE(SUM(amount_usd),0) n FROM lumen_revenue_events WHERE event_type='payment_settled' AND status='verified'"),
     scalar(env, "SELECT COUNT(*) n FROM lumen_opportunity_assessments WHERE commercially_actionable=1 AND synthetic_or_test_only=0"),
@@ -36,10 +36,11 @@ async function metrics(env) {
     scalar(env, "SELECT COUNT(*) n FROM lumen_proposal_drafts p LEFT JOIN lumen_outreach_attempts x ON x.proposal_id=p.proposal_id WHERE p.status='APPROVED' AND p.quality_gate_status='PASS' AND x.proposal_id IS NULL"),
     scalar(env, "SELECT COUNT(*) n FROM lumen_outreach_attempts WHERE status IN ('SENT','SENT_TASK','WORKING','RESPONDED','TASK_TERMINAL')"),
     scalar(env, "SELECT COUNT(*) n FROM lumen_outreach_attempts WHERE status='RESPONDED'"),
-    scalar(env, "SELECT COUNT(*) n FROM lumen_sales_pipeline WHERE stage='NEGOTIATING' AND response_class IN ('INTERESTED','QUESTION')"),
+    scalar(env, "SELECT COUNT(*) n FROM lumen_sales_pipeline WHERE response_class IN ('PURCHASE_INTENT','COMMERCIAL_INTEREST','COMMERCIAL_QUESTION')"),
+    scalar(env, "SELECT COUNT(*) n FROM lumen_sales_pipeline WHERE stage='NEGOTIATING'"),
     scalar(env, "SELECT COUNT(*) n FROM lumen_sales_pipeline WHERE stage='BLOCKED'")
   ]);
-  return { verifiedSettlements:settlements, realizedRevenueUsd:revenue, actionableOpportunities:actionable, qualityPassProposals:proposals, approvedUnsent:approved, sent, responded, qualifiedCommercialResponses:negotiating, negotiating, blocked };
+  return { verifiedSettlements:settlements, realizedRevenueUsd:revenue, actionableOpportunities:actionable, qualityPassProposals:proposals, approvedUnsent:approved, sent, responded, qualifiedCommercialResponses:qualified, negotiating, blocked };
 }
 
 function progressed(previous, current) {
@@ -141,7 +142,7 @@ async function state(env) {
 
 export async function handleRevenueDirector(request, env) {
   const url = new URL(request.url);
-  if (request.method === "GET" && url.pathname === "/revenue-director/policy") return json({ version:VERSION, name:"LUMEN First-Cash Revenue Director", objective:"maximize_probability_of_first_verified_settlement_with_bounded_reversible_tactics", coldStartFocus:ENTRY_OFFERS, progressRule:"only_observed_funnel_progress_resets_stagnation", responseQualificationRule:"raw_response_is_not_commercial_intent; only INTERESTED or QUESTION pipeline classifications count as qualified commercial response", verifiedSettlementRule:"after_first_verified_settlement_profit_feedback_becomes_authoritative", selectionPriorityOnly:true, priorityAdjustmentRange:[-4,8], addsExternalMessages:false, autonomousPriceChange:false, autonomousSpend:false, autonomousContract:false, bindingActionsHumanGated:true });
+  if (request.method === "GET" && url.pathname === "/revenue-director/policy") return json({ version:VERSION, name:"LUMEN First-Cash Revenue Director", objective:"maximize_probability_of_first_verified_settlement_with_bounded_reversible_tactics", coldStartFocus:ENTRY_OFFERS, progressRule:"only_observed_funnel_progress_resets_stagnation", responseQualificationRule:"raw_response_is_not_commercial_intent; only PURCHASE_INTENT, COMMERCIAL_INTEREST or COMMERCIAL_QUESTION count as qualified commercial responses", verifiedSettlementRule:"after_first_verified_settlement_profit_feedback_becomes_authoritative", selectionPriorityOnly:true, priorityAdjustmentRange:[-4,8], addsExternalMessages:false, autonomousPriceChange:false, autonomousSpend:false, autonomousContract:false, bindingActionsHumanGated:true });
   if (request.method === "GET" && url.pathname === "/revenue-director/state") return json(await state(env));
   if (request.method === "POST" && url.pathname === "/revenue-director/recompute") {
     if (!authorized(request, env)) return json({ ok:false, error:"admin_token_required" },403);
