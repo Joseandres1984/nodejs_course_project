@@ -1,0 +1,69 @@
+name: LUMEN Agent Economy Smoke
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-agent-economy-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  agent-economy-smoke:
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: https://lumen-zero-a2a.lumen-b2b.workers.dev
+      OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+    steps:
+      - name: Verify protected token
+        run: test -n "${OPPORTUNITY_ADMIN_TOKEN:-}"
+
+      - name: Wait for Agent Economy v1
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 36); do
+            body=$(curl --show-error --silent --max-time 10 "$BASE_URL/agent-economy/policy" || true)
+            echo "$body"
+            if echo "$body" | grep -q '1.0-agent-economy'; then exit 0; fi
+            sleep 5
+          done
+          exit 1
+
+      - name: Verify economy policy and zero outgoing budget
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 20 "$BASE_URL/agent-economy/policy" > /tmp/policy.json
+          cat /tmp/policy.json
+          echo
+          jq -e '.version == "1.0-agent-economy" and .mode == "receive_and_account_with_outgoing_spend_hard_blocked" and .outgoingBudgetUsd == 0 and .outgoingSpendHardBlocked == true and .autonomousOutgoingSpend == false and .autonomousPurchase == false and .autonomousContract == false and .bindingActionsHumanGated == true and .paymentRails.outboundExecutable == false' /tmp/policy.json >/dev/null
+
+      - name: Recompute real agent economy
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 60 \
+            -X POST "$BASE_URL/agent-economy/recompute" \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'content-type: application/json' \
+            -d '{}' > /tmp/economy.json
+          cat /tmp/economy.json
+          echo
+          jq -e '.ok == true and .version == "1.0-agent-economy" and .state.incomeIntents >= 1 and .state.potentialIncomeUsd >= 0 and .state.realizedIncomeUsd >= 0 and .state.contractDraftMessagesSent == 0 and .guardrails.outgoingBudgetUsd == 0 and .guardrails.outgoingSpendHardBlocked == true and .guardrails.autonomousOutgoingSpend == false and .guardrails.autonomousPurchase == false and .guardrails.autonomousContract == false and .guardrails.bindingActionsHumanGated == true and .guardrails.verifiedSettlementRequiredForIncome == true' /tmp/economy.json >/dev/null
+
+      - name: Prove outbound payment execution is hard blocked
+        run: |
+          set -euo pipefail
+          code=$(curl --show-error --silent --max-time 20 -o /tmp/blocked.json -w '%{http_code}' \
+            -X POST "$BASE_URL/agent-economy/outbound/execute" \
+            -H 'content-type: application/json' \
+            -d '{"amountUsd":1,"reason":"smoke_test"}')
+          cat /tmp/blocked.json
+          echo
+          test "$code" = "403"
+          jq -e '.ok == false and .error == "outgoing_spend_disabled" and .outgoingBudgetUsd == 0 and .hardBlocked == true and .humanApprovalRequired == true' /tmp/blocked.json >/dev/null
+
+      - name: Verify ledger state
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 20 "$BASE_URL/agent-economy/stats" > /tmp/stats.json
+          cat /tmp/stats.json
+          echo
+          jq -e '.version == "1.0-agent-economy" and .incomeIntents >= 1 and .contractDraftMessagesSent == 0 and .outgoingBudgetUsd == 0 and .outgoingSpendHardBlocked == true and .autonomousOutgoingSpend == false and .bindingActionsHumanGated == true' /tmp/stats.json >/dev/null
