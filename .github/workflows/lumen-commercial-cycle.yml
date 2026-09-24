@@ -1,0 +1,69 @@
+name: LUMEN Commercial Cycle
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-commercial-cycle.yml'
+
+jobs:
+  commercial-cycle:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify live worker
+        run: |
+          set -euo pipefail
+          base='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          curl --fail --show-error --silent --max-time 30 "$base/health"
+          echo
+
+      - name: Reassess commercial opportunities
+        env:
+          OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${OPPORTUNITY_ADMIN_TOKEN:-}" ]; then
+            echo 'OPPORTUNITY_ADMIN_TOKEN_MISSING'
+            exit 2
+          fi
+          base='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          body='/tmp/reassess.json'
+          code=$(curl --show-error --silent --max-time 60 -o "$body" -w '%{http_code}' \
+            -X POST "$base/commercial/reassess" \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'accept: application/json')
+          echo "===== commercial reassess HTTP $code ====="
+          cat "$body"
+          echo
+          test "$code" = '202'
+
+      - name: Prepare top nonbinding proposal
+        env:
+          OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          base='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          body='/tmp/proposal.json'
+          code=$(curl --show-error --silent --max-time 60 -o "$body" -w '%{http_code}' \
+            -X POST "$base/proposals/prepare-top" \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'accept: application/json')
+          echo "===== proposal prepare HTTP $code ====="
+          cat "$body"
+          echo
+          test "$code" = '202'
+
+      - name: Read commercial results
+        run: |
+          set -euo pipefail
+          base='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          echo '===== /commercial/stats ====='
+          curl --fail --show-error --silent --max-time 30 "$base/commercial/stats"
+          echo
+          echo '===== /commercial/next ====='
+          curl --fail --show-error --silent --max-time 30 "$base/commercial/next"
+          echo
+          echo '===== /proposals/next ====='
+          curl --fail --show-error --silent --max-time 30 "$base/proposals/next"
+          echo
