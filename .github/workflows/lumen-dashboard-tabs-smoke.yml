@@ -1,0 +1,41 @@
+name: LUMEN Dashboard tabs smoke
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-dashboard-tabs-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  tabs-smoke:
+    runs-on: ubuntu-latest
+    env:
+      DASH_URL: https://lumen-zero-dashboard.lumen-b2b.workers.dev
+      DASH_PASSWORD: ${{ secrets.LUMEN_DASHBOARD_PASSWORD }}
+    steps:
+      - name: Verify dashboard secret
+        run: test -n "$DASH_PASSWORD"
+      - name: Verify exclusive Experimentos and Control v2 tabs
+        run: |
+          set -euo pipefail
+          ok=0
+          for attempt in $(seq 1 12); do
+            curl --show-error --silent --max-time 30 \
+              -u "socio:$DASH_PASSWORD" \
+              -D /tmp/headers.txt \
+              -o /tmp/dashboard.html \
+              "$DASH_URL/"
+
+            if grep -qi '^x-lumen-tab-normalization: v1' /tmp/headers.txt \
+              && grep -q 'data-tab="experiments"' /tmp/dashboard.html \
+              && grep -q 'data-tab="controlv2"' /tmp/dashboard.html \
+              && ! grep -q 'data-p="experiments"' /tmp/dashboard.html \
+              && ! grep -q 'data-p="controlv2"' /tmp/dashboard.html; then
+              ok=1
+              break
+            fi
+            sleep 5
+          done
+          test "$ok" = '1'
+          echo 'DASHBOARD_TABS_EXCLUSIVE_OK'
