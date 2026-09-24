@@ -1,0 +1,80 @@
+name: LUMEN Council Runtime Launch
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-council-runtime-launch.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  council-live:
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: https://lumen-zero-a2a.lumen-b2b.workers.dev
+      OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+    steps:
+      - name: Verify protected token
+        run: |
+          test -n "${OPPORTUNITY_ADMIN_TOKEN:-}"
+
+      - name: Wait for Council Runtime deployment
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 30); do
+            body=$(curl --show-error --silent --max-time 10 "$BASE_URL/council-runtime/stats" || true)
+            echo "$body"
+            if echo "$body" | grep -q '1.0-council-runtime'; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo 'COUNCIL_RUNTIME_NOT_READY'
+          exit 1
+
+      - name: Create or reuse live council room
+        run: |
+          set -euo pipefail
+          code=$(curl --show-error --silent --max-time 30 -o /tmp/create.json -w '%{http_code}' \
+            -X POST "$BASE_URL/council-runtime/create" \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'content-type: application/json' \
+            -d '{}')
+          echo "===== create HTTP $code ====="
+          cat /tmp/create.json
+          echo
+          test "$code" = '202'
+          jq -e '.ok == true and (.roomId | length > 0)' /tmp/create.json >/dev/null
+          jq -r '.roomId' /tmp/create.json > /tmp/room_id
+
+      - name: Invite one real guest specialist
+        run: |
+          set -euo pipefail
+          room=$(cat /tmp/room_id)
+          payload=$(jq -nc --arg room "$room" '{roomId:$room,forceGuest:true}')
+          code=$(curl --show-error --silent --max-time 45 -o /tmp/invite.json -w '%{http_code}' \
+            -X POST "$BASE_URL/council-runtime/invite-next" \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'content-type: application/json' \
+            -d "$payload")
+          echo "===== invite HTTP $code ====="
+          cat /tmp/invite.json
+          echo
+          test "$code" = '202'
+          jq -e '.ok == true' /tmp/invite.json >/dev/null
+
+      - name: Read live council state
+        run: |
+          set -euo pipefail
+          room=$(cat /tmp/room_id)
+          echo '===== public stats ====='
+          curl --fail --show-error --silent --max-time 20 "$BASE_URL/council-runtime/stats"
+          echo
+          echo '===== protected room ====='
+          curl --fail --show-error --silent --max-time 20 \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            "$BASE_URL/council-runtime/room?id=$room"
+          echo
