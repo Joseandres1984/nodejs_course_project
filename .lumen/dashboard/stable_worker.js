@@ -1,4 +1,4 @@
-import app from "./control_tower_live_status_worker.js";
+import app from "./network_control_tower_worker.js";
 
 const RETRYABLE_PATHS = new Set([
   "/health",
@@ -7,6 +7,7 @@ const RETRYABLE_PATHS = new Set([
   "/api/recovery-state",
   "/api/experiments",
   "/api/control-tower-v2",
+  "/api/network-control-v1",
 ]);
 
 function sleep(ms) {
@@ -28,12 +29,13 @@ async function normalizeInjectedTabs(request, response) {
   let html = await response.text();
   html = html
     .replace(/data-p=(['"])experiments\1/g, 'data-tab="experiments"')
-    .replace(/data-p=(['"])controlv2\1/g, 'data-tab="controlv2"');
+    .replace(/data-p=(['"])controlv2\1/g, 'data-tab="controlv2"')
+    .replace(/data-p=(['"])networktower\1/g, 'data-tab="networktower"');
 
   const headers = new Headers(response.headers);
   headers.delete("content-length");
   headers.set("cache-control", "no-store");
-  headers.set("x-lumen-tab-normalization", "v1");
+  headers.set("x-lumen-tab-normalization", "v2");
 
   return new Response(html, {
     status: response.status,
