@@ -1,0 +1,70 @@
+name: LUMEN Delivery QA Diagnostic
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-delivery-qa-diagnostic.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y poppler-utils
+          python -m pip install -r .lumen/runtime/requirements.txt
+          npm install --no-save playwright pdf-lib
+          npx playwright install --with-deps chromium
+      - name: Build one production-shaped Supplier Snapshot
+        env:
+          PYTHONPATH: .lumen/runtime
+        run: |
+          mkdir -p /tmp/lumen-qa-diag
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          import paid_fulfillment_runtime as f
+          evidence=[
+            {'title':'ISO — Standards','url':'https://www.iso.org/standards.html','note':'Fuente institucional pública para trazabilidad del pipeline.','observed_at':'2026-09-24','host':'iso.org'},
+            {'title':'NIST — Publications','url':'https://www.nist.gov/publications','note':'Fuente institucional pública para trazabilidad del pipeline.','observed_at':'2026-09-24','host':'nist.gov'},
+            {'title':'WTO — Trade topics','url':'https://www.wto.org/english/tratop_e/tratop_e.htm','note':'Fuente institucional pública para trazabilidad del pipeline.','observed_at':'2026-09-24','host':'wto.org'},
+          ]
+          requirement='Analizar señales públicas y producir una respuesta trazable con fuentes, límites, riesgos y próximos pasos para una decisión comercial B2B concreta.'
+          job={'item_id':'MP-SUPPLIER-SNAPSHOT','order_id':'ORD-DIAG-9F62A1BC','receipt_id':'RCPT-DIAG-A71C9D30','brief_id':'BRIEF-DIAG-6D329F10','company':'LUMEN Quality Customer','requirement':requirement}
+          r=f._build_report(job,evidence,f._queries(job['item_id'],requirement))
+          Path('/tmp/lumen-qa-diag/report.json').write_text(json.dumps(r,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+          print(r['report_id'])
+          PY
+      - name: Render and print exact QA result
+        shell: bash
+        run: |
+          set -u
+          json=/tmp/lumen-qa-diag/report.json
+          html=/tmp/lumen-qa-diag/report.html
+          pdf=/tmp/lumen-qa-diag/report.pdf
+          result=/tmp/lumen-qa-diag/quality.json
+          report_id=$(python -c 'import json; print(json.load(open("/tmp/lumen-qa-diag/report.json"))["report_id"])')
+          python .lumen/reporting/validate_report_input.py "$json"
+          node .lumen/reporting/render_report.mjs --input "$json" --output "$html"
+          node .lumen/reporting/render_pdf.mjs --input "$html" --output "$pdf" --report-id "$report_id" --title 'Supplier Snapshot'
+          set +e
+          python .lumen/reporting/validate_pdf.py "$pdf" --report-id "$report_id" --title 'Supplier Snapshot' --tier micro > "$result" 2>&1
+          rc=$?
+          set -e
+          echo "validate_pdf_exit=$rc"
+          cat "$result"
+          exit "$rc"
