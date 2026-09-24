@@ -18,30 +18,30 @@ jobs:
       - name: Verify protected token
         run: test -n "${OPPORTUNITY_ADMIN_TOKEN:-}"
 
-      - name: Wait for Delegation Engine and Runtime v1
+      - name: Wait for Delegation Quality Gate and Runtime v1.1
         run: |
           set -euo pipefail
           for i in $(seq 1 30); do
-            planner=$(curl --show-error --silent --max-time 10 "$BASE_URL/delegation/stats" || true)
+            quality=$(curl --show-error --silent --max-time 10 "$BASE_URL/delegation/quality-stats" || true)
             runtime=$(curl --show-error --silent --max-time 10 "$BASE_URL/delegation/runtime-stats" || true)
-            echo "$planner"
+            echo "$quality"
             echo "$runtime"
-            if echo "$planner" | grep -q '1.0-delegation-engine' && echo "$runtime" | grep -q '1.0-delegation-runtime'; then exit 0; fi
+            if echo "$quality" | grep -q '1.0-delegation-quality-gate' && echo "$runtime" | grep -q '1.1-delegation-runtime'; then exit 0; fi
             sleep 5
           done
           exit 1
 
-      - name: Confirm delegation safety state
+      - name: Confirm quality gate is a hard dispatch barrier
         run: |
           set -euo pipefail
-          curl --fail --show-error --silent --max-time 20 "$BASE_URL/delegation/stats" > /tmp/stats.json
+          curl --fail --show-error --silent --max-time 20 "$BASE_URL/delegation/quality-stats" > /tmp/quality.json
           curl --fail --show-error --silent --max-time 20 "$BASE_URL/delegation/runtime-stats" > /tmp/runtime.json
-          cat /tmp/stats.json
+          cat /tmp/quality.json
           echo
           cat /tmp/runtime.json
           echo
-          jq -e '.version == "1.0-delegation-engine" and .autonomousDelegation == false and .autonomousOutgoingSpend == false and .bindingActionsHumanGated == true' /tmp/stats.json >/dev/null
-          jq -e '.version == "1.0-delegation-runtime" and .autonomousDelegation == false and .autonomousOutgoingSpend == false and .bindingActionsHumanGated == true' /tmp/runtime.json >/dev/null
+          jq -e '.version == "1.0-delegation-quality-gate" and .dispatchRequires == "APPROVED_FOR_DISPATCH" and .autonomousOutgoingSpend == false and .bindingActionsHumanGated == true' /tmp/quality.json >/dev/null
+          jq -e '.version == "1.1-delegation-runtime" and .dispatchRequires == "APPROVED_FOR_DISPATCH" and .autonomousDelegation == false and .autonomousOutgoingSpend == false and .bindingActionsHumanGated == true' /tmp/runtime.json >/dev/null
 
       - name: Confirm unsynthesized council cannot create delegation plan
         run: |
@@ -56,7 +56,7 @@ jobs:
           echo
           jq -e '.ok == true and .planned == false and (.reason == "room_not_synthesized" or .reason == "insufficient_quality_contributors")' /tmp/plan.json >/dev/null
 
-      - name: Confirm dispatch is hard-disabled during pilot
+      - name: Confirm dispatch remains disabled during pilot
         run: |
           set -euo pipefail
           curl --fail --show-error --silent --max-time 30 \
@@ -66,4 +66,4 @@ jobs:
             -d '{"force":false}' > /tmp/dispatch.json
           cat /tmp/dispatch.json
           echo
-          jq -e '.ok == true and .sent == false and .reason == "autonomous_delegation_disabled" and .autonomousDelegation == false' /tmp/dispatch.json >/dev/null
+          jq -e '.ok == true and .sent == false and .reason == "autonomous_delegation_disabled" and .dispatchRequires == "APPROVED_FOR_DISPATCH"' /tmp/dispatch.json >/dev/null
