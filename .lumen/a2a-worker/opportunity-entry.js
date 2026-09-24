@@ -7,6 +7,7 @@ import { handleA2AOutreach, pollOutstandingResponses, sendNextApproved } from ".
 import { handleFollowupEngine, processFollowupCycle } from "./followup-engine.js";
 import { handlePartnerNetwork, runPartnerDiscovery } from "./partner-network.js";
 import { handlePartnerCouncilQuality, buildQualityPartnerMatches } from "./partner-council-quality.js";
+import { handlePartnerVentureBoard } from "./partner-venture-board.js";
 
 export default {
   async fetch(request, env, ctx) {
@@ -27,6 +28,9 @@ export default {
 
     const followupResponse = await handleFollowupEngine(request, env);
     if (followupResponse) return followupResponse;
+
+    const ventureResponse = await handlePartnerVentureBoard(request, env);
+    if (ventureResponse) return ventureResponse;
 
     const partnerQualityResponse = await handlePartnerCouncilQuality(request, env);
     if (partnerQualityResponse) return partnerQualityResponse;
