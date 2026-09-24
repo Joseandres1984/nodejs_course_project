@@ -1,0 +1,239 @@
+name: LUMEN Product Delivery Certification
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-product-delivery-certification.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  certify:
+    name: Certify sale-to-deliverable path
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      PYTHONPATH: .lumen/runtime
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install report QA dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y poppler-utils
+          python -m pip install --upgrade pip
+          python -m pip install pypdf pillow
+          npm install --no-save playwright pdf-lib
+          npx playwright install --with-deps chromium
+
+      - name: Verify live x402 remains fail-closed without payment
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=$(curl -sS -o /tmp/lumen-x402-unpaid-body -D /tmp/lumen-x402-unpaid-headers -w '%{http_code}' \
+            'https://lumen-zero-x402.lumen-b2b.workers.dev/buy/supplier-snapshot')
+          echo "unpaid_http_status=$code"
+          test "$code" = "402"
+          grep -qi 'payment' /tmp/lumen-x402-unpaid-headers || grep -qi 'payment' /tmp/lumen-x402-unpaid-body
+
+      - name: Verify every sold service has an active runtime
+        run: python -m unittest discover -s .lumen/runtime -p 'test_commercial_runtime_coverage.py' -v
+
+      - name: Build isolated fulfillment reports for all six paid microproducts
+        run: |
+          rm -rf /tmp/lumen-delivery-cert
+          mkdir -p /tmp/lumen-delivery-cert
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          import paid_fulfillment_runtime as f
+
+          root = Path('/tmp/lumen-delivery-cert')
+          evidence = [
+              {
+                  'title': 'ISO — Standards',
+                  'url': 'https://www.iso.org/standards.html',
+                  'note': 'Fuente institucional pública utilizada sólo para certificar la trazabilidad y renderizado del pipeline.',
+                  'observed_at': '2026-09-24',
+                  'host': 'iso.org',
+              },
+              {
+                  'title': 'NIST — Publications',
+                  'url': 'https://www.nist.gov/publications',
+                  'note': 'Fuente institucional pública utilizada sólo para certificar la trazabilidad y renderizado del pipeline.',
+                  'observed_at': '2026-09-24',
+                  'host': 'nist.gov',
+              },
+              {
+                  'title': 'WTO — Trade topics',
+                  'url': 'https://www.wto.org/english/tratop_e/tratop_e.htm',
+                  'note': 'Fuente institucional pública utilizada sólo para certificar la trazabilidad y renderizado del pipeline.',
+                  'observed_at': '2026-09-24',
+                  'host': 'wto.org',
+              },
+          ]
+          requirement = (
+              'Analizar señales públicas y producir una respuesta trazable con fuentes, límites, '
+              'riesgos y próximos pasos para una decisión comercial B2B concreta.'
+          )
+          manifest = []
+          for i, item_id in enumerate(f.PRODUCTS, 1):
+              product = f.PRODUCTS[item_id]
+              order_id = f'ORD-CERT-{i:02d}-9F62A1BC'
+              job = {
+                  'item_id': item_id,
+                  'order_id': order_id,
+                  'receipt_id': f'RCPT-CERT-{i:02d}-A71C9D30',
+                  'brief_id': f'BRIEF-CERT-{i:02d}-6D329F10',
+                  'company': 'LUMEN Certification Customer',
+                  'requirement': requirement,
+              }
+              report = f._build_report(job, evidence, f._queries(item_id, requirement))
+              path = root / f'{product["slug"]}.json'
+              path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+              manifest.append({'item_id': item_id, 'slug': product['slug'], 'report': str(path)})
+          (root / 'products.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
+          print(json.dumps({'ok': True, 'products': len(manifest), 'outgoing_spend': False}))
+          PY
+
+      - name: Validate, render and QA every product deliverable
+        shell: bash
+        run: |
+          set -euo pipefail
+          while read -r slug; do
+            echo "CERTIFYING $slug"
+            json="/tmp/lumen-delivery-cert/$slug.json"
+            html="/tmp/lumen-delivery-cert/$slug.html"
+            pdf="/tmp/lumen-delivery-cert/$slug.pdf"
+            quality="/tmp/lumen-delivery-cert/$slug-quality.json"
+
+            python .lumen/reporting/validate_report_input.py "$json"
+            report_id=$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["report_id"])' "$json")
+            title=$(python -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d.get("template_key", "LUMEN Report"))' "$json")
+            node .lumen/reporting/render_report.mjs --input "$json" --output "$html"
+            node .lumen/reporting/render_pdf.mjs --input "$html" --output "$pdf" --report-id "$report_id" --title "$title"
+            python .lumen/reporting/validate_pdf.py "$pdf" --report-id "$report_id" --title "$title" --tier micro > "$quality"
+            python - <<'PY' "$quality" "$slug"
+          import json,sys
+          q=json.load(open(sys.argv[1]))
+          assert q['ok'] is True
+          assert q['quality_gate']=='client_delivery_ready'
+          print(json.dumps({'slug':sys.argv[2],'quality_gate':q['quality_gate'],'pages':q['pages'],'sources':q['visible_source_urls']}))
+          PY
+          done < <(python -c 'import json; print("\n".join(x["slug"] for x in json.load(open("/tmp/lumen-delivery-cert/products.json"))))')
+
+      - name: Prove fail-closed delivery approval rejects a canary
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, runpy
+          from pathlib import Path
+          root=Path('/tmp/lumen-delivery-cert')
+          mod=runpy.run_path('.lumen/reporting/approve_delivery.py', run_name='lumen_approve_module')
+          report=json.load(open(root/'supplier-snapshot.json'))
+          ctx={
+            'receipt': {'id':'RCPT-CANARY-001','product_id':'MP-SUPPLIER-SNAPSHOT','service_id':'SRV-SUPPLIERCHECK','amount_usd':5,'currency':'USD','network':mod['EXPECTED_NETWORK'],'pay_to':mod['EXPECTED_PAY_TO'],'status':'redeemed_queued','request_metadata':{'settlement':{'success':True,'transaction':'0x'+'1'*64,'network':mod['EXPECTED_NETWORK']},'conversion':{'brief_id':'BRIEF-CANARY-001'}}},
+            'order': {'id':'ORD-CANARY-001','item_type':'product','item_id':'MP-SUPPLIER-SNAPSHOT','service_id':'SRV-SUPPLIERCHECK','amount_usd':5,'status':'x402_paid_queued','remote_metadata':{'payment_verified':'true','payment_settled':'true','x402_receipt_id':'RCPT-CANARY-001','brief_id':'BRIEF-CANARY-001'}},
+            'brief': {'id':'BRIEF-CANARY-001','product_id':'MP-SUPPLIER-SNAPSHOT','product_slug':'supplier-snapshot','email':'canary@lumen-b2b.com','company':'Technical Canary','details':report['client_request'],'status':'paid_queued','technical_canary':1},
+          }
+          (root/'blocked-context.json').write_text(json.dumps(ctx),encoding='utf-8')
+          PY
+          set +e
+          python .lumen/reporting/approve_delivery.py \
+            --context /tmp/lumen-delivery-cert/blocked-context.json \
+            --report-json /tmp/lumen-delivery-cert/supplier-snapshot.json \
+            --pdf /tmp/lumen-delivery-cert/supplier-snapshot.pdf \
+            --quality-json /tmp/lumen-delivery-cert/supplier-snapshot-quality.json \
+            --manifest /tmp/lumen-delivery-cert/blocked-manifest.json \
+            >/tmp/lumen-delivery-cert/blocked-approval.out 2>&1
+          rc=$?
+          set -e
+          test "$rc" -ne 0
+          grep -Eq 'technical_canary_forbidden|test_or_fixture_marker_forbidden' /tmp/lumen-delivery-cert/blocked-approval.out
+          echo 'fail_closed_canary_gate=PASS'
+
+      - name: Certify positive production-shaped approval in isolated workspace
+        run: |
+          python - <<'PY'
+          import json, runpy
+          from pathlib import Path
+          root=Path('/tmp/lumen-delivery-cert')
+          mod=runpy.run_path('.lumen/reporting/approve_delivery.py', run_name='lumen_approve_module')
+          report_path=root/'supplier-snapshot.json'
+          report=json.load(open(report_path))
+          report['client']='LUMEN Certification Customer'
+          report['fulfillment']['order_id']='ORD-CERT-01-9F62A1BC'
+          report['fulfillment']['receipt_id']='RCPT-CERT-01-A71C9D30'
+          report['fulfillment']['brief_id']='BRIEF-CERT-01-6D329F10'
+          report_path.write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+          ctx={
+            'receipt': {'id':'RCPT-CERT-01-A71C9D30','product_id':'MP-SUPPLIER-SNAPSHOT','service_id':'SRV-SUPPLIERCHECK','amount_usd':5,'currency':'USD','network':mod['EXPECTED_NETWORK'],'pay_to':mod['EXPECTED_PAY_TO'],'status':'redeemed_queued','request_metadata':{'settlement':{'success':True,'transaction':'0x'+'a'*64,'network':mod['EXPECTED_NETWORK']},'conversion':{'brief_id':'BRIEF-CERT-01-6D329F10'}}},
+            'order': {'id':'ORD-CERT-01-9F62A1BC','item_type':'product','item_id':'MP-SUPPLIER-SNAPSHOT','service_id':'SRV-SUPPLIERCHECK','amount_usd':5,'status':'x402_paid_queued','remote_metadata':{'payment_verified':'true','payment_settled':'true','x402_receipt_id':'RCPT-CERT-01-A71C9D30','brief_id':'BRIEF-CERT-01-6D329F10'}},
+            'brief': {'id':'BRIEF-CERT-01-6D329F10','product_id':'MP-SUPPLIER-SNAPSHOT','product_slug':'supplier-snapshot','email':'certification@lumen-b2b.com','company':'LUMEN Certification Customer','details':report['client_request'],'status':'paid_queued','technical_canary':0},
+          }
+          (root/'approval-context.json').write_text(json.dumps(ctx,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+          PY
+          python .lumen/reporting/approve_delivery.py \
+            --context /tmp/lumen-delivery-cert/approval-context.json \
+            --report-json /tmp/lumen-delivery-cert/supplier-snapshot.json \
+            --pdf /tmp/lumen-delivery-cert/supplier-snapshot.pdf \
+            --quality-json /tmp/lumen-delivery-cert/supplier-snapshot-quality.json \
+            --manifest /tmp/lumen-delivery-cert/delivery-manifest.json
+          python - <<'PY'
+          import json
+          m=json.load(open('/tmp/lumen-delivery-cert/delivery-manifest.json'))
+          assert m['approval_status']=='quality_approved'
+          assert m['delivery_status']=='ready_for_delivery'
+          assert m['delivery_attempted'] is False
+          assert m['safety']['outgoing_spend'] is False
+          print(json.dumps({'approval_status':m['approval_status'],'delivery_status':m['delivery_status'],'delivery_attempted':m['delivery_attempted'],'outgoing_spend':m['safety']['outgoing_spend']}))
+          PY
+
+      - name: Certification summary
+        run: |
+          python - <<'PY'
+          import json,glob,hashlib,os
+          rows=[]
+          for qpath in sorted(glob.glob('/tmp/lumen-delivery-cert/*-quality.json')):
+              q=json.load(open(qpath))
+              slug=os.path.basename(qpath).replace('-quality.json','')
+              pdf=f'/tmp/lumen-delivery-cert/{slug}.pdf'
+              h=hashlib.sha256(open(pdf,'rb').read()).hexdigest()
+              rows.append({'slug':slug,'quality_gate':q['quality_gate'],'pages':q['pages'],'sources':q['visible_source_urls'],'pdf_sha256':h})
+          assert len(rows)==6
+          result={
+              'ok':True,
+              'certification':'LUMEN product-delivery pipeline',
+              'products_certified':len(rows),
+              'live_unpaid_x402_gate':'HTTP 402',
+              'payment_spend_usd':0,
+              'delivery_attempted':False,
+              'final_state':'ready_for_delivery',
+              'products':rows,
+          }
+          print(json.dumps(result,indent=2))
+          open('/tmp/lumen-delivery-cert/certification-summary.json','w').write(json.dumps(result,indent=2)+'\n')
+          PY
+
+      - name: Upload certification evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: lumen-product-delivery-certification
+          path: |
+            /tmp/lumen-delivery-cert/certification-summary.json
+            /tmp/lumen-delivery-cert/delivery-manifest.json
+            /tmp/lumen-delivery-cert/*.pdf
+            /tmp/lumen-delivery-cert/*-quality.json
+          retention-days: 7
