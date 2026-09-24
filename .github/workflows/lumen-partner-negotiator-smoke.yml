@@ -46,7 +46,7 @@ jobs:
             -d '{}' > /tmp/recompute.json
           cat /tmp/recompute.json
           echo
-          jq -e '.ok == true and .version == "1.0-partner-negotiator" and .guardrails.recommendationOnly == true and .guardrails.pricesDeclaredNotVerified == true and .guardrails.autonomousNegotiationMessages == false and .guardrails.autonomousHiring == false and .guardrails.autonomousSpend == false and .guardrails.bindingActionsHumanGated == true' /tmp/recompute.json >/dev/null
+          jq -e '.ok == true and .version == "1.0-partner-negotiator" and .cases >= 1 and (.topCases | length) >= 1 and ([.topCases[] | select(.candidates >= 2)] | length) >= 1 and ([.topCases[] | select(.status == "READY_FOR_HUMAN_REVIEW" and (.pricedCandidates < 2 or .candidates < 2))] | length) == 0 and ([.topCases[] | select(.pricedCandidates < 2 and .decisionMode != "TECHNICAL_RANKING_ONLY")] | length) == 0 and .guardrails.recommendationOnly == true and .guardrails.pricesDeclaredNotVerified == true and .guardrails.autonomousNegotiationMessages == false and .guardrails.autonomousHiring == false and .guardrails.autonomousSpend == false and .guardrails.bindingActionsHumanGated == true' /tmp/recompute.json >/dev/null
 
       - name: Verify negotiator state
         run: |
@@ -54,4 +54,18 @@ jobs:
           curl --fail --show-error --silent --max-time 20 "$BASE_URL/negotiator/stats" > /tmp/stats.json
           cat /tmp/stats.json
           echo
-          jq -e '.version == "1.0-partner-negotiator" and .recommendationOnly == true and .autonomousNegotiationMessages == false and .autonomousHiring == false and .autonomousSpend == false and .bindingActionsHumanGated == true' /tmp/stats.json >/dev/null
+          jq -e '.version == "1.0-partner-negotiator" and .totalCases >= 1 and .rankedCandidates >= 2 and .recommendationOnly == true and .autonomousNegotiationMessages == false and .autonomousHiring == false and .autonomousSpend == false and .bindingActionsHumanGated == true' /tmp/stats.json >/dev/null
+
+      - name: Prepare safe negotiator snapshot
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/negotiator-snapshot
+          jq '{version,cases,readyForHumanReview,incompleteTerms,insufficientCompetition,topCases,guardrails}' /tmp/recompute.json > /tmp/negotiator-snapshot/recompute.json
+          jq '{version,totalCases,readyForHumanReview,incompleteTerms,insufficientCompetition,rankedCandidates,pricedCandidates,maxRecommendationConfidence,recommendationOnly,autonomousNegotiationMessages,autonomousHiring,autonomousSpend,bindingActionsHumanGated}' /tmp/stats.json > /tmp/negotiator-snapshot/stats.json
+
+      - name: Upload negotiator snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: negotiator-snapshot
+          path: /tmp/negotiator-snapshot
+          retention-days: 1
