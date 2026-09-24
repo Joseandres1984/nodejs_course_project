@@ -1,0 +1,47 @@
+name: LUMEN Council PHION Retry
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-council-phion-retry.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  retry-phion:
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: https://lumen-zero-a2a.lumen-b2b.workers.dev
+      OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+    steps:
+      - name: Verify protected token
+        run: test -n "${OPPORTUNITY_ADMIN_TOKEN:-}"
+
+      - name: Wait for recovery endpoint
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 30); do
+            code=$(curl --show-error --silent --max-time 10 -o /tmp/retry.json -w '%{http_code}' \
+              -X POST "$BASE_URL/council-runtime/retry-failed" \
+              -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+              -H 'content-type: application/json' \
+              -d '{}' || true)
+            if [ "$code" = '202' ]; then
+              cat /tmp/retry.json
+              echo
+              jq -e '.ok == true' /tmp/retry.json >/dev/null
+              exit 0
+            fi
+            echo "Recovery endpoint not ready (HTTP $code), waiting..."
+            sleep 5
+          done
+          exit 1
+
+      - name: Read council state after retry
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 20 "$BASE_URL/council-runtime/stats"
+          echo
