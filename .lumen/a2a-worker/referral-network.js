@@ -47,7 +47,7 @@ export async function submitInboundReferral(env,body={}){
   const key=(await sha256(`INBOUND|${card}|${title.toLowerCase()}|${summary.toLowerCase().slice(0,1200)}`)).slice(0,32).toUpperCase();
   const id=`REF-IN-${key.slice(0,16)}`,now=new Date().toISOString(),score=basicReferralScore({title,summary,capability,estimatedValueUsd:estimatedValue});
   try{
-    await env.DB.prepare("INSERT INTO lumen_referrals(id,direction,created_at,updated_at,source,origin_partner_id,origin_partner_name,origin_card_url,target_partner_id,target_partner_name,opportunity_id,title,summary,capability,estimated_value_usd,status,trust_score,trust_level,match_score,attribution_key,external_contact_sent,binding_allowed,spend_allowed,commission_status,settled_revenue_usd,settlement_event_id,raw_json,engine_version) VALUES(?,'INBOUND',?,?,?,?,?,?,NULL,'LUMEN',NULL,?,?,?,?, 'PENDING_DISCOVERY',NULL,NULL,?,?,0,0,0,'NOT_CONFIGURED',0,NULL,?,?)")
+    await env.DB.prepare("INSERT INTO lumen_referrals(id,direction,created_at,updated_at,source,origin_partner_id,origin_partner_name,origin_card_url,target_partner_id,target_partner_name,opportunity_id,title,summary,capability,estimated_value_usd,status,trust_score,trust_level,match_score,attribution_key,external_contact_sent,binding_allowed,spend_allowed,commission_status,settled_revenue_usd,settlement_event_id,raw_json,engine_version) VALUES(?,'INBOUND',?,?,?,?,?,?,NULL,'LUMEN',NULL,?,?,?,?,'PENDING_DISCOVERY',NULL,NULL,?,?,0,0,0,'NOT_CONFIGURED',0,NULL,?,?)")
       .bind(id,now,now,"public_referral",null,name,card,title,summary,capability||null,estimatedValue,score,key,JSON.stringify({evidence,declared:body}).slice(0,12000),VERSION).run();
   }catch(e){if(String(e?.message||e).toLowerCase().includes("unique"))return{ok:true,accepted:false,reason:"duplicate_referral",version:VERSION};return{ok:false,error:"referral_persistence_failed",version:VERSION};}
   await logEvent(env,id,"INBOUND_RECEIVED",`declared_match_score=${score};commission=NOT_CONFIGURED`);
@@ -67,13 +67,11 @@ export async function reviewInboundReferrals(env){
     const status=hard?"BLOCKED_TRUST":(["ALLOW","CAUTION"].includes(level)?"INBOUND_TRUSTED":"PENDING_TRUST");
     await env.DB.prepare("UPDATE lumen_referrals SET origin_partner_id=?,origin_partner_name=?,trust_score=?,trust_level=?,status=?,updated_at=? WHERE id=?")
       .bind(p.id,p.name,score,level,status,now,r.id).run();
-    await logEvent(env,r.id,status===interestedStatus("INBOUND_TRUSTED")?"TRUST_PASSED":"TRUST_REVIEW",`trust=${level}/${score};status=${status}`);
+    await logEvent(env,r.id,status==="INBOUND_TRUSTED"?"TRUST_PASSED":"TRUST_REVIEW",`trust=${level}/${score};status=${status}`);
     results.push({referralId:r.id,status,partnerId:p.id,partnerName:p.name,trustLevel:level,trustScore:score});
   }
   return{ok:true,version:VERSION,reviewed:results.length,results,guardrails:{automaticAcceptance:false,automaticPayment:false,commissionConfigured:false,externalContactSent:false}};
 }
-
-function interestedStatus(v){return v;}
 
 export async function planOutboundReferrals(env){
   if(!(await ensure(env)))return{ok:false,error:"persistence_unavailable",version:VERSION};
@@ -86,7 +84,7 @@ export async function planOutboundReferrals(env){
   for(const r of best.values()){
     const caps=parse(r.matched_capabilities_json,[]),cap=clean(caps?.[0]||"specialist",80).toLowerCase();
     const key=(await sha256(`OUTBOUND|${r.opportunity_id}|${r.partner_id}`)).slice(0,32).toUpperCase(),id=`REF-OUT-${key.slice(0,16)}`;
-    await env.DB.prepare("INSERT INTO lumen_referrals(id,direction,created_at,updated_at,source,origin_partner_id,origin_partner_name,origin_card_url,target_partner_id,target_partner_name,opportunity_id,title,summary,capability,estimated_value_usd,status,trust_score,trust_level,match_score,attribution_key,external_contact_sent,binding_allowed,spend_allowed,commission_status,settled_revenue_usd,settlement_event_id,raw_json,engine_version) VALUES(?,'OUTBOUND',?,?,?,?,NULL,'LUMEN',NULL,?,?,?,?,?,NULL,'OUTBOUND_CANDIDATE',?,?,?,?,0,0,0,'NOT_CONFIGURED',0,NULL,?,?) ON CONFLICT(attribution_key) DO UPDATE SET updated_at=excluded.updated_at,trust_score=excluded.trust_score,trust_level=excluded.trust_level,match_score=excluded.match_score,summary=excluded.summary,capability=excluded.capability,engine_version=excluded.engine_version")
+    await env.DB.prepare("INSERT INTO lumen_referrals(id,direction,created_at,updated_at,source,origin_partner_id,origin_partner_name,origin_card_url,target_partner_id,target_partner_name,opportunity_id,title,summary,capability,estimated_value_usd,status,trust_score,trust_level,match_score,attribution_key,external_contact_sent,binding_allowed,spend_allowed,commission_status,settled_revenue_usd,settlement_event_id,raw_json,engine_version) VALUES(?,'OUTBOUND',?,?,?,NULL,'LUMEN',NULL,?,?,?,?,?,?,NULL,'OUTBOUND_CANDIDATE',?,?,?,?,0,0,0,'NOT_CONFIGURED',0,NULL,?,?) ON CONFLICT(attribution_key) DO UPDATE SET updated_at=excluded.updated_at,trust_score=excluded.trust_score,trust_level=excluded.trust_level,match_score=excluded.match_score,summary=excluded.summary,capability=excluded.capability,engine_version=excluded.engine_version")
       .bind(id,now,now,"commercial_opportunity",r.partner_id,r.partner_name,r.opportunity_id,clean(r.title,300),clean(r.summary,4500),cap,Number(r.trust_score||0),clean(r.trust_level,40),Number(r.match_score||0),key,JSON.stringify({commercialScore:Number(r.commercial_score||0),evidenceStrength:r.evidence_strength,offerId:r.revenue_offer_id}).slice(0,6000),VERSION).run();
     await logEvent(env,id,"OUTBOUND_CANDIDATE_PLANNED",`target=${r.partner_name};match=${Number(r.match_score||0)};trust=${r.trust_level}/${Number(r.trust_score||0)};commission=NOT_CONFIGURED`);
     planned.push({referralId:id,opportunityId:r.opportunity_id,title:r.title,targetPartnerId:r.partner_id,target:r.partner_name,capability:cap,commercialScore:Number(r.commercial_score||0),matchScore:Number(r.match_score||0),trustLevel:r.trust_level,trustScore:Number(r.trust_score||0)});
@@ -103,7 +101,7 @@ export async function syncReferralSettlements(env){
     await env.DB.prepare("UPDATE lumen_referrals SET status='SETTLED',settled_revenue_usd=?,settlement_event_id=?,updated_at=? WHERE id=?").bind(amount,e.id,new Date().toISOString(),r.id).run();
     await logEvent(env,r.id,"SETTLEMENT_VERIFIED",clean(e.evidence,1000),amount,true);settled.push({referralId:r.id,revenueEventId:e.id,settledRevenueUsd:amount});
   }
-  return{ok:true,version:VERSION,settled: settled.length,results:settled,commissionStatus:"NOT_CONFIGURED",guardrails:{verifiedSettlementRequired:true,commissionNotPromised:true,automaticPayout:false}};
+  return{ok:true,version:VERSION,settled:settled.length,results:settled,commissionStatus:"NOT_CONFIGURED",guardrails:{verifiedSettlementRequired:true,commissionNotPromised:true,automaticPayout:false}};
 }
 
 async function stats(env){
