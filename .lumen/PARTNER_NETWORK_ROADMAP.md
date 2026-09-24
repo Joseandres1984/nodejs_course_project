@@ -38,4 +38,6 @@ Fase C: 8 → 9 → 11 → 10 → 15 (la Torre se amplía incrementalmente duran
 - Partner matching/reputation inicial: operativo.
 - Council Builder v1.2: operativo, no vinculante.
 - Partner Venture Board: operativo.
-- Recruitment Engine: en construcción/activación.
+- Recruitment Engine v1.0.1: operativo, con primer contacto real enviado a un candidato fuerte.
+- Reclutamiento autónomo continuo: desactivado hasta validar calidad de respuestas y cadencia.
+- Próximo bloque: Sala de Juntas real.
