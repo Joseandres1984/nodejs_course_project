@@ -5,6 +5,7 @@ on:
     branches: [lumen-zero]
     paths:
       - '.github/workflows/lumen-delivery-qa-diagnostic.yml'
+      - '.lumen/reporting/render_pdf.mjs'
   workflow_dispatch:
 
 permissions:
