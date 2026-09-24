@@ -1,0 +1,43 @@
+name: LUMEN Council Quality Synthesis Smoke
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-council-quality-synthesis-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  synthesis-smoke:
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: https://lumen-zero-a2a.lumen-b2b.workers.dev
+      OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+      ROOM_ID: ROOM-4582354AD86443
+    steps:
+      - name: Verify protected token
+        run: test -n "${OPPORTUNITY_ADMIN_TOKEN:-}"
+
+      - name: Wait for quality synthesis endpoint
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 30); do
+            code=$(curl --show-error --silent --max-time 10 -o /tmp/result.json -w '%{http_code}' \
+              -X POST "$BASE_URL/council-quality/synthesize" \
+              -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+              -H 'content-type: application/json' \
+              -d "{\"roomId\":\"$ROOM_ID\"}" || true)
+            if [ "$code" = '202' ]; then
+              cat /tmp/result.json
+              echo
+              exit 0
+            fi
+            sleep 5
+          done
+          exit 1
+
+      - name: Confirm synthesis is blocked without two PASS contributions
+        run: |
+          set -euo pipefail
+          cat /tmp/result.json
+          jq -e '.ok == true and .synthesized == false and .reason == "insufficient_quality_contributions" and .required == 2 and .available < 2' /tmp/result.json >/dev/null
