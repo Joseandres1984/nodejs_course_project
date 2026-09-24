@@ -17,6 +17,7 @@ import { handlePartnerMarketplacePublicCatalog } from "./partner-marketplace-pub
 import { handleReferralNetwork, reviewInboundReferrals, planOutboundReferrals, syncReferralSettlements } from "./referral-network.js";
 import { handlePartnerNegotiator, recomputeNegotiator } from "./partner-negotiator.js";
 import { handleNegotiatorTermsPlanner, planNegotiationTermRequests } from "./negotiator-terms-planner.js";
+import { handleNegotiatorTermsRuntime, pollNegotiationTermResponses } from "./negotiator-terms-runtime.js";
 import { handleAgentEconomy, recomputeAgentEconomy } from "./agent-economy.js";
 import { handleAgentGraph, recomputeAgentGraph } from "./agent-graph.js";
 import { handleDynamicTeamEngine, buildDynamicTeams } from "./dynamic-team-engine.js";
@@ -72,6 +73,7 @@ export default {
     const referralResponse = await handleReferralNetwork(request, env); if (referralResponse) return referralResponse;
     const negotiatorResponse = await handlePartnerNegotiator(request, env); if (negotiatorResponse) return negotiatorResponse;
     const negotiatorTermsResponse = await handleNegotiatorTermsPlanner(request, env); if (negotiatorTermsResponse) return negotiatorTermsResponse;
+    const negotiatorTermsRuntimeResponse = await handleNegotiatorTermsRuntime(request, env); if (negotiatorTermsRuntimeResponse) return negotiatorTermsRuntimeResponse;
     const economyResponse = await handleAgentEconomy(request, env); if (economyResponse) return economyResponse;
     const agentGraphResponse = await handleAgentGraph(request, env); if (agentGraphResponse) return agentGraphResponse;
     const dynamicTeamResponse = await handleDynamicTeamEngine(request, env); if (dynamicTeamResponse) return dynamicTeamResponse;
@@ -110,6 +112,7 @@ export default {
       await reviewInboundReferrals(env);
       await planOutboundReferrals(env);
       await syncReferralSettlements(env);
+      await pollNegotiationTermResponses(env);
       await recomputeNegotiator(env);
       await planNegotiationTermRequests(env);
       // Agent Economy only accounts/plans; outgoing execution is hard-blocked at USD 0.
