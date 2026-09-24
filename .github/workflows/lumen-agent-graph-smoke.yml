@@ -1,0 +1,53 @@
+name: LUMEN Agent Graph Smoke
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-agent-graph-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  agent-graph-smoke:
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: https://lumen-zero-a2a.lumen-b2b.workers.dev
+      OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+    steps:
+      - name: Verify protected token
+        run: test -n "${OPPORTUNITY_ADMIN_TOKEN:-}"
+
+      - name: Wait for Agent Graph v1
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 30); do
+            body=$(curl --show-error --silent --max-time 10 "$BASE_URL/agent-graph/stats" || true)
+            echo "$body"
+            if echo "$body" | grep -q '1.0-agent-graph'; then exit 0; fi
+            sleep 5
+          done
+          exit 1
+
+      - name: Recompute graph with retry
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 20); do
+            code=$(curl --show-error --silent --max-time 60 -o /tmp/graph.json -w '%{http_code}' \
+              -X POST "$BASE_URL/agent-graph/recompute" \
+              -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+              -H 'content-type: application/json' \
+              -d '{}' || true)
+            cat /tmp/graph.json 2>/dev/null || true
+            echo
+            if [ "$code" = '202' ] && grep -q '1.0-agent-graph' /tmp/graph.json; then break; fi
+            sleep 3
+          done
+          jq -e '.ok == true and .version == "1.0-agent-graph" and .nodes >= 1 and .guardrails.graphIsObservational == true and .guardrails.noAutonomousContract == true and .guardrails.noAutonomousSpend == true' /tmp/graph.json >/dev/null
+
+      - name: Verify graph state
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 20 "$BASE_URL/agent-graph/stats" > /tmp/stats.json
+          cat /tmp/stats.json
+          echo
+          jq -e '.version == "1.0-agent-graph" and .nodes >= 1 and .observationalOnly == true and .autonomousSpend == false' /tmp/stats.json >/dev/null
