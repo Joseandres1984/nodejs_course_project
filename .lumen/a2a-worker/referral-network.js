@@ -1,4 +1,4 @@
-const VERSION="1.0-referral-network";
+const VERSION="1.1-referral-network-commission-aware";
 
 function json(d,s=200){return Response.json(d,{status:s,headers:{"cache-control":"no-store","x-content-type-options":"nosniff","access-control-allow-origin":"*"}});}
 function clean(v,n=5000){return String(v??"").trim().replace(/\s+/g," ").slice(0,n);}
@@ -50,8 +50,8 @@ export async function submitInboundReferral(env,body={}){
     await env.DB.prepare("INSERT INTO lumen_referrals(id,direction,created_at,updated_at,source,origin_partner_id,origin_partner_name,origin_card_url,target_partner_id,target_partner_name,opportunity_id,title,summary,capability,estimated_value_usd,status,trust_score,trust_level,match_score,attribution_key,external_contact_sent,binding_allowed,spend_allowed,commission_status,settled_revenue_usd,settlement_event_id,raw_json,engine_version) VALUES(?,'INBOUND',?,?,?,?,?,?,NULL,'LUMEN',NULL,?,?,?,?,'PENDING_DISCOVERY',NULL,NULL,?,?,0,0,0,'NOT_CONFIGURED',0,NULL,?,?)")
       .bind(id,now,now,"public_referral",null,name,card,title,summary,capability||null,estimatedValue,score,key,JSON.stringify({evidence,declared:body}).slice(0,12000),VERSION).run();
   }catch(e){if(String(e?.message||e).toLowerCase().includes("unique"))return{ok:true,accepted:false,reason:"duplicate_referral",version:VERSION};return{ok:false,error:"referral_persistence_failed",version:VERSION};}
-  await logEvent(env,id,"INBOUND_RECEIVED",`declared_match_score=${score};commission=NOT_CONFIGURED`);
-  return{ok:true,accepted:true,version:VERSION,referralId:id,status:"PENDING_DISCOVERY",attributionPreserved:true,declaredMatchScore:score,guardrails:{nonBinding:true,noPaymentPromise:true,commissionConfigured:false,noContract:true,noAutomaticContact:true}};
+  await logEvent(env,id,"INBOUND_RECEIVED",`declared_match_score=${score};commission_case=pending_planning`);
+  return{ok:true,accepted:true,version:VERSION,referralId:id,status:"PENDING_DISCOVERY",attributionPreserved:true,declaredMatchScore:score,commissionLifecycle:"managed_by_referral_commission_engine",guardrails:{nonBinding:true,noPaymentPromise:true,commissionAgreementRequired:true,noContract:true,noAutomaticContact:true}};
 }
 
 export async function reviewInboundReferrals(env){
@@ -70,7 +70,7 @@ export async function reviewInboundReferrals(env){
     await logEvent(env,r.id,status==="INBOUND_TRUSTED"?"TRUST_PASSED":"TRUST_REVIEW",`trust=${level}/${score};status=${status}`);
     results.push({referralId:r.id,status,partnerId:p.id,partnerName:p.name,trustLevel:level,trustScore:score});
   }
-  return{ok:true,version:VERSION,reviewed:results.length,results,guardrails:{automaticAcceptance:false,automaticPayment:false,commissionConfigured:false,externalContactSent:false}};
+  return{ok:true,version:VERSION,reviewed:results.length,results,commissionLifecycle:"managed_by_referral_commission_engine",guardrails:{automaticAcceptance:false,automaticPayment:false,commissionAgreementRequired:true,externalContactSent:false}};
 }
 
 export async function planOutboundReferrals(env){
@@ -86,10 +86,10 @@ export async function planOutboundReferrals(env){
     const key=(await sha256(`OUTBOUND|${r.opportunity_id}|${r.partner_id}`)).slice(0,32).toUpperCase(),id=`REF-OUT-${key.slice(0,16)}`;
     await env.DB.prepare("INSERT INTO lumen_referrals(id,direction,created_at,updated_at,source,origin_partner_id,origin_partner_name,origin_card_url,target_partner_id,target_partner_name,opportunity_id,title,summary,capability,estimated_value_usd,status,trust_score,trust_level,match_score,attribution_key,external_contact_sent,binding_allowed,spend_allowed,commission_status,settled_revenue_usd,settlement_event_id,raw_json,engine_version) VALUES(?,'OUTBOUND',?,?,?,NULL,'LUMEN',NULL,?,?,?,?,?,?,NULL,'OUTBOUND_CANDIDATE',?,?,?,?,0,0,0,'NOT_CONFIGURED',0,NULL,?,?) ON CONFLICT(attribution_key) DO UPDATE SET updated_at=excluded.updated_at,trust_score=excluded.trust_score,trust_level=excluded.trust_level,match_score=excluded.match_score,summary=excluded.summary,capability=excluded.capability,engine_version=excluded.engine_version")
       .bind(id,now,now,"commercial_opportunity",r.partner_id,r.partner_name,r.opportunity_id,clean(r.title,300),clean(r.summary,4500),cap,Number(r.trust_score||0),clean(r.trust_level,40),Number(r.match_score||0),key,JSON.stringify({commercialScore:Number(r.commercial_score||0),evidenceStrength:r.evidence_strength,offerId:r.revenue_offer_id}).slice(0,6000),VERSION).run();
-    await logEvent(env,id,"OUTBOUND_CANDIDATE_PLANNED",`target=${r.partner_name};match=${Number(r.match_score||0)};trust=${r.trust_level}/${Number(r.trust_score||0)};commission=NOT_CONFIGURED`);
+    await logEvent(env,id,"OUTBOUND_CANDIDATE_PLANNED",`target=${r.partner_name};match=${Number(r.match_score||0)};trust=${r.trust_level}/${Number(r.trust_score||0)};commission_case=pending_planning`);
     planned.push({referralId:id,opportunityId:r.opportunity_id,title:r.title,targetPartnerId:r.partner_id,target:r.partner_name,capability:cap,commercialScore:Number(r.commercial_score||0),matchScore:Number(r.match_score||0),trustLevel:r.trust_level,trustScore:Number(r.trust_score||0)});
   }
-  return{ok:true,version:VERSION,candidates:planned.length,referrals:planned.slice(0,25),guardrails:{outboundMessagesSent:0,automaticCommission:false,automaticPayment:false,bindingAllowed:false,autonomousSpend:false}};
+  return{ok:true,version:VERSION,candidates:planned.length,referrals:planned.slice(0,25),commissionLifecycle:"managed_by_referral_commission_engine",guardrails:{outboundMessagesSent:0,automaticBindingCommission:false,automaticPayment:false,bindingAllowed:false,autonomousSpend:false}};
 }
 
 export async function syncReferralSettlements(env){
@@ -101,15 +101,22 @@ export async function syncReferralSettlements(env){
     await env.DB.prepare("UPDATE lumen_referrals SET status='SETTLED',settled_revenue_usd=?,settlement_event_id=?,updated_at=? WHERE id=?").bind(amount,e.id,new Date().toISOString(),r.id).run();
     await logEvent(env,r.id,"SETTLEMENT_VERIFIED",clean(e.evidence,1000),amount,true);settled.push({referralId:r.id,revenueEventId:e.id,settledRevenueUsd:amount});
   }
-  return{ok:true,version:VERSION,settled:settled.length,results:settled,commissionStatus:"NOT_CONFIGURED",guardrails:{verifiedSettlementRequired:true,commissionNotPromised:true,automaticPayout:false}};
+  return{ok:true,version:VERSION,settled:settled.length,results:settled,commissionLifecycle:"managed_by_referral_commission_engine",guardrails:{verifiedSettlementRequired:true,explicitCommissionAgreementRequired:true,automaticPayout:false}};
+}
+
+async function commissionSummary(env){
+  try{
+    const r=await env.DB.prepare("SELECT COUNT(*) total,SUM(CASE WHEN status='BASIS_REQUIRED' THEN 1 ELSE 0 END) basisRequired,SUM(CASE WHEN status='PROPOSAL_READY' THEN 1 ELSE 0 END) proposalReady,SUM(CASE WHEN status='AGREED_PENDING_CLOSE' THEN 1 ELSE 0 END) agreed,SUM(CASE WHEN status='PAYMENT_DUE' THEN 1 ELSE 0 END) paymentDue,SUM(CASE WHEN status='SETTLED' THEN 1 ELSE 0 END) settled,COALESCE(SUM(CASE WHEN status='SETTLED' THEN settled_amount_usd ELSE 0 END),0) realized FROM lumen_referral_commissions").first();
+    return{available:true,total:Number(r?.total||0),basisRequired:Number(r?.basisRequired||0),proposalReady:Number(r?.proposalReady||0),agreedPendingClose:Number(r?.agreed||0),paymentDue:Number(r?.paymentDue||0),settled:Number(r?.settled||0),realizedCommissionRevenueUsd:Number(r?.realized||0)};
+  }catch{return{available:false,total:0,basisRequired:0,proposalReady:0,agreedPendingClose:0,paymentDue:0,settled:0,realizedCommissionRevenueUsd:0};}
 }
 
 async function stats(env){
   await ensure(env);const r=await env.DB.prepare("SELECT COUNT(*) total,SUM(CASE WHEN direction='INBOUND' THEN 1 ELSE 0 END) inbound,SUM(CASE WHEN direction='OUTBOUND' THEN 1 ELSE 0 END) outbound,SUM(CASE WHEN status='INBOUND_TRUSTED' THEN 1 ELSE 0 END) trustedInbound,SUM(CASE WHEN status='OUTBOUND_CANDIDATE' THEN 1 ELSE 0 END) outboundCandidates,SUM(CASE WHEN status='SETTLED' THEN 1 ELSE 0 END) settled,COALESCE(SUM(CASE WHEN status='SETTLED' THEN settled_revenue_usd ELSE 0 END),0) settledRevenue FROM lumen_referrals").first();
-  return json({version:VERSION,total:Number(r?.total||0),inbound:Number(r?.inbound||0),outbound:Number(r?.outbound||0),trustedInbound:Number(r?.trustedInbound||0),outboundCandidates:Number(r?.outboundCandidates||0),settled:Number(r?.settled||0),settledRevenueUsd:Number(r?.settledRevenue||0),bidirectional:true,attributionPreserved:true,commissionStatus:"NOT_CONFIGURED",autonomousReferralMessages:false,autonomousPayout:false,autonomousSpend:false,bindingActionsHumanGated:true});
+  return json({version:VERSION,total:Number(r?.total||0),inbound:Number(r?.inbound||0),outbound:Number(r?.outbound||0),trustedInbound:Number(r?.trustedInbound||0),outboundCandidates:Number(r?.outboundCandidates||0),settled:Number(r?.settled||0),settledRevenueUsd:Number(r?.settledRevenue||0),bidirectional:true,attributionPreserved:true,commissionLifecycle:"managed_by_referral_commission_engine",commission:await commissionSummary(env),autonomousReferralMessages:false,autonomousPayout:false,autonomousSpend:false,bindingActionsHumanGated:true});
 }
 
-async function policy(){return json({version:VERSION,network:"LUMEN Referral Network",mode:"non_binding_attribution",directions:["INBOUND_TO_LUMEN","OUTBOUND_TO_PARTNER"],inboundEndpoint:"/referrals/inbound",states:["PENDING_DISCOVERY","PENDING_TRUST","INBOUND_TRUSTED","BLOCKED_TRUST","OUTBOUND_CANDIDATE","SETTLED"],rules:["public_https_referrer_card_required","trust_review_required","attribution_is_preserved","no_commission_is_promised","verified_payment_settlement_required_before_revenue_credit","no_contract_or_payment_created_by_referral"],commissionStatus:"NOT_CONFIGURED",autonomousReferralMessages:false,autonomousPayout:false,autonomousSpend:false,bindingActionsHumanGated:true});}
+async function policy(){return json({version:VERSION,network:"LUMEN Referral Network",mode:"non_binding_attribution_plus_commission_collection",directions:["INBOUND_TO_LUMEN","OUTBOUND_TO_PARTNER"],inboundEndpoint:"/referrals/inbound",commissionEngine:"1.0-referral-commission-engine",commissionLifecycleEndpoint:"/referrals/commissions/policy",commissionLifecycle:"managed_by_referral_commission_engine",states:["PENDING_DISCOVERY","PENDING_TRUST","INBOUND_TRUSTED","BLOCKED_TRUST","OUTBOUND_CANDIDATE","SETTLED"],rules:["public_https_referrer_card_required","trust_review_required","attribution_is_preserved","commission_requires_explicit_agreement","deal_completion_evidence_required_before_commission_due","verified_payment_settlement_required_before_revenue_credit","no_autonomous_binding_contract_or_spend"],autonomousReferralMessages:false,autonomousPayout:false,autonomousSpend:false,bindingActionsHumanGated:true});}
 
 export async function handleReferralNetwork(request,env){
   const u=new URL(request.url);
@@ -119,6 +126,6 @@ export async function handleReferralNetwork(request,env){
   if(request.method==="POST"&&u.pathname==="/referrals/review"){if(!authorized(request,env))return json({ok:false,error:"admin_token_required"},403);return json(await reviewInboundReferrals(env),202);}
   if(request.method==="POST"&&u.pathname==="/referrals/plan-outbound"){if(!authorized(request,env))return json({ok:false,error:"admin_token_required"},403);return json(await planOutboundReferrals(env),202);}
   if(request.method==="POST"&&u.pathname==="/referrals/settlements/sync"){if(!authorized(request,env))return json({ok:false,error:"admin_token_required"},403);return json(await syncReferralSettlements(env),202);}
-  if(request.method==="GET"&&u.pathname==="/referrals/ledger"){if(!authorized(request,env))return json({ok:false,error:"admin_token_required"},403);await ensure(env);const r=await env.DB.prepare("SELECT * FROM lumen_referrals ORDER BY updated_at DESC LIMIT 150").all();return json({version:VERSION,referrals:r.results||[]});}
+  if(request.method==="GET"&&u.pathname==="/referrals/ledger"){if(!authorized(request,env))return json({ok:false,error:"admin_token_required"},403);await ensure(env);const r=await env.DB.prepare("SELECT * FROM lumen_referrals ORDER BY updated_at DESC LIMIT 150").all();return json({version:VERSION,commissionLifecycle:"managed_by_referral_commission_engine",referrals:r.results||[]});}
   return null;
 }
