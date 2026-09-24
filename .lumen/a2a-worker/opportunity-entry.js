@@ -12,6 +12,7 @@ import { handleVentureSuggestionIntake, ingestCouncilVentureSuggestions } from "
 import { handleVentureCouncil, runVentureCouncil } from "./venture-council-engine.js";
 import { handleVenturePeerReview, planVenturePeerReviews } from "./venture-peer-review.js";
 import { handleCapabilityGapEngine, recomputeCapabilityGaps } from "./capability-gap-engine.js";
+import { handlePartnerMarketplace, syncPartnerMarketplace, reviewMarketplaceInterests } from "./partner-marketplace.js";
 import { handleAgentGraph, recomputeAgentGraph } from "./agent-graph.js";
 import { handleDynamicTeamEngine, buildDynamicTeams } from "./dynamic-team-engine.js";
 import { handleRedundancyEngine, recomputeRedundancy } from "./redundancy-engine.js";
@@ -61,6 +62,7 @@ export default {
     const ventureCouncilResponse = await handleVentureCouncil(request, env); if (ventureCouncilResponse) return ventureCouncilResponse;
     const venturePeerReviewResponse = await handleVenturePeerReview(request, env); if (venturePeerReviewResponse) return venturePeerReviewResponse;
     const capabilityGapResponse = await handleCapabilityGapEngine(request, env); if (capabilityGapResponse) return capabilityGapResponse;
+    const marketplaceResponse = await handlePartnerMarketplace(request, env); if (marketplaceResponse) return marketplaceResponse;
     const agentGraphResponse = await handleAgentGraph(request, env); if (agentGraphResponse) return agentGraphResponse;
     const dynamicTeamResponse = await handleDynamicTeamEngine(request, env); if (dynamicTeamResponse) return dynamicTeamResponse;
     const redundancyResponse = await handleRedundancyEngine(request, env); if (redundancyResponse) return redundancyResponse;
@@ -80,7 +82,6 @@ export default {
       await pollRecruitmentResponses(env);
       await pollCouncilRuntime(env);
       await reviewActiveCouncilContributions(env);
-      // Rejects stay in audit logs but are removed from active peer context before another invite/synthesis.
       await sanitizeCouncilInputs(env);
       const councilRound = await runCouncilRoundManager(env, { force: false });
       const councilExternalMessageSent = Boolean(councilRound?.invite?.sent);
@@ -88,14 +89,15 @@ export default {
       await reviewPendingDelegationTasks(env);
       await pollDelegationTasks(env);
       await reviewDelegationResults(env);
-      // A semantically plausible task result still cannot integrate if it contains manipulation/exfiltration instructions.
       await sanitizeDelegationResults(env);
       await recomputeObservedReputation(env);
       await ingestCouncilVentureSuggestions(env);
       await runVentureCouncil(env);
-      // Peer reviewers are only selected internally here; this does not contact them.
       await planVenturePeerReviews(env, { limit: 6 });
       await recomputeCapabilityGaps(env);
+      // Marketplace publishes only current internal needs; reviewing inbound interest never contacts candidates.
+      await syncPartnerMarketplace(env);
+      await reviewMarketplaceInterests(env);
       await recomputeAgentGraph(env);
       await buildDynamicTeams(env);
       await recomputeRedundancy(env);
