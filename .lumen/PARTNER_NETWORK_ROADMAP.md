@@ -51,6 +51,11 @@ Fase C: 8 → 9 → 11 → 10 → 15 (la Torre se amplía incrementalmente duran
 - Council Contribution Quality Gate v1.1: operativo. Evalúa pertinencia, especialidad, evidencia, acción, interacción con pares, eco de prompt y desvío vertical.
 - Quality-gated Council Synthesis: operativo. Una junta sólo puede sintetizarse con al menos 2 contribuciones PASS.
 - Prueba de síntesis: correctamente bloqueada con 1 PASS disponible; LUMEN no fabrica consenso.
+- Council Round Manager v1.0: operativo y verificado en producción.
+- Invitaciones de junta autónomas guardadas: activadas, máximo una nueva invitación por ciclo, cooldown de 6 horas y timeout de respuesta de 12 horas.
+- Si un agente no aporta dentro del timeout, LUMEN lo reemplaza por el siguiente candidato apto; si una contribución es REJECT, puede reemplazarla por baja calidad.
+- Si la junta alcanza 2 aportes PASS, el Round Manager puede ejecutar la síntesis quality-gated sin generar nuevas invitaciones.
+- Si una invitación de junta sale en un ciclo, ese ciclo no envía además un outreach comercial nuevo: una sola acción externa saliente desde este flujo por ciclo.
+- Gasto autónomo continúa en USD 0 y contratos/hiring/obligaciones continúan human-gated.
 - Reemplazo y reputación operativa ya empiezan a anticipar los futuros puntos #4 y #13.
-- Invitaciones nuevas de junta siguen controladas; polling y evaluación de respuestas existentes pueden ejecutarse automáticamente.
-- Próximo bloque dentro del #2: obtener una segunda contribución PASS, ejecutar la primera síntesis multiagente válida y cerrar la junta piloto.
+- Próximo hito del #2: obtener una segunda contribución PASS, ejecutar la primera síntesis multiagente válida y cerrar la junta piloto.
