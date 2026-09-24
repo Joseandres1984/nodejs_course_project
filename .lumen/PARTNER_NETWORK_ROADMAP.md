@@ -36,7 +36,6 @@ Fase C: 8 → 9 → 11 → 10 → 15 (la Torre se amplía incrementalmente duran
 - Partner Discovery: operativo.
 - Capability Registry: operativo.
 - Council Builder / Partner Matching v1.3: operativo, no vinculante y preparado para reputación observada confidence-aware.
-- Partner Venture Board: operativo.
 - Recruitment Engine v1.0.1: operativo, con primer contacto real enviado a un candidato fuerte.
 - Reclutamiento autónomo continuo: desactivado hasta validar calidad de respuestas y cadencia.
 - Council Runtime v1.0: operativo en fase inicial.
@@ -44,49 +43,60 @@ Fase C: 8 → 9 → 11 → 10 → 15 (la Torre se amplía incrementalmente duran
 - AUX Evidence and Certification: contribución real recibida y Quality Gate PASS 71.
 - PHION: detectado como PARTIAL_DISCOVERY_ONLY y reemplazado sin romper la sala.
 - GAIP Opportunity & Procurement Broker: seleccionado como fallback, pero el runtime rechazó el formato de envío; quedó registrado como evidencia operativa.
-- Packrift A2A Packaging Procurement Router: respondió por A2A y llevó la sala a DELIBERATING, pero el Contribution Quality Gate v1.1 detectó eco de prompt + vertical fuera de foco y lo marcó REJECT 0.
-- Reemplazo por baja calidad: operativo. Packrift fue sustituido por InsightBind Sales Agent sin perder el contexto de la junta.
+- Packrift A2A Packaging Procurement Router: respondió por A2A, pero el Contribution Quality Gate v1.1 detectó eco de prompt + vertical fuera de foco y lo marcó REJECT 0.
 - InsightBind Sales Agent: invitación enviada; por ahora sólo hay acuse técnico, sin contribución de contenido.
-- Council Contribution Quality Gate v1.1: operativo. Evalúa pertinencia, especialidad, evidencia, acción, interacción con pares, eco de prompt y desvío vertical.
-- Quality-gated Council Synthesis: operativo. Una junta sólo puede sintetizarse con al menos 2 contribuciones PASS.
-- Prueba de síntesis: correctamente bloqueada con 1 PASS disponible; LUMEN no fabrica consenso.
-- Council Round Manager v1.0: operativo y verificado en producción.
-- Invitaciones de junta autónomas guardadas: activadas, máximo una nueva invitación por ciclo, cooldown de 6 horas y timeout de respuesta de 12 horas.
-- Si un agente no aporta dentro del timeout, LUMEN lo reemplaza por el siguiente candidato apto; si una contribución es REJECT, puede reemplazarla por baja calidad.
-- Si la junta alcanza 2 aportes PASS, el Round Manager puede ejecutar la síntesis quality-gated sin generar nuevas invitaciones.
-- Si una invitación de junta sale en un ciclo, ese ciclo no envía además un outreach comercial nuevo: una sola acción externa saliente desde este flujo por ciclo.
+- Council Contribution Quality Gate v1.1: operativo.
+- Quality-gated Council Synthesis: sólo sintetiza con al menos 2 contribuciones PASS.
+- Council Round Manager v1.0: operativo, con cooldown 6 h, timeout 12 h y máximo una invitación nueva por ciclo.
 
 ### #3 Delegación de tareas
-- Delegation Engine v1.0: instalada y operativa en modo planner interno.
-- Sólo puede generar tareas desde una sala SYNTHESIZED con al menos 2 contribuciones PASS.
-- Cada tarea incluye rol, objetivo, entregable esperado, exigencia de evidencia y guardrails de no gasto/no contrato.
-- Delegation Task Quality Gate v1.0: operativo. PLANNED no es despachable; sólo APPROVED_FOR_DISPATCH puede llegar al runtime.
-- Delegation Runtime v1.1: instalado. Puede despachar y seguir tareas A2A no vinculantes y de gasto cero, pero A2A_AUTONOMOUS_DELEGATION permanece desactivado durante el piloto.
-- Delegation Result Quality Gate v1.0: operativo. Un resultado recibido no se integra automáticamente; debe alcanzar RESULT_PASS.
-- Cadena preparada: SYNTHESIS → TASK PLAN → TASK QUALITY → APPROVED_FOR_DISPATCH → DISPATCH → RESULT → RESULT QUALITY → RESULT_PASS → integración.
-- Smoke de seguridad del #3: SUCCESS. Sala DELIBERATING bloqueada correctamente, 0 tareas creadas, task gate exige APPROVED_FOR_DISPATCH, result gate exige RESULT_PASS y dispatch continúa autonomous_delegation_disabled.
+- Delegation Engine v1.0: operativa como planner interno desde una sala SYNTHESIZED con al menos 2 PASS.
+- Delegation Task Quality Gate v1.0: PLANNED no es despachable; sólo APPROVED_FOR_DISPATCH puede llegar al runtime.
+- Delegation Runtime v1.1: instalado y con A2A_AUTONOMOUS_DELEGATION desactivado durante el piloto.
+- Delegation Result Quality Gate v1.0: un resultado sólo se integra si alcanza RESULT_PASS.
+- Cadena: SYNTHESIS → TASK PLAN → TASK QUALITY → APPROVED_FOR_DISPATCH → DISPATCH → RESULT → RESULT QUALITY → RESULT_PASS → integración.
 
 ### #4 Reputación basada en hechos
-- Observed Partner Reputation v1.0: operativo y recomputado desde evidencia real de runtime/juntas/delegaciones.
-- Mantiene separada la reputación declarada del Agent Card de la reputación observada por LUMEN.
-- Primera medición: 32 partners registrados y 5 con evidencia operativa real.
-- AUX: observed 73 / confidence 18.
-- Packrift: observed 23 / confidence 27.
-- PHION: observed 26 / confidence 18.
-- GAIP: observed 26 / confidence 18.
-- InsightBind: observed 45 / confidence 9 mientras espera respuesta de contenido.
-- Todavía ningún partner alcanza confidence 30, por lo que la reputación observada NO modifica aún las selecciones.
-- Partner Matching v1.3 aplica un blend conservador sólo desde confidence >= 30 y limita el peso observado a un máximo del 45% de la componente reputacional.
-- Esto permite que la experiencia real gane peso gradualmente sin sobreajustar por uno o dos eventos.
+- Observed Partner Reputation v1.0: operativo desde evidencia real de runtime/juntas/delegaciones.
+- Primera medición: AUX 73/confidence 18; Packrift 23/27; PHION 26/18; GAIP 26/18; InsightBind 45/9.
+- Confidence <30 no altera todavía el matching. Desde confidence >=30 entra gradualmente, con peso máximo 45% de la componente reputacional.
+
+### #5 Venture Council
+- Partner Venture Board + Venture Suggestion Intake v1.1 + Venture Council v1.1: operativos.
+- Una idea proveniente de una junta sólo puede ingresar si la contribución fuente fue PASS y contiene lenguaje explícito de oportunidad de negocio.
+- El primer intento derivado de Packrift fue revocado automáticamente al comprobarse que su contribución fuente era REJECT 0.
+- AUX PASS no había propuesto una idea comercial explícita, por lo que no se inventó ninguna.
+- Los Venture Cases generan experimentos internos de costo USD 0, sin contacto externo ni compromiso vinculante.
+
+### #6 Capability Gap Engine
+- Capability Gap Engine v1.0: operativo y conectado al ciclo interno.
+- Primera recomputación real: 48 necesidades evaluadas; OPEN 0; WEAK_COVERAGE 48; COVERED 0; prioridad máxima 81.
+- Interpretación: existen candidatos declarados para todas las capacidades actuales, pero todavía ninguno tiene suficiente evidencia observada/confianza para considerar la capacidad sólidamente cubierta.
+- No realiza contacto de reclutamiento automático; produce una cola interna de necesidades y búsquedas sugeridas.
+
+### #7 Agent Graph
+- Agent Graph v1.0: operativo y observational-only.
+- Primera red: 32 nodos, 15 relaciones observadas, 0 combinaciones todavía probadas como positivas, 12 combinaciones riesgosas y mejor afinidad 53.
+- Las relaciones suben sólo con resultados conjuntos buenos y bajan con REJECT/fallas/reemplazos; ausencia de historial usa neutralidad, no confianza inventada.
+
+### #12 Equipos dinámicos
+- Dynamic Team Engine v1.1: operativo en modo internal draft only.
+- Primera corrida: 4 oportunidades evaluadas y 4 equipos construidos; 2 agentes con fallas de runtime fueron excluidos automáticamente.
+- SCVD: BerrerGate/verificación + AUX/sourcing + Agent Pulse/research; team score 84, cobertura 100%, graph affinity 51.
+- Mejor team score de la corrida: 86; afinidad promedio 51.
+- No envía invitaciones, no contrata y no gasta: externalInvitesSent=false, autonomousHiring=false, autonomousSpend=false.
 
 ## Guardrails activos
 - Gasto autónomo continúa en USD 0.
 - Contratos/hiring/compras/deuda/obligaciones continúan human-gated.
 - Delegación autónoma externa permanece OFF durante el piloto.
 - Reputación observada no sustituye de golpe la reputación declarada: usa confianza acumulativa.
+- Venture ideas derivadas de juntas heredan el Quality Gate de su contribución fuente.
+- Dynamic Teams son borradores internos hasta validar redundancia y Trust Layer.
 
 ## Próximos hitos
 - #2: obtener una segunda contribución PASS, ejecutar la primera síntesis multiagente válida y cerrar la junta piloto.
-- #3: generar automáticamente el primer paquete real de tareas, pasarlo por Task Quality Gate y hacer una primera delegación controlada.
-- #4: acumular evidencia hasta superar confidence 30 en partners reales y validar que el blend mejore la selección.
-- #5: profundizar Venture Council para convertir ideas de agentes en oportunidades investigables y puntuadas.
+- #3: generar el primer paquete real de tareas y hacer una primera delegación controlada cuando el #2 cierre válidamente.
+- #4: superar confidence 30 con evidencia real y validar el blend.
+- #13: crear banco de suplentes y reemplazo interno por rol/tarea ante fallas.
+- #14: fortalecer identidad, coherencia, permisos y defensa ante agentes maliciosos o manipuladores.
