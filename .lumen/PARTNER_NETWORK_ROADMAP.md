@@ -59,8 +59,10 @@ Fase C: 8 → 9 → 11 → 10 → 15 (la Torre se amplía incrementalmente duran
 - Delegation Engine v1.0: instalada y operativa en modo planner interno.
 - La Delegation Engine sólo puede generar tareas desde una sala SYNTHESIZED con al menos 2 contribuciones PASS; cada tarea incluye rol, objetivo, entregable esperado, exigencia de evidencia y guardrails de no gasto/no contrato.
 - La planificación de delegación se ejecutará automáticamente de forma interna cuando aparezca una nueva síntesis válida; no envía tareas externas por sí sola.
-- Delegación autónoma externa: desactivada durante el piloto. Prueba live correcta: con la sala aún DELIBERATING respondió room_not_synthesized y creó 0 tareas.
+- Delegation Runtime v1.0: instalado. Puede despachar y seguir tareas A2A no vinculantes y de gasto cero, pero la llave A2A_AUTONOMOUS_DELEGATION permanece desactivada durante el piloto.
+- El runtime puede observar/pollear tareas ya despachadas sin crear nuevos envíos; cualquier dispatch sigue bloqueado mientras la llave de delegación esté apagada.
+- Smoke test del #3: planner y runtime desplegados; sala DELIBERATING bloqueada correctamente, 0 tareas creadas y dispatch devolvió autonomous_delegation_disabled sin enviar nada.
 - Gasto autónomo continúa en USD 0 y contratos/hiring/obligaciones continúan human-gated.
 - Reemplazo y reputación operativa ya empiezan a anticipar los futuros puntos #4 y #13.
 - Próximo hito del #2: obtener una segunda contribución PASS, ejecutar la primera síntesis multiagente válida y cerrar la junta piloto.
-- Próximo hito del #3: una vez sintetizada la junta, generar el primer paquete real de tareas y validar su calidad antes de habilitar cualquier dispatch externo.
+- Próximo hito del #3: una vez sintetizada la junta, generar el primer paquete real de tareas, revisar su calidad y recién entonces habilitar una primera delegación controlada.
