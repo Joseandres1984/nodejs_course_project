@@ -94,6 +94,18 @@ Fase C: 8 → 9 → 11 → 10 → 15 (la Torre se amplía incrementalmente duran
 - No hay contratación, contacto saliente ni pago automático desde el Marketplace.
 - Smoke del Marketplace y del catálogo agregado: SUCCESS. Intereses reales actuales: 0; no se cargaron postulantes sintéticos.
 
+### #9 Referral Network
+- Referral Network v1.0: operativo y conectado al ciclo horario.
+- Es bidireccional: acepta referrals INBOUND_TO_LUMEN mediante Agent Card HTTPS pública y prepara OUTBOUND_TO_PARTNER desde oportunidades comerciales reales.
+- Cada referral conserva attribution_key, origen, destino, oportunidad, capacidad, Trust, match, estado y revenue settled asociado.
+- Inbound pasa por PENDING_DISCOVERY → PENDING_TRUST → INBOUND_TRUSTED o BLOCKED_TRUST. No hay aceptación automática ni contacto automático.
+- Outbound se crea únicamente desde oportunidades commercially_actionable/no-test con commercial score >=60, partner match >=70 y Trust ALLOW/CAUTION limpio.
+- Primer candidato outbound real: SCVD Evidence Agent → Attestly / verification; commercial score 71, match 79, Trust CAUTION 60.
+- Ese candidato quedó en OUTBOUND_CANDIDATE; outboundMessagesSent=0. No se envió ninguna derivación automáticamente.
+- Ingresos de referral sólo pasan a SETTLED cuando existe lumen_revenue_events payment_settled + verified enlazado al referral.
+- Commission status permanece NOT_CONFIGURED: la atribución se registra, pero no existe promesa ni pago automático de comisión.
+- Smoke Referral Network: SUCCESS. Estado inicial: 1 outbound candidate, 0 inbound, 0 settlements, USD 0 settled referral revenue.
+
 ### #12 Equipos dinámicos
 - Dynamic Team Engine v1.1: operativo en modo internal draft only.
 - Forma equipos por oportunidad usando capacidades, reputación y Agent Graph sin invitar, contratar ni gastar.
@@ -121,15 +133,16 @@ Fase C: 8 → 9 → 11 → 10 → 15 (la Torre se amplía incrementalmente duran
 - Venture ideas derivadas de juntas heredan el Quality Gate de su contribución fuente.
 - Venture Experiments requieren peer review independiente y permanecen de costo USD 0/no vinculantes durante el piloto.
 - Dynamic Teams son borradores internos.
-- Council invites, delegation y Marketplace matching están Trust-gated.
-- Marketplace inbound es público pero siempre no vinculante y no solicita secretos/credenciales.
+- Council invites, delegation, Marketplace matching y Referral review están Trust-gated.
+- Marketplace inbound y Referral inbound son públicos pero siempre no vinculantes y no solicitan secretos/credenciales.
+- Referral attribution no implica comisión; cualquier reparto futuro requiere política explícita, revenue settled verificado y guardrails de pago.
 
 ## Próximos hitos
 - #2: obtener una segunda contribución PASS, ejecutar la primera síntesis multiagente válida y cerrar la junta piloto.
 - #3: generar el primer paquete real de tareas y hacer una primera delegación controlada cuando el #2 cierre válidamente.
 - #4: superar confidence 30 con evidencia real y validar el blend.
 - #5: recibir la primera idea comercial explícita desde una contribución PASS, someterla a dos peer reviews y validar el primer experimento de costo cero.
-- #9: construir Referral Network bidireccional con atribución, Trust Gate y comisión únicamente propuesta/no vinculante hasta aprobación.
-- #11: Negotiator para comparar alcance/precio/calidad/tiempo antes de cualquier contratación.
+- #9: recibir el primer referral inbound real o validar una derivación outbound controlada; comisión sigue NOT_CONFIGURED.
+- #11: Negotiator para comparar alcance/precio/calidad/tiempo antes de cualquier contratación o derivación con condiciones económicas.
 - #10: economía entre agentes y micropagos sólo después de validar Referral + Negotiator y manteniendo human gate para gasto.
 - #15: ampliar la Torre de Control con red, marketplace, referrals, tareas, trust, reputación y revenue verificado.
