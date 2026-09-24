@@ -1,4 +1,4 @@
-const VERSION = "1.0-x402-revenue-bridge";
+const VERSION = "1.1-x402-revenue-bridge-referral-aware";
 
 function json(data, status = 200) {
   return Response.json(data, { status, headers: { "cache-control": "no-store", "x-content-type-options": "nosniff", "access-control-allow-origin": "*" } });
@@ -40,7 +40,9 @@ function conversionIds(meta) {
   return {
     proposalId: clean(conversion.session_id || conversion.conversion_session || root.proposalId || root.proposal_id, 180) || null,
     opportunityId: clean(conversion.event_id || conversion.conversion_event || root.opportunityId || root.opportunity_id, 180) || null,
-    offerId: clean(conversion.campaign || root.offerId || root.offer_id, 180) || null
+    offerId: clean(conversion.campaign || root.offerId || root.offer_id, 180) || null,
+    referralId: clean(root.referral_id || root.referralId, 180) || null,
+    commissionId: clean(root.commission_id || root.commissionId, 180) || null
   };
 }
 
@@ -48,10 +50,13 @@ async function resolveIds(env, receipt) {
   const ids = conversionIds(receipt.request_metadata);
   let proposal = null;
   if (ids.proposalId) proposal = await safeFirst(env, "SELECT proposal_id,opportunity_id,offer_id FROM lumen_proposal_drafts WHERE proposal_id=? LIMIT 1", [ids.proposalId]);
+  const isReferralCommission = clean(receipt.product_id, 180) === "REFERRAL-COMMISSION" && Boolean(ids.referralId);
   const proposalId = proposal?.proposal_id || null;
   const opportunityId = proposal?.opportunity_id || ids.opportunityId || null;
   const offerId = proposal?.offer_id || ids.offerId || clean(receipt.product_id, 180) || null;
-  return { proposalId, opportunityId, offerId };
+  const itemId = isReferralCommission ? ids.referralId : (proposalId || offerId || clean(receipt.product_id, 180) || receipt.id);
+  const bridgeStatus = isReferralCommission ? "REFERRAL_ATTRIBUTABLE" : (proposalId ? "ATTRIBUTABLE" : "SETTLED_UNLINKED_PROPOSAL");
+  return { proposalId, opportunityId, offerId, referralId: ids.referralId, commissionId: ids.commissionId, itemId, bridgeStatus, isReferralCommission };
 }
 
 export async function syncX402SettlementsToRevenue(env) {
@@ -73,33 +78,38 @@ export async function syncX402SettlementsToRevenue(env) {
       lumen: {
         proposalId: ids.proposalId,
         opportunityId: ids.opportunityId,
-        offerId: ids.offerId
+        offerId: ids.offerId,
+        referralId: ids.referralId,
+        commissionId: ids.commissionId
       },
       attribution: {
-        rule: "settled_verified_x402_receipt_with_exact_conversion_identifiers",
-        proposalExact: Boolean(ids.proposalId)
+        rule: ids.isReferralCommission
+          ? "settled_verified_x402_referral_commission_with_exact_referral_identifier"
+          : "settled_verified_x402_receipt_with_exact_conversion_identifiers",
+        proposalExact: Boolean(ids.proposalId),
+        referralExact: Boolean(ids.referralId)
       }
     };
     if (!existing) {
       await env.DB.prepare("INSERT OR IGNORE INTO lumen_revenue_events(id,created_at,event_type,source,item_id,amount_usd,status,evidence,metadata) VALUES(?,?,'payment_settled','x402',?,?, 'verified',?,?)")
-        .bind(eventId,receipt.created_at || new Date().toISOString(),ids.proposalId || ids.offerId || receipt.product_id || receipt.id,Math.max(0,Number(receipt.amount_usd || 0)),`x402_receipt:${receipt.id}`,JSON.stringify(eventMeta)).run();
+        .bind(eventId,receipt.created_at || new Date().toISOString(),ids.itemId,Math.max(0,Number(receipt.amount_usd || 0)),`x402_receipt:${receipt.id}`,JSON.stringify(eventMeta)).run();
     }
     await env.DB.prepare("INSERT OR IGNORE INTO lumen_x402_revenue_bridge(receipt_id,revenue_event_id,created_at,proposal_id,opportunity_id,offer_id,amount_usd,bridge_status,engine_version) VALUES(?,?,?,?,?,?,?,?,?)")
-      .bind(receipt.id,eventId,new Date().toISOString(),ids.proposalId,ids.opportunityId,ids.offerId,Math.max(0,Number(receipt.amount_usd || 0)),ids.proposalId ? "ATTRIBUTABLE" : "SETTLED_UNLINKED_PROPOSAL",VERSION).run();
-    results.push({ receiptId: receipt.id, revenueEventId: eventId, amountUsd: Number(receipt.amount_usd || 0), proposalId: ids.proposalId, opportunityId: ids.opportunityId, offerId: ids.offerId, status: ids.proposalId ? "ATTRIBUTABLE" : "SETTLED_UNLINKED_PROPOSAL" });
+      .bind(receipt.id,eventId,new Date().toISOString(),ids.proposalId,ids.opportunityId,ids.offerId,Math.max(0,Number(receipt.amount_usd || 0)),ids.bridgeStatus,VERSION).run();
+    results.push({ receiptId: receipt.id, revenueEventId: eventId, amountUsd: Number(receipt.amount_usd || 0), proposalId: ids.proposalId, opportunityId: ids.opportunityId, offerId: ids.offerId, referralId: ids.referralId, commissionId: ids.commissionId, itemId: ids.itemId, status: ids.bridgeStatus });
   }
-  return { ok: true, version: VERSION, processed: results.length, attributable: results.filter(x => x.proposalId).length, results: results.slice(0,50), guardrails: { settledVerifiedOnly: true, noUnverifiedRevenue: true, autonomousSpend: false, bindingActionsHumanGated: true } };
+  return { ok: true, version: VERSION, processed: results.length, attributable: results.filter(x => ["ATTRIBUTABLE","REFERRAL_ATTRIBUTABLE"].includes(x.status)).length, referralAttributable: results.filter(x => x.status === "REFERRAL_ATTRIBUTABLE").length, results: results.slice(0,50), guardrails: { settledVerifiedOnly: true, exactReferralAttribution: true, noUnverifiedRevenue: true, autonomousSpend: false, bindingActionsHumanGated: true } };
 }
 
 async function statsData(env) {
   await ensureSchema(env);
-  const row = await safeFirst(env, "SELECT COUNT(*) total,SUM(CASE WHEN bridge_status='ATTRIBUTABLE' THEN 1 ELSE 0 END) attributable,COALESCE(SUM(amount_usd),0) revenue FROM lumen_x402_revenue_bridge");
-  return { bridgedSettlements: Number(row?.total || 0), attributableSettlements: Number(row?.attributable || 0), bridgedRevenueUsd: Number(row?.revenue || 0) };
+  const row = await safeFirst(env, "SELECT COUNT(*) total,SUM(CASE WHEN bridge_status IN ('ATTRIBUTABLE','REFERRAL_ATTRIBUTABLE') THEN 1 ELSE 0 END) attributable,SUM(CASE WHEN bridge_status='REFERRAL_ATTRIBUTABLE' THEN 1 ELSE 0 END) referral_attributable,COALESCE(SUM(amount_usd),0) revenue FROM lumen_x402_revenue_bridge");
+  return { bridgedSettlements: Number(row?.total || 0), attributableSettlements: Number(row?.attributable || 0), referralAttributableSettlements: Number(row?.referral_attributable || 0), bridgedRevenueUsd: Number(row?.revenue || 0) };
 }
 
 export async function handleX402RevenueBridge(request, env) {
   const url = new URL(request.url);
-  if (request.method === "GET" && url.pathname === "/x402-revenue-bridge/policy") return json({ version: VERSION, truthRule: "only_settled_verified_x402_receipts_become_verified_revenue_events", exactProposalAttributionPreferred: true, autonomousSpend: false, bindingActionsHumanGated: true });
+  if (request.method === "GET" && url.pathname === "/x402-revenue-bridge/policy") return json({ version: VERSION, truthRule: "only_settled_verified_x402_receipts_become_verified_revenue_events", exactProposalAttributionPreferred: true, exactReferralAttribution: true, referralCommissionProductId: "REFERRAL-COMMISSION", autonomousSpend: false, bindingActionsHumanGated: true });
   if (request.method === "GET" && url.pathname === "/x402-revenue-bridge/stats") return json({ version: VERSION, ...await statsData(env) });
   if (request.method === "POST" && url.pathname === "/x402-revenue-bridge/sync") {
     if (!authorized(request, env)) return json({ ok: false, error: "admin_token_required" }, 403);
