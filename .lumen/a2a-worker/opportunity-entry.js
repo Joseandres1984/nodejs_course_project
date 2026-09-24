@@ -9,6 +9,7 @@ import { handlePartnerNetwork, runPartnerDiscovery } from "./partner-network.js"
 import { handlePartnerCouncilQuality, buildQualityPartnerMatches } from "./partner-council-quality.js";
 import { handlePartnerVentureBoard } from "./partner-venture-board.js";
 import { handleRecruitmentEngine, pollRecruitmentResponses } from "./recruitment-engine.js";
+import { handleCouncilReplacement } from "./council-replacement.js";
 import { handleCouncilJsonRpcFallback } from "./council-jsonrpc-fallback.js";
 import { handleCouncilTransportRecovery } from "./council-transport-recovery.js";
 import { handleCouncilRuntime, pollCouncilRuntime } from "./council-runtime.js";
@@ -36,6 +37,9 @@ export default {
     const recruitmentResponse = await handleRecruitmentEngine(request, env);
     if (recruitmentResponse) return recruitmentResponse;
 
+    const councilReplacementResponse = await handleCouncilReplacement(request, env);
+    if (councilReplacementResponse) return councilReplacementResponse;
+
     const councilJsonRpcResponse = await handleCouncilJsonRpcFallback(request, env);
     if (councilJsonRpcResponse) return councilJsonRpcResponse;
 
@@ -62,23 +66,18 @@ export default {
       await runOpportunityScan(env, { trigger: "cloudflare_cron", scheduledTime: controller?.scheduledTime || null });
       await runCommercialReassessment(env);
 
-      // Partner discovery is intentionally slower than commercial discovery: every 6 hours.
-      // Matching is local/D1-only and can refresh each commercial cycle.
       const scheduledAt = new Date(controller?.scheduledTime || Date.now());
       if (scheduledAt.getUTCHours() % 6 === 0) {
         await runPartnerDiscovery(env, { trigger: "cloudflare_cron", scheduledTime: controller?.scheduledTime || null });
       }
       await buildQualityPartnerMatches(env);
 
-      // Existing recruitment and council tasks may be polled autonomously.
-      // New recruitment invites and new council invitations remain separately human/admin gated.
       await pollRecruitmentResponses(env);
       await pollCouncilRuntime(env);
 
       await prepareTopProposal(env);
       await reviewNextProposal(env);
 
-      // First observe existing commercial conversations. Then prefer a due follow-up over a new cold outreach.
       await pollOutstandingResponses(env);
       const followup = await processFollowupCycle(env);
       if (!followup?.send?.sent) {
