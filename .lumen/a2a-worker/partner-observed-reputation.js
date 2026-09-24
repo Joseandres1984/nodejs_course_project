@@ -1,4 +1,4 @@
-const VERSION = "1.0-observed-partner-reputation";
+const VERSION = "1.1-observed-partner-reputation";
 
 function json(data,status=200){return Response.json(data,{status,headers:{"cache-control":"no-store","x-content-type-options":"nosniff","access-control-allow-origin":"*"}});}
 function clean(v,n=8000){return String(v??"").trim().replace(/\s+/g," ").slice(0,n);}
@@ -19,6 +19,7 @@ async function ensureSchema(env){
 async function safeAll(env,sql,bind=[]){
   try{const stmt=env.DB.prepare(sql);const r=bind.length?await stmt.bind(...bind).all():await stmt.all();return r.results||[];}catch{return[];}
 }
+async function safeFirst(env,sql,bind=[]){try{const s=env.DB.prepare(sql);return bind.length?await s.bind(...bind).first():await s.first();}catch{return null;}}
 
 function responsivenessScore(latencies,invitedNoResponse){
   const xs=latencies.filter(x=>Number.isFinite(x));
@@ -27,6 +28,11 @@ function responsivenessScore(latencies,invitedNoResponse){
   let score=h<=1?95:h<=6?85:h<=12?72:h<=24?58:h<=48?42:30;
   score-=Math.min(25,invitedNoResponse*8);
   return Math.round(clamp(score));
+}
+
+function combineConfidence(a,b){
+  const x=clamp(a),y=clamp(b);
+  return Math.round(clamp(100-((100-x)*(100-y))/100));
 }
 
 export async function recomputeObservedReputation(env){
@@ -39,6 +45,7 @@ export async function recomputeObservedReputation(env){
     const runtimeObs=await safeAll(env,"SELECT status,capability FROM lumen_partner_runtime_observations WHERE partner_id=?",[p.id]);
     const delegationQ=await safeAll(env,"SELECT q.score,q.status FROM lumen_delegation_result_quality q JOIN lumen_delegation_tasks d ON d.id=q.task_id WHERE d.partner_id=?",[p.id]);
     const delegationTasks=await safeAll(env,"SELECT status,dispatched_at,completed_at FROM lumen_delegation_tasks WHERE partner_id=?",[p.id]);
+    const econ=await safeFirst(env,"SELECT economic_score,economic_confidence,verified_revenue_usd,verified_settlements,verified_referral_settlements FROM lumen_partner_economic_performance WHERE partner_id=? LIMIT 1",[p.id]);
 
     const councilScores=councilQ.map(x=>Number(x.score)).filter(Number.isFinite);
     const delegationScores=delegationQ.map(x=>Number(x.score)).filter(Number.isFinite);
@@ -62,19 +69,30 @@ export async function recomputeObservedReputation(env){
     const invitedNoResponse=members.filter(x=>['INVITED','WAITING_TASK'].includes(String(x.room_status||''))&&!x.last_response_at).length;
     const responsiveness=responsivenessScore(latencies,invitedNoResponse);
 
-    const evidenceEvents=councilQ.length+delegationQ.length+runtimeObs.length+members.filter(x=>x.last_message_at||x.last_response_at||['FAILED','REPLACED','LOW_QUALITY_REPLACED','CONTRIBUTED'].includes(String(x.room_status||''))).length+delegationTasks.filter(x=>x.dispatched_at||['FAILED','RESULT_PASS','RESULT_REJECTED','RESULT_WEAK'].includes(String(x.status||''))).length;
-    const passEvents=councilPass+delegationPass+members.filter(x=>x.room_status==='CONTRIBUTED').length+delegationTasks.filter(x=>x.status==='RESULT_PASS').length;
+    const operationalEvidenceEvents=councilQ.length+delegationQ.length+runtimeObs.length+members.filter(x=>x.last_message_at||x.last_response_at||['FAILED','REPLACED','LOW_QUALITY_REPLACED','CONTRIBUTED'].includes(String(x.room_status||''))).length+delegationTasks.filter(x=>x.dispatched_at||['FAILED','RESULT_PASS','RESULT_REJECTED','RESULT_WEAK'].includes(String(x.status||''))).length;
+    const economicScore=econ?Number(econ.economic_score||50):50;
+    const economicConfidence=econ?Number(econ.economic_confidence||0):0;
+    const economicSettlements=econ?Number(econ.verified_settlements||0):0;
+    const economicRevenue=econ?Number(econ.verified_revenue_usd||0):0;
+    const economicReferrals=econ?Number(econ.verified_referral_settlements||0):0;
+    const evidenceEvents=operationalEvidenceEvents+economicSettlements;
+    const passEvents=councilPass+delegationPass+members.filter(x=>x.room_status==='CONTRIBUTED').length+delegationTasks.filter(x=>x.status==='RESULT_PASS').length+economicSettlements;
     const failEvents=fail;
-    const confidence=Math.round(clamp(evidenceEvents*9,0,100));
+    const operationalConfidence=Math.round(clamp(operationalEvidenceEvents*9,0,100));
+    const confidence=combineConfidence(operationalConfidence,economicConfidence);
 
     const components=[];
     if(councilQ.length)components.push([councilScore,0.36]);
     if(delegationQ.length)components.push([delegationScore,0.39]);
     if(members.length||runtimeObs.length||delegationTasks.length)components.push([reliabilityScore,0.16]);
     if(latencies.length||invitedNoResponse)components.push([responsiveness,0.09]);
-    let observed=50;
-    if(components.length){const w=components.reduce((a,x)=>a+x[1],0);observed=components.reduce((a,x)=>a+x[0]*x[1],0)/w;}
-    observed-=Math.min(24,runtimeFail*8);
+    let operationalObserved=50;
+    if(components.length){const w=components.reduce((a,x)=>a+x[1],0);operationalObserved=components.reduce((a,x)=>a+x[0]*x[1],0)/w;}
+    operationalObserved-=Math.min(24,runtimeFail*8);
+    operationalObserved=clamp(operationalObserved);
+
+    const economicWeight=economicSettlements>0?Math.min(0.20,clamp(economicConfidence)/100*0.20):0;
+    const observed=operationalObserved*(1-economicWeight)+economicScore*economicWeight;
     const score=Math.round(clamp(observed));
 
     const reasons=[];
@@ -84,20 +102,21 @@ export async function recomputeObservedReputation(env){
     if(roomFail)reasons.push(`council_failures_or_replacements:${roomFail}`);
     if(invitedNoResponse)reasons.push(`pending_no_response:${invitedNoResponse}`);
     if(latencies.length)reasons.push(`observed_response_samples:${latencies.length}`);
+    if(economicSettlements>0)reasons.push(`verified_economic_performance:score=${economicScore};confidence=${economicConfidence};settlements=${economicSettlements};revenue_usd=${economicRevenue.toFixed(2)};referrals=${economicReferrals};weight_pct=${Math.round(economicWeight*100)}`);
 
     const now=new Date().toISOString();
     await env.DB.prepare("INSERT INTO lumen_partner_observed_reputation(partner_id,score,confidence,council_score,delegation_score,reliability_score,responsiveness_score,evidence_events,pass_events,fail_events,updated_at,reasons_json,engine_version) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(partner_id) DO UPDATE SET score=excluded.score,confidence=excluded.confidence,council_score=excluded.council_score,delegation_score=excluded.delegation_score,reliability_score=excluded.reliability_score,responsiveness_score=excluded.responsiveness_score,evidence_events=excluded.evidence_events,pass_events=excluded.pass_events,fail_events=excluded.fail_events,updated_at=excluded.updated_at,reasons_json=excluded.reasons_json,engine_version=excluded.engine_version")
       .bind(p.id,score,confidence,councilScore,delegationScore,reliabilityScore,responsiveness,evidenceEvents,passEvents,failEvents,now,JSON.stringify(reasons),VERSION).run();
-    outputs.push({partnerId:p.id,name:p.name,declaredReputation:Number(p.reputation_score||0),compatibility:Number(p.compatibility_score||0),observedScore:score,confidence,evidenceEvents,passEvents,failEvents,councilScore,delegationScore,reliabilityScore,responsivenessScore:responsiveness,reasons});
+    outputs.push({partnerId:p.id,name:p.name,declaredReputation:Number(p.reputation_score||0),compatibility:Number(p.compatibility_score||0),observedScore:score,confidence,operationalConfidence,evidenceEvents,passEvents,failEvents,councilScore,delegationScore,reliabilityScore,responsivenessScore:responsiveness,economicScore,economicConfidence,economicWeightPercent:Math.round(economicWeight*100),verifiedRevenueUsd:economicRevenue,verifiedSettlements:economicSettlements,verifiedReferralSettlements:economicReferrals,reasons});
   }
   outputs.sort((a,b)=>b.confidence-a.confidence||b.observedScore-a.observedScore);
-  return{ok:true,version:VERSION,partners:outputs.length,withEvidence:outputs.filter(x=>x.evidenceEvents>0).length,topObserved:outputs.filter(x=>x.evidenceEvents>0).slice(0,10)};
+  return{ok:true,version:VERSION,partners:outputs.length,withEvidence:outputs.filter(x=>x.evidenceEvents>0).length,withVerifiedEconomicEvidence:outputs.filter(x=>x.verifiedSettlements>0).length,topObserved:outputs.filter(x=>x.evidenceEvents>0).slice(0,10),guardrails:{economicSignalVerifiedOnly:true,economicWeightMaxPercent:20,noRevenuePenalty:true,directPartnerAttributionRequired:true}};
 }
 
 async function stats(env){
   await ensureSchema(env);
-  const x=await env.DB.prepare("SELECT COUNT(*) total,SUM(CASE WHEN evidence_events>0 THEN 1 ELSE 0 END) with_evidence,SUM(CASE WHEN confidence>=30 THEN 1 ELSE 0 END) meaningful_confidence,AVG(CASE WHEN evidence_events>0 THEN score END) avg_observed FROM lumen_partner_observed_reputation").first();
-  return json({version:VERSION,total:Number(x?.total||0),withEvidence:Number(x?.with_evidence||0),meaningfulConfidence:Number(x?.meaningful_confidence||0),averageObserved:x?.avg_observed==null?null:Math.round(Number(x.avg_observed)),replacesDeclaredReputation:false,confidenceAware:true});
+  const x=await env.DB.prepare("SELECT COUNT(*) total,SUM(CASE WHEN o.evidence_events>0 THEN 1 ELSE 0 END) with_evidence,SUM(CASE WHEN o.confidence>=30 THEN 1 ELSE 0 END) meaningful_confidence,AVG(CASE WHEN o.evidence_events>0 THEN o.score END) avg_observed,SUM(CASE WHEN e.verified_settlements>0 THEN 1 ELSE 0 END) economic_evidence FROM lumen_partner_observed_reputation o LEFT JOIN lumen_partner_economic_performance e ON e.partner_id=o.partner_id").first();
+  return json({version:VERSION,total:Number(x?.total||0),withEvidence:Number(x?.with_evidence||0),meaningfulConfidence:Number(x?.meaningful_confidence||0),withVerifiedEconomicEvidence:Number(x?.economic_evidence||0),averageObserved:x?.avg_observed==null?null:Math.round(Number(x.avg_observed)),replacesDeclaredReputation:false,confidenceAware:true,economicSignalVerifiedOnly:true,economicWeightMaxPercent:20});
 }
 
 export async function handleObservedPartnerReputation(request,env){
@@ -108,7 +127,7 @@ export async function handleObservedPartnerReputation(request,env){
   }
   if(request.method==='GET'&&url.pathname==='/partners/observed-reputation'){
     if(!authorized(request,env))return json({ok:false,error:'admin_token_required'},403);await ensureSchema(env);
-    const r=await env.DB.prepare("SELECT o.*,p.name,p.reputation_score AS declared_reputation,p.compatibility_score FROM lumen_partner_observed_reputation o JOIN lumen_partner_agents p ON p.id=o.partner_id ORDER BY o.confidence DESC,o.score DESC LIMIT 100").all();
+    const r=await env.DB.prepare("SELECT o.*,p.name,p.reputation_score AS declared_reputation,p.compatibility_score,e.economic_score,e.economic_confidence,e.verified_revenue_usd,e.verified_settlements,e.verified_referral_settlements FROM lumen_partner_observed_reputation o JOIN lumen_partner_agents p ON p.id=o.partner_id LEFT JOIN lumen_partner_economic_performance e ON e.partner_id=o.partner_id ORDER BY o.confidence DESC,o.score DESC LIMIT 100").all();
     return json({version:VERSION,partners:(r.results||[]).map(x=>({...x,reasons:(()=>{try{return JSON.parse(x.reasons_json||'[]');}catch{return[];}})()}))});
   }
   return null;
