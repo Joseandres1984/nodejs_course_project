@@ -1,0 +1,57 @@
+name: LUMEN Partner Marketplace Smoke
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-partner-marketplace-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  marketplace-smoke:
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: https://lumen-zero-a2a.lumen-b2b.workers.dev
+      OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+    steps:
+      - name: Verify protected token
+        run: test -n "${OPPORTUNITY_ADMIN_TOKEN:-}"
+
+      - name: Wait for Partner Marketplace v1
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 36); do
+            body=$(curl --show-error --silent --max-time 10 "$BASE_URL/partner-marketplace/stats" || true)
+            echo "$body"
+            if echo "$body" | grep -q '1.0-partner-marketplace'; then exit 0; fi
+            sleep 5
+          done
+          exit 1
+
+      - name: Synchronize real marketplace needs
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 45 \
+            -X POST "$BASE_URL/partner-marketplace/sync" \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'content-type: application/json' \
+            -d '{}' > /tmp/sync.json
+          cat /tmp/sync.json
+          echo
+          jq -e '.ok == true and .version == "1.0-partner-marketplace" and .guardrails.publicListingsNonBinding == true and .guardrails.autonomousSpend == false and .guardrails.autonomousHiring == false and .guardrails.externalContactSent == false' /tmp/sync.json >/dev/null
+
+      - name: Verify public catalog safety
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 20 "$BASE_URL/partner-marketplace/catalog" > /tmp/catalog.json
+          cat /tmp/catalog.json
+          echo
+          jq -e '.version == "1.0-partner-marketplace" and .mode == "non_binding_discovery" and (.lumenOffers | length) >= 1 and .autonomousSpend == false and .bindingActionsHumanGated == true and (.rules | index("trust_review_required")) != null and (.rules | index("no_payment_or_contract_created")) != null' /tmp/catalog.json >/dev/null
+
+      - name: Verify marketplace state
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 20 "$BASE_URL/partner-marketplace/stats" > /tmp/stats.json
+          cat /tmp/stats.json
+          echo
+          jq -e '.version == "1.0-partner-marketplace" and .publicInboundInterest == true and .trustReviewRequired == true and .autonomousHiring == false and .autonomousSpend == false and .bindingActionsHumanGated == true' /tmp/stats.json >/dev/null
