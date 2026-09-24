@@ -17,7 +17,7 @@ import { handlePartnerMarketplacePublicCatalog } from "./partner-marketplace-pub
 import { handleReferralNetwork, reviewInboundReferrals, planOutboundReferrals, syncReferralSettlements } from "./referral-network.js";
 import { handlePartnerNegotiator, recomputeNegotiator } from "./partner-negotiator.js";
 import { handleNegotiatorTermsPlanner, planNegotiationTermRequests } from "./negotiator-terms-planner.js";
-import { handleNegotiatorTermsRuntime, pollNegotiationTermResponses } from "./negotiator-terms-runtime.js";
+import { handleNegotiatorTermsRuntime, pollNegotiationTermResponses, sendNegotiationTermRequests } from "./negotiator-terms-runtime.js";
 import { handleAgentEconomy, recomputeAgentEconomy } from "./agent-economy.js";
 import { handleAgentGraph, recomputeAgentGraph } from "./agent-graph.js";
 import { handleDynamicTeamEngine, buildDynamicTeams } from "./dynamic-team-engine.js";
@@ -115,6 +115,11 @@ export default {
       await pollNegotiationTermResponses(env);
       await recomputeNegotiator(env);
       await planNegotiationTermRequests(env);
+      let termsExternalMessageSent = false;
+      if (!councilExternalMessageSent) {
+        const termInquiry = await sendNegotiationTermRequests(env, { force: false, limit: 1 });
+        termsExternalMessageSent = Number(termInquiry?.sent || 0) > 0;
+      }
       // Agent Economy only accounts/plans; outgoing execution is hard-blocked at USD 0.
       await recomputeAgentEconomy(env);
       await recomputeAgentGraph(env);
@@ -123,7 +128,7 @@ export default {
       await prepareTopProposal(env);
       await reviewNextProposal(env);
       await pollOutstandingResponses(env);
-      if (!councilExternalMessageSent) {
+      if (!councilExternalMessageSent && !termsExternalMessageSent) {
         const followup = await processFollowupCycle(env);
         if (!followup?.send?.sent) await sendNextApproved(env, { force: false });
       }
