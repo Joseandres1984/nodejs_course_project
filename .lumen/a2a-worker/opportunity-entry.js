@@ -16,6 +16,7 @@ import { handlePartnerMarketplace, syncPartnerMarketplace, reviewMarketplaceInte
 import { handlePartnerMarketplacePublicCatalog } from "./partner-marketplace-public-catalog.js";
 import { handleReferralNetwork, reviewInboundReferrals, planOutboundReferrals, syncReferralSettlements } from "./referral-network.js";
 import { handleRevenueAttribution, recomputeRevenueAttribution } from "./revenue-attribution-engine.js";
+import { handleProfitFeedback, recomputeProfitFeedback } from "./profit-feedback-engine.js";
 import { handlePartnerNegotiator, recomputeNegotiator } from "./partner-negotiator.js";
 import { handleNegotiatorTermsPlanner, planNegotiationTermRequests } from "./negotiator-terms-planner.js";
 import { handleNegotiatorTermsRuntime, pollNegotiationTermResponses, sendNegotiationTermRequests } from "./negotiator-terms-runtime.js";
@@ -73,6 +74,7 @@ export default {
     const marketplaceResponse = await handlePartnerMarketplace(request, env); if (marketplaceResponse) return marketplaceResponse;
     const referralResponse = await handleReferralNetwork(request, env); if (referralResponse) return referralResponse;
     const revenueAttributionResponse = await handleRevenueAttribution(request, env); if (revenueAttributionResponse) return revenueAttributionResponse;
+    const profitFeedbackResponse = await handleProfitFeedback(request, env); if (profitFeedbackResponse) return profitFeedbackResponse;
     const negotiatorResponse = await handlePartnerNegotiator(request, env); if (negotiatorResponse) return negotiatorResponse;
     const negotiatorTermsResponse = await handleNegotiatorTermsPlanner(request, env); if (negotiatorTermsResponse) return negotiatorTermsResponse;
     const negotiatorTermsRuntimeResponse = await handleNegotiatorTermsRuntime(request, env); if (negotiatorTermsRuntimeResponse) return negotiatorTermsRuntimeResponse;
@@ -115,6 +117,7 @@ export default {
       await planOutboundReferrals(env);
       await syncReferralSettlements(env);
       await recomputeRevenueAttribution(env);
+      await recomputeProfitFeedback(env);
       await pollNegotiationTermResponses(env);
       await recomputeNegotiator(env);
       await planNegotiationTermRequests(env);
