@@ -1,7 +1,7 @@
 const VERSION = "1.4-portfolio-aware-proposal-engine";
 
 const OFFERS = {
-  "MP-SUPPLIER-SNAPSHOT": { name: "Supplier Snapshot", priceUsd: 5, outcome: "a compact supplier verification snapshot" },
+  "MP-SUPPLIER-SNAPSHOT": { name: "Supplier Snapshot", priceUsd: 1, outcome: "a compact supplier identity and official-channel signal for one named company or domain" },
   "MP-QUOTE-SANITY": { name: "Quote Sanity Check", priceUsd: 7, outcome: "a quick sanity check of pricing and quotation structure" },
   "MP-TENDER-SCAN": { name: "Tender Quick Scan", priceUsd: 9, outcome: "a focused scan of tender fit, deadlines and commercial relevance" },
   "MP-SOURCING-5": { name: "Supplier Shortlist 5", priceUsd: 15, outcome: "a shortlist of five relevant suppliers with evidence" },

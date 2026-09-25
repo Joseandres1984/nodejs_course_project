@@ -162,7 +162,8 @@ export default {
 
       await runOpportunityFactory(env);
       const portfolio = await recomputePortfolioGovernor(env);
-      const preferredExternalAction = portfolio?.recommendedExternalAction || "NONE";
+      const firstCashModeActive = String(env?.LUMEN_FIRST_CASH_MODE || "").toLowerCase() === "true" && Number(portfolio?.metrics?.verifiedRevenueUsd || 0) < 1;
+      const preferredExternalAction = firstCashModeActive ? "FIRST_CASH" : (portfolio?.recommendedExternalAction || "NONE");
 
       let conversionExternalMessageSent = false;
       let firstCash = null;

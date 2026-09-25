@@ -16,7 +16,7 @@ const SERVICE_CATALOG = [
 ];
 
 const MACHINE_PRODUCTS = [
-  { id:"MP-SUPPLIER-SNAPSHOT", name:"Supplier Snapshot", price_usd:5, service_id:"SRV-SUPPLIERCHECK", billing:"per_request", desc:"Fast supplier identity and official-channel snapshot for one named company or domain." },
+  { id:"MP-SUPPLIER-SNAPSHOT", name:"Supplier Snapshot", price_usd:1, service_id:"SRV-SUPPLIERCHECK", billing:"per_request", desc:"FIRST CASH entry offer: fast supplier identity and official-channel signal for one named company or domain." },
   { id:"MP-QUOTE-SANITY", name:"Quote Sanity Check", price_usd:7, service_id:"SRV-QUOTECHECK", billing:"per_request", desc:"Structured sanity check of one B2B quotation against supplied facts and available public references." },
   { id:"MP-TENDER-SCAN", name:"Tender Quick Scan", price_usd:9, service_id:"SRV-TENDER-HUNTER", billing:"per_request", desc:"Focused public-opportunity scan for one product/category and target market." },
   { id:"MP-SOURCING-5", name:"Supplier Shortlist 5", price_usd:15, service_id:"SRV-SOURCING-EXPRESS", billing:"per_request", desc:"Research-oriented shortlist of up to five supplier candidates for a concrete requirement." },
