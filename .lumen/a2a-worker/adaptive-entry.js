@@ -4,11 +4,14 @@ import { handleMarketHunterPruner, pruneMarketHunterStrategies } from "./market-
 import { handleSourceIntelligence, runSourceIntelligence } from "./source-intelligence.js";
 import { handleSourceIntelligencePolicy } from "./source-intelligence-policy.js";
 import { handleProductCommerceRadar, runProductCommerceRadar } from "./product-commerce-radar.js";
+import { handleCommerceMachine, runCommerceMachine } from "./commerce-machine.js";
 
 export default {
   async fetch(request, env, ctx) {
     const sourcePolicyResponse = handleSourceIntelligencePolicy(request);
     if (sourcePolicyResponse) return sourcePolicyResponse;
+    const commerceMachineResponse = await handleCommerceMachine(request, env);
+    if (commerceMachineResponse) return commerceMachineResponse;
     const productCommerceResponse = await handleProductCommerceRadar(request, env);
     if (productCommerceResponse) return productCommerceResponse;
     const sourceResponse = await handleSourceIntelligence(request, env);
@@ -21,20 +24,20 @@ export default {
   },
 
   async scheduled(controller, env, ctx) {
-    // Discovery learning stays independent from the commercial execution slot.
-    // Source Intelligence, Product Commerce Radar and Adaptive Market Hunter only
-    // observe allowed/public sources and write internal state. Product Commerce may
-    // score and prepare DRAFT_READY candidates but never publishes, purchases,
-    // accepts contracts or spends money autonomously. The established commercial
-    // scheduler and Governor remain authoritative for every external action.
+    // Discovery remains isolated from the established commercial execution slot.
+    // Product Commerce observes allowed feeds. Commerce Machine may research prices
+    // read-only and prepare shadow catalog/channel plans, but it cannot publish,
+    // purchase, accept contracts or spend money. External authority stays with the
+    // existing Governor and explicit human approvals.
     ctx.waitUntil((async () => {
       const [sourceIntelligence, productCommerce, hunter] = await Promise.all([
         runSourceIntelligence(env),
         runProductCommerceRadar(env),
         runAdaptiveMarketHunter(env)
       ]);
+      const commerceMachine = await runCommerceMachine(env);
       const pruning = await pruneMarketHunterStrategies(env);
-      return { sourceIntelligence, productCommerce, hunter, pruning };
+      return { sourceIntelligence, productCommerce, commerceMachine, hunter, pruning };
     })().catch(() => ({ ok: false, isolatedFailure: true })));
     return currentWorker.scheduled(controller, env, ctx);
   }

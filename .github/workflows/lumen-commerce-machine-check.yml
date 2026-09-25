@@ -1,0 +1,45 @@
+name: LUMEN Commerce Machine check
+
+on:
+  pull_request:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/a2a-worker/commerce-machine.js'
+      - '.lumen/a2a-worker/test-commerce-machine.mjs'
+      - '.lumen/a2a-worker/adaptive-entry.js'
+      - '.github/workflows/lumen-commerce-machine-check.yml'
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/a2a-worker/commerce-machine.js'
+      - '.lumen/a2a-worker/test-commerce-machine.mjs'
+      - '.lumen/a2a-worker/adaptive-entry.js'
+      - '.github/workflows/lumen-commerce-machine-check.yml'
+  workflow_dispatch:
+
+jobs:
+  validate-commerce-machine:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Check Commerce Machine syntax
+        run: |
+          node --check .lumen/a2a-worker/commerce-machine.js
+          node --check .lumen/a2a-worker/adaptive-entry.js
+          node --check .lumen/a2a-worker/test-commerce-machine.mjs
+      - name: Test economics, catalog generation and channel guardrails
+        run: node .lumen/a2a-worker/test-commerce-machine.mjs
+      - name: Verify no autonomous commerce authority
+        run: |
+          node --input-type=module - <<'NODE'
+          import fs from 'node:fs';
+          const source = fs.readFileSync('.lumen/a2a-worker/commerce-machine.js', 'utf8');
+          if (!source.includes('publicationAuthority: false')) throw new Error('publication authority guard missing');
+          if (!source.includes('purchaseAuthority: false')) throw new Error('purchase authority guard missing');
+          if (!source.includes('autonomousSpendUsd: 0')) throw new Error('zero-spend guard missing');
+          if (!source.includes('SHADOW_DRAFT')) throw new Error('shadow draft guard missing');
+          console.log('COMMERCE_MACHINE_AUTHORITY_GUARDS ok');
+          NODE
