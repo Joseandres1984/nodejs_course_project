@@ -20,6 +20,39 @@ function isRetryable(request) {
   return RETRYABLE_PATHS.has(url.pathname);
 }
 
+function liveOwnerSummaryScript() {
+  return `<script id="lumenLiveOwnerSummaryV2">
+(()=>{
+  const e=id=>document.getElementById(id);
+  const set=(id,v)=>{const el=e(id);if(el)el.textContent=v;};
+  const usd=v=>'USD '+Number(v||0).toLocaleString('es-AR',{maximumFractionDigits:2});
+  async function refresh(){
+    try{
+      const r=await fetch('/api/control-tower-v2',{cache:'no-store'});
+      if(!r.ok)return;
+      const d=await r.json();
+      const f=d.funnel||{};
+      const totalProposals=Number(f.drafts||0)+Number(f.approved||0)+Number(f.sentProposals||0)+Number(f.respondedProposals||0);
+      const strictDemand=Number(f.negotiating||0);
+      set('lfRevenue',usd(f.realizedRevenueUsd));
+      set('lfDemand',strictDemand.toLocaleString('es-AR'));
+      set('lfOpps',Number(f.actionable||0).toLocaleString('es-AR'));
+      set('lfProposals',totalProposals.toLocaleString('es-AR'));
+      set('lfClose',Number(f.negotiating||0).toLocaleString('es-AR'));
+      set('lfReplies',Number(f.outreachResponded||0).toLocaleString('es-AR'));
+      set('lfFocus',Number(f.realizedRevenueUsd||0)>0?'Escalar ingresos verificados':'Conseguir el primer cobro verificado');
+      set('lfDetail','First Cash activo · oportunidades accionables y actividad A2A leídas desde el motor vivo. Sólo un settlement verificado cuenta como ingreso.');
+      set('lfAutonomy','Autonomía: OPERANDO · First Cash');
+      set('lfSearch','Búsqueda: cada 15 min · contacto: máx. 1 por hora');
+      set('lfBlocker',Number(f.realizedRevenueUsd||0)>0?'Bloqueo: ninguno crítico':'Objetivo: primer settlement x402 verificado');
+    }catch{}
+  }
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',refresh,{once:true});else refresh();
+  setInterval(refresh,20000);
+})();
+</script>`;
+}
+
 async function normalizeInjectedTabs(request, response) {
   if (request.method !== "GET" || response.status !== 200) return response;
   const url = new URL(request.url);
@@ -32,10 +65,15 @@ async function normalizeInjectedTabs(request, response) {
     .replace(/data-p=(['"])controlv2\1/g, 'data-tab="controlv2"')
     .replace(/data-p=(['"])networktower\1/g, 'data-tab="networktower"');
 
+  if (!html.includes('id="lumenLiveOwnerSummaryV2"')) {
+    html = html.replace("</body>", `${liveOwnerSummaryScript()}</body>`);
+  }
+
   const headers = new Headers(response.headers);
   headers.delete("content-length");
   headers.set("cache-control", "no-store");
   headers.set("x-lumen-tab-normalization", "v2");
+  headers.set("x-lumen-owner-summary", "a2a-live-v2");
 
   return new Response(html, {
     status: response.status,
