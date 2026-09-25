@@ -6,6 +6,7 @@ import { handleSourceIntelligencePolicy } from "./source-intelligence-policy.js"
 import { handleProductCommerceRadar, runProductCommerceRadar } from "./product-commerce-radar.js";
 import { handleCommerceMachine, runCommerceMachine } from "./commerce-machine.js";
 import { handleCommerceOperations, runCommerceOperations } from "./commerce-operations.js";
+import { handleTiendanubeInstall } from "./tiendanube-install.js";
 import { handleTiendanubeBridge } from "./tiendanube-bridge.js";
 import { handleTiendanubePrivacy } from "./tiendanube-privacy.js";
 
@@ -13,6 +14,8 @@ export default {
   async fetch(request, env, ctx) {
     const sourcePolicyResponse = handleSourceIntelligencePolicy(request);
     if (sourcePolicyResponse) return sourcePolicyResponse;
+    const tiendanubeInstallResponse = await handleTiendanubeInstall(request, env);
+    if (tiendanubeInstallResponse) return tiendanubeInstallResponse;
     const tiendanubePrivacyResponse = await handleTiendanubePrivacy(request, env);
     if (tiendanubePrivacyResponse) return tiendanubePrivacyResponse;
     const tiendanubeResponse = await handleTiendanubeBridge(request, env);
