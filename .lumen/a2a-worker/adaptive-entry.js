@@ -9,6 +9,7 @@ import { handleCommerceOperations, runCommerceOperations } from "./commerce-oper
 import { handleTiendanubeInstall } from "./tiendanube-install.js";
 import { handleTiendanubeBridge } from "./tiendanube-bridge.js";
 import { handleTiendanubePrivacy } from "./tiendanube-privacy.js";
+import { handleTiendanubeSupplierIntake, runTiendanubeSupplierIntake } from "./tiendanube-supplier-intake.js";
 
 export default {
   async fetch(request, env, ctx) {
@@ -18,6 +19,8 @@ export default {
     if (tiendanubeInstallResponse) return tiendanubeInstallResponse;
     const tiendanubePrivacyResponse = await handleTiendanubePrivacy(request, env);
     if (tiendanubePrivacyResponse) return tiendanubePrivacyResponse;
+    const supplierIntakeResponse = await handleTiendanubeSupplierIntake(request, env);
+    if (supplierIntakeResponse) return supplierIntakeResponse;
     const tiendanubeResponse = await handleTiendanubeBridge(request, env);
     if (tiendanubeResponse) return tiendanubeResponse;
     const commerceOpsResponse = await handleCommerceOperations(request, env);
@@ -37,21 +40,20 @@ export default {
 
   async scheduled(controller, env, ctx) {
     // Discovery remains isolated from the established commercial execution slot.
-    // Product Commerce observes allowed feeds. Commerce Machine researches and
-    // prepares catalog/channel plans. Commerce Operations prepares publication,
-    // inventory/price sync and fulfillment queues. Tiendanube Bridge receives
-    // verified events and can execute only an explicitly admin-approved hidden
-    // product creation; privacy callbacks are HMAC-verified and isolated.
+    // Supplier Intake stages connected Tiendanube products, reads variant cost/stock,
+    // hides fresh imports until approval, and feeds landed-cost candidates into the
+    // existing Commerce Machine. No supplier purchase, publication or spend authority.
     ctx.waitUntil((async () => {
-      const [sourceIntelligence, productCommerce, hunter] = await Promise.all([
+      const [sourceIntelligence, productCommerce, supplierIntake, hunter] = await Promise.all([
         runSourceIntelligence(env),
         runProductCommerceRadar(env),
+        runTiendanubeSupplierIntake(env),
         runAdaptiveMarketHunter(env)
       ]);
       const commerceMachine = await runCommerceMachine(env);
       const commerceOperations = await runCommerceOperations(env);
       const pruning = await pruneMarketHunterStrategies(env);
-      return { sourceIntelligence, productCommerce, commerceMachine, commerceOperations, hunter, pruning };
+      return { sourceIntelligence, productCommerce, supplierIntake, commerceMachine, commerceOperations, hunter, pruning };
     })().catch(() => ({ ok: false, isolatedFailure: true })));
     return currentWorker.scheduled(controller, env, ctx);
   }
