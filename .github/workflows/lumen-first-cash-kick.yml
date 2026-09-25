@@ -1,0 +1,100 @@
+name: LUMEN First Cash Kick
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-first-cash-kick.yml'
+
+jobs:
+  first-cash:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify USD 1 offer is live
+        run: |
+          set -euo pipefail
+          a2a='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          x402='https://lumen-zero-x402.lumen-b2b.workers.dev'
+          curl --fail --show-error --silent --max-time 30 "$a2a/machine/catalog" -o /tmp/a2a-catalog.json
+          curl --fail --show-error --silent --max-time 30 "$x402/catalog" -o /tmp/x402-catalog.json
+          echo '===== A2A catalog ====='
+          cat /tmp/a2a-catalog.json; echo
+          echo '===== x402 catalog ====='
+          cat /tmp/x402-catalog.json; echo
+          jq -e '.. | objects | select((.id? == "MP-SUPPLIER-SNAPSHOT") or (.slug? == "supplier-snapshot")) | select((.price_usd? == 1) or (.priceUsd? == 1) or (.price? == 1))' /tmp/a2a-catalog.json >/dev/null
+          jq -e '.. | objects | select((.id? == "MP-SUPPLIER-SNAPSHOT") or (.slug? == "supplier-snapshot")) | select((.price_usd? == 1) or (.priceUsd? == 1) or (.price? == 1))' /tmp/x402-catalog.json >/dev/null
+          echo 'USD_1_LIVE_VERIFIED'
+
+      - name: Try qualified FIRST CASH close
+        id: close
+        env:
+          OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "${OPPORTUNITY_ADMIN_TOKEN:-}"
+          base='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          code=$(curl --show-error --silent --max-time 60 -o /tmp/first-cash.json -w '%{http_code}' \
+            -X POST "$base/first-cash/run" \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'accept: application/json')
+          echo "FIRST_CASH_HTTP=$code"
+          cat /tmp/first-cash.json; echo
+          test "$code" = '202'
+          if jq -e '(.sent == true) or (.externalAttempted == true) or (.status == "SEND_FAILED") or (.send.sent == true) or (.send.externalAttempted == true) or (.send.status == "SEND_FAILED")' /tmp/first-cash.json >/dev/null 2>&1; then
+            echo 'consumed=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'consumed=false' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Reassess market if no hot close consumed the slot
+        if: steps.close.outputs.consumed != 'true'
+        env:
+          OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          base='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          code=$(curl --show-error --silent --max-time 60 -o /tmp/reassess.json -w '%{http_code}' \
+            -X POST "$base/commercial/reassess" \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'accept: application/json')
+          echo "REASSESS_HTTP=$code"
+          cat /tmp/reassess.json; echo
+          test "$code" = '202'
+
+      - name: Find one viable buyer and use at most one external slot
+        if: steps.close.outputs.consumed != 'true'
+        env:
+          OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          base='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          consumed=false
+          for attempt in 1 2 3 4 5 6; do
+            echo "===== FIRST CASH candidate $attempt/6 ====="
+            curl --fail --show-error --silent --max-time 60 -X POST "$base/proposals/prepare-top" -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" -H 'accept: application/json' -o "/tmp/proposal-$attempt.json"
+            cat "/tmp/proposal-$attempt.json"; echo
+            curl --fail --show-error --silent --max-time 60 -X POST "$base/quality/review-next" -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" -H 'accept: application/json' -o "/tmp/quality-$attempt.json"
+            cat "/tmp/quality-$attempt.json"; echo
+            curl --fail --show-error --silent --max-time 60 -X POST "$base/outreach/probe-next" -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" -H 'accept: application/json' -o "/tmp/probe-$attempt.json"
+            cat "/tmp/probe-$attempt.json"; echo
+            curl --fail --show-error --silent --max-time 60 -X POST "$base/outreach/send-next" -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" -H 'accept: application/json' -o "/tmp/send-$attempt.json"
+            cat "/tmp/send-$attempt.json"; echo
+            if jq -e '(.sent == true) or (.externalAttempted == true) or (.status == "SEND_FAILED")' "/tmp/send-$attempt.json" >/dev/null 2>&1; then
+              consumed=true
+              echo "EXTERNAL_SLOT_CONSUMED_ON_ATTEMPT=$attempt"
+              break
+            fi
+          done
+          echo "EXTERNAL_SLOT_CONSUMED=$consumed"
+
+      - name: Read FIRST CASH state
+        run: |
+          set -euo pipefail
+          base='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          echo '===== first cash ====='
+          curl --fail --show-error --silent --max-time 30 "$base/first-cash/stats"; echo
+          echo '===== outreach ====='
+          curl --fail --show-error --silent --max-time 30 "$base/outreach/stats"; echo
+          echo '===== portfolio ====='
+          curl --fail --show-error --silent --max-time 30 "$base/portfolio-governor/state"; echo
