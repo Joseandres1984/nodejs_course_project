@@ -1,0 +1,32 @@
+name: LUMEN Supplier Intake live init
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-supplier-intake-live-init.yml'
+  workflow_run:
+    workflows: ["LUMEN Cloudflare deploy"]
+    types: [completed]
+
+jobs:
+  initialize:
+    if: ${{ github.event_name == 'push' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify supplier intake policy
+        run: |
+          set -euo pipefail
+          BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          curl -fsS --max-time 20 "$BASE/supplier-intake/policy" -o supplier-policy.json
+          jq -e '.version == "1.0-tiendanube-supplier-intake" and .importedProductsAutoHiddenInStaging == true and .autonomousPublishing == false and .autonomousPurchasing == false and .autonomousSpendUsd == 0' supplier-policy.json >/dev/null
+      - name: Register webhooks and run first supplier scan
+        env:
+          OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$OPPORTUNITY_ADMIN_TOKEN"
+          BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          curl -fsS --max-time 60 -X POST -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" "$BASE/supplier-intake/run" -o supplier-run.json
+          jq -e '.ok == true and .version == "1.0-tiendanube-supplier-intake"' supplier-run.json >/dev/null
+          echo 'SUPPLIER_INTAKE_LIVE_INITIALIZED'
