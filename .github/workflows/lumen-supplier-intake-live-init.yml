@@ -20,7 +20,7 @@ jobs:
           BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
           curl -fsS --max-time 20 "$BASE/supplier-intake/policy" -o supplier-policy.json
           jq -e '.version == "1.0-tiendanube-supplier-intake" and .importedProductsAutoHiddenInStaging == true and .autonomousPublishing == false and .autonomousPurchasing == false and .autonomousSpendUsd == 0' supplier-policy.json >/dev/null
-      - name: Register webhooks and run first supplier scan
+      - name: Register webhooks and run supplier scan
         env:
           OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
         run: |
@@ -29,4 +29,9 @@ jobs:
           BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
           curl -fsS --max-time 60 -X POST -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" "$BASE/supplier-intake/run" -o supplier-run.json
           jq -e '.ok == true and .version == "1.0-tiendanube-supplier-intake"' supplier-run.json >/dev/null
+          echo 'SUPPLIER_INTAKE_RUN_SUMMARY'
+          jq -c '{status,storeId,productsSeen,variantsSeen,candidates,hidden,errorCount:(.errors|length)}' supplier-run.json
+          curl -fsS --max-time 20 -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" "$BASE/supplier-intake/status" -o supplier-status.json
+          echo 'SUPPLIER_INTAKE_STATUS_SUMMARY'
+          jq -c '{storeId,connected,counts,topCandidates:(.topCandidates | map({title,sku,supplier_cost,listed_price,stock,status,score}) | .[:10])}' supplier-status.json
           echo 'SUPPLIER_INTAKE_LIVE_INITIALIZED'
