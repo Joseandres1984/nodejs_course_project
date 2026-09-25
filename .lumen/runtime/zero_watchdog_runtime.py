@@ -2,20 +2,22 @@ from __future__ import annotations
 
 """Zero-cost watchdog compatibility.
 
-The original production watchdog has two hard Postgres checks. In LUMEN Zero, Postgres is
-intentionally absent and Cloudflare D1 is the canonical persistence layer. This adapter does not
-hide those checks: it replaces them with a real D1 configuration check and an actual write/read
-canary, then recomputes the watchdog score.
+The original production watchdog has two hard Postgres checks and a legacy Python-worker
+heartbeat. In LUMEN Zero, Postgres is intentionally absent, Cloudflare D1 is canonical, and the
+hourly autonomous cycle is driven by the Cloudflare A2A Worker cron. This adapter replaces the
+legacy persistence checks with real D1 checks and the legacy heartbeat with actual Cloudflare-cron
+telemetry from lumen_opportunity_runs.
 """
 
 import os
 import uuid
+from datetime import datetime, timezone
 from typing import Any, Dict
 
 import d1_persistence_runtime as d1
 import system_watchdog
 
-VERSION = "1.0-zero-d1-watchdog"
+VERSION = "1.1-zero-d1-cloudflare-cron-watchdog"
 _original_run = system_watchdog.run_system_watchdog
 
 
@@ -52,6 +54,57 @@ def _d1_roundtrip() -> tuple[bool, str]:
         return False, f"{type(exc).__name__}: {str(exc)[:260]}"
 
 
+def _parse_iso(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+def _cloudflare_cron_heartbeat() -> tuple[str, str]:
+    """Return pass/warn/fail using the real hourly Cloudflare cron telemetry.
+
+    The A2A Worker runs at minute 7 of every hour. A small scheduling/network delay is normal, so
+    <=80 minutes is healthy, 80-140 minutes is warning, and >140 minutes is a real missed-cycle
+    failure. A fresh run whose opportunity scan itself ended as failed remains a warning: the cron
+    is alive, but its first commercial discovery stage needs attention.
+    """
+    try:
+        result = d1._request({
+            "sql": "SELECT started_at,finished_at,status FROM lumen_opportunity_runs ORDER BY started_at DESC LIMIT 1",
+            "params": [],
+        })
+        statements = d1._result_statements(result)
+        rows = d1._statement_rows(statements[0]) if statements else []
+        if not rows:
+            return "warn", "cron Cloudflare configurado pero todavía no hay ejecución registrada"
+
+        row = rows[0]
+        stamp = _parse_iso(row.get("finished_at") or row.get("started_at"))
+        if stamp is None:
+            return "warn", "último cron existe pero su timestamp no es interpretable"
+
+        age_min = max(0.0, (datetime.now(timezone.utc) - stamp).total_seconds() / 60.0)
+        run_status = str(row.get("status") or "unknown").lower()
+        detail = f"último cron Cloudflare hace {age_min:.1f} min · estado {run_status}"
+
+        if age_min <= 80:
+            if run_status == "failed":
+                return "warn", detail + " · scheduler vivo, escaneo inicial falló"
+            return "pass", detail
+        if age_min <= 140:
+            return "warn", detail + " · revisar si el próximo cron se demora"
+        return "fail", detail + " · cron horario no está corriendo con la frecuencia esperada"
+    except Exception as exc:
+        return "warn", f"no se pudo leer telemetría del cron Cloudflare: {type(exc).__name__}: {str(exc)[:220]}"
+
+
 def _replace(checks: list[Dict[str, Any]], check_id: str, row: Dict[str, Any]) -> None:
     for idx, existing in enumerate(checks):
         if str(existing.get("id") or "") == check_id:
@@ -66,6 +119,7 @@ def zero_run_system_watchdog(state: Dict[str, Any], db_status: Dict[str, Any] | 
         return report
 
     checks = list(report.get("checks", []) or [])
+
     cfg_ok, cfg_detail = _d1_configured()
     rw_ok, rw_detail = _d1_roundtrip() if cfg_ok else (False, "D1 no configurado")
     _replace(
@@ -82,6 +136,16 @@ def zero_run_system_watchdog(state: Dict[str, Any], db_status: Dict[str, Any] | 
         if rw_ok
         else system_watchdog._fail("db_rw", "Persistencia D1 lectura/escritura", rw_detail),
     )
+
+    cron_status, cron_detail = _cloudflare_cron_heartbeat() if cfg_ok else ("fail", "D1 no configurado; no se puede verificar cron")
+    if cron_status == "pass":
+        cron_row = system_watchdog._pass("heartbeat", "Cron Cloudflare con pulso reciente", cron_detail)
+    elif cron_status == "warn":
+        cron_row = system_watchdog._warn("heartbeat", "Cron Cloudflare con pulso reciente", cron_detail)
+    else:
+        cron_row = system_watchdog._fail("heartbeat", "Cron Cloudflare con pulso reciente", cron_detail)
+    _replace(checks, "heartbeat", cron_row)
+
     passed = sum(1 for row in checks if row.get("status") == "pass")
     warnings = sum(1 for row in checks if row.get("status") == "warn")
     failed = sum(1 for row in checks if row.get("status") == "fail")
@@ -97,8 +161,10 @@ def zero_run_system_watchdog(state: Dict[str, Any], db_status: Dict[str, Any] | 
             "score_pct": round((passed + warnings * 0.5) / max(1, total) * 100, 1),
             "checks": checks,
             "persistence_backend": "cloudflare_d1",
+            "heartbeat_backend": "cloudflare_cron_d1_telemetry",
             "legacy_postgres_checks_replaced": True,
-            "note": "Watchdog Zero verifica D1 con un canary real; el resto de los gates técnicos y comerciales permanece sin cambios.",
+            "legacy_python_heartbeat_replaced": True,
+            "note": "Watchdog Zero verifica D1 con canary real y el cron horario de Cloudflare con telemetría real; el resto de los gates técnicos y comerciales permanece sin cambios.",
         }
     )
     state["system_watchdog"] = report
@@ -114,4 +180,4 @@ def zero_run_system_watchdog(state: Dict[str, Any], db_status: Dict[str, Any] | 
 
 system_watchdog.run_system_watchdog = zero_run_system_watchdog
 
-print({"zero_watchdog_runtime": {"status": "installed", "version": VERSION, "backend": "cloudflare_d1"}}, flush=True)
+print({"zero_watchdog_runtime": {"status": "installed", "version": VERSION, "backend": "cloudflare_d1", "heartbeat": "cloudflare_cron_d1_telemetry"}}, flush=True)
