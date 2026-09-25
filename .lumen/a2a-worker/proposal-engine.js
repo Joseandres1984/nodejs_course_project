@@ -1,4 +1,4 @@
-const VERSION = "1.4-portfolio-aware-proposal-engine";
+const VERSION = "1.5-first-cash-microbuyer-proposal-engine";
 
 const OFFERS = {
   "MP-SUPPLIER-SNAPSHOT": { name: "Supplier Snapshot", priceUsd: 1, outcome: "a compact supplier identity and official-channel signal for one named company or domain" },
@@ -22,6 +22,12 @@ function json(data, status = 200) {
 
 function clean(value, limit = 4000) {
   return String(value ?? "").trim().replace(/\s+/g, " ").slice(0, limit);
+}
+
+function boolVar(value, fallback = false) {
+  const v = clean(value, 20).toLowerCase();
+  if (!v) return fallback;
+  return ["1", "true", "yes", "on"].includes(v);
 }
 
 function safeParse(value, fallback = {}) {
@@ -67,20 +73,43 @@ async function getBestProposalCandidate(env) {
   return { ...row, reasons: safeParse(row.reasons_json, []) };
 }
 
-function makeDraft(opportunity) {
-  const offer = OFFERS[opportunity.revenue_offer_id] || OFFERS["MP-BUYER-SIGNALS"];
+function makeDraft(opportunity, env) {
+  const reasons = Array.isArray(opportunity.reasons) ? opportunity.reasons : [];
+  const firstCashMode = boolVar(env?.LUMEN_FIRST_CASH_MODE, false);
+  const microbuyerFit = reasons.includes("microbuyer_fit");
+  const selectedOfferId = firstCashMode && microbuyerFit ? "MP-SUPPLIER-SNAPSHOT" : (opportunity.revenue_offer_id || "MP-BUYER-SIGNALS");
+  const offer = OFFERS[selectedOfferId] || OFFERS["MP-BUYER-SIGNALS"];
   const target = clean(opportunity.name || opportunity.remote_id, 180);
   const evidence = completeExcerpt(opportunity.description, 420);
-  const subject = clean(`Possible fit: ${offer.name} for ${target}`, 180);
-  const message = [
-    `Hi ${target},`,
-    `LUMEN found a public commercial signal that appears relevant to ${offer.name}.`,
-    evidence ? `Observed context: ${evidence}` : "Observed context: the public signal appears related to an active B2B requirement.",
-    `We can provide ${offer.outcome} for USD ${offer.priceUsd}.`,
-    "This is a non-binding commercial introduction. No order, payment, contract or commitment is created by this message.",
-    "If useful, reply with the requirement or scope you want checked. LUMEN can then confirm the exact deliverable and provide the x402 checkout. If this is not relevant, no action is needed."
-  ].join("\n\n");
-  return { offerId: opportunity.revenue_offer_id || "MP-BUYER-SIGNALS", offerName: offer.name, amountUsd: offer.priceUsd, subject, message: clean(message, 1800) };
+  const subject = clean(`${firstCashMode && microbuyerFit ? "USD 1 machine-service fit" : "Possible fit"}: ${offer.name} for ${target}`, 180);
+
+  const message = firstCashMode && microbuyerFit
+    ? [
+        `Hi ${target},`,
+        "LUMEN found a public signal that suggests your agent/API may use machine-to-machine payments together with research or verification workflows.",
+        evidence ? `Observed context: ${evidence}` : "Observed context: the public signal combines machine-payment compatibility with an information-verification need.",
+        `FIRST CASH offer: ${offer.name} — ${offer.outcome} — USD ${offer.priceUsd.toFixed(2)} per request via x402 USDC on Base.`,
+        "This is a non-binding commercial introduction. No order, payment, contract or commitment is created by this message.",
+        "If useful, reply with one company or domain you want checked. LUMEN can confirm the exact deliverable and provide the x402 checkout. If this is not relevant, no action is needed."
+      ].join("\n\n")
+    : [
+        `Hi ${target},`,
+        `LUMEN found a public commercial signal that appears relevant to ${offer.name}.`,
+        evidence ? `Observed context: ${evidence}` : "Observed context: the public signal appears related to an active B2B requirement.",
+        `We can provide ${offer.outcome} for USD ${offer.priceUsd}.`,
+        "This is a non-binding commercial introduction. No order, payment, contract or commitment is created by this message.",
+        "If useful, reply with the requirement or scope you want checked. LUMEN can then confirm the exact deliverable and provide the x402 checkout. If this is not relevant, no action is needed."
+      ].join("\n\n");
+
+  return {
+    offerId: selectedOfferId,
+    offerName: offer.name,
+    amountUsd: offer.priceUsd,
+    subject,
+    message: clean(message, 1800),
+    firstCashMode,
+    microbuyerFit
+  };
 }
 
 export async function prepareTopProposal(env) {
@@ -88,7 +117,7 @@ export async function prepareTopProposal(env) {
   const opportunity = await getBestProposalCandidate(env);
   if (!opportunity) return { ok: true, prepared: false, reason: "no_unprocessed_commercial_candidate", version: VERSION };
 
-  const draft = makeDraft(opportunity);
+  const draft = makeDraft(opportunity, env);
   const now = new Date().toISOString();
   const proposalId = opportunity.existing_proposal_id || `PROP-${crypto.randomUUID().replaceAll("-", "").slice(0, 12).toUpperCase()}`;
   const createdAt = opportunity.existing_created_at || now;
@@ -100,6 +129,12 @@ export async function prepareTopProposal(env) {
     endpoint: opportunity.endpoint || null,
     reasons: opportunity.reasons || [],
     source_status: opportunity.status || null,
+    first_cash: {
+      enabled: draft.firstCashMode,
+      microbuyer_fit: draft.microbuyerFit,
+      selected_offer_id: draft.offerId,
+      autonomous_discounting: false
+    },
     profit_feedback: {
       priority_adjustment: Number(opportunity.profit_priority_adjustment || 0),
       evidence_level: opportunity.profit_evidence_level || "COLD",
@@ -145,6 +180,8 @@ export async function prepareTopProposal(env) {
       status: "DRAFT",
       qualityGateStatus: "PENDING_QUALITY_GATE",
       autonomousSend: false,
+      firstCashMode: draft.firstCashMode,
+      microbuyerFit: draft.microbuyerFit,
       profitPriorityAdjustment: Number(opportunity.profit_priority_adjustment || 0),
       profitEvidenceLevel: opportunity.profit_evidence_level || "COLD",
       directorPriorityAdjustment: Number(opportunity.director_priority_adjustment || 0),
@@ -156,6 +193,7 @@ export async function prepareTopProposal(env) {
       chargeCreated: false,
       contractCreated: false,
       autonomousPriceChange: false,
+      autonomousDiscounting: false,
       autonomousOutgoingSpend: false,
       autonomousContract: false,
       bindingActionsHumanGated: true
