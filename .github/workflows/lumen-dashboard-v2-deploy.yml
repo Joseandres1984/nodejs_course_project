@@ -43,3 +43,19 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           DASH_PASSWORD: ${{ secrets.LUMEN_DASHBOARD_PASSWORD }}
         run: printf '%s' "$DASH_PASSWORD" | npx --yes wrangler@latest secret put LUMEN_DASHBOARD_PASSWORD --config wrangler.toml
+      - name: Smoke live dashboard data plane
+        env:
+          DASH_PASSWORD: ${{ secrets.LUMEN_DASHBOARD_PASSWORD }}
+        run: |
+          BASE='https://lumen-zero-dashboard.lumen-b2b.workers.dev'
+          for path in /health /api/control-tower-v2 /api/network-control-v1; do
+            body="$(mktemp)"
+            code="$(curl -sS --retry 4 --retry-delay 2 -u "socio:${DASH_PASSWORD}" -o "$body" -w '%{http_code}' "${BASE}${path}")"
+            if [ "$code" != '200' ]; then
+              echo "DASHBOARD_LIVE_SMOKE_FAILED path=${path} http=${code}"
+              cat "$body"
+              exit 1
+            fi
+            python -m json.tool < "$body" >/dev/null
+            echo "DASHBOARD_LIVE_SMOKE_OK path=${path}"
+          done
