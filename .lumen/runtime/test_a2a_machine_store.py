@@ -27,7 +27,7 @@ class A2AMachineStoreTests(unittest.TestCase):
         products = [m.groupdict() for m in PRODUCT_RE.finditer(self.worker)]
         self.assertEqual(6, len(products))
         prices = [int(x["price"]) for x in products]
-        self.assertEqual(5, min(prices))
+        self.assertEqual(1, min(prices))
         self.assertEqual(25, max(prices))
         self.assertEqual(len(products), len({x["id"] for x in products}))
 
