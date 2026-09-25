@@ -42,13 +42,13 @@ jobs:
       LIVE_OUTBOUND: 'false'
       LUMEN_INSTAGRAM_SEND_ENABLED: 'false'
       LUMEN_PUBLIC_BASE_URL: 'https://lumen-zero-public.lumen-b2b.workers.dev'
-      LUMEN_D1_ACCOUNT_ID: ${{ secrets.LUMEN_D1_ACCOUNT_ID || secrets.CLOUDFLARE_ACCOUNT_ID }}
+      LUMEN_D1_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       LUMEN_D1_DATABASE_ID: 'e872694a-ed14-4a7f-b2c3-38b8e1bb498b'
-      LUMEN_D1_API_TOKEN: ${{ secrets.LUMEN_D1_API_TOKEN || secrets.CLOUDFLARE_API_TOKEN }}
-      LUMEN_INSTAGRAM_THEME: ${{ github.event.inputs.theme || 'travel' }}
-      LUMEN_INSTAGRAM_THEME_GOAL: ${{ github.event.inputs.goal || 'Atraer agencias, alojamientos, operadores y proveedores turísticos a conversaciones comerciales por DM.' }}
-      LUMEN_INSTAGRAM_THEME_NOTES: ${{ github.event.inputs.notes || 'Enfoque B2B: oportunidades, señales de demanda, proveedores y encaje comercial; no contenido turístico genérico.' }}
-      LUMEN_INSTAGRAM_THEME_REQUEST_ID: ${{ github.event.inputs.request_id || format('run-{0}', github.run_id) }}
+      LUMEN_D1_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      LUMEN_INSTAGRAM_THEME: ${{ inputs.theme }}
+      LUMEN_INSTAGRAM_THEME_GOAL: ${{ inputs.goal }}
+      LUMEN_INSTAGRAM_THEME_NOTES: ${{ inputs.notes }}
+      LUMEN_INSTAGRAM_THEME_REQUEST_ID: ${{ inputs.request_id }}
 
     steps:
       - uses: actions/checkout@v4
