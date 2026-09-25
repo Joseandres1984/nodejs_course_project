@@ -1,10 +1,11 @@
 name: LUMEN First Cash activation
 
-on:
+'on':
   push:
-    branches: [lumen-zero]
+    branches:
+      - lumen-zero
     paths:
-      - '.github/workflows/lumen-first-cash-activate.yml'
+      - .github/workflows/lumen-first-cash-activate.yml
 
 permissions:
   contents: write
@@ -16,74 +17,17 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: lumen-zero
-      - name: Activate FIRST CASH mode and USD 1 entry offer
+      - name: Patch FIRST CASH mode
+        run: python .github/scripts/activate_first_cash.py
+      - name: Validate patch
         run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          replacements = {
-            '.lumen/a2a-worker/worker.js': [
-              ('{ id:"MP-SUPPLIER-SNAPSHOT", name:"Supplier Snapshot", price_usd:5, service_id:"SRV-SUPPLIERCHECK", billing:"per_request", desc:"Fast supplier identity and official-channel snapshot for one named company or domain." }',
-               '{ id:"MP-SUPPLIER-SNAPSHOT", name:"Supplier Snapshot", price_usd:1, service_id:"SRV-SUPPLIERCHECK", billing:"per_request", desc:"FIRST CASH entry offer: fast supplier identity and official-channel signal for one named company or domain." }'),
-            ],
-            '.lumen/x402-worker/worker-v2.js': [
-              ('"supplier-snapshot": { id:"MP-SUPPLIER-SNAPSHOT", name:"Supplier Snapshot", price_usd:5, service_id:"SRV-SUPPLIERCHECK" }',
-               '"supplier-snapshot": { id:"MP-SUPPLIER-SNAPSHOT", name:"Supplier Snapshot", price_usd:1, service_id:"SRV-SUPPLIERCHECK" }'),
-            ],
-            '.lumen/a2a-worker/proposal-engine.js': [
-              ('"MP-SUPPLIER-SNAPSHOT": { name: "Supplier Snapshot", priceUsd: 5, outcome: "a compact supplier verification snapshot" }',
-               '"MP-SUPPLIER-SNAPSHOT": { name: "Supplier Snapshot", priceUsd: 1, outcome: "a compact supplier identity and official-channel signal for one named company or domain" }'),
-            ],
-          }
-
-          for filename, pairs in replacements.items():
-            p = Path(filename)
-            text = p.read_text()
-            for old, new in pairs:
-              if old not in text:
-                raise SystemExit(f'expected text not found in {filename}: {old[:100]}')
-              text = text.replace(old, new, 1)
-            p.write_text(text)
-
-          wrangler = Path('.lumen/a2a-worker/wrangler.toml')
-          text = wrangler.read_text()
-          if 'LUMEN_FIRST_CASH_MODE = "true"' not in text:
-            anchor = 'A2A_AUTONOMOUS_CONVERSION_CLOSE = "true"\n'
-            if anchor not in text:
-              raise SystemExit('first cash wrangler anchor missing')
-            text = text.replace(anchor, anchor + 'LUMEN_FIRST_CASH_MODE = "true"\n', 1)
-          wrangler.write_text(text)
-
-          entry = Path('.lumen/a2a-worker/opportunity-entry.js')
-          text = entry.read_text()
-          old = '      const preferredExternalAction = portfolio?.recommendedExternalAction || "NONE";'
-          new = '''      const firstCashModeRequested = String(env?.LUMEN_FIRST_CASH_MODE || "").toLowerCase() === "true";
-      let firstCashVerifiedRevenueUsd = 0;
-      if (firstCashModeRequested && env?.DB) {
-        try {
-          const row = await env.DB.prepare("SELECT COALESCE(SUM(amount_usd),0) n FROM lumen_revenue_events WHERE event_type='payment_settled' AND status='verified'").first();
-          firstCashVerifiedRevenueUsd = Math.max(0, Number(row?.n || 0));
-        } catch {}
-      }
-      const firstCashModeActive = firstCashModeRequested && firstCashVerifiedRevenueUsd < 1;
-      const preferredExternalAction = firstCashModeActive ? "FIRST_CASH" : (portfolio?.recommendedExternalAction || "NONE");'''
-          if old not in text:
-            if 'const firstCashModeActive' not in text:
-              raise SystemExit('opportunity-entry FIRST CASH anchor missing')
-          else:
-            text = text.replace(old, new, 1)
-          entry.write_text(text)
-
-          print('FIRST_CASH_MODE_PATCH_OK')
-          PY
-
+          set -euo pipefail
           git diff --check
           grep -q 'price_usd:1' .lumen/a2a-worker/worker.js
           grep -q 'price_usd:1' .lumen/x402-worker/worker-v2.js
           grep -q 'priceUsd: 1' .lumen/a2a-worker/proposal-engine.js
           grep -q 'LUMEN_FIRST_CASH_MODE = "true"' .lumen/a2a-worker/wrangler.toml
           grep -q 'firstCashModeActive' .lumen/a2a-worker/opportunity-entry.js
-
       - name: Commit activation
         run: |
           git config user.name 'LUMEN Automation'
