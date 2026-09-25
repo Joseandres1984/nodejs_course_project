@@ -1,0 +1,59 @@
+name: LUMEN Revenue State Sync
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-revenue-state-sync.yml'
+
+jobs:
+  sync-revenue-state:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sync follow-up qualification state
+        env:
+          OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "${OPPORTUNITY_ADMIN_TOKEN:-}"
+          base='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          curl --fail --show-error --silent --max-time 60 \
+            -X POST "$base/followup/run" \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'accept: application/json'
+          echo
+
+      - name: Rebuild opportunity portfolio
+        env:
+          OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          base='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          curl --fail --show-error --silent --max-time 60 \
+            -X POST "$base/opportunity-factory/run" \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'accept: application/json'
+          echo
+          curl --fail --show-error --silent --max-time 60 \
+            -X POST "$base/portfolio-governor/recompute" \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'accept: application/json'
+          echo
+
+      - name: Read synchronized revenue state
+        run: |
+          set -euo pipefail
+          base='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          echo '===== FOLLOWUP ====='
+          curl --fail --show-error --silent --max-time 30 "$base/followup/stats"
+          echo
+          echo '===== GOVERNOR ====='
+          curl --fail --show-error --silent --max-time 30 "$base/portfolio-governor/state"
+          echo
+          echo '===== FIRST CASH ====='
+          curl --fail --show-error --silent --max-time 30 "$base/first-cash/stats"
+          echo
+          echo '===== ECONOMY ====='
+          curl --fail --show-error --silent --max-time 30 "$base/agent-economy/stats"
+          echo
