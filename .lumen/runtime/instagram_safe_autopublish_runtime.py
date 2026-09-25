@@ -13,7 +13,9 @@ import sys
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Tuple
 
-VERSION = "1.0-safe-autonomous-instagram-publishing"
+import instagram_content_dedupe_runtime as _dedupe
+
+VERSION = "1.1-safe-autonomous-instagram-publishing-dedupe"
 MIN_QA_SCORE = 90
 AUTO_APPROVER = "lumen_policy_auto"
 
@@ -57,7 +59,7 @@ def _now() -> str:
     return _now_dt().isoformat()
 
 
-def _safe_editorial_candidate(job: Dict[str, Any]) -> Tuple[bool, List[str]]:
+def _safe_editorial_candidate(job: Dict[str, Any], state: Dict[str, Any] | None = None) -> Tuple[bool, List[str]]:
     reasons: List[str] = []
     jid = _text(job.get("id"))
 
@@ -111,7 +113,13 @@ def _safe_editorial_candidate(job: Dict[str, Any]) -> Tuple[bool, List[str]]:
         if token in visible:
             reasons.append(f"blocked_text:{token}")
 
-    return not reasons, reasons
+    # The same anti-repeat policy applies to autonomous IGPRO posts. A post that
+    # is exact or near-duplicate of verified published content is not eligible
+    # for policy approval and never reaches the provider call.
+    if state is not None:
+        reasons.extend(_dedupe.duplicate_reasons(state, job))
+
+    return not reasons, sorted(set(reasons))
 
 
 def _policy_approve(module: Any, state: Dict[str, Any], job: Dict[str, Any]) -> Tuple[bool, List[str]]:
@@ -125,7 +133,7 @@ def _policy_approve(module: Any, state: Dict[str, Any], job: Dict[str, Any]) -> 
     if module._approval_valid(state, job):
         return False, []
 
-    eligible, reasons = _safe_editorial_candidate(job)
+    eligible, reasons = _safe_editorial_candidate(job, state)
     if not eligible:
         return False, reasons
 
@@ -148,6 +156,7 @@ def _policy_approve(module: Any, state: Dict[str, Any], job: Dict[str, Any]) -> 
         "authority": "owned_channel_safe_editorial_policy",
         "monetary_budget_usd": 0,
         "binding_authority_changed": False,
+        "dedupe_policy_version": _dedupe.VERSION,
     }
 
     if freeze is not None:
@@ -160,6 +169,7 @@ def _policy_approve(module: Any, state: Dict[str, Any], job: Dict[str, Any]) -> 
     job["status"] = "approved_safe_autonomous"
     job["autopublish_policy"] = VERSION
     job["autopublish_approved_at"] = now.isoformat()
+    job["dedupe_policy_version"] = _dedupe.VERSION
     module._append_audit(
         state,
         {
@@ -170,6 +180,7 @@ def _policy_approve(module: Any, state: Dict[str, Any], job: Dict[str, Any]) -> 
             "qa_score": approval["qa_score"],
             "monetary_budget_usd": 0,
             "binding_authority_changed": False,
+            "dedupe_policy_version": _dedupe.VERSION,
         },
     )
     return True, []
@@ -181,6 +192,10 @@ def _patch_publish_control(module: Any) -> None:
     if not hasattr(module, "instagram_publish_control_tick") or not hasattr(module, "_approval_store"):
         return
 
+    # Compose safe-autopublish on top of the shared dedupe wrapper. This keeps
+    # duplicate blocking immediately before any provider call even when a post
+    # was auto-approved by IGPRO policy.
+    _dedupe.patch_publish_control(module)
     original_tick = module.instagram_publish_control_tick
     original_attempt = module.attempt_publish_approved
 
@@ -190,12 +205,14 @@ def _patch_publish_control(module: Any) -> None:
         if _text(approval.get("approved_by")) == AUTO_APPROVER:
             result["approval_mode"] = "safe_autonomous"
             result["policy_version"] = VERSION
+            result["dedupe_policy_version"] = _dedupe.VERSION
             if result.get("status") == "PUBLISHED":
                 for row in reversed(state.get("instagram_publish_audit", []) or []):
                     if isinstance(row, dict) and _text(row.get("job_id")) == str(job_id) and row.get("status") == "PUBLISHED":
                         row["authority"] = "owned_channel_safe_editorial_policy"
                         row["approval_mode"] = "safe_autonomous"
                         row["policy_version"] = VERSION
+                        row["dedupe_policy_version"] = _dedupe.VERSION
                         break
         return result
 
@@ -240,7 +257,9 @@ def _patch_publish_control(module: Any) -> None:
                 "human_approval_required_for_exceptions": True,
                 "monetary_budget_usd": 0,
                 "binding_authority_changed": False,
-                "binding_rule": "LUMEN may auto-publish only owned IGPRO editorial content that passes QA and safety policy; exceptions remain human-gated",
+                "dedupe_policy_version": _dedupe.VERSION,
+                "duplicate_publication_blocked_before_provider": True,
+                "binding_rule": "LUMEN may auto-publish only owned IGPRO editorial content that passes QA, safety and anti-duplicate policy; exceptions remain human-gated",
                 "updated_at": _now(),
             }
         )
@@ -259,6 +278,8 @@ def _patch_publish_control(module: Any) -> None:
                 "human_review_for_exceptions": True,
                 "monetary_budget_usd": 0,
                 "binding_authority_changed": False,
+                "dedupe_policy_version": _dedupe.VERSION,
+                "duplicate_publication_blocked_before_provider": True,
             }
         },
         flush=True,
@@ -270,9 +291,15 @@ _IN_HOOK = False
 
 
 def _patch_loaded_target() -> None:
-    module = sys.modules.get("instagram_publish_control")
-    if module is not None and hasattr(module, "instagram_publish_control_tick"):
-        _patch_publish_control(module)
+    publish = sys.modules.get("instagram_publish_control")
+    if publish is not None and hasattr(publish, "instagram_publish_control_tick"):
+        _patch_publish_control(publish)
+    editorial = sys.modules.get("instagram_pro_editorial_runtime")
+    if editorial is not None:
+        _dedupe.patch_editorial_module(editorial)
+    thematic = sys.modules.get("zero_instagram_thematic_prepare_v2")
+    if thematic is not None:
+        _dedupe.patch_thematic_module(thematic)
 
 
 def _lumen_import(name: str, globals=None, locals=None, fromlist=(), level=0):
