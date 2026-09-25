@@ -72,7 +72,7 @@ jobs:
           ok=0
           for i in $(seq 1 15); do
             if curl -fsS --max-time 15 "$BASE/market-hunter/policy" -o hunter-policy.json; then
-              if grep -q '1.0-adaptive-market-hunter' hunter-policy.json && grep -q 'adaptiveStrategyLearning' hunter-policy.json; then
+              if grep -q '1.0-adaptive-market-hunter' hunter-policy.json && grep -q 'bounded_explore_exploit' hunter-policy.json && grep -q 'bounded_child_queries' hunter-policy.json; then
                 ok=1
                 break
               fi
@@ -80,7 +80,7 @@ jobs:
             sleep 4
           done
           test "$ok" -eq 1
-          jq -e '.adaptiveStrategyLearning == true and .adaptiveQueryGeneration == true and .selfModifyingCode == false and .maxQueriesPerRun == 3 and .createsExternalMessages == false and .autonomousSpend == false and .autonomousPurchase == false and .autonomousContract == false and .verifiedRevenueOnly == true and .bindingActionsHumanGated == true' hunter-policy.json >/dev/null
+          jq -e '.version == "1.0-adaptive-market-hunter" and (.selectionPolicy | contains("bounded_explore_exploit")) and (.queryEvolution | contains("bounded_child_queries")) and .selfModifyingCode == false and .maxQueriesPerRun == 3 and .createsExternalMessages == false and .autonomousSpend == false and .autonomousPurchase == false and .autonomousContract == false and .verifiedRevenueOnly == true and .bindingActionsHumanGated == true' hunter-policy.json >/dev/null
           echo 'ADAPTIVE_MARKET_HUNTER_CONTROL_PLANE_OK'
       - name: Smoke test live B2B travel broker
         env:
