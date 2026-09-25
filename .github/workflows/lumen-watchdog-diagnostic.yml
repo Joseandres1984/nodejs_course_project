@@ -1,0 +1,80 @@
+name: LUMEN watchdog diagnostic
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-watchdog-diagnostic.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      LUMEN_ZERO_COST_MODE: 'true'
+      LUMEN_D1_DATABASE_ID: 'e872694a-ed14-4a7f-b2c3-38b8e1bb498b'
+      D1_ACCOUNT_PRIMARY: ${{ secrets.LUMEN_D1_ACCOUNT_ID }}
+      D1_TOKEN_PRIMARY: ${{ secrets.LUMEN_D1_API_TOKEN }}
+      D1_ACCOUNT_FALLBACK: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      D1_TOKEN_FALLBACK: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: lumen-zero
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install runtime dependencies
+        run: python -m pip install --disable-pip-version-check -r .lumen/runtime/requirements.txt
+
+      - name: Select D1 credentials without exposing secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          account="${D1_ACCOUNT_PRIMARY:-${D1_ACCOUNT_FALLBACK:-}}"
+          token="${D1_TOKEN_PRIMARY:-${D1_TOKEN_FALLBACK:-}}"
+          test -n "$account" && test -n "$token"
+          echo "LUMEN_D1_ACCOUNT_ID=$account" >> "$GITHUB_ENV"
+          echo "LUMEN_D1_API_TOKEN=$token" >> "$GITHUB_ENV"
+
+      - name: Read persisted watchdog state only
+        working-directory: .lumen/runtime
+        run: |
+          python - <<'PY'
+          import d1_persistence_runtime
+          import zero_watchdog_runtime
+          import app as lumen_app
+
+          if not lumen_app.load_state():
+              raise RuntimeError('state_unavailable')
+          wd = lumen_app.STATE.get('system_watchdog') or {}
+          checks = wd.get('checks') or []
+          print({'watchdog_summary': {
+              'status': wd.get('status'),
+              'score_pct': wd.get('score_pct'),
+              'passed': wd.get('passed'),
+              'warnings': wd.get('warnings'),
+              'failed': wd.get('failed'),
+              'total': wd.get('total'),
+              'updated_at': wd.get('updated_at'),
+              'last_tick': lumen_app.STATE.get('last_tick'),
+              'last_tick_origin': lumen_app.STATE.get('last_tick_origin'),
+          }}, flush=True)
+          for row in checks:
+              if str(row.get('status') or '').lower() != 'pass':
+                  print({'watchdog_nonpass': {
+                      'id': row.get('id'),
+                      'name': row.get('name'),
+                      'status': row.get('status'),
+                      'severity': row.get('severity'),
+                      'detail': row.get('detail'),
+                  }}, flush=True)
+          PY
