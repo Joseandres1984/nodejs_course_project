@@ -6,11 +6,14 @@ import { handleSourceIntelligencePolicy } from "./source-intelligence-policy.js"
 import { handleProductCommerceRadar, runProductCommerceRadar } from "./product-commerce-radar.js";
 import { handleCommerceMachine, runCommerceMachine } from "./commerce-machine.js";
 import { handleCommerceOperations, runCommerceOperations } from "./commerce-operations.js";
+import { handleTiendanubeBridge } from "./tiendanube-bridge.js";
 
 export default {
   async fetch(request, env, ctx) {
     const sourcePolicyResponse = handleSourceIntelligencePolicy(request);
     if (sourcePolicyResponse) return sourcePolicyResponse;
+    const tiendanubeResponse = await handleTiendanubeBridge(request, env);
+    if (tiendanubeResponse) return tiendanubeResponse;
     const commerceOpsResponse = await handleCommerceOperations(request, env);
     if (commerceOpsResponse) return commerceOpsResponse;
     const commerceMachineResponse = await handleCommerceMachine(request, env);
@@ -30,8 +33,9 @@ export default {
     // Discovery remains isolated from the established commercial execution slot.
     // Product Commerce observes allowed feeds. Commerce Machine researches and
     // prepares catalog/channel plans. Commerce Operations prepares publication,
-    // inventory/price sync and fulfillment queues but performs no marketplace write,
-    // supplier purchase or monetary spend without explicit external authorization.
+    // inventory/price sync and fulfillment queues. Tiendanube Bridge receives
+    // verified events and can execute only an explicitly admin-approved hidden
+    // product creation; no autonomous publish, supplier purchase or monetary spend.
     ctx.waitUntil((async () => {
       const [sourceIntelligence, productCommerce, hunter] = await Promise.all([
         runSourceIntelligence(env),
