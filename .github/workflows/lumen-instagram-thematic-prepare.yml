@@ -89,7 +89,14 @@ jobs:
 
       - name: Prepare pixel-safe thematic Instagram post in canonical D1 state
         working-directory: .lumen/runtime
-        run: python zero_instagram_thematic_prepare_v2.py
+        run: |
+          python - <<'PY'
+          # Install the Zero watchdog adapter before importing app so this helper
+          # cannot persist false Postgres failures into the canonical dashboard.
+          import zero_watchdog_runtime  # noqa: F401
+          import zero_instagram_thematic_prepare_v2 as thematic
+          raise SystemExit(thematic.main())
+          PY
 
       - name: Commit generated 4x5 Instagram asset
         shell: bash
