@@ -1,0 +1,41 @@
+name: LUMEN Supplier Intake check
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/a2a-worker/tiendanube-supplier-intake.js'
+      - '.lumen/a2a-worker/test-tiendanube-supplier-intake.mjs'
+      - '.lumen/a2a-worker/adaptive-entry.js'
+      - '.github/workflows/lumen-supplier-intake-check.yml'
+  pull_request:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/a2a-worker/tiendanube-supplier-intake.js'
+      - '.lumen/a2a-worker/test-tiendanube-supplier-intake.mjs'
+      - '.lumen/a2a-worker/adaptive-entry.js'
+      - '.github/workflows/lumen-supplier-intake-check.yml'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Syntax check
+        run: |
+          node --check .lumen/a2a-worker/tiendanube-supplier-intake.js
+          node --check .lumen/a2a-worker/adaptive-entry.js
+          node --check .lumen/a2a-worker/test-tiendanube-supplier-intake.mjs
+      - name: Run supplier intake tests
+        run: node .lumen/a2a-worker/test-tiendanube-supplier-intake.mjs
+      - name: Verify authority guardrails
+        run: |
+          grep -q 'autonomousPublishing: false' .lumen/a2a-worker/tiendanube-supplier-intake.js
+          grep -q 'autonomousPurchasing: false' .lumen/a2a-worker/tiendanube-supplier-intake.js
+          grep -q 'supplierOrdering: false' .lumen/a2a-worker/tiendanube-supplier-intake.js
+          grep -q 'autonomousSpendUsd: 0' .lumen/a2a-worker/tiendanube-supplier-intake.js
+          grep -q 'approvalRequiredBeforeLive: true' .lumen/a2a-worker/tiendanube-supplier-intake.js
+          grep -q 'visibility: "hidden"' .lumen/a2a-worker/tiendanube-supplier-intake.js
