@@ -1,0 +1,78 @@
+name: LUMEN Supplier First Sale Launch
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-supplier-launch-first-sale.yml'
+  workflow_dispatch:
+
+jobs:
+  launch-first-vetted-product:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify launch gate
+        run: |
+          set -euo pipefail
+          BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          curl -fsS --max-time 20 "$BASE/supplier-launch/policy" -o policy.json
+          jq -e '.version == "1.0-supplier-market-launch" and .explicitHumanApprovalRequired == true and .autonomousPurchasing == false and .autonomousSpendUsd == 0' policy.json >/dev/null
+          echo 'SUPPLIER_LAUNCH_GATE_OK'
+
+      - name: Seed verified GTS-1703 market benchmark
+        env:
+          OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          test -n "$OPPORTUNITY_ADMIN_TOKEN"
+          curl -fsS --max-time 20 -X POST \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'content-type: application/json' \
+            "$BASE/supplier-launch/benchmark" \
+            --data '{"sku":"PARGTS1703","title":"PARLANTE GTS-1703 6.5 X2","marketMin":105039,"marketMedian":127299.50,"marketMax":219999,"sampleCount":14,"observedAt":"2026-09-25T14:40:00-03:00","sourceNotes":"Public Argentina market snapshot: Mercado Libre exact GTS-1703 listings observed around ARS 105039, 106200, 109000, 109999, 111890, 119000, 124999, 129600, 139500, 142000, 158861, 159999, 164000 and 219999."}' \
+            -o benchmark.json
+          jq -e '.ok == true and .sku == "PARGTS1703"' benchmark.json >/dev/null
+          echo 'GTS_BENCHMARK_OK'
+
+      - name: Evaluate first launch economics
+        env:
+          OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          curl -fsS --max-time 20 -X POST \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'content-type: application/json' \
+            "$BASE/supplier-launch/evaluate" \
+            --data '{"sku":"PARGTS1703","launchPrice":119900}' \
+            -o evaluation.json
+          echo 'GTS_LAUNCH_EVALUATION'
+          jq -c '{sku,title,stock,supplierCost,launchPrice,marketMedian:.benchmark.marketMedian,marketSampleCount:.benchmark.sampleCount,projectedProfit:.economics.projectedProfit,projectedMarginPct:.economics.projectedMarginPct,marketGapPct,blockers,launchable}' evaluation.json
+          jq -e '.ok == true and .launchable == true and .economics.projectedMarginPct >= 18' evaluation.json >/dev/null
+
+      - name: Execute explicitly approved first sales test
+        env:
+          OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          curl -fsS --max-time 30 -X POST \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'content-type: application/json' \
+            "$BASE/supplier-launch/execute" \
+            --data '{"sku":"PARGTS1703","launchPrice":119900,"approvedBy":"owner","approvalNote":"Explicit owner approval in chat on 2026-09-25 for a small vetted Tiendanube sales test. No supplier purchase or autonomous spend authorized."}' \
+            -o launch.json
+          echo 'FIRST_SALES_TEST_RESULT'
+          jq -c '{sku,title,launchPrice,stock,projectedProfit:.economics.projectedProfit,projectedMarginPct:.economics.projectedMarginPct,marketMedian:.benchmark.marketMedian,state,externalWriteExecuted,freeShipping,error,blockers}' launch.json
+          jq -e '.externalWriteExecuted == true and .state == "LIVE" and .sku == "PARGTS1703"' launch.json >/dev/null
+
+      - name: Verify LUMEN recorded live launch
+        env:
+          OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          curl -fsS --max-time 20 -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" "$BASE/supplier-launch/status" -o status.json
+          jq -e '.launches | map(select(.sku == "PARGTS1703" and .state == "LIVE")) | length >= 1' status.json >/dev/null
+          echo 'FIRST_SALES_TEST_LIVE_CONFIRMED'
