@@ -47,7 +47,7 @@ jobs:
             echo 'INSTAGRAM_CONNECTOR_PREREQUISITES=NOT_READY'
           fi
 
-      - name: Recover Instagram business account ID from existing token
+      - name: Recover Instagram account ID from existing token
         if: ${{ env.IG_USER_ID == '' && (env.IG_ACCESS_TOKEN != '' || env.IG_PAGE_ACCESS_TOKEN != '') }}
         shell: bash
         run: |
@@ -56,33 +56,36 @@ jobs:
           version="${IG_GRAPH_VERSION:-v26.0}"
           case "$version" in v*) ;; *) version="v$version" ;; esac
 
-          # Do not put the token in the URL or output. Query only account IDs/usernames.
-          curl --fail-with-body --silent --show-error --max-time 30 \
+          # Route 1: Instagram Graph API through Facebook Login / linked Page.
+          fb_code=$(curl --silent --show-error --max-time 30 -w '%{http_code}' \
             -H "Authorization: Bearer $token" \
             "https://graph.facebook.com/$version/me/accounts?fields=id%2Cinstagram_business_account%7Bid%2Cusername%7D&limit=100" \
-            -o /tmp/accounts.json || true
-
+            -o /tmp/accounts.json || true)
+          echo "FACEBOOK_GRAPH_PROBE_HTTP=${fb_code:-000}"
           candidate=$(jq -r '[.data[]? | .instagram_business_account? | select(.id != null) | {id:(.id|tostring),username:(.username // "")}] | map(select(.username=="lumen.b2b")) + map(select(.username!="lumen.b2b")) | .[0].id // empty' /tmp/accounts.json 2>/dev/null || true)
           username=$(jq -r --arg id "$candidate" '[.data[]? | .instagram_business_account? | select((.id|tostring)==$id)][0].username // empty' /tmp/accounts.json 2>/dev/null || true)
-
           if [ -n "$candidate" ]; then
             echo "RECOVERED_INSTAGRAM_USER_ID=$candidate"
             echo "RECOVERED_INSTAGRAM_USERNAME=${username:-UNKNOWN}"
+            echo 'INSTAGRAM_API_MODE=FACEBOOK_LOGIN'
             echo 'INSTAGRAM_ID_RECOVERY=SUCCESS'
             exit 0
           fi
 
-          # Fallback: inspect token identity without exposing token or account names.
-          curl --fail-with-body --silent --show-error --max-time 30 \
+          # Route 2: Instagram API with Instagram Login. Token stays only in the Authorization header.
+          ig_code=$(curl --silent --show-error --max-time 30 -w '%{http_code}' \
             -H "Authorization: Bearer $token" \
-            "https://graph.facebook.com/$version/me?fields=id%2Cusername" \
-            -o /tmp/me.json || true
-          me_id=$(jq -r '.id // empty' /tmp/me.json 2>/dev/null || true)
-          me_username=$(jq -r '.username // empty' /tmp/me.json 2>/dev/null || true)
-          if [ -n "$me_id" ] && [ "$me_username" = 'lumen.b2b' ]; then
-            echo "RECOVERED_INSTAGRAM_USER_ID=$me_id"
-            echo "RECOVERED_INSTAGRAM_USERNAME=$me_username"
-            echo 'INSTAGRAM_ID_RECOVERY=SUCCESS_DIRECT_IDENTITY'
-          else
-            echo 'INSTAGRAM_ID_RECOVERY=NOT_FOUND'
+            "https://graph.instagram.com/$version/me?fields=user_id%2Cid%2Cusername" \
+            -o /tmp/igme.json || true)
+          echo "INSTAGRAM_GRAPH_PROBE_HTTP=${ig_code:-000}"
+          ig_id=$(jq -r '.user_id // .id // empty' /tmp/igme.json 2>/dev/null || true)
+          ig_username=$(jq -r '.username // empty' /tmp/igme.json 2>/dev/null || true)
+          if [ -n "$ig_id" ] && { [ "$ig_username" = 'lumen.b2b' ] || [ -n "$ig_username" ]; }; then
+            echo "RECOVERED_INSTAGRAM_USER_ID=$ig_id"
+            echo "RECOVERED_INSTAGRAM_USERNAME=$ig_username"
+            echo 'INSTAGRAM_API_MODE=INSTAGRAM_LOGIN'
+            echo 'INSTAGRAM_ID_RECOVERY=SUCCESS'
+            exit 0
           fi
+
+          echo 'INSTAGRAM_ID_RECOVERY=NOT_FOUND'
