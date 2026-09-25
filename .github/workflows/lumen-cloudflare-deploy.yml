@@ -32,7 +32,7 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: npx --yes wrangler@latest deploy --config wrangler.toml
+        run: npx --yes wrangler@latest deploy adaptive-entry.js --config wrangler.toml
       - name: Restore protected opportunity admin secret
         working-directory: .lumen/a2a-worker
         env:
@@ -60,6 +60,29 @@ jobs:
           grep -q '"autonomousSpend":false' governor-policy.json
           grep -q '"maxExternalMessagesPerCycle":1' governor-policy.json
           echo 'PORTFOLIO_PUBLIC_SMOKE_OK'
+      - name: Smoke test adaptive market hunter
+        env:
+          OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          ok=0
+          for i in $(seq 1 15); do
+            if curl -fsS "$BASE/market-hunter/policy" -o hunter-policy.json; then
+              if grep -q '1.0-adaptive-market-hunter' hunter-policy.json && grep -q 'adaptiveStrategyLearning' hunter-policy.json; then
+                ok=1
+                break
+              fi
+            fi
+            sleep 4
+          done
+          test "$ok" -eq 1
+          jq -e '.adaptiveStrategyLearning == true and .adaptiveQueryGeneration == true and .selfModifyingCode == false and .maxQueriesPerRun == 3 and .createsExternalMessages == false and .autonomousSpend == false and .autonomousPurchase == false and .autonomousContract == false and .verifiedRevenueOnly == true' hunter-policy.json >/dev/null
+          curl -fsS -X POST -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" "$BASE/market-hunter/run" -o hunter-run.json
+          jq -e '.version == "1.0-adaptive-market-hunter" and (.selectedStrategies|type) == "array" and (.selectedStrategies|length) >= 1 and (.selectedStrategies|length) <= 3 and .guardrails.createsExternalMessages == false and .guardrails.autonomousSpend == false' hunter-run.json >/dev/null
+          curl -fsS "$BASE/market-hunter/state" -o hunter-state.json
+          jq -e '.version == "1.0-adaptive-market-hunter" and .totals.activeStrategies >= 8 and (.ranking|type) == "array"' hunter-state.json >/dev/null
+          echo 'ADAPTIVE_MARKET_HUNTER_SMOKE_OK'
       - name: Smoke test live B2B travel broker
         env:
           OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
