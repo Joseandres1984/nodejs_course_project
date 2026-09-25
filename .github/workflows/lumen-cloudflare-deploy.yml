@@ -60,3 +60,27 @@ jobs:
           grep -q '"autonomousSpend":false' governor-policy.json
           grep -q '"maxExternalMessagesPerCycle":1' governor-policy.json
           echo 'PORTFOLIO_PUBLIC_SMOKE_OK'
+      - name: Smoke test live B2B travel broker
+        env:
+          OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          ok=0
+          for i in $(seq 1 15); do
+            if curl -fsS "$BASE/travel/policy" -o travel-policy.json && curl -fsS "$BASE/travel/catalog" -o travel-catalog.json && curl -fsS "$BASE/travel/stats" -o travel-stats.json && curl -fsS "$BASE/travel/partners/stats" -o travel-partners.json; then
+              if grep -q '1.0-travel-broker-referral' travel-policy.json && grep -q 'TRAVEL-CORPORATE-BROKER' travel-catalog.json && grep -q 'autonomousTravelBooking' travel-policy.json; then
+                ok=1
+                break
+              fi
+            fi
+            sleep 4
+          done
+          test "$ok" -eq 1
+          grep -q '"createsBooking":false' travel-policy.json
+          grep -q '"autonomousSpend":false' travel-policy.json
+          curl -fsS -X POST -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" "$BASE/travel/run" -o travel-run.json
+          grep -q '"ok":true' travel-run.json
+          grep -q '"b2bOnly":true' travel-run.json
+          grep -q '"createsBooking":false' travel-run.json
+          echo 'TRAVEL_BROKER_LIVE_SMOKE_OK'
