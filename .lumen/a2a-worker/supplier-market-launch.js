@@ -114,6 +114,7 @@ function economics(cost, launchPrice, cfg) {
 }
 
 async function upsertBenchmark(env, body) {
+  await ensureSchema(env);
   const sku = clean(body?.sku, 160);
   const title = clean(body?.title, 260);
   const marketMin = Math.max(0, num(body?.marketMin));
@@ -130,6 +131,7 @@ async function upsertBenchmark(env, body) {
 }
 
 async function evaluateSku(env, sku, requestedPrice = 0) {
+  await ensureSchema(env);
   const cfg = config(env);
   const row = await env.DB.prepare("SELECT * FROM lumen_supplier_intake_products WHERE sku=? ORDER BY stock DESC LIMIT 1").bind(sku).first();
   if (!row) return { ok: false, error: "sku_not_found" };
@@ -217,19 +219,22 @@ export async function handleSupplierMarketLaunch(request, env) {
   }
   if (url.pathname === "/supplier-launch/status" && request.method === "GET") {
     if (!authorized(request, env)) return Response.json({ ok: false, error: "unauthorized" }, { status: 401 });
-    return Response.json(await status(env));
+    try { return Response.json(await status(env)); }
+    catch (error) { return Response.json({ ok: false, error: clean(error, 500) }, { status: 400 }); }
   }
   if (url.pathname === "/supplier-launch/benchmark" && request.method === "POST") {
     if (!authorized(request, env)) return Response.json({ ok: false, error: "unauthorized" }, { status: 401 });
     let body = {};
     try { body = await request.json(); } catch {}
-    return Response.json(await upsertBenchmark(env, body));
+    try { return Response.json(await upsertBenchmark(env, body)); }
+    catch (error) { return Response.json({ ok: false, error: clean(error, 500) }, { status: 400 }); }
   }
   if (url.pathname === "/supplier-launch/evaluate" && request.method === "POST") {
     if (!authorized(request, env)) return Response.json({ ok: false, error: "unauthorized" }, { status: 401 });
     let body = {};
     try { body = await request.json(); } catch {}
-    return Response.json(await evaluateSku(env, clean(body?.sku, 160), Math.max(0, num(body?.launchPrice))));
+    try { return Response.json(await evaluateSku(env, clean(body?.sku, 160), Math.max(0, num(body?.launchPrice)))); }
+    catch (error) { return Response.json({ ok: false, error: clean(error, 500) }, { status: 400 }); }
   }
   if (url.pathname === "/supplier-launch/execute" && request.method === "POST") {
     if (!authorized(request, env)) return Response.json({ ok: false, error: "unauthorized" }, { status: 401 });
