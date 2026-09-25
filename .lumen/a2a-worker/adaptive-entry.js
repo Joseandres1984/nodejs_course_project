@@ -7,11 +7,14 @@ import { handleProductCommerceRadar, runProductCommerceRadar } from "./product-c
 import { handleCommerceMachine, runCommerceMachine } from "./commerce-machine.js";
 import { handleCommerceOperations, runCommerceOperations } from "./commerce-operations.js";
 import { handleTiendanubeBridge } from "./tiendanube-bridge.js";
+import { handleTiendanubePrivacy } from "./tiendanube-privacy.js";
 
 export default {
   async fetch(request, env, ctx) {
     const sourcePolicyResponse = handleSourceIntelligencePolicy(request);
     if (sourcePolicyResponse) return sourcePolicyResponse;
+    const tiendanubePrivacyResponse = await handleTiendanubePrivacy(request, env);
+    if (tiendanubePrivacyResponse) return tiendanubePrivacyResponse;
     const tiendanubeResponse = await handleTiendanubeBridge(request, env);
     if (tiendanubeResponse) return tiendanubeResponse;
     const commerceOpsResponse = await handleCommerceOperations(request, env);
@@ -35,7 +38,7 @@ export default {
     // prepares catalog/channel plans. Commerce Operations prepares publication,
     // inventory/price sync and fulfillment queues. Tiendanube Bridge receives
     // verified events and can execute only an explicitly admin-approved hidden
-    // product creation; no autonomous publish, supplier purchase or monetary spend.
+    // product creation; privacy callbacks are HMAC-verified and isolated.
     ctx.waitUntil((async () => {
       const [sourceIntelligence, productCommerce, hunter] = await Promise.all([
         runSourceIntelligence(env),
