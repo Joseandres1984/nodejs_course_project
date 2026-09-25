@@ -1,4 +1,4 @@
-const VERSION = "1.0-commercial-intelligence";
+const VERSION = "1.1-microbuyer-commercial-intelligence";
 
 const HARD_TEST_PHRASES = [
   "paper-only",
@@ -69,6 +69,47 @@ const COMMERCIAL_CONTEXT_PHRASES = [
   "pricing"
 ];
 
+// FIRST CASH does not treat x402 support by itself as purchase intent. A
+// microbuyer fit exists only when a machine-payment compatibility signal is
+// combined with a concrete information/research need that LUMEN can service.
+const MICROBUYER_COMPAT_PHRASES = [
+  "x402",
+  "http 402",
+  "payment-required",
+  "payment required",
+  "pay per request",
+  "per-request",
+  "per request",
+  "usdc",
+  "machine-to-machine",
+  "machine to machine",
+  "agent marketplace",
+  "api marketplace",
+  "a2a agent",
+  "agent-to-agent",
+  "mcp"
+];
+
+const MICROBUYER_NEED_PHRASES = [
+  "supplier",
+  "sourcing",
+  "vendor",
+  "procurement",
+  "company",
+  "domain",
+  "counterparty",
+  "due diligence",
+  "research",
+  "verification",
+  "verify",
+  "identity",
+  "official channel",
+  "market intelligence",
+  "quotation",
+  "quote",
+  "tender"
+];
+
 function json(data, status = 200) {
   return Response.json(data, {
     status,
@@ -115,6 +156,9 @@ export function assessCommercialOpportunity(row) {
   const softTestHits = countHits(text, SOFT_TEST_PHRASES);
   const intentHits = countHits(text, HIGH_INTENT_PHRASES);
   const contextHits = countHits(text, COMMERCIAL_CONTEXT_PHRASES);
+  const microbuyerCompatHits = countHits(text, MICROBUYER_COMPAT_PHRASES);
+  const microbuyerNeedHits = countHits(text, MICROBUYER_NEED_PHRASES);
+  const microbuyerFit = microbuyerCompatHits > 0 && microbuyerNeedHits > 0;
 
   let score = Math.min(70, Math.max(0, Number(row?.score || 0)));
 
@@ -134,6 +178,12 @@ export function assessCommercialOpportunity(row) {
     score += Math.min(12, contextHits * 2);
     reasons.push(`commercial_context:${contextHits}`);
   }
+  if (microbuyerCompatHits) reasons.push(`microbuyer_compat:${microbuyerCompatHits}`);
+  if (microbuyerNeedHits) reasons.push(`microbuyer_need:${microbuyerNeedHits}`);
+  if (microbuyerFit) {
+    score += 20;
+    reasons.push("microbuyer_fit");
+  }
   if (hardTestHits) {
     score -= Math.min(70, hardTestHits * 24);
     reasons.push(`hard_test_only:${hardTestHits}`);
@@ -148,7 +198,13 @@ export function assessCommercialOpportunity(row) {
 
   score = Math.max(0, Math.min(100, Math.round(score)));
   const fit = score >= 80 ? "A" : score >= 65 ? "B" : score >= 45 ? "C" : "D";
-  const evidenceStrength = intentHits >= 3 ? "strong" : intentHits >= 1 ? "medium" : Number(row?.demand_signal || 0) === 1 ? "weak" : "none";
+  const evidenceStrength = intentHits >= 3
+    ? "strong"
+    : (intentHits >= 1 || microbuyerFit)
+      ? "medium"
+      : Number(row?.demand_signal || 0) === 1
+        ? "weak"
+        : "none";
   const commerciallyActionable = !explicitNoCommerce && score >= 45 && Number(row?.demand_signal || 0) === 1;
 
   return {
@@ -160,6 +216,9 @@ export function assessCommercialOpportunity(row) {
     reasons,
     intentHits,
     contextHits,
+    microbuyerCompatHits,
+    microbuyerNeedHits,
+    microbuyerFit,
     hardTestHits,
     softTestHits
   };
@@ -180,6 +239,7 @@ export async function runCommercialReassessment(env) {
   let assessed = 0;
   let actionable = 0;
   let testOnly = 0;
+  let microbuyerFits = 0;
   const now = new Date().toISOString();
 
   for (const row of rows.results || []) {
@@ -189,6 +249,7 @@ export async function runCommercialReassessment(env) {
     assessed += 1;
     if (a.commerciallyActionable) actionable += 1;
     if (a.syntheticOrTestOnly) testOnly += 1;
+    if (a.microbuyerFit) microbuyerFits += 1;
   }
 
   return {
@@ -197,11 +258,13 @@ export async function runCommercialReassessment(env) {
     assessed,
     actionable,
     testOnly,
+    microbuyerFits,
     guardrails: {
       autonomousOutgoingSpend: false,
       autonomousPurchase: false,
       autonomousContract: false,
       autonomousOutreach: false,
+      microbuyerCompatibilityAloneIsNotIntent: true,
       bindingActionsHumanGated: true
     }
   };
@@ -213,12 +276,14 @@ async function commercialStats(env) {
   const actionable = await env.DB.prepare("SELECT COUNT(*) AS n FROM lumen_opportunity_assessments WHERE commercially_actionable=1").first();
   const testOnly = await env.DB.prepare("SELECT COUNT(*) AS n FROM lumen_opportunity_assessments WHERE synthetic_or_test_only=1").first();
   const high = await env.DB.prepare("SELECT COUNT(*) AS n FROM lumen_opportunity_assessments WHERE commercial_score>=65 AND synthetic_or_test_only=0").first();
+  const microbuyers = await env.DB.prepare("SELECT COUNT(*) AS n FROM lumen_opportunity_assessments WHERE reasons_json LIKE '%microbuyer_fit%' AND synthetic_or_test_only=0").first();
   return json({
     version: VERSION,
     totalAssessed: Number(total?.n || 0),
     actionable: Number(actionable?.n || 0),
     filteredTestOnly: Number(testOnly?.n || 0),
     commercialScore65Plus: Number(high?.n || 0),
+    microbuyerFits: Number(microbuyers?.n || 0),
     autonomousOutreach: false,
     autonomousOutgoingSpend: false
   });
