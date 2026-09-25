@@ -27,12 +27,16 @@ jobs:
             exit 2
           fi
           echo 'REQUIRED_SECRETS_PRESENT'
-      - name: Deploy lumen-zero-a2a
+      - name: Deploy lumen-zero-a2a with adaptive entrypoint
         working-directory: .lumen/a2a-worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: npx --yes wrangler@latest deploy adaptive-entry.js --config wrangler.toml
+        run: |
+          set -euo pipefail
+          sed -i 's/^main = "opportunity-entry.js"$/main = "adaptive-entry.js"/' wrangler.toml
+          grep -q '^main = "adaptive-entry.js"$' wrangler.toml
+          npx --yes wrangler@latest deploy --config wrangler.toml
       - name: Restore protected opportunity admin secret
         working-directory: .lumen/a2a-worker
         env:
@@ -40,6 +44,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
         run: |
+          sed -i 's/^main = "opportunity-entry.js"$/main = "adaptive-entry.js"/' wrangler.toml
           printf '%s' "$OPPORTUNITY_ADMIN_TOKEN" | npx --yes wrangler@latest secret put OPPORTUNITY_ADMIN_TOKEN --config wrangler.toml
       - name: Smoke test public portfolio endpoints
         run: |
