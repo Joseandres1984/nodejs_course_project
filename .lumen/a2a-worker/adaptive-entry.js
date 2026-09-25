@@ -2,9 +2,12 @@ import currentWorker from "./opportunity-entry.js";
 import { handleAdaptiveMarketHunter, runAdaptiveMarketHunter } from "./adaptive-market-hunter.js";
 import { handleMarketHunterPruner, pruneMarketHunterStrategies } from "./market-hunter-pruner.js";
 import { handleSourceIntelligence, runSourceIntelligence } from "./source-intelligence.js";
+import { handleSourceIntelligencePolicy } from "./source-intelligence-policy.js";
 
 export default {
   async fetch(request, env, ctx) {
+    const sourcePolicyResponse = handleSourceIntelligencePolicy(request);
+    if (sourcePolicyResponse) return sourcePolicyResponse;
     const sourceResponse = await handleSourceIntelligence(request, env);
     if (sourceResponse) return sourceResponse;
     const hunterResponse = await handleAdaptiveMarketHunter(request, env);
