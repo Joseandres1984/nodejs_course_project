@@ -1,0 +1,43 @@
+name: LUMEN Tiendanube privacy check
+
+on:
+  pull_request:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/a2a-worker/tiendanube-privacy.js'
+      - '.lumen/a2a-worker/adaptive-entry.js'
+      - '.github/workflows/lumen-tiendanube-privacy-check.yml'
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/a2a-worker/tiendanube-privacy.js'
+      - '.lumen/a2a-worker/adaptive-entry.js'
+      - '.github/workflows/lumen-tiendanube-privacy-check.yml'
+
+jobs:
+  validate-tiendanube-privacy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Check syntax
+        run: |
+          node --check .lumen/a2a-worker/tiendanube-privacy.js
+          node --check .lumen/a2a-worker/adaptive-entry.js
+      - name: Verify mandatory privacy routes and HMAC guard
+        run: |
+          node --input-type=module - <<'NODE'
+          import fs from 'node:fs';
+          const src = fs.readFileSync('.lumen/a2a-worker/tiendanube-privacy.js', 'utf8');
+          for (const needle of [
+            '/tiendanube/privacy/store-redact',
+            '/tiendanube/privacy/customer-redact',
+            '/tiendanube/privacy/customers-data-request',
+            'x-linkedstore-hmac-sha256',
+            'DELETE FROM lumen_tiendanube_connections',
+            'DELETE FROM lumen_commerce_order_events'
+          ]) if (!src.includes(needle)) throw new Error(`missing ${needle}`);
+          console.log('TIENDANUBE_PRIVACY_GUARDS_OK');
+          NODE
