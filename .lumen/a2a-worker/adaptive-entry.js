@@ -5,11 +5,14 @@ import { handleSourceIntelligence, runSourceIntelligence } from "./source-intell
 import { handleSourceIntelligencePolicy } from "./source-intelligence-policy.js";
 import { handleProductCommerceRadar, runProductCommerceRadar } from "./product-commerce-radar.js";
 import { handleCommerceMachine, runCommerceMachine } from "./commerce-machine.js";
+import { handleCommerceOperations, runCommerceOperations } from "./commerce-operations.js";
 
 export default {
   async fetch(request, env, ctx) {
     const sourcePolicyResponse = handleSourceIntelligencePolicy(request);
     if (sourcePolicyResponse) return sourcePolicyResponse;
+    const commerceOpsResponse = await handleCommerceOperations(request, env);
+    if (commerceOpsResponse) return commerceOpsResponse;
     const commerceMachineResponse = await handleCommerceMachine(request, env);
     if (commerceMachineResponse) return commerceMachineResponse;
     const productCommerceResponse = await handleProductCommerceRadar(request, env);
@@ -25,10 +28,10 @@ export default {
 
   async scheduled(controller, env, ctx) {
     // Discovery remains isolated from the established commercial execution slot.
-    // Product Commerce observes allowed feeds. Commerce Machine may research prices
-    // read-only and prepare shadow catalog/channel plans, but it cannot publish,
-    // purchase, accept contracts or spend money. External authority stays with the
-    // existing Governor and explicit human approvals.
+    // Product Commerce observes allowed feeds. Commerce Machine researches and
+    // prepares catalog/channel plans. Commerce Operations prepares publication,
+    // inventory/price sync and fulfillment queues but performs no marketplace write,
+    // supplier purchase or monetary spend without explicit external authorization.
     ctx.waitUntil((async () => {
       const [sourceIntelligence, productCommerce, hunter] = await Promise.all([
         runSourceIntelligence(env),
@@ -36,8 +39,9 @@ export default {
         runAdaptiveMarketHunter(env)
       ]);
       const commerceMachine = await runCommerceMachine(env);
+      const commerceOperations = await runCommerceOperations(env);
       const pruning = await pruneMarketHunterStrategies(env);
-      return { sourceIntelligence, productCommerce, commerceMachine, hunter, pruning };
+      return { sourceIntelligence, productCommerce, commerceMachine, commerceOperations, hunter, pruning };
     })().catch(() => ({ ok: false, isolatedFailure: true })));
     return currentWorker.scheduled(controller, env, ctx);
   }

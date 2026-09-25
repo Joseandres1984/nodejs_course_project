@@ -5,6 +5,7 @@ on:
     branches: [lumen-zero]
     paths:
       - '.lumen/a2a-worker/commerce-machine.js'
+      - '.lumen/a2a-worker/commerce-operations.js'
       - '.lumen/a2a-worker/test-commerce-machine.mjs'
       - '.lumen/a2a-worker/adaptive-entry.js'
       - '.github/workflows/lumen-commerce-machine-check.yml'
@@ -12,6 +13,7 @@ on:
     branches: [lumen-zero]
     paths:
       - '.lumen/a2a-worker/commerce-machine.js'
+      - '.lumen/a2a-worker/commerce-operations.js'
       - '.lumen/a2a-worker/test-commerce-machine.mjs'
       - '.lumen/a2a-worker/adaptive-entry.js'
       - '.github/workflows/lumen-commerce-machine-check.yml'
@@ -28,6 +30,7 @@ jobs:
       - name: Check Commerce Machine syntax
         run: |
           node --check .lumen/a2a-worker/commerce-machine.js
+          node --check .lumen/a2a-worker/commerce-operations.js
           node --check .lumen/a2a-worker/adaptive-entry.js
           node --check .lumen/a2a-worker/test-commerce-machine.mjs
       - name: Test economics, catalog generation and channel guardrails
@@ -36,10 +39,19 @@ jobs:
         run: |
           node --input-type=module - <<'NODE'
           import fs from 'node:fs';
-          const source = fs.readFileSync('.lumen/a2a-worker/commerce-machine.js', 'utf8');
-          if (!source.includes('publicationAuthority: false')) throw new Error('publication authority guard missing');
-          if (!source.includes('purchaseAuthority: false')) throw new Error('purchase authority guard missing');
-          if (!source.includes('autonomousSpendUsd: 0')) throw new Error('zero-spend guard missing');
-          if (!source.includes('SHADOW_DRAFT')) throw new Error('shadow draft guard missing');
-          console.log('COMMERCE_MACHINE_AUTHORITY_GUARDS ok');
+          const machine = fs.readFileSync('.lumen/a2a-worker/commerce-machine.js', 'utf8');
+          const ops = fs.readFileSync('.lumen/a2a-worker/commerce-operations.js', 'utf8');
+          if (!machine.includes('publicationAuthority: false')) throw new Error('publication authority guard missing');
+          if (!machine.includes('purchaseAuthority: false')) throw new Error('purchase authority guard missing');
+          if (!machine.includes('autonomousSpendUsd: 0')) throw new Error('zero-spend guard missing');
+          if (!machine.includes('SHADOW_DRAFT')) throw new Error('shadow draft guard missing');
+          if (!ops.includes('autonomousPublishing: false')) throw new Error('ops publication guard missing');
+          if (!ops.includes('autonomousPurchasing: false')) throw new Error('ops purchasing guard missing');
+          if (!ops.includes('supplierOrdering: false')) throw new Error('supplier order guard missing');
+          if (!ops.includes('priceWriteAuthority: false')) throw new Error('price write guard missing');
+          if (!ops.includes('inventoryWriteAuthority: false')) throw new Error('inventory write guard missing');
+          if (!ops.includes('autonomousSpendUsd: 0')) throw new Error('ops zero-spend guard missing');
+          if (!ops.includes('AWAITING_HUMAN_PURCHASE_APPROVAL')) throw new Error('human purchase gate missing');
+          if (!ops.includes('verified=1')) throw new Error('verified order gate missing');
+          console.log('COMMERCE_MACHINE_AND_OPS_AUTHORITY_GUARDS ok');
           NODE
