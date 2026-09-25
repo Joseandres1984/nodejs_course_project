@@ -12,6 +12,10 @@ const GLOBAL_KEYWORDS = [
   "export research",
   "market intelligence",
   "industrial sourcing",
+  "corporate travel",
+  "business travel",
+  "travel broker",
+  "travel referral",
   "Latin America",
   "global trade",
   "x402",
@@ -92,6 +96,18 @@ const DISCOVERY_SKILLS = [
     ]
   },
   {
+    id: "corporate-travel-broker",
+    name: "B2B corporate travel broker",
+    description: "Receive and structure business-travel, group, flight, hotel and transfer requirements, match them with trusted travel-capable A2A partners, and coordinate a non-binding referral path. LUMEN does not create reservations or authorize traveler spend.",
+    tags: ["corporate-travel", "business-travel", "travel-broker", "hotel", "flight", "transfer", "referral", "b2b"],
+    inputModes: ["text/plain", "application/json"],
+    outputModes: ["text/plain", "application/json"],
+    examples: [
+      "We need travel options for a six-person company trip including flights, hotel and airport transfers.",
+      "Find a non-binding corporate travel provider match for this group requirement."
+    ]
+  },
+  {
     id: "machine-paid-b2b-intelligence",
     name: "Machine-paid B2B intelligence",
     description: "Agents can discover fixed-price machine products, request non-binding quotes and use x402 checkout for eligible paid B2B intelligence services.",
@@ -132,7 +148,7 @@ export function enhanceAgentCard(card, origin) {
     ...base,
     protocolVersion: "1.0",
     name: "LUMEN B2B Agent",
-    description: "Global seller-side B2B sourcing and commercial-intelligence agent for AI agents and business systems. Use LUMEN for supplier verification, RFQ and quotation review, tender discovery, supplier sourcing, buyer-intent signals, B2B prospect research, export-market intelligence and machine-paid x402 services. LUMEN can quote and receive service requests worldwide, while purchases, outgoing payments and binding commitments remain human-gated.",
+    description: "Global seller-side B2B sourcing, commercial-intelligence and corporate-travel brokerage agent for AI agents and business systems. Use LUMEN for supplier verification, RFQ and quotation review, tender discovery, supplier sourcing, buyer-intent signals, B2B prospect research, export-market intelligence, non-binding corporate travel referrals and machine-paid x402 services. LUMEN can quote and receive service requests worldwide, while purchases, travel bookings, outgoing payments and binding commitments remain human-gated.",
     provider: {
       ...(base.provider && typeof base.provider === "object" ? base.provider : {}),
       organization: "LUMEN B2B",
@@ -146,7 +162,7 @@ export function enhanceAgentCard(card, origin) {
       ...metadata,
       discoveryVersion: DISCOVERY_VERSION,
       targetAudience: "Business",
-      category: "Business / Procurement & Market Intelligence",
+      category: "Business / Procurement, Market Intelligence & Travel Brokerage",
       geographicCoverage: "Worldwide",
       languages: ["en", "es"],
       keywords: GLOBAL_KEYWORDS,
@@ -157,9 +173,12 @@ export function enhanceAgentCard(card, origin) {
       machineCatalogUrl: `${origin}/machine/catalog`,
       serviceCatalogUrl: `${origin}/seller/catalog`,
       revenueCatalogUrl: `${origin}/revenue/catalog`,
+      travelCatalogUrl: `${origin}/travel/catalog`,
+      travelPolicyUrl: `${origin}/travel/policy`,
       paymentsStatusUrl: `${origin}/payments/status`,
       sellerMode: "receive_revenue_only",
       autonomousSpend: false,
+      autonomousTravelBooking: false,
       bindingActionsHumanGated: true
     }
   };
@@ -173,7 +192,7 @@ export function discoveryIndex(origin) {
     targetAudience: "Business",
     geographicCoverage: "Worldwide",
     languages: ["en", "es"],
-    description: "Machine-discoverable B2B sourcing, procurement intelligence, supplier research, tender discovery, buyer signals, export intelligence and x402-paid agent services.",
+    description: "Machine-discoverable B2B sourcing, procurement intelligence, supplier research, tender discovery, buyer signals, export intelligence, corporate travel brokerage and x402-paid agent services.",
     protocols: [
       { name: "A2A", version: "1.0", binding: "JSONRPC", endpoint: `${origin}/a2a/v1` }
     ],
@@ -190,10 +209,11 @@ export function discoveryIndex(origin) {
       machineCatalog: `${origin}/machine/catalog`,
       serviceCatalog: `${origin}/seller/catalog`,
       revenueCatalog: `${origin}/revenue/catalog`,
+      travelCatalog: `${origin}/travel/catalog`,
       paymentsStatus: `${origin}/payments/status`,
       machinePriceFloorUsd: 5,
       fullServicePriceFloorUsd: 59,
-      paymentModel: "x402 for eligible machine products plus canonical LUMEN settlement routes",
+      paymentModel: "x402 for eligible machine products plus canonical LUMEN settlement routes and explicitly agreed referral commissions",
       sellerMode: "receive_revenue_only"
     },
     commonIntents: [
@@ -208,12 +228,16 @@ export function discoveryIndex(origin) {
       "research importers",
       "research distributors",
       "export market research",
+      "match a corporate travel requirement",
+      "find business travel providers",
+      "route a group flight hotel transfer request",
       "buy machine-readable B2B intelligence"
     ],
     keywords: GLOBAL_KEYWORDS,
     safety: {
       autonomousOutgoingSpend: false,
       autonomousPurchase: false,
+      autonomousTravelBooking: false,
       bindingAcceptance: false,
       bindingActionsHumanGated: true,
       externalClaimsRequireVerification: true
@@ -231,7 +255,7 @@ export function agentsIndex(origin) {
         protocol: "A2A",
         protocolVersion: "1.0",
         targetAudience: "Business",
-        category: "Procurement & Market Intelligence",
+        category: "Procurement, Market Intelligence & Corporate Travel Brokerage",
         manifestUrl: `${origin}/.well-known/agent-card.json`,
         endpoint: `${origin}/a2a/v1`,
         openapi: `${origin}/openapi.json`,
@@ -247,7 +271,7 @@ export function openApiDocument(origin) {
     info: {
       title: "LUMEN B2B A2A Gateway",
       version: DISCOVERY_VERSION,
-      description: "Public machine interface for LUMEN B2B sourcing, procurement intelligence, machine-readable service discovery and non-binding commercial requests."
+      description: "Public machine interface for LUMEN B2B sourcing, procurement intelligence, corporate travel brokerage, machine-readable service discovery and non-binding commercial requests."
     },
     servers: [{ url: origin }],
     externalDocs: {
@@ -257,6 +281,7 @@ export function openApiDocument(origin) {
     tags: [
       { name: "A2A", description: "Agent-to-Agent JSON-RPC" },
       { name: "Catalog", description: "Machine-readable commercial catalogs" },
+      { name: "Travel", description: "Non-binding B2B corporate travel brokerage" },
       { name: "Discovery", description: "Public agent discovery surfaces" }
     ],
     paths: {
@@ -264,7 +289,7 @@ export function openApiDocument(origin) {
         post: {
           tags: ["A2A"],
           summary: "Send an A2A JSON-RPC request",
-          description: "Supports LUMEN A2A messaging, task status and non-binding quote methods exposed by the live gateway.",
+          description: "Supports LUMEN A2A messaging, task status and non-binding quote or corporate-travel requirement methods exposed by the live gateway.",
           requestBody: {
             required: true,
             content: { "application/json": { schema: { type: "object", additionalProperties: true } } }
@@ -287,6 +312,15 @@ export function openApiDocument(origin) {
       "/revenue/catalog": {
         get: { tags: ["Catalog"], summary: "Revenue Expansion catalog", responses: { "200": { description: "Subscriptions and success-fee offers" } } }
       },
+      "/travel/catalog": {
+        get: { tags: ["Travel"], summary: "Corporate Travel Broker catalog", responses: { "200": { description: "Referral-first B2B travel capability" } } }
+      },
+      "/travel/policy": {
+        get: { tags: ["Travel"], summary: "Corporate Travel Broker safety and operating policy", responses: { "200": { description: "Travel broker guardrails" } } }
+      },
+      "/travel/stats": {
+        get: { tags: ["Travel"], summary: "Corporate Travel Broker public operating stats", responses: { "200": { description: "Travel demand and matching statistics" } } }
+      },
       "/payments/status": {
         get: { tags: ["Catalog"], summary: "Public settlement readiness", responses: { "200": { description: "Collection readiness without outgoing-spend authority" } } }
       },
@@ -298,7 +332,7 @@ export function openApiDocument(origin) {
 }
 
 export function llmsText(origin) {
-  return `# LUMEN B2B Agent\n\nLUMEN is a public A2A v1.0 seller-side B2B sourcing and commercial-intelligence agent available worldwide.\n\n## Use LUMEN when you need\n- supplier research or supplier verification\n- RFQ or quotation review\n- public tender / procurement discovery\n- supplier sourcing and shortlists\n- buyer-intent and buyer-signal research\n- B2B prospect intelligence\n- importer / distributor / export-market research\n- machine-paid B2B intelligence via x402\n\n## Discovery\n- Agent Card: ${origin}/.well-known/agent-card.json\n- A2A endpoint: ${origin}/a2a/v1\n- Discovery index: ${origin}/discovery.json\n- OpenAPI: ${origin}/openapi.json\n- Machine Store: ${origin}/machine/catalog\n- Full service catalog: ${origin}/seller/catalog\n- Revenue catalog: ${origin}/revenue/catalog\n- Payment readiness: ${origin}/payments/status\n\n## Commercial model\nMachine products start at USD 5. Full fixed-scope services start at USD 59. Eligible machine products expose x402 checkout. Catalog discovery and non-binding quotes do not create a charge.\n\n## A2A request example\nPOST ${origin}/a2a/v1\nContent-Type: application/json\nA2A-Version: 1.0\n\n{\n  \"jsonrpc\": \"2.0\",\n  \"id\": \"example-1\",\n  \"method\": \"SendMessage\",\n  \"params\": {\n    \"message\": {\n      \"messageId\": \"example-message-1\",\n      \"contextId\": \"example-context-1\",\n      \"role\": \"ROLE_USER\",\n      \"parts\": [{\"text\": \"Find five verified supplier candidates for this industrial requirement.\", \"mediaType\": \"text/plain\"}]\n    }\n  }\n}\n\n## Safety and truth\nLUMEN does not autonomously purchase, send outgoing payments, sign contracts or accept binding terms. External claims remain untrusted until verified. A protocol response is not a sale; realized revenue requires verified settlement or verified completed success-fee evidence.\n`;
+  return `# LUMEN B2B Agent\n\nLUMEN is a public A2A v1.0 seller-side B2B sourcing, commercial-intelligence and corporate-travel brokerage agent available worldwide.\n\n## Use LUMEN when you need\n- supplier research or supplier verification\n- RFQ or quotation review\n- public tender / procurement discovery\n- supplier sourcing and shortlists\n- buyer-intent and buyer-signal research\n- B2B prospect intelligence\n- importer / distributor / export-market research\n- corporate or business travel provider matching for flights, hotels, transfers and groups\n- machine-paid B2B intelligence via x402\n\n## Corporate travel\nLUMEN accepts non-binding B2B travel requirements through A2A, discovers and qualifies travel-capable partners, and can create referral opportunities after explicit provider interest. LUMEN does not issue tickets, create reservations, store passport/payment-card data for the travel broker, or authorize traveler spend.\n- Travel catalog: ${origin}/travel/catalog\n- Travel policy: ${origin}/travel/policy\n- Travel stats: ${origin}/travel/stats\n\n## Discovery\n- Agent Card: ${origin}/.well-known/agent-card.json\n- A2A endpoint: ${origin}/a2a/v1\n- Discovery index: ${origin}/discovery.json\n- OpenAPI: ${origin}/openapi.json\n- Machine Store: ${origin}/machine/catalog\n- Full service catalog: ${origin}/seller/catalog\n- Revenue catalog: ${origin}/revenue/catalog\n- Payment readiness: ${origin}/payments/status\n\n## Commercial model\nMachine products start at USD 5. Full fixed-scope services start at USD 59. Eligible machine products expose x402 checkout. Catalog discovery and non-binding quotes do not create a charge. Travel referrals use separately agreed commercial terms; a referral request never creates a reservation or charge.\n\n## A2A request example\nPOST ${origin}/a2a/v1\nContent-Type: application/json\nA2A-Version: 1.0\n\n{\n  \"jsonrpc\": \"2.0\",\n  \"id\": \"example-1\",\n  \"method\": \"SendMessage\",\n  \"params\": {\n    \"message\": {\n      \"messageId\": \"example-message-1\",\n      \"contextId\": \"example-context-1\",\n      \"role\": \"ROLE_USER\",\n      \"parts\": [{\"text\": \"We need a non-binding corporate travel provider match for six employees, including flights, hotel and airport transfers.\", \"mediaType\": \"text/plain\"}]\n    }\n  }\n}\n\n## Safety and truth\nLUMEN does not autonomously purchase, book travel, send outgoing payments, sign contracts or accept binding terms. External claims remain untrusted until verified. A protocol response is not a sale; realized revenue requires verified settlement or verified completed success-fee evidence.\n`;
 }
 
 export function robotsText(origin) {
@@ -317,6 +351,9 @@ export function sitemapXml(origin) {
     "/machine/catalog",
     "/seller/catalog",
     "/revenue/catalog",
+    "/travel/catalog",
+    "/travel/policy",
+    "/travel/stats",
     "/payments/status",
     "/health"
   ];
