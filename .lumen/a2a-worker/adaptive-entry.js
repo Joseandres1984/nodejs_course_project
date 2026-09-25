@@ -10,6 +10,7 @@ import { handleTiendanubeInstall } from "./tiendanube-install.js";
 import { handleTiendanubeBridge } from "./tiendanube-bridge.js";
 import { handleTiendanubePrivacy } from "./tiendanube-privacy.js";
 import { handleTiendanubeSupplierIntake, runTiendanubeSupplierIntake } from "./tiendanube-supplier-intake.js";
+import { handleSupplierMarketLaunch } from "./supplier-market-launch.js";
 
 export default {
   async fetch(request, env, ctx) {
@@ -19,6 +20,8 @@ export default {
     if (tiendanubeInstallResponse) return tiendanubeInstallResponse;
     const tiendanubePrivacyResponse = await handleTiendanubePrivacy(request, env);
     if (tiendanubePrivacyResponse) return tiendanubePrivacyResponse;
+    const supplierLaunchResponse = await handleSupplierMarketLaunch(request, env);
+    if (supplierLaunchResponse) return supplierLaunchResponse;
     const supplierIntakeResponse = await handleTiendanubeSupplierIntake(request, env);
     if (supplierIntakeResponse) return supplierIntakeResponse;
     const tiendanubeResponse = await handleTiendanubeBridge(request, env);
@@ -41,8 +44,8 @@ export default {
   async scheduled(controller, env, ctx) {
     // Discovery remains isolated from the established commercial execution slot.
     // Supplier Intake stages connected Tiendanube products, reads variant cost/stock,
-    // hides fresh imports until approval, and feeds landed-cost candidates into the
-    // existing Commerce Machine. No supplier purchase, publication or spend authority.
+    // hides fresh imports until explicit launch approval, and feeds landed-cost candidates
+    // into the existing Commerce Machine. Supplier Market Launch remains human-gated.
     ctx.waitUntil((async () => {
       const [sourceIntelligence, productCommerce, supplierIntake, hunter] = await Promise.all([
         runSourceIntelligence(env),
