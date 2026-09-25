@@ -21,11 +21,12 @@ function isRetryable(request) {
 }
 
 function liveOwnerSummaryScript() {
-  return `<script id="lumenLiveOwnerSummaryV2">
+  return `<script id="lumenLiveOwnerSummaryV3">
 (()=>{
   const e=id=>document.getElementById(id);
   const set=(id,v)=>{const el=e(id);if(el)el.textContent=v;};
   const usd=v=>'USD '+Number(v||0).toLocaleString('es-AR',{maximumFractionDigits:2});
+  const setMany=(ids,v)=>ids.forEach(id=>set(id,v));
   async function refresh(){
     try{
       const r=await fetch('/api/control-tower-v2',{cache:'no-store'});
@@ -34,20 +35,29 @@ function liveOwnerSummaryScript() {
       const f=d.funnel||{};
       const totalProposals=Number(f.drafts||0)+Number(f.approved||0)+Number(f.sentProposals||0)+Number(f.respondedProposals||0);
       const strictDemand=Number(f.negotiating||0);
-      set('lfRevenue',usd(f.realizedRevenueUsd));
-      set('lfDemand',strictDemand.toLocaleString('es-AR'));
-      set('lfOpps',Number(f.actionable||0).toLocaleString('es-AR'));
-      set('lfProposals',totalProposals.toLocaleString('es-AR'));
-      set('lfClose',Number(f.negotiating||0).toLocaleString('es-AR'));
-      set('lfReplies',Number(f.outreachResponded||0).toLocaleString('es-AR'));
-      set('lfFocus',Number(f.realizedRevenueUsd||0)>0?'Escalar ingresos verificados':'Conseguir el primer cobro verificado');
-      set('lfDetail','First Cash activo · oportunidades accionables y actividad A2A leídas desde el motor vivo. Sólo un settlement verificado cuenta como ingreso.');
-      set('lfAutonomy','Autonomía: OPERANDO · First Cash');
+      const actionable=Number(f.actionable||0);
+      const replies=Number(f.outreachResponded||0);
+      const revenue=Number(f.realizedRevenueUsd||0);
+      const focus=revenue>0?'Escalar ingresos verificados':strictDemand>0?'Convertir demanda real en cobro':actionable>0?'Convertir oportunidades en demanda verificable':'Encontrar la primera demanda verificable';
+      const detail=revenue>0?'Hay ingresos verificados: el foco es repetir los patrones que ya convirtieron.':strictDemand>0?'Ya existe intención comercial suficiente; prioridad: llevarla a checkout y settlement verificado.':actionable>0?'Hay oportunidades accionables en el motor vivo; falta convertir una en intención de compra verificable.':'First Cash sigue buscando evidencia comercial real sin inflar actividad como resultado.';
+
+      setMany(['lumenRevenue','lfRevenue'],usd(revenue));
+      setMany(['lumenDemand','lfDemand'],strictDemand.toLocaleString('es-AR'));
+      setMany(['lumenOpps','lfOpps'],actionable.toLocaleString('es-AR'));
+      setMany(['lumenProposals','lfProposals'],totalProposals.toLocaleString('es-AR'));
+      setMany(['lumenReplies','lfReplies'],replies.toLocaleString('es-AR'));
+      set('lfClose',strictDemand.toLocaleString('es-AR'));
+      setMany(['lumenFocus','lfFocus'],focus);
+      setMany(['lumenFocusDetail','lfDetail'],detail);
+      setMany(['lumenAutonomy','lfAutonomy'], 'OPERANDO');
+      set('lumenBudgetNow','First Cash: búsqueda cada 15 min · contacto máx. 1 por hora');
       set('lfSearch','Búsqueda: cada 15 min · contacto: máx. 1 por hora');
-      set('lfBlocker',Number(f.realizedRevenueUsd||0)>0?'Bloqueo: ninguno crítico':'Objetivo: primer settlement x402 verificado');
+      set('lumenNeedsYou',strictDemand>0?'Necesita de vos: sólo si aparece una acción vinculante':'Necesita de vos: nada ahora');
+      set('lfBlocker',revenue>0?'Bloqueo: ninguno crítico':'Objetivo: primer settlement verificado');
     }catch{}
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',refresh,{once:true});else refresh();
+  setTimeout(refresh,1200);
   setInterval(refresh,20000);
 })();
 </script>`;
@@ -65,15 +75,18 @@ async function normalizeInjectedTabs(request, response) {
     .replace(/data-p=(['"])controlv2\1/g, 'data-tab="controlv2"')
     .replace(/data-p=(['"])networktower\1/g, 'data-tab="networktower"');
 
-  if (!html.includes('id="lumenLiveOwnerSummaryV2"')) {
+  html = html.replace(/<script id="lumenLiveOwnerSummaryV2">[\s\S]*?<\/script>/, "");
+  if (!html.includes('id="lumenLiveOwnerSummaryV3"')) {
     html = html.replace("</body>", `${liveOwnerSummaryScript()}</body>`);
   }
 
   const headers = new Headers(response.headers);
   headers.delete("content-length");
-  headers.set("cache-control", "no-store");
-  headers.set("x-lumen-tab-normalization", "v2");
-  headers.set("x-lumen-owner-summary", "a2a-live-v2");
+  headers.set("cache-control", "no-store, no-cache, must-revalidate");
+  headers.set("pragma", "no-cache");
+  headers.set("expires", "0");
+  headers.set("x-lumen-tab-normalization", "v3");
+  headers.set("x-lumen-owner-summary", "a2a-live-v3");
 
   return new Response(html, {
     status: response.status,
