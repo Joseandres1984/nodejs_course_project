@@ -1,4 +1,4 @@
-# Read-only diagnostic: no commercial execution, no outbound, no publishing.
+# Health-only refresh: no commercial execution, no outbound, no publishing.
 name: LUMEN watchdog diagnostic
 
 on:
@@ -46,18 +46,21 @@ jobs:
           echo "LUMEN_D1_ACCOUNT_ID=$account" >> "$GITHUB_ENV"
           echo "LUMEN_D1_API_TOKEN=$token" >> "$GITHUB_ENV"
 
-      - name: Read persisted watchdog state only
+      - name: Recalculate and persist health only
         working-directory: .lumen/runtime
         run: |
           python - <<'PY'
           import d1_persistence_runtime
           import zero_watchdog_runtime
+          import system_watchdog
           import app as lumen_app
 
           if not lumen_app.load_state():
               raise RuntimeError('state_unavailable')
-          wd = lumen_app.STATE.get('system_watchdog') or {}
-          checks = wd.get('checks') or []
+          wd = system_watchdog.run_system_watchdog(lumen_app.STATE, lumen_app.DB_STATUS)
+          if not lumen_app.save_state():
+              raise RuntimeError('watchdog_state_persistence_failed')
+
           print({'watchdog_summary': {
               'status': wd.get('status'),
               'score_pct': wd.get('score_pct'),
@@ -65,11 +68,10 @@ jobs:
               'warnings': wd.get('warnings'),
               'failed': wd.get('failed'),
               'total': wd.get('total'),
-              'updated_at': wd.get('updated_at'),
-              'last_tick': lumen_app.STATE.get('last_tick'),
-              'last_tick_origin': lumen_app.STATE.get('last_tick_origin'),
+              'heartbeat_backend': wd.get('heartbeat_backend'),
+              'persistence_backend': wd.get('persistence_backend'),
           }}, flush=True)
-          for row in checks:
+          for row in wd.get('checks') or []:
               if str(row.get('status') or '').lower() != 'pass':
                   print({'watchdog_nonpass': {
                       'id': row.get('id'),
