@@ -38,69 +38,65 @@ jobs:
           echo
           test "$code" = '202'
 
-      - name: Prepare top nonbinding proposal
+      - name: Rotate candidates until one viable outreach consumes the external slot
         env:
           OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
         run: |
           set -euo pipefail
           base='https://lumen-zero-a2a.lumen-b2b.workers.dev'
-          body='/tmp/proposal.json'
-          code=$(curl --show-error --silent --max-time 60 -o "$body" -w '%{http_code}' \
-            -X POST "$base/proposals/prepare-top" \
-            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
-            -H 'accept: application/json')
-          echo "===== proposal prepare HTTP $code ====="
-          cat "$body"
-          echo
-          test "$code" = '202'
+          consumed=false
 
-      - name: Quality review next proposal
-        env:
-          OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
-        run: |
-          set -euo pipefail
-          base='https://lumen-zero-a2a.lumen-b2b.workers.dev'
-          body='/tmp/quality.json'
-          code=$(curl --show-error --silent --max-time 60 -o "$body" -w '%{http_code}' \
-            -X POST "$base/quality/review-next" \
-            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
-            -H 'accept: application/json')
-          echo "===== quality review HTTP $code ====="
-          cat "$body"
-          echo
-          test "$code" = '202'
+          for attempt in 1 2 3 4 5 6; do
+            echo "===== revenue candidate rotation $attempt/6 ====="
 
-      - name: Probe next approved A2A target
-        env:
-          OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
-        run: |
-          set -euo pipefail
-          base='https://lumen-zero-a2a.lumen-b2b.workers.dev'
-          body='/tmp/probe.json'
-          code=$(curl --show-error --silent --max-time 60 -o "$body" -w '%{http_code}' \
-            -X POST "$base/outreach/probe-next" \
-            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
-            -H 'accept: application/json')
-          echo "===== outreach probe HTTP $code ====="
-          cat "$body"
-          echo
-          test "$code" = '202'
+            proposal="/tmp/proposal-$attempt.json"
+            code=$(curl --show-error --silent --max-time 60 -o "$proposal" -w '%{http_code}' \
+              -X POST "$base/proposals/prepare-top" \
+              -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+              -H 'accept: application/json')
+            echo "proposal HTTP $code"
+            cat "$proposal"; echo
+            test "$code" = '202'
 
-      - name: Send at most one approved commercial outreach
-        env:
-          OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
-        run: |
-          set -euo pipefail
-          base='https://lumen-zero-a2a.lumen-b2b.workers.dev'
-          body='/tmp/send.json'
-          code=$(curl --show-error --silent --max-time 60 -o "$body" -w '%{http_code}' \
-            -X POST "$base/outreach/send-next" \
-            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
-            -H 'accept: application/json')
-          echo "===== guarded outreach send HTTP $code ====="
-          cat "$body"
-          echo
-          test "$code" = '202'
+            quality="/tmp/quality-$attempt.json"
+            code=$(curl --show-error --silent --max-time 60 -o "$quality" -w '%{http_code}' \
+              -X POST "$base/quality/review-next" \
+              -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+              -H 'accept: application/json')
+            echo "quality HTTP $code"
+            cat "$quality"; echo
+            test "$code" = '202'
+
+            probe="/tmp/probe-$attempt.json"
+            code=$(curl --show-error --silent --max-time 60 -o "$probe" -w '%{http_code}' \
+              -X POST "$base/outreach/probe-next" \
+              -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+              -H 'accept: application/json')
+            echo "probe HTTP $code"
+            cat "$probe"; echo
+            test "$code" = '202'
+
+            send="/tmp/send-$attempt.json"
+            code=$(curl --show-error --silent --max-time 60 -o "$send" -w '%{http_code}' \
+              -X POST "$base/outreach/send-next" \
+              -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+              -H 'accept: application/json')
+            echo "send HTTP $code"
+            cat "$send"; echo
+            test "$code" = '202'
+
+            # One real external slot per cycle. Stop on a successful send or on
+            # an actual failed send attempt. Pure probe blockers such as auth
+            # requirements do not consume the slot and may rotate to the next
+            # candidate.
+            if jq -e '(.sent == true) or (.externalAttempted == true) or (.status == "SEND_FAILED")' "$send" >/dev/null 2>&1; then
+              consumed=true
+              echo "EXTERNAL_SLOT_CONSUMED_ON_ATTEMPT=$attempt"
+              break
+            fi
+          done
+
+          echo "EXTERNAL_SLOT_CONSUMED=$consumed"
 
       - name: Read revenue sprint results
         run: |
