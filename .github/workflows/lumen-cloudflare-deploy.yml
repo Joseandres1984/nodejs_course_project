@@ -83,6 +83,24 @@ jobs:
           jq -e '.version == "1.0-adaptive-market-hunter" and (.selectionPolicy | contains("bounded_explore_exploit")) and (.queryEvolution | contains("bounded_child_queries")) and .selfModifyingCode == false and .maxQueriesPerRun == 3 and .createsExternalMessages == false and .autonomousSpend == false and .autonomousPurchase == false and .autonomousContract == false and .verifiedRevenueOnly == true and .bindingActionsHumanGated == true' hunter-policy.json >/dev/null
           jq -e '.version == "1.0-market-hunter-pruner" and .seedStrategiesCanBeAutoPruned == false and .maxDeactivationsPerCycle == 2 and .minimumActiveStrategies == 8 and .createsExternalMessages == false and .autonomousSpend == false and .autonomousPurchase == false and .autonomousContract == false and .bindingActionsHumanGated == true' pruning-policy.json >/dev/null
           echo 'ADAPTIVE_MARKET_HUNTER_CONTROL_PLANE_OK'
+      - name: Smoke test source intelligence control plane
+        run: |
+          set -euo pipefail
+          BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          ok=0
+          for i in $(seq 1 15); do
+            if curl -fsS --max-time 15 "$BASE/source-intelligence/policy" -o source-policy.json && curl -fsS --max-time 15 "$BASE/source-intelligence/status" -o source-status.json; then
+              if grep -q '1.0-source-intelligence' source-policy.json && grep -q 'bounded_source_explore_exploit' source-policy.json && grep -q 'ted_eu_public_procurement' source-status.json && grep -q 'uk_contracts_finder' source-status.json; then
+                ok=1
+                break
+              fi
+            fi
+            sleep 4
+          done
+          test "$ok" -eq 1
+          jq -e '.version == "1.0-source-intelligence" and .selectionPolicy == "bounded_source_explore_exploit" and .sourceLearning == "direct_opportunity_to_verified_settlement_attribution" and .maxExternalSourcesPerCycle == 2 and .maxResultsPerSource == 20 and .createsExternalMessages == false and .autonomousSpendUsd == 0 and .autonomousPurchase == false and .autonomousContract == false and .verifiedRevenueOnly == true and .bindingActionsHumanGated == true' source-policy.json >/dev/null
+          jq -e '.version == "1.0-source-intelligence" and (.sources | length) >= 3 and (.sources | map(.source_id) | index("ted_eu_public_procurement")) != null and (.sources | map(.source_id) | index("uk_contracts_finder")) != null' source-status.json >/dev/null
+          echo 'SOURCE_INTELLIGENCE_CONTROL_PLANE_OK'
       - name: Smoke test live B2B travel broker
         env:
           OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
