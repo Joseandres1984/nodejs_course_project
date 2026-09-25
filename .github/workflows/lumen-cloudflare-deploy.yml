@@ -46,6 +46,18 @@ jobs:
         run: |
           sed -i 's/^main = "opportunity-entry.js"$/main = "adaptive-entry.js"/' wrangler.toml
           printf '%s' "$OPPORTUNITY_ADMIN_TOKEN" | npx --yes wrangler@latest secret put OPPORTUNITY_ADMIN_TOKEN --config wrangler.toml
+      - name: Restore optional Tiendanube credentials
+        working-directory: .lumen/a2a-worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          TIENDANUBE_APP_ID: ${{ secrets.TIENDANUBE_APP_ID }}
+          TIENDANUBE_CLIENT_SECRET: ${{ secrets.TIENDANUBE_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          sed -i 's/^main = "opportunity-entry.js"$/main = "adaptive-entry.js"/' wrangler.toml
+          if [ -n "$TIENDANUBE_APP_ID" ]; then printf '%s' "$TIENDANUBE_APP_ID" | npx --yes wrangler@latest secret put TIENDANUBE_APP_ID --config wrangler.toml; else echo 'TIENDANUBE_APP_ID_NOT_CONFIGURED'; fi
+          if [ -n "$TIENDANUBE_CLIENT_SECRET" ]; then printf '%s' "$TIENDANUBE_CLIENT_SECRET" | npx --yes wrangler@latest secret put TIENDANUBE_CLIENT_SECRET --config wrangler.toml; else echo 'TIENDANUBE_CLIENT_SECRET_NOT_CONFIGURED'; fi
       - name: Smoke test public portfolio endpoints
         run: |
           set -euo pipefail
@@ -122,6 +134,20 @@ jobs:
           jq -e '.version == "3.0-commerce-operations" and .autonomousPublishing == false and .autonomousPurchasing == false and .supplierOrdering == false and .priceWriteAuthority == false and .inventoryWriteAuthority == false and .autonomousSpendUsd == 0 and .verifiedOrdersOnlyCanCreateFulfillment == true and .humanApprovalRequired == true' commerce-ops-policy.json >/dev/null
           jq -e '.version == "3.0-commerce-operations" and .authority.publish == false and .authority.purchase == false and .authority.autonomousSpendUsd == 0' commerce-ops-status.json >/dev/null
           echo 'COMMERCE_OPERATIONS_CONTROL_PLANE_OK'
+      - name: Smoke test Tiendanube bridge policy
+        run: |
+          set -euo pipefail
+          BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          ok=0
+          for i in $(seq 1 15); do
+            if curl -fsS --max-time 15 "$BASE/tiendanube/policy" -o tiendanube-policy.json; then
+              if grep -q '1.0-tiendanube-bridge' tiendanube-policy.json; then ok=1; break; fi
+            fi
+            sleep 4
+          done
+          test "$ok" -eq 1
+          jq -e '.version == "1.0-tiendanube-bridge" and .oauth2 == true and .webhookHmacVerification == true and .orderPaidIngestion == true and .publicationExecution == "EXPLICIT_ADMIN_ONLY" and .newProductVisibility == "hidden" and .autonomousPublishing == false and .autonomousPurchasing == false and .supplierOrdering == false and .autonomousSpendUsd == 0' tiendanube-policy.json >/dev/null
+          echo 'TIENDANUBE_BRIDGE_POLICY_OK'
       - name: Smoke test live B2B travel broker
         env:
           OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}

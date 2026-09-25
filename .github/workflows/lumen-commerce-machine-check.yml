@@ -6,7 +6,9 @@ on:
     paths:
       - '.lumen/a2a-worker/commerce-machine.js'
       - '.lumen/a2a-worker/commerce-operations.js'
+      - '.lumen/a2a-worker/tiendanube-bridge.js'
       - '.lumen/a2a-worker/test-commerce-machine.mjs'
+      - '.lumen/a2a-worker/test-tiendanube-bridge.mjs'
       - '.lumen/a2a-worker/adaptive-entry.js'
       - '.github/workflows/lumen-commerce-machine-check.yml'
   push:
@@ -14,7 +16,9 @@ on:
     paths:
       - '.lumen/a2a-worker/commerce-machine.js'
       - '.lumen/a2a-worker/commerce-operations.js'
+      - '.lumen/a2a-worker/tiendanube-bridge.js'
       - '.lumen/a2a-worker/test-commerce-machine.mjs'
+      - '.lumen/a2a-worker/test-tiendanube-bridge.mjs'
       - '.lumen/a2a-worker/adaptive-entry.js'
       - '.github/workflows/lumen-commerce-machine-check.yml'
   workflow_dispatch:
@@ -31,16 +35,21 @@ jobs:
         run: |
           node --check .lumen/a2a-worker/commerce-machine.js
           node --check .lumen/a2a-worker/commerce-operations.js
+          node --check .lumen/a2a-worker/tiendanube-bridge.js
           node --check .lumen/a2a-worker/adaptive-entry.js
           node --check .lumen/a2a-worker/test-commerce-machine.mjs
+          node --check .lumen/a2a-worker/test-tiendanube-bridge.mjs
       - name: Test economics, catalog generation and channel guardrails
-        run: node .lumen/a2a-worker/test-commerce-machine.mjs
+        run: |
+          node .lumen/a2a-worker/test-commerce-machine.mjs
+          node .lumen/a2a-worker/test-tiendanube-bridge.mjs
       - name: Verify no autonomous commerce authority
         run: |
           node --input-type=module - <<'NODE'
           import fs from 'node:fs';
           const machine = fs.readFileSync('.lumen/a2a-worker/commerce-machine.js', 'utf8');
           const ops = fs.readFileSync('.lumen/a2a-worker/commerce-operations.js', 'utf8');
+          const tn = fs.readFileSync('.lumen/a2a-worker/tiendanube-bridge.js', 'utf8');
           if (!machine.includes('publicationAuthority: false')) throw new Error('publication authority guard missing');
           if (!machine.includes('purchaseAuthority: false')) throw new Error('purchase authority guard missing');
           if (!machine.includes('autonomousSpendUsd: 0')) throw new Error('zero-spend guard missing');
@@ -53,5 +62,10 @@ jobs:
           if (!ops.includes('autonomousSpendUsd: 0')) throw new Error('ops zero-spend guard missing');
           if (!ops.includes('AWAITING_HUMAN_PURCHASE_APPROVAL')) throw new Error('human purchase gate missing');
           if (!ops.includes('verified=1')) throw new Error('verified order gate missing');
-          console.log('COMMERCE_MACHINE_AND_OPS_AUTHORITY_GUARDS ok');
+          if (!tn.includes('autonomousPublishing: false')) throw new Error('tiendanube autonomous publish guard missing');
+          if (!tn.includes('autonomousPurchasing: false')) throw new Error('tiendanube purchase guard missing');
+          if (!tn.includes('autonomousSpendUsd: 0')) throw new Error('tiendanube zero-spend guard missing');
+          if (!tn.includes('visibility: "hidden"')) throw new Error('tiendanube hidden-first guard missing');
+          if (!tn.includes('x-linkedstore-hmac-sha256')) throw new Error('tiendanube webhook verification missing');
+          console.log('COMMERCE_MACHINE_OPS_TIENDANUBE_GUARDS ok');
           NODE
