@@ -1,3 +1,4 @@
+# Read-only diagnostic: no commercial execution, no outbound, no publishing.
 name: LUMEN watchdog diagnostic
 
 on:
