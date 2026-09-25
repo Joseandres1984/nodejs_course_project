@@ -42,9 +42,11 @@ jobs:
       LIVE_OUTBOUND: 'false'
       LUMEN_INSTAGRAM_SEND_ENABLED: 'false'
       LUMEN_PUBLIC_BASE_URL: 'https://lumen-zero-public.lumen-b2b.workers.dev'
-      LUMEN_D1_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       LUMEN_D1_DATABASE_ID: 'e872694a-ed14-4a7f-b2c3-38b8e1bb498b'
-      LUMEN_D1_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      D1_ACCOUNT_PRIMARY: ${{ secrets.LUMEN_D1_ACCOUNT_ID }}
+      D1_TOKEN_PRIMARY: ${{ secrets.LUMEN_D1_API_TOKEN }}
+      D1_ACCOUNT_FALLBACK: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      D1_TOKEN_FALLBACK: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       LUMEN_INSTAGRAM_THEME: ${{ inputs.theme }}
       LUMEN_INSTAGRAM_THEME_GOAL: ${{ inputs.goal }}
       LUMEN_INSTAGRAM_THEME_NOTES: ${{ inputs.notes }}
@@ -67,14 +69,23 @@ jobs:
         working-directory: .lumen/runtime
         run: python -m unittest -v test_zero_instagram_thematic_prepare.py
 
-      - name: Verify D1 credentials
+      - name: Select D1 credentials without exposing secrets
         shell: bash
         run: |
           set -euo pipefail
-          test -n "${LUMEN_D1_ACCOUNT_ID:-}"
-          test -n "${LUMEN_D1_DATABASE_ID:-}"
-          test -n "${LUMEN_D1_API_TOKEN:-}"
-          echo 'LUMEN_ZERO_D1_CREDENTIALS_PRESENT'
+          account="${D1_ACCOUNT_PRIMARY:-${D1_ACCOUNT_FALLBACK:-}}"
+          token="${D1_TOKEN_PRIMARY:-${D1_TOKEN_FALLBACK:-}}"
+          test -n "$account"
+          test -n "$token"
+          echo "LUMEN_D1_ACCOUNT_ID=$account" >> "$GITHUB_ENV"
+          echo "LUMEN_D1_API_TOKEN=$token" >> "$GITHUB_ENV"
+          if [ -n "${D1_TOKEN_PRIMARY:-}" ]; then
+            echo 'LUMEN_D1_CREDENTIAL_SOURCE=dedicated' >> "$GITHUB_ENV"
+            echo 'LUMEN_ZERO_D1_CREDENTIALS=DEDICATED'
+          else
+            echo 'LUMEN_D1_CREDENTIAL_SOURCE=cloudflare_fallback' >> "$GITHUB_ENV"
+            echo 'LUMEN_ZERO_D1_CREDENTIALS=CLOUDFLARE_FALLBACK'
+          fi
 
       - name: Prepare thematic Instagram post in canonical D1 state
         working-directory: .lumen/runtime
