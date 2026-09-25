@@ -1,0 +1,48 @@
+name: LUMEN Instagram connector diagnostic
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-instagram-connector-diagnostic.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      IG_USER_ID: ${{ secrets.LUMEN_INSTAGRAM_USER_ID }}
+      IG_ACCESS_TOKEN: ${{ secrets.LUMEN_INSTAGRAM_ACCESS_TOKEN }}
+      IG_PAGE_ACCESS_TOKEN: ${{ secrets.LUMEN_META_PAGE_ACCESS_TOKEN }}
+      IG_GRAPH_VERSION: ${{ secrets.LUMEN_META_GRAPH_VERSION }}
+    steps:
+      - name: Check Instagram publishing prerequisites without exposing secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          present() { if [ -n "$1" ]; then printf 'PRESENT'; else printf 'MISSING'; fi; }
+          echo "LUMEN_INSTAGRAM_USER_ID=$(present "${IG_USER_ID:-}")"
+          if [ -n "${IG_ACCESS_TOKEN:-}" ]; then
+            echo 'INSTAGRAM_TOKEN_SOURCE=LUMEN_INSTAGRAM_ACCESS_TOKEN'
+            echo 'INSTAGRAM_ACCESS_TOKEN=PRESENT'
+          elif [ -n "${IG_PAGE_ACCESS_TOKEN:-}" ]; then
+            echo 'INSTAGRAM_TOKEN_SOURCE=LUMEN_META_PAGE_ACCESS_TOKEN'
+            echo 'INSTAGRAM_ACCESS_TOKEN=PRESENT'
+          else
+            echo 'INSTAGRAM_TOKEN_SOURCE=NONE'
+            echo 'INSTAGRAM_ACCESS_TOKEN=MISSING'
+          fi
+          if [ -n "${IG_GRAPH_VERSION:-}" ]; then
+            echo 'INSTAGRAM_GRAPH_VERSION=PRESENT'
+          else
+            echo 'INSTAGRAM_GRAPH_VERSION=DEFAULT_ALLOWED'
+          fi
+          if [ -n "${IG_USER_ID:-}" ] && { [ -n "${IG_ACCESS_TOKEN:-}" ] || [ -n "${IG_PAGE_ACCESS_TOKEN:-}" ]; }; then
+            echo 'INSTAGRAM_CONNECTOR_PREREQUISITES=READY'
+          else
+            echo 'INSTAGRAM_CONNECTOR_PREREQUISITES=NOT_READY'
+          fi
