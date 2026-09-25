@@ -169,6 +169,7 @@ export default {
       let commercialReply = null;
       let commissionAction = null;
       let priorityFollowup = null;
+      let newOutreach = null;
       let travelAction = null;
 
       if (preferredExternalAction === "COMMISSION_AUTOPILOT") {
@@ -183,6 +184,15 @@ export default {
       } else if (preferredExternalAction === "FOLLOWUP") {
         priorityFollowup = await processFollowupCycle(env);
         conversionExternalMessageSent = consumedExternalSlot(priorityFollowup);
+      } else if (preferredExternalAction === "NEW_OUTREACH") {
+        // Revenue-first fix: when the portfolio explicitly says fresh commercial
+        // outreach is the best use of the single external slot, prepare/review
+        // the proposal immediately and try that path before councils, partner
+        // term inquiries, travel or other lower-priority external actions.
+        await prepareTopProposal(env);
+        await reviewNextProposal(env);
+        newOutreach = await sendNextApproved(env, { force: false });
+        conversionExternalMessageSent = consumedExternalSlot(newOutreach);
       }
 
       if (!conversionExternalMessageSent && !firstCash) {
