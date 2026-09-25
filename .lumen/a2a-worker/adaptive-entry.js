@@ -12,42 +12,53 @@ import { handleTiendanubePrivacy } from "./tiendanube-privacy.js";
 import { handleTiendanubeSupplierIntake, runTiendanubeSupplierIntake } from "./tiendanube-supplier-intake.js";
 import { handleSupplierMarketLaunch } from "./supplier-market-launch.js";
 
-const ECONOMIC_CONTROL_VERSION = "1.0-economic-focus-cadence";
+const ECONOMIC_CONTROL_VERSION = "1.1-quarter-hour-discovery-hourly-commercial";
+const HOURLY_COMMERCIAL_MINUTE_UTC = 7;
 
 function skipped(reason, family) {
   return { ok: true, skipped: true, reason, economicFocus: family || null, version: ECONOMIC_CONTROL_VERSION };
 }
 
 async function readEconomicFocus(env) {
-  if (!env?.DB) return { initialized: false, family: null, cycle: 0, attention: {} };
+  if (!env?.DB) return { initialized: false, family: null, cycle: 0, attention: {}, verifiedRevenueUsd: 0 };
   try {
     const row = await env.DB.prepare("SELECT cycle,metrics_json FROM lumen_portfolio_governor_state WHERE id='GLOBAL' LIMIT 1").first();
-    if (!row) return { initialized: false, family: null, cycle: 0, attention: {} };
+    if (!row) return { initialized: false, family: null, cycle: 0, attention: {}, verifiedRevenueUsd: 0 };
     let metrics = {};
     try { metrics = JSON.parse(row.metrics_json || "{}"); } catch {}
     return {
       initialized: true,
       family: String(metrics?.recommendedBusinessFamily || "").trim() || null,
       cycle: Number(row.cycle || 0),
-      attention: metrics?.businessFamilyAttention && typeof metrics.businessFamilyAttention === "object" ? metrics.businessFamilyAttention : {}
+      attention: metrics?.businessFamilyAttention && typeof metrics.businessFamilyAttention === "object" ? metrics.businessFamilyAttention : {},
+      verifiedRevenueUsd: Math.max(0, Number(metrics?.verifiedRevenueUsd ?? metrics?.metrics?.verifiedRevenueUsd ?? 0) || 0)
     };
   } catch {
-    return { initialized: false, family: null, cycle: 0, attention: {} };
+    return { initialized: false, family: null, cycle: 0, attention: {}, verifiedRevenueUsd: 0 };
   }
 }
 
-function cadencePlan(focus, scheduledTime) {
-  // Sensing never goes to zero. A non-priority family still gets periodic exploration,
-  // while the current economic winner gets full-frequency discovery.
+function firstCashActive(env, focus) {
+  return String(env?.LUMEN_FIRST_CASH_MODE || "").toLowerCase() === "true" && Number(focus?.verifiedRevenueUsd || 0) < 1;
+}
+
+function cadencePlan(focus, scheduledTime, forceB2BDiscovery = false) {
+  // Sensing never goes to zero. During FIRST CASH, B2B/A2A discovery is forced
+  // on every 15-minute trigger while outbound commercial actions remain hourly.
   if (!focus?.initialized || !focus?.family) {
-    return { b2bDiscovery: true, commerceDiscovery: true, mode: "COLD_START_FULL_SENSING" };
+    return { b2bDiscovery: true, commerceDiscovery: true, mode: forceB2BDiscovery ? "FIRST_CASH_FULL_B2B_SENSING" : "COLD_START_FULL_SENSING" };
   }
   const ms = Number(scheduledTime || Date.now());
   const hourSlot = Math.floor((Number.isFinite(ms) ? ms : Date.now()) / 3600000);
   const family = focus.family;
-  const b2bDiscovery = family === "B2B_A2A" || family === "REFERRAL" || hourSlot % 3 === 0;
+  const b2bDiscovery = forceB2BDiscovery || family === "B2B_A2A" || family === "REFERRAL" || hourSlot % 3 === 0;
   const commerceDiscovery = family === "COMMERCE" || hourSlot % 4 === 0;
-  return { b2bDiscovery, commerceDiscovery, mode: "ECONOMIC_FOCUS_WITH_BOUNDED_EXPLORATION" };
+  return { b2bDiscovery, commerceDiscovery, mode: forceB2BDiscovery ? "FIRST_CASH_QUARTER_HOUR_B2B" : "ECONOMIC_FOCUS_WITH_BOUNDED_EXPLORATION" };
+}
+
+function isHourlyCommercialSlot(scheduledTime) {
+  const when = new Date(Number(scheduledTime || Date.now()));
+  return when.getUTCMinutes() === HOURLY_COMMERCIAL_MINUTE_UTC;
 }
 
 export default {
@@ -80,14 +91,17 @@ export default {
   },
 
   async scheduled(controller, env, ctx) {
-    // Economic focus governs scarce discovery cadence, not truth collection or safety.
-    // The winning business family receives full-frequency discovery; other families
-    // retain bounded exploration so LUMEN can detect regime changes and better ideas.
-    // Supplier intake and Commerce Operations remain live every cycle for stock/order
-    // truth and operational safety. No purchase, contract or spend authority is added.
+    // Search runs every configured trigger (15 minutes). The heavy commercial
+    // scheduler is intentionally allowed only at minute :07 UTC, preserving a
+    // hard maximum of one autonomous external commercial slot per hour.
+    // Discovery itself creates no external messages and has USD 0 spend authority.
+    const scheduledTime = controller?.scheduledTime || Date.now();
+    const hourlyCommercialSlot = isHourlyCommercialSlot(scheduledTime);
+
     ctx.waitUntil((async () => {
       const focus = await readEconomicFocus(env);
-      const plan = cadencePlan(focus, controller?.scheduledTime || null);
+      const firstCash = firstCashActive(env, focus);
+      const plan = cadencePlan(focus, scheduledTime, firstCash);
 
       const [sourceIntelligence, productCommerce, supplierIntake, hunter] = await Promise.all([
         plan.b2bDiscovery ? runSourceIntelligence(env) : Promise.resolve(skipped("economic_focus_exploration_cadence", focus.family)),
@@ -108,8 +122,13 @@ export default {
         economicControl: {
           version: ECONOMIC_CONTROL_VERSION,
           focus,
+          firstCash,
+          hourlyCommercialSlot,
           plan,
           guardrails: {
+            discoveryEveryMinutes: 15,
+            commercialExternalSlotEveryMinutes: 60,
+            maxAutonomousExternalCommercialMessagesPerHour: 1,
             sensingNeverZero: true,
             commerceOperationsAlwaysOn: true,
             supplierTruthAlwaysOn: true,
@@ -127,6 +146,8 @@ export default {
         pruning
       };
     })().catch(() => ({ ok: false, isolatedFailure: true })));
-    return currentWorker.scheduled(controller, env, ctx);
+
+    if (hourlyCommercialSlot) return currentWorker.scheduled(controller, env, ctx);
+    return undefined;
   }
 };
