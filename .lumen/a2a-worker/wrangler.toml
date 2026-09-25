@@ -23,7 +23,7 @@ A2A_FOLLOWUP_COOLDOWN_DAYS = "4"
 A2A_FOLLOWUP_MAX = "2"
 
 [triggers]
-crons = ["7 * * * *"]
+crons = ["7,22,37,52 * * * *"]
 
 [[d1_databases]]
 binding = "DB"
