@@ -15,11 +15,12 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  diagnose-approved:
+  publish-exact-approved:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 10
     env:
       LUMEN_ZERO_COST_MODE: 'true'
+      LUMEN_PUBLIC_BASE_URL: 'https://lumen-zero-public.lumen-b2b.workers.dev'
       LUMEN_D1_DATABASE_ID: 'e872694a-ed14-4a7f-b2c3-38b8e1bb498b'
       D1_ACCOUNT_PRIMARY: ${{ secrets.LUMEN_D1_ACCOUNT_ID }}
       D1_TOKEN_PRIMARY: ${{ secrets.LUMEN_D1_API_TOKEN }}
@@ -54,7 +55,24 @@ jobs:
           echo "LUMEN_D1_ACCOUNT_ID=$account" >> "$GITHUB_ENV"
           echo "LUMEN_D1_API_TOKEN=$token" >> "$GITHUB_ENV"
 
-      - name: Read persisted publish error without publishing
+      - name: Verify exact Instagram account and approved media
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=$(curl --silent --show-error --max-time 30 -w '%{http_code}' \
+            -H "Authorization: Bearer $LUMEN_INSTAGRAM_ACCESS_TOKEN" \
+            "https://graph.instagram.com/v26.0/me?fields=user_id%2Cid%2Cusername" \
+            -o /tmp/igme.json)
+          test "$code" = '200'
+          test "$(jq -r '.user_id // .id // empty' /tmp/igme.json)" = "$LUMEN_INSTAGRAM_USER_ID"
+          test "$(jq -r '.username // empty' /tmp/igme.json)" = 'lumen.b2b'
+          curl --fail --silent --show-error --max-time 30 \
+            "https://lumen-zero-public.lumen-b2b.workers.dev/media/instagram/$TARGET_JOB_ID.jpg" \
+            -o /tmp/approved-post.jpg
+          test -s /tmp/approved-post.jpg
+          echo 'EXACT_ACCOUNT_AND_MEDIA_VERIFIED'
+
+      - name: Publish only the exact previously approved post
         working-directory: .lumen/runtime
         shell: bash
         run: |
@@ -65,33 +83,41 @@ jobs:
           import zero_watchdog_runtime
           import zero_instagram_login_runtime
           import app as lumen_app
-          import social_distribution
 
           target = os.environ['TARGET_JOB_ID']
           if not lumen_app.load_state():
               raise RuntimeError('state_unavailable')
 
-          jobs = [x for x in lumen_app.STATE.get('distribution_operator_jobs', []) or [] if isinstance(x, dict)]
-          job = next((x for x in jobs if str(x.get('id') or '') == target), {})
           approvals = lumen_app.STATE.get('instagram_publish_approvals') or {}
-          approval = approvals.get(target, {}) if isinstance(approvals, dict) else {}
-          receipt = next((
-              x for x in lumen_app.STATE.get('distribution_receipts', []) or []
-              if isinstance(x, dict) and str(x.get('distribution_job_id') or '') == target
-          ), None)
-          connector = (social_distribution.connector_status().get('instagram') or {})
+          approval = approvals.get(target) if isinstance(approvals, dict) else None
+          if not isinstance(approval, dict) or str(approval.get('status') or '') not in {
+              'APPROVED', 'APPROVED_WAITING_CONNECTOR', 'APPROVED_RETRY', 'PUBLISHED'
+          }:
+              raise RuntimeError('target_post_has_no_valid_explicit_approval')
 
-          print({'instagram_publish_diagnostic': {
+          import instagram_publish_control
+          result = instagram_publish_control.attempt_publish_approved(lumen_app.STATE, target)
+          if not lumen_app.save_state():
+              raise RuntimeError('state_persistence_failed_after_exact_publish')
+
+          receipt = next((
+              row for row in lumen_app.STATE.get('distribution_receipts', []) or []
+              if isinstance(row, dict)
+              and str(row.get('distribution_job_id') or '') == target
+              and row.get('external_post_id')
+          ), None)
+          print({'exact_instagram_publish': {
               'job_id': target,
-              'job_status': job.get('status'),
-              'approval_status': approval.get('status'),
-              'attempts': approval.get('attempts'),
-              'last_error': approval.get('last_error') or job.get('last_error'),
-              'image_url': job.get('image_url') or job.get('creative_asset_url'),
-              'connector_ready': connector.get('ready'),
-              'connector_missing': connector.get('missing'),
-              'receipt_exists': bool(receipt),
-              'receipt_provider': (receipt or {}).get('provider'),
+              'result': result,
+              'published': bool(receipt),
+              'provider': (receipt or {}).get('provider'),
               'external_post_id': (receipt or {}).get('external_post_id'),
+              'approval_required_per_post': True,
           }}, flush=True)
+          if not receipt:
+              raise RuntimeError('exact_approved_post_not_published')
+
+          import zero_instagram_control_bridge_runtime as bridge
+          projection = bridge.export_posts()
+          print({'instagram_control_projection': projection}, flush=True)
           PY
