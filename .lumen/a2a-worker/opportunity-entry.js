@@ -2,6 +2,8 @@ import baseWorker from "./worker-entry.js";
 import { handleOpportunityEngine, runOpportunityScan } from "./opportunity-engine.js";
 import { handleOpportunityFactory, runOpportunityFactory } from "./opportunity-factory.js";
 import { handlePortfolioGovernor, recomputePortfolioGovernor } from "./portfolio-governor.js";
+import { handleTravelBroker, pollTravelReferralTasks, runTravelBroker, runTravelReferralAction } from "./travel-broker.js";
+import { handleTravelPartnerDiscovery, runTravelPartnerDiscovery } from "./travel-partner-discovery.js";
 import { handleCommercialIntelligence, runCommercialReassessment } from "./commercial-intelligence.js";
 import { handleProposalEngine, prepareTopProposal } from "./proposal-engine.js";
 import { handleQualityGate, reviewNextProposal } from "./quality-gate.js";
@@ -68,6 +70,8 @@ export default {
     const opportunityResponse = await handleOpportunityEngine(request, env); if (opportunityResponse) return opportunityResponse;
     const factoryResponse = await handleOpportunityFactory(request, env); if (factoryResponse) return factoryResponse;
     const portfolioResponse = await handlePortfolioGovernor(request, env); if (portfolioResponse) return portfolioResponse;
+    const travelResponse = await handleTravelBroker(request, env); if (travelResponse) return travelResponse;
+    const travelPartnerResponse = await handleTravelPartnerDiscovery(request, env); if (travelPartnerResponse) return travelPartnerResponse;
     const commercialResponse = await handleCommercialIntelligence(request, env); if (commercialResponse) return commercialResponse;
     const proposalResponse = await handleProposalEngine(request, env); if (proposalResponse) return proposalResponse;
     const qualityResponse = await handleQualityGate(request, env); if (qualityResponse) return qualityResponse;
@@ -127,10 +131,14 @@ export default {
       await pollOutstandingResponses(env);
       await pollCommercialReplyTasks(env);
       await pollReferralCommissionAutopilot(env);
+      await pollTravelReferralTasks(env);
 
       const scheduledAt = new Date(controller?.scheduledTime || Date.now());
-      if (scheduledAt.getUTCHours() % 6 === 0) await runPartnerDiscovery(env, { trigger: "cloudflare_cron", scheduledTime: controller?.scheduledTime || null });
-      await recomputeTrust(env, { limit: 6 });
+      if (scheduledAt.getUTCHours() % 6 === 0) {
+        await runPartnerDiscovery(env, { trigger: "cloudflare_cron", scheduledTime: controller?.scheduledTime || null });
+        await runTravelPartnerDiscovery(env);
+      }
+      await recomputeTrust(env, { limit: 12 });
       await buildQualityPartnerMatches(env);
       await pollRecruitmentResponses(env);
       await pollCouncilRuntime(env);
@@ -150,6 +158,7 @@ export default {
       await reviewInboundReferrals(env);
       await planOutboundReferrals(env);
       await planReferralCommissions(env);
+      await runTravelBroker(env);
 
       await runOpportunityFactory(env);
       const portfolio = await recomputePortfolioGovernor(env);
@@ -160,6 +169,7 @@ export default {
       let commercialReply = null;
       let commissionAction = null;
       let priorityFollowup = null;
+      let travelAction = null;
 
       if (preferredExternalAction === "COMMISSION_AUTOPILOT") {
         commissionAction = await runReferralCommissionAutopilot(env, { force: false });
@@ -186,6 +196,11 @@ export default {
       if (!conversionExternalMessageSent && !commissionAction) {
         commissionAction = await runReferralCommissionAutopilot(env, { force: false });
         conversionExternalMessageSent = consumedExternalSlot(commissionAction);
+      }
+      if (!conversionExternalMessageSent) {
+        travelAction = await runTravelReferralAction(env, { force: false });
+        conversionExternalMessageSent = consumedExternalSlot(travelAction);
+        if (travelAction?.referralId) await planReferralCommissions(env);
       }
 
       const councilRound = conversionExternalMessageSent
