@@ -48,7 +48,7 @@ jobs:
           DASH_PASSWORD: ${{ secrets.LUMEN_DASHBOARD_PASSWORD }}
         run: |
           BASE='https://lumen-zero-dashboard.lumen-b2b.workers.dev'
-          for path in /health /api/control-tower-v2 /api/network-control-v1; do
+          for path in /health /api/control-tower-v2 /api/network-control-v1 /api/data; do
             body="$(mktemp)"
             code="$(curl -sS --retry 4 --retry-delay 2 -u "socio:${DASH_PASSWORD}" -o "$body" -w '%{http_code}' "${BASE}${path}")"
             if [ "$code" != '200' ]; then
