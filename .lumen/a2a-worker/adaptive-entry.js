@@ -11,8 +11,9 @@ import { handleTiendanubeBridge } from "./tiendanube-bridge.js";
 import { handleTiendanubePrivacy } from "./tiendanube-privacy.js";
 import { handleTiendanubeSupplierIntake, runTiendanubeSupplierIntake } from "./tiendanube-supplier-intake.js";
 import { handleSupplierMarketLaunch } from "./supplier-market-launch.js";
+import { handleRevenueFocusController, computeRevenueFocus } from "./revenue-focus-controller.js";
 
-const ECONOMIC_CONTROL_VERSION = "1.1-quarter-hour-discovery-hourly-commercial";
+const ECONOMIC_CONTROL_VERSION = "1.2-revenue-first-inventory-focus";
 const HOURLY_COMMERCIAL_MINUTE_UTC = 7;
 
 function skipped(reason, family) {
@@ -42,18 +43,26 @@ function firstCashActive(env, focus) {
   return String(env?.LUMEN_FIRST_CASH_MODE || "").toLowerCase() === "true" && Number(focus?.verifiedRevenueUsd || 0) < 1;
 }
 
-function cadencePlan(focus, scheduledTime, forceB2BDiscovery = false) {
-  // Sensing never goes to zero. During FIRST CASH, B2B/A2A discovery is forced
-  // on every 15-minute trigger while outbound commercial actions remain hourly.
+function cadencePlan(focus, scheduledTime, forceB2BDiscovery = false, revenueFocus = null) {
   if (!focus?.initialized || !focus?.family) {
     return { b2bDiscovery: true, commerceDiscovery: true, mode: forceB2BDiscovery ? "FIRST_CASH_FULL_B2B_SENSING" : "COLD_START_FULL_SENSING" };
   }
   const ms = Number(scheduledTime || Date.now());
   const hourSlot = Math.floor((Number.isFinite(ms) ? ms : Date.now()) / 3600000);
   const family = focus.family;
-  const b2bDiscovery = forceB2BDiscovery || family === "B2B_A2A" || family === "REFERRAL" || hourSlot % 3 === 0;
-  const commerceDiscovery = family === "COMMERCE" || hourSlot % 4 === 0;
-  return { b2bDiscovery, commerceDiscovery, mode: forceB2BDiscovery ? "FIRST_CASH_QUARTER_HOUR_B2B" : "ECONOMIC_FOCUS_WITH_BOUNDED_EXPLORATION" };
+  let b2bDiscovery = forceB2BDiscovery || family === "B2B_A2A" || family === "REFERRAL" || hourSlot % 3 === 0;
+  let commerceDiscovery = family === "COMMERCE" || hourSlot % 4 === 0;
+
+  // When LUMEN already owns qualified commercial inventory, preserve sensing but
+  // reduce expansion cadence. The single hourly external slot remains dedicated
+  // to close -> reply -> follow-up -> Quality PASS outreach in opportunity-entry.
+  if (revenueFocus?.mode === "CONVERSION_FIRST") {
+    b2bDiscovery = b2bDiscovery && hourSlot % 3 === 0;
+    commerceDiscovery = commerceDiscovery && hourSlot % 4 === 0;
+  } else if (revenueFocus?.mode === "BALANCED_CONVERSION") {
+    b2bDiscovery = b2bDiscovery && hourSlot % 2 === 0;
+  }
+  return { b2bDiscovery, commerceDiscovery, mode: revenueFocus?.mode || (forceB2BDiscovery ? "FIRST_CASH_QUARTER_HOUR_B2B" : "ECONOMIC_FOCUS_WITH_BOUNDED_EXPLORATION") };
 }
 
 function isHourlyCommercialSlot(scheduledTime) {
@@ -65,6 +74,8 @@ export default {
   async fetch(request, env, ctx) {
     const sourcePolicyResponse = handleSourceIntelligencePolicy(request);
     if (sourcePolicyResponse) return sourcePolicyResponse;
+    const revenueFocusResponse = await handleRevenueFocusController(request, env);
+    if (revenueFocusResponse) return revenueFocusResponse;
     const tiendanubeInstallResponse = await handleTiendanubeInstall(request, env);
     if (tiendanubeInstallResponse) return tiendanubeInstallResponse;
     const tiendanubePrivacyResponse = await handleTiendanubePrivacy(request, env);
@@ -91,28 +102,25 @@ export default {
   },
 
   async scheduled(controller, env, ctx) {
-    // Search runs every configured trigger (15 minutes). The heavy commercial
-    // scheduler is intentionally allowed only at minute :07 UTC, preserving a
-    // hard maximum of one autonomous external commercial slot per hour.
-    // Discovery itself creates no external messages and has USD 0 spend authority.
     const scheduledTime = controller?.scheduledTime || Date.now();
     const hourlyCommercialSlot = isHourlyCommercialSlot(scheduledTime);
 
     ctx.waitUntil((async () => {
       const focus = await readEconomicFocus(env);
       const firstCash = firstCashActive(env, focus);
-      const plan = cadencePlan(focus, scheduledTime, firstCash);
+      const revenueFocus = await computeRevenueFocus(env);
+      const plan = cadencePlan(focus, scheduledTime, firstCash, revenueFocus);
 
       const [sourceIntelligence, productCommerce, supplierIntake, hunter] = await Promise.all([
-        plan.b2bDiscovery ? runSourceIntelligence(env) : Promise.resolve(skipped("economic_focus_exploration_cadence", focus.family)),
-        plan.commerceDiscovery ? runProductCommerceRadar(env) : Promise.resolve(skipped("economic_focus_exploration_cadence", focus.family)),
+        plan.b2bDiscovery ? runSourceIntelligence(env) : Promise.resolve(skipped("conversion_inventory_has_priority", focus.family)),
+        plan.commerceDiscovery ? runProductCommerceRadar(env) : Promise.resolve(skipped("conversion_inventory_has_priority", focus.family)),
         runTiendanubeSupplierIntake(env),
-        plan.b2bDiscovery ? runAdaptiveMarketHunter(env) : Promise.resolve(skipped("economic_focus_exploration_cadence", focus.family))
+        plan.b2bDiscovery ? runAdaptiveMarketHunter(env) : Promise.resolve(skipped("conversion_inventory_has_priority", focus.family))
       ]);
 
       const commerceMachine = plan.commerceDiscovery
         ? await runCommerceMachine(env)
-        : skipped("economic_focus_exploration_cadence", focus.family);
+        : skipped("conversion_inventory_has_priority", focus.family);
       const commerceOperations = await runCommerceOperations(env);
       const pruning = plan.b2bDiscovery
         ? await pruneMarketHunterStrategies(env)
@@ -123,12 +131,14 @@ export default {
           version: ECONOMIC_CONTROL_VERSION,
           focus,
           firstCash,
+          revenueFocus,
           hourlyCommercialSlot,
           plan,
           guardrails: {
-            discoveryEveryMinutes: 15,
+            discoveryBaselineMinutes: 15,
             commercialExternalSlotEveryMinutes: 60,
             maxAutonomousExternalCommercialMessagesPerHour: 1,
+            conversionInventoryBeforeExpansion: true,
             sensingNeverZero: true,
             commerceOperationsAlwaysOn: true,
             supplierTruthAlwaysOn: true,
