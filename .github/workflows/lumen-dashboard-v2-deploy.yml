@@ -59,3 +59,20 @@ jobs:
             python -m json.tool < "$body" >/dev/null
             echo "DASHBOARD_LIVE_SMOKE_OK path=${path}"
           done
+
+          page="$(mktemp)"
+          code="$(curl -sS --retry 4 --retry-delay 2 -u "socio:${DASH_PASSWORD}" -o "$page" -w '%{http_code}' "${BASE}/")"
+          if [ "$code" != '200' ]; then
+            echo "DASHBOARD_HTML_SMOKE_FAILED http=${code}"
+            exit 1
+          fi
+          if ! grep -q 'id="ntState">RED ' "$page"; then
+            echo 'DASHBOARD_NETWORK_NOT_SERVER_HYDRATED'
+            grep -o 'id="ntState">[^<]*' "$page" || true
+            exit 1
+          fi
+          if grep -q 'id="ntState">CARGANDO RED' "$page"; then
+            echo 'DASHBOARD_NETWORK_STILL_LOADING_IN_INITIAL_HTML'
+            exit 1
+          fi
+          echo 'DASHBOARD_NETWORK_SERVER_HYDRATION_OK'
