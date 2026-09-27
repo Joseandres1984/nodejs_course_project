@@ -2,20 +2,100 @@ name: LUMEN Instagram prepare
 
 on:
   workflow_dispatch:
+    inputs:
+      theme:
+        description: 'Tema del post'
+        required: false
+        default: 'travel'
+      goal:
+        description: 'Objetivo comercial opcional'
+        required: false
+        default: 'daily organic B2B acquisition'
+      notes:
+        description: 'Notas opcionales'
+        required: false
+        default: ''
 
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: lumen-instagram-prepare
+  cancel-in-progress: false
 
 jobs:
   prepare:
     runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      LUMEN_ZERO_COST_MODE: 'true'
+      LIVE_OUTBOUND: 'false'
+      LUMEN_INSTAGRAM_SEND_ENABLED: 'false'
+      LUMEN_PUBLIC_BASE_URL: 'https://lumen-zero-public.lumen-b2b.workers.dev'
+      LUMEN_D1_DATABASE_ID: 'e872694a-ed14-4a7f-b2c3-38b8e1bb498b'
+      D1_ACCOUNT_PRIMARY: ${{ secrets.LUMEN_D1_ACCOUNT_ID }}
+      D1_TOKEN_PRIMARY: ${{ secrets.LUMEN_D1_API_TOKEN }}
+      D1_ACCOUNT_FALLBACK: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      D1_TOKEN_FALLBACK: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      LUMEN_INSTAGRAM_THEME: ${{ inputs.theme }}
+      LUMEN_INSTAGRAM_THEME_GOAL: ${{ inputs.goal }}
+      LUMEN_INSTAGRAM_THEME_NOTES: ${{ inputs.notes }}
+      LUMEN_INSTAGRAM_THEME_REQUEST_ID: ''
+
     steps:
       - name: Checkout LUMEN production branch
         uses: actions/checkout@v4
         with:
           ref: lumen-zero
-      - name: Explain preparation entrypoint
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install LUMEN runtime dependencies
+        run: python -m pip install --disable-pip-version-check -r .lumen/runtime/requirements.txt
+
+      - name: Validate Instagram QA and dedupe
+        working-directory: .lumen/runtime
         run: |
-          echo "LUMEN Instagram preparation launcher is active."
-          echo "Production source branch: lumen-zero"
-          echo "Publishing remains subject to human approval."
+          python -m unittest -v \
+            test_instagram_content_dedupe_runtime.py \
+            test_zero_instagram_thematic_prepare_v2.py
+
+      - name: Select canonical D1 credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          account="${D1_ACCOUNT_PRIMARY:-${D1_ACCOUNT_FALLBACK:-}}"
+          token="${D1_TOKEN_PRIMARY:-${D1_TOKEN_FALLBACK:-}}"
+          test -n "$account"
+          test -n "$token"
+          echo "LUMEN_D1_ACCOUNT_ID=$account" >> "$GITHUB_ENV"
+          echo "LUMEN_D1_API_TOKEN=$token" >> "$GITHUB_ENV"
+
+      - name: Generate post and leave it awaiting human approval
+        working-directory: .lumen/runtime
+        run: |
+          python - <<'PY'
+          import zero_watchdog_runtime  # noqa: F401
+          import zero_instagram_thematic_prepare_v2 as thematic
+          import instagram_content_dedupe_runtime as dedupe
+          dedupe.patch_thematic_module(thematic)
+          raise SystemExit(thematic.main())
+          PY
+
+      - name: Commit generated 4x5 Instagram asset to lumen-zero
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'LUMEN Zero'
+          git config user.email 'lumen-zero@users.noreply.github.com'
+          git add .lumen/public/instagram/
+          if git diff --cached --quiet; then
+            echo 'NO_NEW_ASSET'
+            exit 0
+          fi
+          git commit -m "LUMEN: prepare Instagram post for human approval"
+          git pull --rebase origin lumen-zero
+          git push origin HEAD:lumen-zero
