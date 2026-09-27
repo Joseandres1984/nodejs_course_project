@@ -1,0 +1,34 @@
+name: LUMEN Demand First Smoke
+
+on:
+  push:
+    branches: [lumen-zero-demand-first-v1]
+    paths:
+      - '.lumen/a2a-worker/demand-first.js'
+      - '.lumen/a2a-worker/adaptive-entry.js'
+      - '.github/workflows/lumen-demand-first-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Syntax and safety invariants
+        run: |
+          set -euo pipefail
+          node --check .lumen/a2a-worker/demand-first.js
+          node --check .lumen/a2a-worker/adaptive-entry.js
+          grep -q 'explicitEvidenceRequiredForVerifiedDemand:true' .lumen/a2a-worker/demand-first.js
+          grep -q 'autonomousSpend:false' .lumen/a2a-worker/demand-first.js
+          grep -q 'bindingActionsHumanGated:true' .lumen/a2a-worker/demand-first.js
+          grep -q 'runDemandFirst(env)' .lumen/a2a-worker/adaptive-entry.js
+          echo DEMAND_FIRST_STATIC_SMOKE_OK
+      - name: Verify production branch untouched by experiment
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = 'lumen-zero-demand-first-v1'
+          echo ISOLATED_EXPERIMENT_BRANCH_OK
