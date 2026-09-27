@@ -1,0 +1,21 @@
+name: LUMEN Instagram prepare
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout LUMEN production branch
+        uses: actions/checkout@v4
+        with:
+          ref: lumen-zero
+      - name: Explain preparation entrypoint
+        run: |
+          echo "LUMEN Instagram preparation launcher is active."
+          echo "Production source branch: lumen-zero"
+          echo "Publishing remains subject to human approval."
