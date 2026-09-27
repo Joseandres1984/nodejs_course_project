@@ -17,7 +17,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  publish-exact-approved:
+  publish-approved-pending:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -32,7 +32,6 @@ jobs:
       LUMEN_INSTAGRAM_ACCESS_TOKEN: ${{ secrets.LUMEN_INSTAGRAM_ACCESS_TOKEN }}
       LUMEN_META_GRAPH_VERSION: 'v26.0'
       LUMEN_INSTAGRAM_API_MODE: 'instagram_login'
-      TARGET_JOB_ID: 'IGTHEME-1256E8BD2F2D'
 
     steps:
       - uses: actions/checkout@v4
@@ -61,7 +60,7 @@ jobs:
           echo "LUMEN_D1_ACCOUNT_ID=$account" >> "$GITHUB_ENV"
           echo "LUMEN_D1_API_TOKEN=$token" >> "$GITHUB_ENV"
 
-      - name: Verify exact Instagram account approved media and recent feed
+      - name: Verify Instagram account and recent feed
         shell: bash
         run: |
           set -euo pipefail
@@ -76,61 +75,60 @@ jobs:
             -H "Authorization: Bearer $LUMEN_INSTAGRAM_ACCESS_TOKEN" \
             "https://graph.instagram.com/v26.0/me/media?fields=id%2Ccaption%2Ctimestamp%2Cpermalink&limit=25" \
             -o /tmp/ig-recent.json
-          curl --fail --silent --show-error --max-time 30 \
-            "https://lumen-zero-public.lumen-b2b.workers.dev/media/instagram/$TARGET_JOB_ID.jpg" \
-            -o /tmp/approved-post.jpg
-          test -s /tmp/approved-post.jpg
-          echo 'EXACT_ACCOUNT_MEDIA_AND_RECENT_FEED_VERIFIED'
+          echo 'INSTAGRAM_ACCOUNT_AND_RECENT_FEED_VERIFIED'
 
-      - name: Publish only the exact approved non-duplicate post
+      - name: Publish next approved pending non-duplicate post
         working-directory: .lumen/runtime
         shell: bash
         run: |
           set -euo pipefail
           python - <<'PY'
           import json
-          import os
           import d1_persistence_runtime
           import zero_watchdog_runtime
           import zero_instagram_login_runtime
           import app as lumen_app
+          import instagram_publish_control
+          import instagram_content_dedupe_runtime as dedupe
 
-          target = os.environ['TARGET_JOB_ID']
           if not lumen_app.load_state():
               raise RuntimeError('state_unavailable')
 
-          approvals = lumen_app.STATE.get('instagram_publish_approvals') or {}
-          approval = approvals.get(target) if isinstance(approvals, dict) else None
-          if not isinstance(approval, dict) or str(approval.get('status') or '') not in {
-              'APPROVED', 'APPROVED_WAITING_CONNECTOR', 'APPROVED_RETRY', 'PUBLISHED'
-          }:
-              raise RuntimeError('target_post_has_no_valid_explicit_approval')
-
-          import instagram_publish_control
-          import instagram_content_dedupe_runtime as dedupe
           dedupe.patch_publish_control(instagram_publish_control)
+          approvals = lumen_app.STATE.get('instagram_publish_approvals') or {}
+          receipts = lumen_app.STATE.get('distribution_receipts', []) or []
+          published_ids = {
+              str(row.get('distribution_job_id') or '')
+              for row in receipts
+              if isinstance(row, dict) and (row.get('external_post_id') or row.get('external_url'))
+          }
 
-          existing_receipt = next((
-              row for row in lumen_app.STATE.get('distribution_receipts', []) or []
-              if isinstance(row, dict)
-              and str(row.get('distribution_job_id') or '') == target
-              and row.get('external_post_id')
-          ), None)
-          if existing_receipt:
-              print({'exact_instagram_publish': {
-                  'job_id': target,
-                  'status': 'ALREADY_PUBLISHED_IDEMPOTENT',
-                  'external_post_id': existing_receipt.get('external_post_id'),
-                  'dedupe_policy_version': dedupe.VERSION,
-              }}, flush=True)
+          allowed = {'APPROVED', 'APPROVED_WAITING_CONNECTOR', 'APPROVED_RETRY'}
+          candidates = []
+          if isinstance(approvals, dict):
+              for job_id, approval in approvals.items():
+                  if not isinstance(approval, dict):
+                      continue
+                  if str(approval.get('status') or '') not in allowed:
+                      continue
+                  if str(job_id) in published_ids:
+                      continue
+                  job = instagram_publish_control._job_by_id(lumen_app.STATE, str(job_id))
+                  if not isinstance(job, dict):
+                      continue
+                  if not instagram_publish_control._approval_valid(lumen_app.STATE, job):
+                      continue
+                  candidates.append((str(approval.get('approved_at') or approval.get('updated_at') or ''), str(job_id), job, approval))
+
+          candidates.sort(key=lambda row: (row[0], row[1]))
+          if not candidates:
+              print({'instagram_approved_flush': {'status': 'NO_PENDING_APPROVED_POSTS', 'published': False}}, flush=True)
               raise SystemExit(0)
 
-          job = instagram_publish_control._job_by_id(lumen_app.STATE, target)
-          if not isinstance(job, dict):
-              raise RuntimeError('target_job_not_found')
-
+          _, target, job, approval = candidates[0]
           with open('/tmp/ig-recent.json', 'r', encoding='utf-8') as fh:
               remote = json.load(fh)
+
           remote_reasons = dedupe.remote_caption_duplicate_reasons(
               job.get('caption') or job.get('copy'),
               (remote or {}).get('data') or [],
@@ -144,44 +142,30 @@ jobs:
               job['dedupe_policy_version'] = dedupe.VERSION
               if not lumen_app.save_state():
                   raise RuntimeError('state_persistence_failed_after_duplicate_block')
-              print({'exact_instagram_publish': {
-                  'job_id': target,
-                  'status': 'DUPLICATE_BLOCKED_REMOTE',
-                  'reasons': remote_reasons,
-                  'dedupe_policy_version': dedupe.VERSION,
-              }}, flush=True)
+              print({'instagram_approved_flush': {'job_id': target, 'status': 'DUPLICATE_BLOCKED_REMOTE', 'published': False, 'reasons': remote_reasons}}, flush=True)
               raise SystemExit(0)
 
           result = instagram_publish_control.attempt_publish_approved(lumen_app.STATE, target)
           if not lumen_app.save_state():
-              raise RuntimeError('state_persistence_failed_after_exact_publish')
-
-          if result.get('status') == 'DUPLICATE_BLOCKED':
-              print({'exact_instagram_publish': {
-                  'job_id': target,
-                  'result': result,
-                  'published': False,
-                  'dedupe_policy_version': dedupe.VERSION,
-              }}, flush=True)
-              raise SystemExit(0)
+              raise RuntimeError('state_persistence_failed_after_publish')
 
           receipt = next((
               row for row in lumen_app.STATE.get('distribution_receipts', []) or []
               if isinstance(row, dict)
               and str(row.get('distribution_job_id') or '') == target
-              and row.get('external_post_id')
+              and (row.get('external_post_id') or row.get('external_url'))
           ), None)
-          print({'exact_instagram_publish': {
+          print({'instagram_approved_flush': {
               'job_id': target,
               'result': result,
               'published': bool(receipt),
-              'provider': (receipt or {}).get('provider'),
               'external_post_id': (receipt or {}).get('external_post_id'),
-              'approval_required_per_post': True,
               'dedupe_policy_version': dedupe.VERSION,
+              'selection': 'oldest_valid_explicit_approval_without_receipt',
           }}, flush=True)
-          if not receipt:
-              raise RuntimeError('exact_approved_post_not_published')
+
+          if result.get('status') not in {'PUBLISHED', 'DUPLICATE_BLOCKED'} and not receipt:
+              raise RuntimeError(f"approved_post_not_published:{result.get('status')}")
 
           import zero_instagram_control_bridge_runtime as bridge
           projection = bridge.export_posts()
