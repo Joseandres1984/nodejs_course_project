@@ -12,152 +12,70 @@ import { handleTiendanubePrivacy } from "./tiendanube-privacy.js";
 import { handleTiendanubeSupplierIntake, runTiendanubeSupplierIntake } from "./tiendanube-supplier-intake.js";
 import { handleSupplierMarketLaunch } from "./supplier-market-launch.js";
 import { handleRevenueFocusController, computeRevenueFocus } from "./revenue-focus-controller.js";
+import { handleDemandFirst, runDemandFirst } from "./demand-first.js";
 
-const ECONOMIC_CONTROL_VERSION = "1.2-revenue-first-inventory-focus";
+const ECONOMIC_CONTROL_VERSION = "1.3-demand-first";
 const HOURLY_COMMERCIAL_MINUTE_UTC = 7;
 
-function skipped(reason, family) {
-  return { ok: true, skipped: true, reason, economicFocus: family || null, version: ECONOMIC_CONTROL_VERSION };
-}
-
+function skipped(reason, family) { return { ok:true, skipped:true, reason, economicFocus:family || null, version:ECONOMIC_CONTROL_VERSION }; }
 async function readEconomicFocus(env) {
-  if (!env?.DB) return { initialized: false, family: null, cycle: 0, attention: {}, verifiedRevenueUsd: 0 };
+  if (!env?.DB) return { initialized:false, family:null, cycle:0, attention:{}, verifiedRevenueUsd:0 };
   try {
     const row = await env.DB.prepare("SELECT cycle,metrics_json FROM lumen_portfolio_governor_state WHERE id='GLOBAL' LIMIT 1").first();
-    if (!row) return { initialized: false, family: null, cycle: 0, attention: {}, verifiedRevenueUsd: 0 };
-    let metrics = {};
-    try { metrics = JSON.parse(row.metrics_json || "{}"); } catch {}
-    return {
-      initialized: true,
-      family: String(metrics?.recommendedBusinessFamily || "").trim() || null,
-      cycle: Number(row.cycle || 0),
-      attention: metrics?.businessFamilyAttention && typeof metrics.businessFamilyAttention === "object" ? metrics.businessFamilyAttention : {},
-      verifiedRevenueUsd: Math.max(0, Number(metrics?.verifiedRevenueUsd ?? metrics?.metrics?.verifiedRevenueUsd ?? 0) || 0)
-    };
-  } catch {
-    return { initialized: false, family: null, cycle: 0, attention: {}, verifiedRevenueUsd: 0 };
-  }
+    if (!row) return { initialized:false, family:null, cycle:0, attention:{}, verifiedRevenueUsd:0 };
+    let metrics={}; try { metrics=JSON.parse(row.metrics_json || "{}"); } catch {}
+    return { initialized:true, family:String(metrics?.recommendedBusinessFamily || "").trim() || null, cycle:Number(row.cycle || 0), attention:metrics?.businessFamilyAttention && typeof metrics.businessFamilyAttention === "object" ? metrics.businessFamilyAttention : {}, verifiedRevenueUsd:Math.max(0,Number(metrics?.verifiedRevenueUsd ?? metrics?.metrics?.verifiedRevenueUsd ?? 0)||0) };
+  } catch { return { initialized:false, family:null, cycle:0, attention:{}, verifiedRevenueUsd:0 }; }
 }
-
-function firstCashActive(env, focus) {
-  return String(env?.LUMEN_FIRST_CASH_MODE || "").toLowerCase() === "true" && Number(focus?.verifiedRevenueUsd || 0) < 1;
+function firstCashActive(env, focus) { return String(env?.LUMEN_FIRST_CASH_MODE || "").toLowerCase() === "true" && Number(focus?.verifiedRevenueUsd || 0) < 1; }
+function cadencePlan(focus, scheduledTime, forceB2BDiscovery=false, revenueFocus=null) {
+  if (!focus?.initialized || !focus?.family) return { b2bDiscovery:true, commerceDiscovery:true, mode:forceB2BDiscovery ? "FIRST_CASH_FULL_B2B_SENSING" : "COLD_START_FULL_SENSING" };
+  const ms=Number(scheduledTime || Date.now()); const hourSlot=Math.floor((Number.isFinite(ms)?ms:Date.now())/3600000); const family=focus.family;
+  let b2bDiscovery=forceB2BDiscovery || family === "B2B_A2A" || family === "REFERRAL" || hourSlot % 3 === 0;
+  let commerceDiscovery=family === "COMMERCE" || hourSlot % 4 === 0;
+  if (revenueFocus?.mode === "CONVERSION_FIRST") { b2bDiscovery=b2bDiscovery && hourSlot%3===0; commerceDiscovery=commerceDiscovery && hourSlot%4===0; }
+  else if (revenueFocus?.mode === "BALANCED_CONVERSION") b2bDiscovery=b2bDiscovery && hourSlot%2===0;
+  return { b2bDiscovery, commerceDiscovery, mode:revenueFocus?.mode || (forceB2BDiscovery ? "FIRST_CASH_QUARTER_HOUR_B2B" : "ECONOMIC_FOCUS_WITH_BOUNDED_EXPLORATION") };
 }
-
-function cadencePlan(focus, scheduledTime, forceB2BDiscovery = false, revenueFocus = null) {
-  if (!focus?.initialized || !focus?.family) {
-    return { b2bDiscovery: true, commerceDiscovery: true, mode: forceB2BDiscovery ? "FIRST_CASH_FULL_B2B_SENSING" : "COLD_START_FULL_SENSING" };
-  }
-  const ms = Number(scheduledTime || Date.now());
-  const hourSlot = Math.floor((Number.isFinite(ms) ? ms : Date.now()) / 3600000);
-  const family = focus.family;
-  let b2bDiscovery = forceB2BDiscovery || family === "B2B_A2A" || family === "REFERRAL" || hourSlot % 3 === 0;
-  let commerceDiscovery = family === "COMMERCE" || hourSlot % 4 === 0;
-
-  // When LUMEN already owns qualified commercial inventory, preserve sensing but
-  // reduce expansion cadence. The single hourly external slot remains dedicated
-  // to close -> reply -> follow-up -> Quality PASS outreach in opportunity-entry.
-  if (revenueFocus?.mode === "CONVERSION_FIRST") {
-    b2bDiscovery = b2bDiscovery && hourSlot % 3 === 0;
-    commerceDiscovery = commerceDiscovery && hourSlot % 4 === 0;
-  } else if (revenueFocus?.mode === "BALANCED_CONVERSION") {
-    b2bDiscovery = b2bDiscovery && hourSlot % 2 === 0;
-  }
-  return { b2bDiscovery, commerceDiscovery, mode: revenueFocus?.mode || (forceB2BDiscovery ? "FIRST_CASH_QUARTER_HOUR_B2B" : "ECONOMIC_FOCUS_WITH_BOUNDED_EXPLORATION") };
-}
-
-function isHourlyCommercialSlot(scheduledTime) {
-  const when = new Date(Number(scheduledTime || Date.now()));
-  return when.getUTCMinutes() === HOURLY_COMMERCIAL_MINUTE_UTC;
-}
+function isHourlyCommercialSlot(scheduledTime) { const when=new Date(Number(scheduledTime || Date.now())); return when.getUTCMinutes()===HOURLY_COMMERCIAL_MINUTE_UTC; }
 
 export default {
   async fetch(request, env, ctx) {
-    const sourcePolicyResponse = handleSourceIntelligencePolicy(request);
-    if (sourcePolicyResponse) return sourcePolicyResponse;
-    const revenueFocusResponse = await handleRevenueFocusController(request, env);
-    if (revenueFocusResponse) return revenueFocusResponse;
-    const tiendanubeInstallResponse = await handleTiendanubeInstall(request, env);
-    if (tiendanubeInstallResponse) return tiendanubeInstallResponse;
-    const tiendanubePrivacyResponse = await handleTiendanubePrivacy(request, env);
-    if (tiendanubePrivacyResponse) return tiendanubePrivacyResponse;
-    const supplierLaunchResponse = await handleSupplierMarketLaunch(request, env);
-    if (supplierLaunchResponse) return supplierLaunchResponse;
-    const supplierIntakeResponse = await handleTiendanubeSupplierIntake(request, env);
-    if (supplierIntakeResponse) return supplierIntakeResponse;
-    const tiendanubeResponse = await handleTiendanubeBridge(request, env);
-    if (tiendanubeResponse) return tiendanubeResponse;
-    const commerceOpsResponse = await handleCommerceOperations(request, env);
-    if (commerceOpsResponse) return commerceOpsResponse;
-    const commerceMachineResponse = await handleCommerceMachine(request, env);
-    if (commerceMachineResponse) return commerceMachineResponse;
-    const productCommerceResponse = await handleProductCommerceRadar(request, env);
-    if (productCommerceResponse) return productCommerceResponse;
-    const sourceResponse = await handleSourceIntelligence(request, env);
-    if (sourceResponse) return sourceResponse;
-    const hunterResponse = await handleAdaptiveMarketHunter(request, env);
-    if (hunterResponse) return hunterResponse;
-    const prunerResponse = await handleMarketHunterPruner(request, env);
-    if (prunerResponse) return prunerResponse;
-    return currentWorker.fetch(request, env, ctx);
+    const sourcePolicyResponse=handleSourceIntelligencePolicy(request); if (sourcePolicyResponse) return sourcePolicyResponse;
+    const demandFirstResponse=await handleDemandFirst(request,env); if (demandFirstResponse) return demandFirstResponse;
+    const revenueFocusResponse=await handleRevenueFocusController(request,env); if (revenueFocusResponse) return revenueFocusResponse;
+    const tiendanubeInstallResponse=await handleTiendanubeInstall(request,env); if (tiendanubeInstallResponse) return tiendanubeInstallResponse;
+    const tiendanubePrivacyResponse=await handleTiendanubePrivacy(request,env); if (tiendanubePrivacyResponse) return tiendanubePrivacyResponse;
+    const supplierLaunchResponse=await handleSupplierMarketLaunch(request,env); if (supplierLaunchResponse) return supplierLaunchResponse;
+    const supplierIntakeResponse=await handleTiendanubeSupplierIntake(request,env); if (supplierIntakeResponse) return supplierIntakeResponse;
+    const tiendanubeResponse=await handleTiendanubeBridge(request,env); if (tiendanubeResponse) return tiendanubeResponse;
+    const commerceOpsResponse=await handleCommerceOperations(request,env); if (commerceOpsResponse) return commerceOpsResponse;
+    const commerceMachineResponse=await handleCommerceMachine(request,env); if (commerceMachineResponse) return commerceMachineResponse;
+    const productCommerceResponse=await handleProductCommerceRadar(request,env); if (productCommerceResponse) return productCommerceResponse;
+    const sourceResponse=await handleSourceIntelligence(request,env); if (sourceResponse) return sourceResponse;
+    const hunterResponse=await handleAdaptiveMarketHunter(request,env); if (hunterResponse) return hunterResponse;
+    const prunerResponse=await handleMarketHunterPruner(request,env); if (prunerResponse) return prunerResponse;
+    return currentWorker.fetch(request,env,ctx);
   },
-
   async scheduled(controller, env, ctx) {
-    const scheduledTime = controller?.scheduledTime || Date.now();
-    const hourlyCommercialSlot = isHourlyCommercialSlot(scheduledTime);
-
-    ctx.waitUntil((async () => {
-      const focus = await readEconomicFocus(env);
-      const firstCash = firstCashActive(env, focus);
-      const revenueFocus = await computeRevenueFocus(env);
-      const plan = cadencePlan(focus, scheduledTime, firstCash, revenueFocus);
-
-      const [sourceIntelligence, productCommerce, supplierIntake, hunter] = await Promise.all([
-        plan.b2bDiscovery ? runSourceIntelligence(env) : Promise.resolve(skipped("conversion_inventory_has_priority", focus.family)),
-        plan.commerceDiscovery ? runProductCommerceRadar(env) : Promise.resolve(skipped("conversion_inventory_has_priority", focus.family)),
+    const scheduledTime=controller?.scheduledTime || Date.now(); const hourlyCommercialSlot=isHourlyCommercialSlot(scheduledTime);
+    ctx.waitUntil((async()=>{
+      const focus=await readEconomicFocus(env); const firstCash=firstCashActive(env,focus); const revenueFocus=await computeRevenueFocus(env); const plan=cadencePlan(focus,scheduledTime,firstCash,revenueFocus);
+      const [sourceIntelligence,productCommerce,supplierIntake,hunter]=await Promise.all([
+        plan.b2bDiscovery ? runSourceIntelligence(env) : Promise.resolve(skipped("conversion_inventory_has_priority",focus.family)),
+        plan.commerceDiscovery ? runProductCommerceRadar(env) : Promise.resolve(skipped("conversion_inventory_has_priority",focus.family)),
         runTiendanubeSupplierIntake(env),
-        plan.b2bDiscovery ? runAdaptiveMarketHunter(env) : Promise.resolve(skipped("conversion_inventory_has_priority", focus.family))
+        plan.b2bDiscovery ? runAdaptiveMarketHunter(env) : Promise.resolve(skipped("conversion_inventory_has_priority",focus.family))
       ]);
-
-      const commerceMachine = plan.commerceDiscovery
-        ? await runCommerceMachine(env)
-        : skipped("conversion_inventory_has_priority", focus.family);
-      const commerceOperations = await runCommerceOperations(env);
-      const pruning = plan.b2bDiscovery
-        ? await pruneMarketHunterStrategies(env)
-        : skipped("no_market_hunter_cycle_to_prune", focus.family);
-
-      return {
-        economicControl: {
-          version: ECONOMIC_CONTROL_VERSION,
-          focus,
-          firstCash,
-          revenueFocus,
-          hourlyCommercialSlot,
-          plan,
-          guardrails: {
-            discoveryBaselineMinutes: 15,
-            commercialExternalSlotEveryMinutes: 60,
-            maxAutonomousExternalCommercialMessagesPerHour: 1,
-            conversionInventoryBeforeExpansion: true,
-            sensingNeverZero: true,
-            commerceOperationsAlwaysOn: true,
-            supplierTruthAlwaysOn: true,
-            autonomousSpendUsd: 0,
-            autonomousPurchase: false,
-            autonomousContract: false
-          }
-        },
-        sourceIntelligence,
-        productCommerce,
-        supplierIntake,
-        commerceMachine,
-        commerceOperations,
-        hunter,
-        pruning
-      };
-    })().catch(() => ({ ok: false, isolatedFailure: true })));
-
-    if (hourlyCommercialSlot) return currentWorker.scheduled(controller, env, ctx);
+      // Demand scoring runs after discovery. It never fabricates demand: VERIFIED_DEMAND
+      // requires explicit observed purchase/RFQ/tender/supplier-seeking evidence.
+      const demandFirst=plan.b2bDiscovery ? await runDemandFirst(env) : skipped("no_new_b2b_sensing_to_score",focus.family);
+      const commerceMachine=plan.commerceDiscovery ? await runCommerceMachine(env) : skipped("conversion_inventory_has_priority",focus.family);
+      const commerceOperations=await runCommerceOperations(env);
+      const pruning=plan.b2bDiscovery ? await pruneMarketHunterStrategies(env) : skipped("no_market_hunter_cycle_to_prune",focus.family);
+      return { economicControl:{ version:ECONOMIC_CONTROL_VERSION,focus,firstCash,revenueFocus,hourlyCommercialSlot,plan,guardrails:{ discoveryBaselineMinutes:15,commercialExternalSlotEveryMinutes:60,maxAutonomousExternalCommercialMessagesPerHour:1,conversionInventoryBeforeExpansion:true,demandFirst:true,verifiedDemandRequiresExplicitEvidence:true,sensingNeverZero:true,commerceOperationsAlwaysOn:true,supplierTruthAlwaysOn:true,autonomousSpendUsd:0,autonomousPurchase:false,autonomousContract:false } },sourceIntelligence,productCommerce,supplierIntake,hunter,demandFirst,commerceMachine,commerceOperations,pruning };
+    })().catch(()=>({ok:false,isolatedFailure:true})));
+    if (hourlyCommercialSlot) return currentWorker.scheduled(controller,env,ctx);
     return undefined;
   }
 };
