@@ -7,6 +7,7 @@ on:
       - '.github/workflows/lumen-instagram-approved-flush.yml'
       - '.lumen/runtime/instagram_content_dedupe_runtime.py'
       - '.lumen/runtime/test_instagram_content_dedupe_runtime.py'
+      - '.lumen/runtime/zero_instagram_control_bridge_runtime.py'
   workflow_dispatch:
 
 permissions:
@@ -90,6 +91,16 @@ jobs:
           import app as lumen_app
           import instagram_publish_control
           import instagram_content_dedupe_runtime as dedupe
+          import zero_instagram_control_bridge_runtime as bridge
+
+          # The dashboard writes signed approve/reject commands to the D1 command queue.
+          # Fold those commands into canonical state BEFORE looking for approved posts.
+          # This was the missing link that caused a valid dashboard click to be followed by
+          # NO_PENDING_APPROVED_POSTS.
+          consume = bridge.consume_commands()
+          print({'instagram_control_commands_before_flush': consume}, flush=True)
+          if consume.get('status') != 'ok':
+              raise RuntimeError(f"instagram_control_command_consume_failed:{consume.get('last_error')}")
 
           if not lumen_app.load_state():
               raise RuntimeError('state_unavailable')
@@ -122,7 +133,13 @@ jobs:
 
           candidates.sort(key=lambda row: (row[0], row[1]))
           if not candidates:
-              print({'instagram_approved_flush': {'status': 'NO_PENDING_APPROVED_POSTS', 'published': False}}, flush=True)
+              print({'instagram_approved_flush': {
+                  'status': 'NO_PENDING_APPROVED_POSTS',
+                  'published': False,
+                  'commands_seen': consume.get('commands_seen', 0),
+                  'commands_approved': consume.get('approved', 0),
+                  'commands_rejected': consume.get('rejected', 0),
+              }}, flush=True)
               raise SystemExit(0)
 
           _, target, job, approval = candidates[0]
@@ -162,12 +179,13 @@ jobs:
               'external_post_id': (receipt or {}).get('external_post_id'),
               'dedupe_policy_version': dedupe.VERSION,
               'selection': 'oldest_valid_explicit_approval_without_receipt',
+              'commands_seen': consume.get('commands_seen', 0),
+              'commands_approved': consume.get('approved', 0),
           }}, flush=True)
 
           if result.get('status') not in {'PUBLISHED', 'DUPLICATE_BLOCKED'} and not receipt:
               raise RuntimeError(f"approved_post_not_published:{result.get('status')}")
 
-          import zero_instagram_control_bridge_runtime as bridge
           projection = bridge.export_posts()
           print({'instagram_control_projection': projection}, flush=True)
           PY
