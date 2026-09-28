@@ -1,0 +1,32 @@
+name: LUMEN Cognitive Core check
+
+on:
+  push:
+    branches: [lumen-cognitive-core-v1-20260927]
+    paths:
+      - '.lumen/a2a-worker/cognitive-economic-operator.js'
+      - '.lumen/a2a-worker/adaptive-entry.js'
+      - '.lumen/a2a-worker/wrangler.toml'
+      - '.lumen/a2a-worker/test-cognitive-economic-operator.mjs'
+      - '.github/workflows/lumen-cognitive-core-check.yml'
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: JavaScript syntax checks
+        working-directory: .lumen/a2a-worker
+        run: |
+          node --check cognitive-economic-operator.js
+          node --check adaptive-entry.js
+      - name: Cognitive economic guardrail tests
+        working-directory: .lumen/a2a-worker
+        run: node test-cognitive-economic-operator.mjs
+      - name: Cloudflare Worker bundle dry run
+        working-directory: .lumen/a2a-worker
+        run: npx --yes wrangler@latest deploy --dry-run --outdir /tmp/lumen-cognitive-dry-run --config wrangler.toml
