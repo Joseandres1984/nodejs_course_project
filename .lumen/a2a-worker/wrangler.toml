@@ -19,6 +19,10 @@ A2A_AUTONOMOUS_CONVERSION_CLOSE = "true"
 A2A_AUTONOMOUS_RECRUITMENT = "false"
 A2A_AUTONOMOUS_DELEGATION = "false"
 LUMEN_FIRST_CASH_MODE = "false"
+X402_PAY_TO = "0x04285DE6A083CEb28fb0C254a2ed0F5fdB2eeD28"
+X402_CHECKOUT_URL = "https://lumen-zero-x402.lumen-b2b.workers.dev"
+X402_NETWORK = "base"
+X402_FACILITATOR = "https://facilitator.xpay.sh"
 
 [triggers]
 crons = ["7,22,37,52 * * * *"]
