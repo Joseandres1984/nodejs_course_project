@@ -1,0 +1,43 @@
+name: LUMEN cognitive task memory smoke
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/a2a-worker/cognitive-task-memory.js'
+      - '.lumen/a2a-worker/adaptive-entry.js'
+      - '.github/workflows/lumen-cognitive-task-memory-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify cognitive task memory in production
+        env:
+          OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$OPPORTUNITY_ADMIN_TOKEN"
+          BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+
+          ready=0
+          for i in $(seq 1 24); do
+            if curl -fsS --max-time 15 "$BASE/cognitive/tasks/policy" -o policy.json; then
+              if jq -e '.version == "1.0-persistent-agenda" and .authority.directToolExecution == false and .authority.externalMessagesCreated == false and .authority.autonomousSpendUsd == 0 and .authority.autonomousPurchase == false and .authority.autonomousContract == false and .authority.bindingActionsHumanGated == true' policy.json >/dev/null; then
+                ready=1
+                break
+              fi
+            fi
+            sleep 5
+          done
+          test "$ready" -eq 1
+
+          curl -fsS --max-time 25 -X POST \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            "$BASE/cognitive/tasks/run" -o run.json
+          jq -e '.ok == true and .version == "1.0-persistent-agenda" and (.agenda | length) >= 1 and .authority.directToolExecution == false and .authority.externalMessagesCreated == false and .authority.autonomousSpendUsd == 0 and .authority.bindingActionsHumanGated == true' run.json >/dev/null
+
+          curl -fsS --max-time 15 "$BASE/cognitive/tasks/state" -o state.json
+          jq -e '.initialized == true and .engineVersion == "1.0-persistent-agenda" and (.openTasks | length) >= 1 and (.openTasks | length) <= 8' state.json >/dev/null
+          echo 'COGNITIVE_TASK_MEMORY_SMOKE_OK'
