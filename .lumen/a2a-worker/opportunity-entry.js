@@ -173,10 +173,10 @@ export default {
       let newOutreach = null;
       let travelAction = null;
 
-      if (preferredExternalAction === "COMMISSION_AUTOPILOT") {
-        commissionAction = await runReferralCommissionAutopilot(env, { force: false });
-        conversionExternalMessageSent = consumedExternalSlot(commissionAction);
-      } else if (preferredExternalAction === "FIRST_CASH") {
+      // Downstream commercial inventory always gets the single external slot first.
+      // Expansive actions (fresh outreach, commissions, travel, councils and terms)
+      // are attempted only after close intent, qualified replies and due follow-ups.
+      if (preferredExternalAction === "FIRST_CASH") {
         firstCash = await runFirstCashCloser(env, { force: false });
         conversionExternalMessageSent = consumedExternalSlot(firstCash);
       } else if (preferredExternalAction === "COMMERCIAL_REPLY") {
@@ -185,15 +185,6 @@ export default {
       } else if (preferredExternalAction === "FOLLOWUP") {
         priorityFollowup = await processFollowupCycle(env);
         conversionExternalMessageSent = consumedExternalSlot(priorityFollowup);
-      } else if (preferredExternalAction === "NEW_OUTREACH") {
-        // Revenue-first fix: when the portfolio explicitly says fresh commercial
-        // outreach is the best use of the single external slot, prepare/review
-        // the proposal immediately and try that path before councils, partner
-        // term inquiries, travel or other lower-priority external actions.
-        await prepareTopProposal(env);
-        await reviewNextProposal(env);
-        newOutreach = await sendNextApproved(env, { force: false });
-        conversionExternalMessageSent = consumedExternalSlot(newOutreach);
       }
 
       if (!conversionExternalMessageSent && !firstCash) {
@@ -203,6 +194,17 @@ export default {
       if (!conversionExternalMessageSent && !commercialReply) {
         commercialReply = await runCommercialReplyEngine(env, { force: false });
         conversionExternalMessageSent = consumedExternalSlot(commercialReply);
+      }
+      if (!conversionExternalMessageSent && !priorityFollowup) {
+        priorityFollowup = await processFollowupCycle(env);
+        conversionExternalMessageSent = consumedExternalSlot(priorityFollowup);
+      }
+
+      if (!conversionExternalMessageSent && preferredExternalAction === "NEW_OUTREACH") {
+        await prepareTopProposal(env);
+        await reviewNextProposal(env);
+        newOutreach = await sendNextApproved(env, { force: false });
+        conversionExternalMessageSent = consumedExternalSlot(newOutreach);
       }
       if (!conversionExternalMessageSent && !commissionAction) {
         commissionAction = await runReferralCommissionAutopilot(env, { force: false });
@@ -243,8 +245,7 @@ export default {
       await reviewNextProposal(env);
 
       if (!conversionExternalMessageSent && !councilExternalMessageSent && !termsExternalMessageSent) {
-        const followup = priorityFollowup || await processFollowupCycle(env);
-        if (!consumedExternalSlot(followup)) await sendNextApproved(env, { force: false });
+        await sendNextApproved(env, { force: false });
       }
 
       await runOpportunityFactory(env);
