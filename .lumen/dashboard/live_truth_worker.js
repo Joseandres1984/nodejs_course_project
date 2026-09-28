@@ -1,5 +1,6 @@
 import app from "./live_data_worker.js";
 
+// Redeploy marker: keep the tokenized Instagram command flow and verified Gmail health active together.
 async function hmacHex(secret, value) {
   const key = await crypto.subtle.importKey(
     "raw",
