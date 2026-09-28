@@ -34,9 +34,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
       - name: Probe configured mail routes without sending
         id: probe
         shell: bash
@@ -115,10 +112,9 @@ jobs:
               fh.write(f"outbound_live={'true' if outbound_live else 'false'}\n")
               fh.write(f"mail_live={'true' if result['mail_live'] else 'false'}\n")
           PY
-      - name: Persist verified mail health in D1
+      - name: Publish verified mail health to LUMEN
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
           GMAIL_LIVE: ${{ steps.probe.outputs.gmail_live }}
           SMTP_LIVE: ${{ steps.probe.outputs.smtp_live }}
           BREVO_LIVE: ${{ steps.probe.outputs.brevo_live }}
@@ -127,11 +123,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -n "${CLOUDFLARE_API_TOKEN:-}"
-          test -n "${CLOUDFLARE_ACCOUNT_ID:-}"
-          if [ "$GMAIL_LIVE" = 'true' ]; then STATUS='online'; else STATUS='offline'; fi
+          test -n "${OPPORTUNITY_ADMIN_TOKEN:-}"
+          if [ "$MAIL_LIVE" = 'true' ]; then STATUS='online'; elif [ "$GMAIL_LIVE" = 'true' ]; then STATUS='degraded'; else STATUS='offline'; fi
           if [ "$SMTP_LIVE" = 'true' ]; then PROVIDER='gmail_smtp'; elif [ "$BREVO_LIVE" = 'true' ]; then PROVIDER='brevo'; else PROVIDER='none'; fi
-          DETAILS="{\"gmail_live\":${GMAIL_LIVE},\"smtp_live\":${SMTP_LIVE},\"brevo_live\":${BREVO_LIVE},\"outbound_live\":${OUTBOUND_LIVE},\"mail_live\":${MAIL_LIVE},\"probe_message_sent\":false}"
-          SQL="CREATE TABLE IF NOT EXISTS lumen_channel_health (channel TEXT PRIMARY KEY,status TEXT NOT NULL,provider TEXT,checked_at TEXT NOT NULL,details_json TEXT); INSERT INTO lumen_channel_health(channel,status,provider,checked_at,details_json) VALUES('gmail','${STATUS}','${PROVIDER}',datetime('now'),'${DETAILS}') ON CONFLICT(channel) DO UPDATE SET status=excluded.status,provider=excluded.provider,checked_at=excluded.checked_at,details_json=excluded.details_json;"
-          npx --yes wrangler@latest d1 execute lumen-zero --remote --command "$SQL"
-          echo "LUMEN_MAIL_HEALTH_PERSISTED status=${STATUS} provider=${PROVIDER}"
+          BODY="{\"channel\":\"gmail\",\"status\":\"${STATUS}\",\"provider\":\"${PROVIDER}\",\"details\":{\"gmail_live\":${GMAIL_LIVE},\"smtp_live\":${SMTP_LIVE},\"brevo_live\":${BREVO_LIVE},\"outbound_live\":${OUTBOUND_LIVE},\"mail_live\":${MAIL_LIVE},\"probe_message_sent\":false}}"
+          curl --fail-with-body --show-error --silent --max-time 30 \
+            -X POST 'https://lumen-zero-a2a.lumen-b2b.workers.dev/channel-health' \
+            -H "x-lumen-admin: ${OPPORTUNITY_ADMIN_TOKEN}" \
+            -H 'content-type: application/json' \
+            --data "$BODY"
+          echo
+          echo "LUMEN_MAIL_HEALTH_PUBLISHED status=${STATUS} provider=${PROVIDER}"
