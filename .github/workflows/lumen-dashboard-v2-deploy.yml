@@ -47,6 +47,7 @@ jobs:
         env:
           DASH_PASSWORD: ${{ secrets.LUMEN_DASHBOARD_PASSWORD }}
         run: |
+          set -euo pipefail
           BASE='https://lumen-zero-dashboard.lumen-b2b.workers.dev'
           for path in /health /api/control-tower-v2 /api/network-control-v1 /api/data; do
             body="$(mktemp)"
@@ -59,6 +60,16 @@ jobs:
             python -m json.tool < "$body" >/dev/null
             echo "DASHBOARD_LIVE_SMOKE_OK path=${path}"
           done
+
+          data="$(mktemp)"
+          curl -fsS --retry 4 --retry-delay 2 -u "socio:${DASH_PASSWORD}" "${BASE}/api/data" -o "$data"
+          jq -e '.source == "live_d1_a2a_canonical" and .services.public_web.status == "online" and .services.public_web.probe == "service_binding"' "$data" >/dev/null
+          echo 'DASHBOARD_PUBLIC_WEB_SERVICE_BINDING_OK'
+
+          control="$(mktemp)"
+          curl -fsS --retry 4 --retry-delay 2 -u "socio:${DASH_PASSWORD}" "${BASE}/api/control-tower-v2" -o "$control"
+          jq -e '.system.x402 == "READY" and .system.x402Live == true and .system.x402StatusSource == "x402_service_binding"' "$control" >/dev/null
+          echo 'DASHBOARD_X402_SERVICE_BINDING_READY'
 
           page="$(mktemp)"
           code="$(curl -sS --retry 4 --retry-delay 2 -u "socio:${DASH_PASSWORD}" -o "$page" -w '%{http_code}' "${BASE}/")"
