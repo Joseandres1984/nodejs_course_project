@@ -6,6 +6,8 @@ on:
     paths:
       - '.github/workflows/lumen-mail-health.yml'
   workflow_dispatch:
+  schedule:
+    - cron: '17 * * * *'
 
 permissions:
   contents: read
@@ -32,7 +34,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
       - name: Probe configured mail routes without sending
+        id: probe
         shell: bash
         run: |
           python - <<'PY'
@@ -48,7 +54,6 @@ jobs:
               'brevo': {'configured': False, 'authenticated': False},
           }
 
-          # SMTP login only. No message is created or sent.
           if present('LUMEN_SMTP_HOST','LUMEN_SMTP_USER','LUMEN_SMTP_PASSWORD'):
               result['smtp']['configured'] = True
               try:
@@ -66,7 +71,6 @@ jobs:
               except Exception as exc:
                   result['smtp']['error_type'] = type(exc).__name__
 
-          # IMAP login + readonly INBOX select only. No message flags are changed.
           if present('LUMEN_IMAP_HOST','LUMEN_IMAP_USER','LUMEN_IMAP_PASSWORD'):
               result['imap']['configured'] = True
               try:
@@ -82,7 +86,6 @@ jobs:
               except Exception as exc:
                   result['imap']['error_type'] = type(exc).__name__
 
-          # Brevo account endpoint only. No delivery API call.
           if present('LUMEN_BREVO_API_KEY','LUMEN_BREVO_FROM_EMAIL'):
               result['brevo']['configured'] = True
               try:
@@ -102,8 +105,33 @@ jobs:
           result['mail_live'] = bool(gmail_live and outbound_live)
           print('LUMEN_MAIL_HEALTH=' + json.dumps(result, sort_keys=True))
 
-          # This diagnostic reports truth; missing legacy credentials are not a CI failure.
-          # Only an internally inconsistent result is considered a probe failure.
           if result['probe_message_sent']:
               raise SystemExit('mail_health_probe_must_never_send')
+
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as fh:
+              fh.write(f"gmail_live={'true' if gmail_live else 'false'}\n")
+              fh.write(f"smtp_live={'true' if result['smtp']['authenticated'] else 'false'}\n")
+              fh.write(f"brevo_live={'true' if result['brevo']['authenticated'] else 'false'}\n")
+              fh.write(f"outbound_live={'true' if outbound_live else 'false'}\n")
+              fh.write(f"mail_live={'true' if result['mail_live'] else 'false'}\n")
           PY
+      - name: Persist verified mail health in D1
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          GMAIL_LIVE: ${{ steps.probe.outputs.gmail_live }}
+          SMTP_LIVE: ${{ steps.probe.outputs.smtp_live }}
+          BREVO_LIVE: ${{ steps.probe.outputs.brevo_live }}
+          OUTBOUND_LIVE: ${{ steps.probe.outputs.outbound_live }}
+          MAIL_LIVE: ${{ steps.probe.outputs.mail_live }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${CLOUDFLARE_API_TOKEN:-}"
+          test -n "${CLOUDFLARE_ACCOUNT_ID:-}"
+          if [ "$GMAIL_LIVE" = 'true' ]; then STATUS='online'; else STATUS='offline'; fi
+          if [ "$SMTP_LIVE" = 'true' ]; then PROVIDER='gmail_smtp'; elif [ "$BREVO_LIVE" = 'true' ]; then PROVIDER='brevo'; else PROVIDER='none'; fi
+          DETAILS="{\"gmail_live\":${GMAIL_LIVE},\"smtp_live\":${SMTP_LIVE},\"brevo_live\":${BREVO_LIVE},\"outbound_live\":${OUTBOUND_LIVE},\"mail_live\":${MAIL_LIVE},\"probe_message_sent\":false}"
+          SQL="CREATE TABLE IF NOT EXISTS lumen_channel_health (channel TEXT PRIMARY KEY,status TEXT NOT NULL,provider TEXT,checked_at TEXT NOT NULL,details_json TEXT); INSERT INTO lumen_channel_health(channel,status,provider,checked_at,details_json) VALUES('gmail','${STATUS}','${PROVIDER}',datetime('now'),'${DETAILS}') ON CONFLICT(channel) DO UPDATE SET status=excluded.status,provider=excluded.provider,checked_at=excluded.checked_at,details_json=excluded.details_json;"
+          npx --yes wrangler@latest d1 execute lumen-zero --remote --command "$SQL"
+          echo "LUMEN_MAIL_HEALTH_PERSISTED status=${STATUS} provider=${PROVIDER}"
