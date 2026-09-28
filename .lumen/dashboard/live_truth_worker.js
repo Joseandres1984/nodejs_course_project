@@ -1,5 +1,28 @@
 import app from "./live_data_worker.js";
 
+async function hmacHex(secret, value) {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(String(secret || "")),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(value));
+  return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function withCommandTokens(rows, env) {
+  const secret = String(env.LUMEN_DASHBOARD_PASSWORD || "");
+  const out = [];
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const approve = await hmacHex(secret, `${row.job_id}|${row.fingerprint}|approve`);
+    const reject = await hmacHex(secret, `${row.job_id}|${row.fingerprint}|reject`);
+    out.push({ ...row, approve_token: approve, reject_token: reject });
+  }
+  return out;
+}
+
 async function serviceJson(binding, path) {
   try {
     if (!binding || typeof binding.fetch !== "function") return null;
@@ -73,6 +96,7 @@ export default {
     if (url.pathname === "/api/data") {
       let data;
       try { data = await response.json(); } catch { return response; }
+      data.instagram_posts = await withCommandTokens(data.instagram_posts, env);
       const [publicStatus, gmail] = await Promise.all([
         publicWebStatus(env),
         gmailDashboardStatus(env),
