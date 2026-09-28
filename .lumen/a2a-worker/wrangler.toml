@@ -25,6 +25,10 @@ A2A_FOLLOWUP_MAX = "2"
 [triggers]
 crons = ["7,22,37,52 * * * *"]
 
+[[services]]
+binding = "COGNITIVE"
+service = "lumen-zero-cognitive"
+
 [[d1_databases]]
 binding = "DB"
 database_name = "lumen-zero"
