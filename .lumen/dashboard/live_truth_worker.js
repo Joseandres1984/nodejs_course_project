@@ -104,6 +104,9 @@ export default {
         mail_status: gmail.status,
         mail_checked_at: gmail.checkedAt,
         mail_status_source: gmail.source,
+        owner_email_fallback: gmail.live,
+        owner_email_fallback_status: gmail.live ? "available_via_gmail" : "unavailable",
+        owner_email_fallback_source: gmail.source,
       };
       return jsonResponse(data, response, {
         "x-lumen-public-health-source": "service-binding",
