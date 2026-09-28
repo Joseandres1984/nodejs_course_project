@@ -66,6 +66,9 @@ jobs:
           jq -e '.source == "live_d1_a2a_canonical" and .services.public_web.status == "online" and .services.public_web.probe == "service_binding"' "$data" >/dev/null
           echo 'DASHBOARD_PUBLIC_WEB_SERVICE_BINDING_OK'
 
+          jq -e '.outbound.mail_ready == true and .outbound.mail_provider == "gmail_smtp" and .outbound.mail_status == "online" and .outbound.mail_status_source == "a2a_channel_health" and .services.gmail.status == "online" and .services.gmail.live == true and .services.gmail.fresh == true and .services.gmail.imap_live == true and .services.gmail.outbound_live == true and .services.gmail.probe_message_sent == false' "$data" >/dev/null
+          echo 'DASHBOARD_GMAIL_CHANNEL_HEALTH_OK'
+
           control="$(mktemp)"
           curl -fsS --retry 4 --retry-delay 2 -u "socio:${DASH_PASSWORD}" "${BASE}/api/control-tower-v2" -o "$control"
           jq -e '.system.x402 == "READY" and .system.x402Live == true and .system.x402StatusSource == "x402_service_binding"' "$control" >/dev/null
