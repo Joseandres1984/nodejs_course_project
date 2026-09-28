@@ -1,0 +1,109 @@
+name: LUMEN Mail Health
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-mail-health.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe-mail:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      LUMEN_SMTP_HOST: ${{ secrets.LUMEN_SMTP_HOST }}
+      LUMEN_SMTP_PORT: ${{ secrets.LUMEN_SMTP_PORT }}
+      LUMEN_SMTP_USER: ${{ secrets.LUMEN_SMTP_USER }}
+      LUMEN_SMTP_PASSWORD: ${{ secrets.LUMEN_SMTP_PASSWORD }}
+      LUMEN_SMTP_SSL: ${{ secrets.LUMEN_SMTP_SSL }}
+      LUMEN_IMAP_HOST: ${{ secrets.LUMEN_IMAP_HOST }}
+      LUMEN_IMAP_PORT: ${{ secrets.LUMEN_IMAP_PORT }}
+      LUMEN_IMAP_USER: ${{ secrets.LUMEN_IMAP_USER }}
+      LUMEN_IMAP_PASSWORD: ${{ secrets.LUMEN_IMAP_PASSWORD }}
+      LUMEN_IMAP_SSL: ${{ secrets.LUMEN_IMAP_SSL }}
+      LUMEN_BREVO_API_KEY: ${{ secrets.LUMEN_BREVO_API_KEY }}
+      LUMEN_BREVO_FROM_EMAIL: ${{ secrets.LUMEN_BREVO_FROM_EMAIL }}
+      LUMEN_BREVO_SENDER_VERIFIED: ${{ secrets.LUMEN_BREVO_SENDER_VERIFIED }}
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Probe configured mail routes without sending
+        shell: bash
+        run: |
+          python - <<'PY'
+          import imaplib, json, os, smtplib, ssl, urllib.request
+
+          def present(*names):
+              return all(bool((os.getenv(n) or '').strip()) for n in names)
+
+          result = {
+              'probe_message_sent': False,
+              'smtp': {'configured': False, 'authenticated': False},
+              'imap': {'configured': False, 'authenticated': False, 'inbox_readable': False},
+              'brevo': {'configured': False, 'authenticated': False},
+          }
+
+          # SMTP login only. No message is created or sent.
+          if present('LUMEN_SMTP_HOST','LUMEN_SMTP_USER','LUMEN_SMTP_PASSWORD'):
+              result['smtp']['configured'] = True
+              try:
+                  host = os.environ['LUMEN_SMTP_HOST'].strip()
+                  port = int((os.getenv('LUMEN_SMTP_PORT') or '587').strip() or '587')
+                  use_ssl = (os.getenv('LUMEN_SMTP_SSL') or 'false').lower() == 'true'
+                  if use_ssl:
+                      client = smtplib.SMTP_SSL(host, port, timeout=20, context=ssl.create_default_context())
+                  else:
+                      client = smtplib.SMTP(host, port, timeout=20)
+                      client.ehlo(); client.starttls(context=ssl.create_default_context()); client.ehlo()
+                  client.login(os.environ['LUMEN_SMTP_USER'], os.environ['LUMEN_SMTP_PASSWORD'])
+                  result['smtp']['authenticated'] = True
+                  client.quit()
+              except Exception as exc:
+                  result['smtp']['error_type'] = type(exc).__name__
+
+          # IMAP login + readonly INBOX select only. No message flags are changed.
+          if present('LUMEN_IMAP_HOST','LUMEN_IMAP_USER','LUMEN_IMAP_PASSWORD'):
+              result['imap']['configured'] = True
+              try:
+                  host = os.environ['LUMEN_IMAP_HOST'].strip()
+                  port = int((os.getenv('LUMEN_IMAP_PORT') or '993').strip() or '993')
+                  use_ssl = (os.getenv('LUMEN_IMAP_SSL') or 'true').lower() != 'false'
+                  client = imaplib.IMAP4_SSL(host, port) if use_ssl else imaplib.IMAP4(host, port)
+                  client.login(os.environ['LUMEN_IMAP_USER'], os.environ['LUMEN_IMAP_PASSWORD'])
+                  result['imap']['authenticated'] = True
+                  typ, _ = client.select('INBOX', readonly=True)
+                  result['imap']['inbox_readable'] = typ == 'OK'
+                  client.logout()
+              except Exception as exc:
+                  result['imap']['error_type'] = type(exc).__name__
+
+          # Brevo account endpoint only. No delivery API call.
+          if present('LUMEN_BREVO_API_KEY','LUMEN_BREVO_FROM_EMAIL'):
+              result['brevo']['configured'] = True
+              try:
+                  req = urllib.request.Request('https://api.brevo.com/v3/account', headers={
+                      'accept': 'application/json',
+                      'api-key': os.environ['LUMEN_BREVO_API_KEY'],
+                  })
+                  with urllib.request.urlopen(req, timeout=20) as resp:
+                      result['brevo']['authenticated'] = 200 <= int(resp.status) < 300
+              except Exception as exc:
+                  result['brevo']['error_type'] = type(exc).__name__
+
+          gmail_live = result['imap']['authenticated'] and result['imap']['inbox_readable']
+          outbound_live = result['smtp']['authenticated'] or result['brevo']['authenticated']
+          result['gmail_live'] = bool(gmail_live)
+          result['outbound_mail_live'] = bool(outbound_live)
+          result['mail_live'] = bool(gmail_live and outbound_live)
+          print('LUMEN_MAIL_HEALTH=' + json.dumps(result, sort_keys=True))
+
+          # This diagnostic reports truth; missing legacy credentials are not a CI failure.
+          # Only an internally inconsistent result is considered a probe failure.
+          if result['probe_message_sent']:
+              raise SystemExit('mail_health_probe_must_never_send')
+          PY
