@@ -12,8 +12,9 @@ import { handleTiendanubePrivacy } from "./tiendanube-privacy.js";
 import { handleTiendanubeSupplierIntake, runTiendanubeSupplierIntake } from "./tiendanube-supplier-intake.js";
 import { handleSupplierMarketLaunch } from "./supplier-market-launch.js";
 import { handleRevenueFocusController, computeRevenueFocus } from "./revenue-focus-controller.js";
+import { handleCognitiveEconomicOperator, runCognitiveEconomicSupervisor } from "./cognitive-economic-operator.js";
 
-const ECONOMIC_CONTROL_VERSION = "1.2-revenue-first-inventory-focus";
+const ECONOMIC_CONTROL_VERSION = "1.3-cognitive-supervised-revenue-first";
 const HOURLY_COMMERCIAL_MINUTE_UTC = 7;
 
 function skipped(reason, family) {
@@ -36,6 +37,30 @@ async function readEconomicFocus(env) {
     };
   } catch {
     return { initialized: false, family: null, cycle: 0, attention: {}, verifiedRevenueUsd: 0 };
+  }
+}
+
+async function readCachedCognitiveSupervisor(env) {
+  if (!env?.DB) return null;
+  try {
+    const row = await env.DB.prepare("SELECT updated_at,provider,plan_json FROM lumen_cognitive_operator_state WHERE id='GLOBAL' LIMIT 1").first();
+    if (!row) return null;
+    let plan = null;
+    try { plan = JSON.parse(row.plan_json || "null"); } catch {}
+    if (!plan || typeof plan !== "object") return null;
+    return {
+      ok: true,
+      status: "cached",
+      cognitiveProvider: row.provider || null,
+      updatedAt: row.updated_at || null,
+      plan,
+      actionsExecutedBySupervisor: false,
+      externalMessagesCreated: false,
+      outgoingSpendEnabled: false,
+      bindingAuthorityChanged: false,
+    };
+  } catch {
+    return null;
   }
 }
 
@@ -62,7 +87,7 @@ function cadencePlan(focus, scheduledTime, forceB2BDiscovery = false, revenueFoc
   } else if (revenueFocus?.mode === "BALANCED_CONVERSION") {
     b2bDiscovery = b2bDiscovery && hourSlot % 2 === 0;
   }
-  return { b2bDiscovery, commerceDiscovery, mode: revenueFocus?.mode || (forceB2BDiscovery ? "FIRST_CASH_QUARTER_HOUR_B2B" : "ECONOMIC_FOCUS_WITH_BOUNDED_EXPLORATION") };
+  return { b2bDiscovery, commerceDiscovery, mode: revenueFocus?.mode || (forceB2BDiscovery ? "FIRST_CASH_OR_COGNITIVE_B2B_SENSING" : "ECONOMIC_FOCUS_WITH_BOUNDED_EXPLORATION") };
 }
 
 function isHourlyCommercialSlot(scheduledTime) {
@@ -74,6 +99,8 @@ export default {
   async fetch(request, env, ctx) {
     const sourcePolicyResponse = handleSourceIntelligencePolicy(request);
     if (sourcePolicyResponse) return sourcePolicyResponse;
+    const cognitiveResponse = await handleCognitiveEconomicOperator(request, env);
+    if (cognitiveResponse) return cognitiveResponse;
     const revenueFocusResponse = await handleRevenueFocusController(request, env);
     if (revenueFocusResponse) return revenueFocusResponse;
     const tiendanubeInstallResponse = await handleTiendanubeInstall(request, env);
@@ -109,7 +136,14 @@ export default {
       const focus = await readEconomicFocus(env);
       const firstCash = firstCashActive(env, focus);
       const revenueFocus = await computeRevenueFocus(env);
-      const plan = cadencePlan(focus, scheduledTime, firstCash, revenueFocus);
+      let cognitive = hourlyCommercialSlot
+        ? await runCognitiveEconomicSupervisor(env)
+        : await readCachedCognitiveSupervisor(env);
+      if (!cognitive) cognitive = await runCognitiveEconomicSupervisor(env);
+
+      const cognitiveB2BBoost = Boolean(cognitive?.plan?.b2bDiscoveryBoost)
+        && revenueFocus?.mode !== "CONVERSION_FIRST";
+      const plan = cadencePlan(focus, scheduledTime, firstCash || cognitiveB2BBoost, revenueFocus);
 
       const [sourceIntelligence, productCommerce, supplierIntake, hunter] = await Promise.all([
         plan.b2bDiscovery ? runSourceIntelligence(env) : Promise.resolve(skipped("conversion_inventory_has_priority", focus.family)),
@@ -132,13 +166,19 @@ export default {
           focus,
           firstCash,
           revenueFocus,
+          cognitive,
+          cognitiveB2BBoost,
           hourlyCommercialSlot,
           plan,
           guardrails: {
             discoveryBaselineMinutes: 15,
+            cognitiveDecisionMinutes: 60,
+            cognitiveCachedBetweenDecisionCycles: true,
             commercialExternalSlotEveryMinutes: 60,
             maxAutonomousExternalCommercialMessagesPerHour: 1,
             conversionInventoryBeforeExpansion: true,
+            cognitiveCannotOverrideConversion: true,
+            cognitiveCannotChooseExternalCommercialAction: true,
             sensingNeverZero: true,
             commerceOperationsAlwaysOn: true,
             supplierTruthAlwaysOn: true,
