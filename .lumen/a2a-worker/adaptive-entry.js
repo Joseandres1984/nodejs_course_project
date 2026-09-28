@@ -13,8 +13,9 @@ import { handleTiendanubeSupplierIntake, runTiendanubeSupplierIntake } from "./t
 import { handleSupplierMarketLaunch } from "./supplier-market-launch.js";
 import { handleRevenueFocusController, computeRevenueFocus } from "./revenue-focus-controller.js";
 import { handleCognitiveEconomicOperator, runCognitiveEconomicSupervisor } from "./cognitive-economic-operator.js";
+import { handleCognitiveCore, runCognitiveCore } from "./cognitive-core.js";
 
-const ECONOMIC_CONTROL_VERSION = "1.3-cognitive-supervised-revenue-first";
+const ECONOMIC_CONTROL_VERSION = "1.4-persistent-cognitive-core";
 const HOURLY_COMMERCIAL_MINUTE_UTC = 7;
 
 function skipped(reason, family) {
@@ -78,9 +79,6 @@ function cadencePlan(focus, scheduledTime, forceB2BDiscovery = false, revenueFoc
   let b2bDiscovery = forceB2BDiscovery || family === "B2B_A2A" || family === "REFERRAL" || hourSlot % 3 === 0;
   let commerceDiscovery = family === "COMMERCE" || hourSlot % 4 === 0;
 
-  // When LUMEN already owns qualified commercial inventory, preserve sensing but
-  // reduce expansion cadence. The single hourly external slot remains dedicated
-  // to close -> reply -> follow-up -> Quality PASS outreach in opportunity-entry.
   if (revenueFocus?.mode === "CONVERSION_FIRST") {
     b2bDiscovery = b2bDiscovery && hourSlot % 3 === 0;
     commerceDiscovery = commerceDiscovery && hourSlot % 4 === 0;
@@ -101,6 +99,8 @@ export default {
     if (sourcePolicyResponse) return sourcePolicyResponse;
     const cognitiveResponse = await handleCognitiveEconomicOperator(request, env);
     if (cognitiveResponse) return cognitiveResponse;
+    const cognitiveCoreResponse = await handleCognitiveCore(request, env);
+    if (cognitiveCoreResponse) return cognitiveCoreResponse;
     const revenueFocusResponse = await handleRevenueFocusController(request, env);
     if (revenueFocusResponse) return revenueFocusResponse;
     const tiendanubeInstallResponse = await handleTiendanubeInstall(request, env);
@@ -141,6 +141,20 @@ export default {
         : await readCachedCognitiveSupervisor(env);
       if (!cognitive) cognitive = await runCognitiveEconomicSupervisor(env);
 
+      let cognitiveCore;
+      try {
+        cognitiveCore = await runCognitiveCore(env, { cognitive });
+      } catch (error) {
+        cognitiveCore = {
+          ok: false,
+          isolatedFailure: true,
+          error: String(error?.message || error || "cognitive_core_failed").slice(0, 180),
+          externalMessagesCreated: false,
+          outgoingSpendEnabled: false,
+          bindingAuthorityChanged: false,
+        };
+      }
+
       const cognitiveB2BBoost = Boolean(cognitive?.plan?.b2bDiscoveryBoost)
         && revenueFocus?.mode !== "CONVERSION_FIRST";
       const plan = cadencePlan(focus, scheduledTime, firstCash || cognitiveB2BBoost, revenueFocus);
@@ -167,18 +181,22 @@ export default {
           firstCash,
           revenueFocus,
           cognitive,
+          cognitiveCore,
           cognitiveB2BBoost,
           hourlyCommercialSlot,
           plan,
           guardrails: {
             discoveryBaselineMinutes: 15,
             cognitiveDecisionMinutes: 60,
+            cognitiveCorePlanningMinutes: 15,
             cognitiveCachedBetweenDecisionCycles: true,
+            persistentGoalTaskMemory: true,
             commercialExternalSlotEveryMinutes: 60,
             maxAutonomousExternalCommercialMessagesPerHour: 1,
             conversionInventoryBeforeExpansion: true,
             cognitiveCannotOverrideConversion: true,
             cognitiveCannotChooseExternalCommercialAction: true,
+            cognitiveCoreDirectExecution: false,
             sensingNeverZero: true,
             commerceOperationsAlwaysOn: true,
             supplierTruthAlwaysOn: true,
