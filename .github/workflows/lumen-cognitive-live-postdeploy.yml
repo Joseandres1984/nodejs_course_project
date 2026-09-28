@@ -1,0 +1,49 @@
+name: LUMEN Live Cognitive Postdeploy
+
+on:
+  workflow_run:
+    workflows: ["LUMEN Cloudflare deploy"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cognitive-live:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      BASE: https://lumen-zero-a2a.lumen-b2b.workers.dev
+      OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+    steps:
+      - name: Wait for Cognitive Core public policy
+        run: |
+          set -euo pipefail
+          ok=0
+          for i in $(seq 1 20); do
+            if curl -fsS --max-time 15 "$BASE/cognitive/policy" -o cognitive-policy.json; then
+              if jq -e '.version == "2.0-live-cognitive-core-shadow" and .mode == "shadow" and .paidAiAllowed == false and .aiMonetaryBudgetUsd == 0 and .actionsExecutedByModel == false and .bindingActionsHumanGated == true' cognitive-policy.json >/dev/null; then
+                ok=1
+                break
+              fi
+            fi
+            sleep 4
+          done
+          test "$ok" -eq 1
+      - name: Run one bounded live cognitive cycle
+        run: |
+          set -euo pipefail
+          test -n "$OPPORTUNITY_ADMIN_TOKEN"
+          curl -fsS --max-time 45 -X POST -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" "$BASE/cognitive/run" -o cognitive-run.json
+          jq -e '.ok == true and .mode == "shadow" and .actionsExecuted == 0 and .monetaryCostUsd == 0 and .guardrails.paidAiAllowed == false and .guardrails.autonomousSpendUsd == 0 and .guardrails.modelCanExecuteTools == false and .guardrails.modelCanOverrideEconomicGovernor == false and .guardrails.bindingActionsHumanGated == true' cognitive-run.json >/dev/null
+          jq '{version,mode,cycle,provider,model,phase,recommendation,actionsExecuted,monetaryCostUsd,guardrails}' cognitive-run.json
+      - name: Verify persistent cognitive memory
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 15 "$BASE/cognitive/state" -o cognitive-state.json
+          curl -fsS --max-time 15 "$BASE/cognitive/history?limit=3" -o cognitive-history.json
+          jq -e '.initialized == true and .mode == "shadow" and .actionsExecuted == 0 and .monetaryCostUsd == 0 and (.cycle >= 1)' cognitive-state.json >/dev/null
+          jq -e '.mode == "shadow" and (.history | length) >= 1 and ([.history[].actionsExecuted] | all(. == 0)) and ([.history[].monetaryCostUsd] | all(. == 0))' cognitive-history.json >/dev/null
+          echo 'LIVE_COGNITIVE_POSTDEPLOY_OK'
