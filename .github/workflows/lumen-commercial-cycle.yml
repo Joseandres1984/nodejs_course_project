@@ -56,7 +56,7 @@ jobs:
           echo
           test "$code" = '202'
 
-      - name: Prioritize existing intent before cold outreach
+      - name: Prioritize existing intent and due follow-up before cold outreach
         id: conversion
         env:
           OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
@@ -65,10 +65,10 @@ jobs:
           base='https://lumen-zero-a2a.lumen-b2b.workers.dev'
           consumed=false
 
-          # FIRST CASH may already have a purchase-intent response ready to close.
-          # If not, answer a pending commercial question before spending the single
-          # external slot on another cold prospect.
-          for endpoint in first-cash/run commercial-reply/run; do
+          # Use the single external commercial slot on the shortest verified path
+          # to revenue: close intent, answer qualified replies, then due follow-up.
+          # Only if none of those consumes the slot may fresh cold outreach proceed.
+          for endpoint in first-cash/run commercial-reply/run followup/run; do
             body="/tmp/${endpoint//\//-}.json"
             code=$(curl --show-error --silent --max-time 60 -o "$body" -w '%{http_code}' \
               -X POST "$base/$endpoint" \
@@ -160,6 +160,7 @@ jobs:
             outreach/next \
             commercial-reply/stats \
             first-cash/stats \
+            followup/stats \
             agent-economy/stats \
             portfolio-governor/state; do
             echo "===== /$endpoint ====="
