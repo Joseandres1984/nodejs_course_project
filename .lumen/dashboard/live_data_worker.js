@@ -2,7 +2,7 @@ import stable from "./stable_worker.js";
 
 const PUBLIC_WEB = "https://lumen-zero-public.lumen-b2b.workers.dev";
 const INSTAGRAM_URL = "https://www.instagram.com/lumen.b2b/";
-const CATALOG_VERSION = "2026-09-25-live";
+const CATALOG_VERSION = "2026-09-27-live-canonical";
 const SERVICE_CATALOG = [
   { id: "SRV-QUOTECHECK", name: "LUMEN QuoteCheck Global", from_usd: 59, desc: "Revisión documental y comparación estructurada de cotizaciones B2B con referencias públicas disponibles." },
   { id: "SRV-SUPPLIERCHECK", name: "LUMEN SupplierCheck", from_usd: 79, desc: "Investigación de identidad, canales oficiales, señales públicas y riesgo comercial de proveedores." },
@@ -34,6 +34,18 @@ async function scalar(env, sql, binds = []) {
     return n(r?.n);
   } catch {
     return 0;
+  }
+}
+
+async function publicHealth() {
+  try {
+    const response = await fetch(`${PUBLIC_WEB}/health`, {
+      headers: { accept: "application/json" },
+      cf: { cacheTtl: 0 },
+    });
+    return response.ok ? "online" : `http_${response.status}`;
+  } catch {
+    return "unreachable";
   }
 }
 
@@ -86,7 +98,7 @@ function pendingFromLive(ctrl) {
   if (n(f.settlements) === 0) {
     pending.push({
       title: "FIRST CASH: conseguir el primer settlement verificado",
-      reason: "La infraestructura de cobro está activa; el objetivo sigue siendo convertir una oportunidad real en pago confirmado.",
+      reason: "El objetivo sigue siendo convertir una oportunidad real en pago confirmado, sin saltar conversaciones comerciales ya abiertas.",
       priority: 100,
       risk: "low",
       owner: "LUMEN",
@@ -96,7 +108,7 @@ function pendingFromLive(ctrl) {
     pending.push({
       title: `Ejecutar ${n(f.dueFollowups)} follow-up${n(f.dueFollowups) === 1 ? "" : "s"} vencido${n(f.dueFollowups) === 1 ? "" : "s"}`,
       reason: "Hay conversaciones comerciales esperando seguimiento y tienen prioridad sobre nueva salida fría.",
-      priority: 96,
+      priority: 99,
       risk: "low",
       owner: "LUMEN",
     });
@@ -138,7 +150,7 @@ async function liveUnifiedData(request, env, ctx) {
 
   const [
     topOpps, pipelineRows, outreachRows, proposalRows, revenueRows,
-    inquiries, journal, instagramPosts, instagramCommands,
+    inquiries, journal, instagramPosts, instagramCommands, webStatus,
   ] = await Promise.all([
     rows(env, "SELECT o.id,o.name,o.revenue_offer_id,a.commercial_score,a.commercial_fit,a.evidence_strength FROM lumen_opportunities o JOIN lumen_opportunity_assessments a ON a.opportunity_id=o.id WHERE a.commercially_actionable=1 AND a.synthetic_or_test_only=0 ORDER BY a.commercial_score DESC,o.updated_at DESC LIMIT 20"),
     rows(env, "SELECT proposal_id,opportunity_id,target,offer_name,amount_usd,stage,response_class,last_contact_at,next_action,next_action_at,followup_count,updated_at,notes FROM lumen_sales_pipeline ORDER BY COALESCE(updated_at,last_contact_at) DESC LIMIT 20"),
@@ -149,6 +161,7 @@ async function liveUnifiedData(request, env, ctx) {
     rows(env, "SELECT cycle,recorded_at,local_time,status,source FROM lumen_cycle_journal ORDER BY cycle DESC LIMIT 30"),
     rows(env, "SELECT job_id,fingerprint,audience,campaign_id,caption,image_url,state_status,approval_status,last_error,created_at,updated_at FROM lumen_instagram_control_posts ORDER BY updated_at DESC LIMIT 30"),
     rows(env, "SELECT id,job_id,fingerprint,action,created_at,processed,processed_at,result FROM lumen_instagram_control_commands ORDER BY created_at DESC LIMIT 30"),
+    publicHealth(),
   ]);
 
   const opportunities = topOpps.map((x) => ({
@@ -194,7 +207,7 @@ async function liveUnifiedData(request, env, ctx) {
   const realized = n(f.realizedRevenueUsd);
 
   return Response.json({
-    source: "live_d1_a2a_fallback",
+    source: "live_d1_a2a_canonical",
     status: {
       updated_at: ctrl.generatedAt || now,
       ticks: 0,
@@ -299,7 +312,7 @@ async function liveUnifiedData(request, env, ctx) {
     public_inquiries: inquiries,
     cycle_journal: journal,
     services: {
-      public_web: { url: PUBLIC_WEB, status: "online" },
+      public_web: { url: PUBLIC_WEB, status: webStatus },
       instagram: { url: INSTAGRAM_URL, status: instagramPosts.length ? "operational" : "connected" },
       dashboard: { status: "online" },
     },
@@ -307,7 +320,7 @@ async function liveUnifiedData(request, env, ctx) {
     headers: {
       "cache-control": "no-store, no-cache, must-revalidate",
       "x-content-type-options": "nosniff",
-      "x-lumen-data-source": "live-d1-a2a-fallback-v1",
+      "x-lumen-data-source": "live-d1-a2a-canonical-v2",
     },
   });
 }
@@ -316,8 +329,6 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (request.method === "GET" && url.pathname === "/api/data") {
-      const legacy = await stable.fetch(request, env, ctx);
-      if (legacy.status !== 503) return legacy;
       return liveUnifiedData(request, env, ctx);
     }
     return stable.fetch(request, env, ctx);
