@@ -1,6 +1,9 @@
 const VERSION = "1.0-channel-health";
 const MAX_BODY_BYTES = 4096;
-const FRESH_SECONDS = 2 * 60 * 60;
+// GitHub Actions scheduled probes can be delayed. Gmail is the only channel here,
+// so keep the last verified probe valid for 6h to avoid false dashboard alarms
+// while still expiring genuinely stale mail health.
+const FRESH_SECONDS = 6 * 60 * 60;
 const ALLOWED_CHANNELS = new Set(["gmail"]);
 const ALLOWED_STATUS = new Set(["online", "degraded", "offline"]);
 
