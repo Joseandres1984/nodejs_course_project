@@ -1,0 +1,44 @@
+name: LUMEN Instagram source renderer QA
+
+on:
+  push:
+    branches:
+      - lumen-zero
+      - 'lumen-instagram-source-pixel-fit-*'
+    paths:
+      - '.lumen/runtime/zero_instagram_assets.py'
+      - '.lumen/runtime/test_zero_instagram_assets_pixel_safe.py'
+      - '.github/workflows/lumen-instagram-source-renderer-qa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lumen-instagram-source-renderer-qa-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pixel-safe-source-renderer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      LUMEN_ZERO_COST_MODE: 'true'
+      LIVE_OUTBOUND: 'false'
+      LUMEN_INSTAGRAM_SEND_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install renderer dependencies
+        run: python -m pip install --disable-pip-version-check -r .lumen/runtime/requirements.txt
+
+      - name: Verify pixel-safe source renderer
+        working-directory: .lumen/runtime
+        run: python -m unittest -v test_zero_instagram_assets_pixel_safe.py
