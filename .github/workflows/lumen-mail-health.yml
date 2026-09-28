@@ -7,7 +7,7 @@ on:
       - '.github/workflows/lumen-mail-health.yml'
   workflow_dispatch:
   schedule:
-    - cron: '17 * * * *'
+    - cron: '17,47 * * * *'
 
 permissions:
   contents: read
