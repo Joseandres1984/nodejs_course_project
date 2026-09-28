@@ -12,9 +12,11 @@ import { handleTiendanubePrivacy } from "./tiendanube-privacy.js";
 import { handleTiendanubeSupplierIntake, runTiendanubeSupplierIntake } from "./tiendanube-supplier-intake.js";
 import { handleSupplierMarketLaunch } from "./supplier-market-launch.js";
 import { handleRevenueFocusController, computeRevenueFocus } from "./revenue-focus-controller.js";
+import { handleLiveCognitiveCore, runLiveCognitiveCycle } from "./cognitive-core-live.js";
 
-const ECONOMIC_CONTROL_VERSION = "1.2-revenue-first-inventory-focus";
+const ECONOMIC_CONTROL_VERSION = "1.3-live-cognitive-guidance";
 const HOURLY_COMMERCIAL_MINUTE_UTC = 7;
+const COGNITIVE_HINT_MAX_AGE_MS = 3 * 60 * 60 * 1000;
 
 function skipped(reason, family) {
   return { ok: true, skipped: true, reason, economicFocus: family || null, version: ECONOMIC_CONTROL_VERSION };
@@ -39,19 +41,63 @@ async function readEconomicFocus(env) {
   }
 }
 
+async function readCognitiveHint(env) {
+  if (!env?.DB) return null;
+  try {
+    const row = await env.DB.prepare("SELECT updated_at,cycle,provider,action_type,target_lane,confidence,expected_value FROM lumen_live_cognitive_state WHERE id='GLOBAL' LIMIT 1").first();
+    if (!row) return null;
+    const updatedMs = Date.parse(String(row.updated_at || ""));
+    const ageMs = Number.isFinite(updatedMs) ? Math.max(0, Date.now() - updatedMs) : Number.POSITIVE_INFINITY;
+    if (ageMs > COGNITIVE_HINT_MAX_AGE_MS) return null;
+    return {
+      updatedAt: row.updated_at || null,
+      cycle: Number(row.cycle || 0),
+      provider: row.provider || null,
+      actionType: row.action_type || null,
+      targetLane: row.target_lane || null,
+      confidence: Math.max(0, Math.min(1, Number(row.confidence || 0))),
+      expectedValue: Math.max(0, Math.min(1, Number(row.expected_value || 0))),
+      ageMs,
+      authority: "internal_discovery_guidance_only"
+    };
+  } catch {
+    return null;
+  }
+}
+
 function firstCashActive(env, focus) {
   return String(env?.LUMEN_FIRST_CASH_MODE || "").toLowerCase() === "true" && Number(focus?.verifiedRevenueUsd || 0) < 1;
 }
 
-function cadencePlan(focus, scheduledTime, forceB2BDiscovery = false, revenueFocus = null) {
+function cadencePlan(focus, scheduledTime, forceB2BDiscovery = false, revenueFocus = null, cognitiveHint = null) {
   if (!focus?.initialized || !focus?.family) {
-    return { b2bDiscovery: true, commerceDiscovery: true, mode: forceB2BDiscovery ? "FIRST_CASH_FULL_B2B_SENSING" : "COLD_START_FULL_SENSING" };
+    return {
+      b2bDiscovery: true,
+      commerceDiscovery: true,
+      mode: forceB2BDiscovery ? "FIRST_CASH_FULL_B2B_SENSING" : "COLD_START_FULL_SENSING",
+      cognitiveGuidanceApplied: false
+    };
   }
   const ms = Number(scheduledTime || Date.now());
   const hourSlot = Math.floor((Number.isFinite(ms) ? ms : Date.now()) / 3600000);
   const family = focus.family;
   let b2bDiscovery = forceB2BDiscovery || family === "B2B_A2A" || family === "REFERRAL" || hourSlot % 3 === 0;
   let commerceDiscovery = family === "COMMERCE" || hourSlot % 4 === 0;
+  let cognitiveGuidanceApplied = false;
+
+  // Cognitive Core may only widen INTERNAL sensing while the funnel is in normal
+  // discovery mode. It cannot create external messages, spend, purchases, contracts
+  // or override conversion-first inventory owned by the Economic Governor.
+  if (revenueFocus?.mode === "NORMAL_DISCOVERY" && cognitiveHint && Number(cognitiveHint.confidence || 0) >= 0.55) {
+    if (cognitiveHint.actionType === "DISCOVER_B2B" || cognitiveHint.targetLane === "B2B_A2A" || cognitiveHint.targetLane === "REFERRAL") {
+      b2bDiscovery = true;
+      cognitiveGuidanceApplied = true;
+    }
+    if (cognitiveHint.actionType === "DISCOVER_COMMERCE" || cognitiveHint.targetLane === "COMMERCE") {
+      commerceDiscovery = true;
+      cognitiveGuidanceApplied = true;
+    }
+  }
 
   // When LUMEN already owns qualified commercial inventory, preserve sensing but
   // reduce expansion cadence. The single hourly external slot remains dedicated
@@ -59,10 +105,17 @@ function cadencePlan(focus, scheduledTime, forceB2BDiscovery = false, revenueFoc
   if (revenueFocus?.mode === "CONVERSION_FIRST") {
     b2bDiscovery = b2bDiscovery && hourSlot % 3 === 0;
     commerceDiscovery = commerceDiscovery && hourSlot % 4 === 0;
+    cognitiveGuidanceApplied = false;
   } else if (revenueFocus?.mode === "BALANCED_CONVERSION") {
     b2bDiscovery = b2bDiscovery && hourSlot % 2 === 0;
+    cognitiveGuidanceApplied = false;
   }
-  return { b2bDiscovery, commerceDiscovery, mode: revenueFocus?.mode || (forceB2BDiscovery ? "FIRST_CASH_QUARTER_HOUR_B2B" : "ECONOMIC_FOCUS_WITH_BOUNDED_EXPLORATION") };
+  return {
+    b2bDiscovery,
+    commerceDiscovery,
+    mode: revenueFocus?.mode || (forceB2BDiscovery ? "FIRST_CASH_QUARTER_HOUR_B2B" : "ECONOMIC_FOCUS_WITH_BOUNDED_EXPLORATION"),
+    cognitiveGuidanceApplied
+  };
 }
 
 function isHourlyCommercialSlot(scheduledTime) {
@@ -74,6 +127,8 @@ export default {
   async fetch(request, env, ctx) {
     const sourcePolicyResponse = handleSourceIntelligencePolicy(request);
     if (sourcePolicyResponse) return sourcePolicyResponse;
+    const cognitiveResponse = await handleLiveCognitiveCore(request, env);
+    if (cognitiveResponse) return cognitiveResponse;
     const revenueFocusResponse = await handleRevenueFocusController(request, env);
     if (revenueFocusResponse) return revenueFocusResponse;
     const tiendanubeInstallResponse = await handleTiendanubeInstall(request, env);
@@ -106,10 +161,13 @@ export default {
     const hourlyCommercialSlot = isHourlyCommercialSlot(scheduledTime);
 
     ctx.waitUntil((async () => {
-      const focus = await readEconomicFocus(env);
+      const [focus, cognitiveHint] = await Promise.all([
+        readEconomicFocus(env),
+        readCognitiveHint(env)
+      ]);
       const firstCash = firstCashActive(env, focus);
       const revenueFocus = await computeRevenueFocus(env);
-      const plan = cadencePlan(focus, scheduledTime, firstCash, revenueFocus);
+      const plan = cadencePlan(focus, scheduledTime, firstCash, revenueFocus, cognitiveHint);
 
       const [sourceIntelligence, productCommerce, supplierIntake, hunter] = await Promise.all([
         plan.b2bDiscovery ? runSourceIntelligence(env) : Promise.resolve(skipped("conversion_inventory_has_priority", focus.family)),
@@ -126,17 +184,28 @@ export default {
         ? await pruneMarketHunterStrategies(env)
         : skipped("no_market_hunter_cycle_to_prune", focus.family);
 
+      // One bounded reasoning cycle per hour. The result becomes a hint for the
+      // NEXT sensing cycle, not an execution command for the current cycle.
+      const cognitive = hourlyCommercialSlot
+        ? await runLiveCognitiveCycle(env, { trigger: "hourly_cloudflare_cron" })
+        : skipped("hourly_cognitive_slot_not_due", focus.family);
+
       return {
         economicControl: {
           version: ECONOMIC_CONTROL_VERSION,
           focus,
           firstCash,
           revenueFocus,
+          cognitiveHint,
           hourlyCommercialSlot,
           plan,
           guardrails: {
             discoveryBaselineMinutes: 15,
             commercialExternalSlotEveryMinutes: 60,
+            cognitiveReasoningEveryMinutes: 60,
+            cognitiveAuthority: "internal_discovery_guidance_only",
+            cognitiveCanOverrideConversionPriority: false,
+            cognitiveCanExecuteTools: false,
             maxAutonomousExternalCommercialMessagesPerHour: 1,
             conversionInventoryBeforeExpansion: true,
             sensingNeverZero: true,
@@ -153,7 +222,8 @@ export default {
         commerceMachine,
         commerceOperations,
         hunter,
-        pruning
+        pruning,
+        cognitive
       };
     })().catch(() => ({ ok: false, isolatedFailure: true })));
 

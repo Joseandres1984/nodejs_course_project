@@ -1,0 +1,43 @@
+name: LUMEN Live Cognitive Core Smoke
+
+on:
+  pull_request:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/a2a-worker/cognitive-core-live.js'
+      - '.lumen/a2a-worker/adaptive-entry.js'
+      - '.lumen/a2a-worker/wrangler.toml'
+      - '.lumen/a2a-worker/test-cognitive-core-live.mjs'
+      - '.github/workflows/lumen-cognitive-live-smoke.yml'
+      - '.github/workflows/lumen-cloudflare-deploy.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live-cognitive-core:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Syntax check Cognitive Core
+        working-directory: .lumen/a2a-worker
+        run: node --check cognitive-core-live.js
+      - name: Syntax check adaptive runtime
+        working-directory: .lumen/a2a-worker
+        run: node --check adaptive-entry.js
+      - name: Run live cognitive safety tests
+        working-directory: .lumen/a2a-worker
+        run: node test-cognitive-core-live.mjs
+      - name: Verify zero-spend AI policy is explicit
+        working-directory: .lumen/a2a-worker
+        run: |
+          grep -q '^\[ai\]$' wrangler.toml
+          grep -q '^binding = "AI"$' wrangler.toml
+          grep -q 'AI_MONETARY_BUDGET_USD = 0' cognitive-core-live.js
+          grep -q 'paidAiAllowed: false' cognitive-core-live.js
+          grep -q 'modelCanExecuteTools: false' cognitive-core-live.js
