@@ -73,5 +73,7 @@ assert.match(core, /AI_MONETARY_BUDGET_USD\s*=\s*0/);
 assert.match(core, /actionsExecuted:\s*0/);
 assert.match(core, /paidAiAllowed:\s*false/);
 assert.match(core, /chainOfThoughtStored:\s*false/);
+assert.match(core, /VALUES\('GLOBAL',\?,\?,\?,\?,\?,\?,\?,\?,\?,\?,\?,\?,\?,\?\) ON CONFLICT/);
+assert.doesNotMatch(core, /VALUES\('GLOBAL',\?,\?,\?,\?,\?,\?,\?,\?,\?,\?,\?,\?,\?,\?,\?\) ON CONFLICT/);
 
 console.log("LIVE_COGNITIVE_CORE_SAFETY_OK");
