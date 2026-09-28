@@ -1,0 +1,32 @@
+name: LUMEN Cognitive Core v1 Smoke
+
+on:
+  pull_request:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/runtime/cognitive_core_v1.py'
+      - '.lumen/runtime/cognitive_core_bridge_runtime.py'
+      - '.lumen/runtime/autonomy_core_bridge_runtime.py'
+      - '.lumen/runtime/operating_constitution.py'
+      - '.lumen/runtime/test_cognitive_core_v1.py'
+      - '.github/workflows/lumen-cognitive-core-v1-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cognitive-core-v1:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Compile Cognitive Core
+        working-directory: .lumen/runtime
+        run: python -m py_compile cognitive_core_v1.py cognitive_core_bridge_runtime.py autonomy_core_bridge_runtime.py
+      - name: Run Cognitive Core safety tests
+        working-directory: .lumen/runtime
+        run: python -m unittest -v test_cognitive_core_v1.py
