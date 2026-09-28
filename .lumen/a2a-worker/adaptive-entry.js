@@ -13,8 +13,9 @@ import { handleTiendanubeSupplierIntake, runTiendanubeSupplierIntake } from "./t
 import { handleSupplierMarketLaunch } from "./supplier-market-launch.js";
 import { handleRevenueFocusController, computeRevenueFocus } from "./revenue-focus-controller.js";
 import { handleLiveCognitiveCore, runLiveCognitiveCycle } from "./cognitive-core-live.js";
+import { handleCognitiveTaskMemory, runCognitiveTaskMemory } from "./cognitive-task-memory.js";
 
-const ECONOMIC_CONTROL_VERSION = "1.3-live-cognitive-guidance";
+const ECONOMIC_CONTROL_VERSION = "1.4-live-cognitive-persistent-agenda";
 const HOURLY_COMMERCIAL_MINUTE_UTC = 7;
 const COGNITIVE_HINT_MAX_AGE_MS = 3 * 60 * 60 * 1000;
 
@@ -85,9 +86,6 @@ function cadencePlan(focus, scheduledTime, forceB2BDiscovery = false, revenueFoc
   let commerceDiscovery = family === "COMMERCE" || hourSlot % 4 === 0;
   let cognitiveGuidanceApplied = false;
 
-  // Cognitive Core may only widen INTERNAL sensing while the funnel is in normal
-  // discovery mode. It cannot create external messages, spend, purchases, contracts
-  // or override conversion-first inventory owned by the Economic Governor.
   if (revenueFocus?.mode === "NORMAL_DISCOVERY" && cognitiveHint && Number(cognitiveHint.confidence || 0) >= 0.55) {
     if (cognitiveHint.actionType === "DISCOVER_B2B" || cognitiveHint.targetLane === "B2B_A2A" || cognitiveHint.targetLane === "REFERRAL") {
       b2bDiscovery = true;
@@ -99,9 +97,6 @@ function cadencePlan(focus, scheduledTime, forceB2BDiscovery = false, revenueFoc
     }
   }
 
-  // When LUMEN already owns qualified commercial inventory, preserve sensing but
-  // reduce expansion cadence. The single hourly external slot remains dedicated
-  // to close -> reply -> follow-up -> Quality PASS outreach in opportunity-entry.
   if (revenueFocus?.mode === "CONVERSION_FIRST") {
     b2bDiscovery = b2bDiscovery && hourSlot % 3 === 0;
     commerceDiscovery = commerceDiscovery && hourSlot % 4 === 0;
@@ -129,6 +124,8 @@ export default {
     if (sourcePolicyResponse) return sourcePolicyResponse;
     const cognitiveResponse = await handleLiveCognitiveCore(request, env);
     if (cognitiveResponse) return cognitiveResponse;
+    const cognitiveTaskResponse = await handleCognitiveTaskMemory(request, env);
+    if (cognitiveTaskResponse) return cognitiveTaskResponse;
     const revenueFocusResponse = await handleRevenueFocusController(request, env);
     if (revenueFocusResponse) return revenueFocusResponse;
     const tiendanubeInstallResponse = await handleTiendanubeInstall(request, env);
@@ -167,6 +164,24 @@ export default {
       ]);
       const firstCash = firstCashActive(env, focus);
       const revenueFocus = await computeRevenueFocus(env);
+
+      let cognitiveTaskMemory;
+      try {
+        cognitiveTaskMemory = await runCognitiveTaskMemory(env, { cognitiveHint });
+      } catch (error) {
+        cognitiveTaskMemory = {
+          ok: false,
+          isolatedFailure: true,
+          error: String(error?.message || error || "cognitive_task_memory_failed").slice(0, 180),
+          authority: {
+            directToolExecution: false,
+            externalMessagesCreated: false,
+            autonomousSpendUsd: 0,
+            bindingActionsHumanGated: true,
+          }
+        };
+      }
+
       const plan = cadencePlan(focus, scheduledTime, firstCash, revenueFocus, cognitiveHint);
 
       const [sourceIntelligence, productCommerce, supplierIntake, hunter] = await Promise.all([
@@ -184,8 +199,6 @@ export default {
         ? await pruneMarketHunterStrategies(env)
         : skipped("no_market_hunter_cycle_to_prune", focus.family);
 
-      // One bounded reasoning cycle per hour. The result becomes a hint for the
-      // NEXT sensing cycle, not an execution command for the current cycle.
       const cognitive = hourlyCommercialSlot
         ? await runLiveCognitiveCycle(env, { trigger: "hourly_cloudflare_cron" })
         : skipped("hourly_cognitive_slot_not_due", focus.family);
@@ -197,15 +210,19 @@ export default {
           firstCash,
           revenueFocus,
           cognitiveHint,
+          cognitiveTaskMemory,
           hourlyCommercialSlot,
           plan,
           guardrails: {
             discoveryBaselineMinutes: 15,
             commercialExternalSlotEveryMinutes: 60,
             cognitiveReasoningEveryMinutes: 60,
+            cognitiveTaskMemoryRefreshMinutes: 15,
+            persistentCognitiveAgenda: true,
             cognitiveAuthority: "internal_discovery_guidance_only",
             cognitiveCanOverrideConversionPriority: false,
             cognitiveCanExecuteTools: false,
+            cognitiveTaskMemoryCanExecuteTools: false,
             maxAutonomousExternalCommercialMessagesPerHour: 1,
             conversionInventoryBeforeExpansion: true,
             sensingNeverZero: true,
