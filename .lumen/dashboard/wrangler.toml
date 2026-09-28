@@ -1,5 +1,5 @@
 name = "lumen-zero-dashboard"
-main = "live_data_worker.js"
+main = "live_truth_worker.js"
 compatibility_date = "2026-09-20"
 workers_dev = true
 
@@ -9,6 +9,14 @@ LUMEN_DASHBOARD_USER = "socio"
 [[services]]
 binding = "A2A"
 service = "lumen-zero-a2a"
+
+[[services]]
+binding = "PUBLIC"
+service = "lumen-zero-public"
+
+[[services]]
+binding = "X402"
+service = "lumen-zero-x402"
 
 [[d1_databases]]
 binding = "DB"
