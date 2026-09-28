@@ -24,14 +24,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Syntax check live cognitive runtime
+      - name: Syntax check Cognitive Core
         working-directory: .lumen/a2a-worker
-        run: |
-          node --experimental-default-type=module --check cognitive-core-live.js
-          node --experimental-default-type=module --check adaptive-entry.js
+        run: node --check cognitive-core-live.js
+      - name: Syntax check adaptive runtime
+        working-directory: .lumen/a2a-worker
+        run: node --check adaptive-entry.js
       - name: Run live cognitive safety tests
         working-directory: .lumen/a2a-worker
-        run: node --experimental-default-type=module test-cognitive-core-live.mjs
+        run: node test-cognitive-core-live.mjs
       - name: Verify zero-spend AI policy is explicit
         working-directory: .lumen/a2a-worker
         run: |
