@@ -16,6 +16,20 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+      - name: Restore Secretaria compatibility route
+        working-directory: .lumen/dashboard
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('worker.js')
+          s = p.read_text()
+          old = 'if (request.method === "GET" && (url.pathname === "/" || url.pathname === "/index.html")) {'
+          new = 'if (request.method === "GET" && (url.pathname === "/" || url.pathname === "/index.html" || url.pathname === "/secretaria" || url.pathname === "/secretaria/")) {'
+          if old not in s:
+              raise SystemExit('SECRETARIA_ROUTE_PATCH_TARGET_NOT_FOUND')
+          p.write_text(s.replace(old, new, 1))
+          print('SECRETARIA_ROUTE_RESTORED')
+          PY
       - name: Validate dashboard bundle
         working-directory: .lumen/dashboard
         run: npx --yes wrangler@latest deploy --dry-run --config wrangler.toml
@@ -74,19 +88,22 @@ jobs:
           jq -e '.system.x402 == "READY" and .system.x402Live == true and .system.x402StatusSource == "x402_service_binding"' "$control" >/dev/null
           echo 'DASHBOARD_X402_SERVICE_BINDING_READY'
 
-          page="$(mktemp)"
-          code="$(curl -sS --retry 4 --retry-delay 2 -u "socio:${DASH_PASSWORD}" -o "$page" -w '%{http_code}' "${BASE}/")"
-          if [ "$code" != '200' ]; then
-            echo "DASHBOARD_HTML_SMOKE_FAILED http=${code}"
-            exit 1
-          fi
-          if ! grep -q 'id="ntState">RED ' "$page"; then
-            echo 'DASHBOARD_NETWORK_NOT_SERVER_HYDRATED'
-            grep -o 'id="ntState">[^<]*' "$page" || true
-            exit 1
-          fi
-          if grep -q 'id="ntState">CARGANDO RED' "$page"; then
-            echo 'DASHBOARD_NETWORK_STILL_LOADING_IN_INITIAL_HTML'
-            exit 1
-          fi
-          echo 'DASHBOARD_NETWORK_SERVER_HYDRATION_OK'
+          for page_path in / /secretaria; do
+            page="$(mktemp)"
+            code="$(curl -sS --retry 4 --retry-delay 2 -u "socio:${DASH_PASSWORD}" -o "$page" -w '%{http_code}' "${BASE}${page_path}")"
+            if [ "$code" != '200' ]; then
+              echo "DASHBOARD_HTML_SMOKE_FAILED path=${page_path} http=${code}"
+              exit 1
+            fi
+            if ! grep -q 'id="ntState">RED ' "$page"; then
+              echo "DASHBOARD_NETWORK_NOT_SERVER_HYDRATED path=${page_path}"
+              grep -o 'id="ntState">[^<]*' "$page" || true
+              exit 1
+            fi
+            if grep -q 'id="ntState">CARGANDO RED' "$page"; then
+              echo "DASHBOARD_NETWORK_STILL_LOADING_IN_INITIAL_HTML path=${page_path}"
+              exit 1
+            fi
+            echo "DASHBOARD_NETWORK_SERVER_HYDRATION_OK path=${page_path}"
+          done
+          echo 'SECRETARIA_COMPATIBILITY_ROUTE_OK'
