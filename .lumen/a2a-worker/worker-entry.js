@@ -2,6 +2,7 @@ import a2aWorker from "./worker.js";
 import { handleRevenue } from "./revenue-expansion.js";
 import { handleRevenueLoop } from "./revenue-loop.js";
 import { DISCOVERY_VERSION, enhanceAgentCard, handleDiscovery } from "./discovery.js";
+import { handleChannelHealth } from "./channel-health.js";
 
 export const REGISTRY_PACKAGE_NAME = "github.Joseandres1984.lumen_b2b_agent";
 
@@ -36,6 +37,8 @@ async function withRegistryIdentityResponse(response) {
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    const channelHealthResponse = await handleChannelHealth(request, env);
+    if (channelHealthResponse) return channelHealthResponse;
     if (request.method === "GET" && url.pathname === "/.well-known/agents.json") return registryAgentsManifest(request,env,ctx,url.origin);
     const discoveryResponse = await handleDiscovery(request,env,ctx,a2aWorker);
     if (discoveryResponse) {
