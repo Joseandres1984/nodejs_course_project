@@ -35,6 +35,24 @@ async function x402DashboardStatus(env) {
   };
 }
 
+async function gmailDashboardStatus(env) {
+  const health = await serviceJson(env?.A2A, "/channel-health/gmail");
+  const inboundLive = health?.details?.gmail_live === true;
+  const outboundLive = health?.details?.outbound_live === true;
+  const live = health?.ok === true && health?.fresh === true && health?.status === "online" && inboundLive && outboundLive;
+  return {
+    live,
+    status: health?.status || (health?.httpStatus ? `http_${health.httpStatus}` : "unknown"),
+    provider: health?.provider || "—",
+    checkedAt: health?.checkedAt || null,
+    fresh: health?.fresh === true,
+    source: "a2a_channel_health",
+    inboundLive,
+    outboundLive,
+    probeMessageSent: false,
+  };
+}
+
 function jsonResponse(data, sourceResponse, extraHeaders = {}) {
   const headers = new Headers(sourceResponse.headers);
   headers.set("cache-control", "no-store, no-cache, must-revalidate");
@@ -55,14 +73,42 @@ export default {
     if (url.pathname === "/api/data") {
       let data;
       try { data = await response.json(); } catch { return response; }
+      const [publicStatus, gmail] = await Promise.all([
+        publicWebStatus(env),
+        gmailDashboardStatus(env),
+      ]);
+
       data.services = data.services || {};
       data.services.public_web = {
         ...(data.services.public_web || {}),
         url: "https://lumen-zero-public.lumen-b2b.workers.dev",
-        status: await publicWebStatus(env),
+        status: publicStatus,
         probe: "service_binding",
       };
-      return jsonResponse(data, response, { "x-lumen-public-health-source": "service-binding" });
+      data.services.gmail = {
+        ...(data.services.gmail || {}),
+        status: gmail.status,
+        live: gmail.live,
+        provider: gmail.provider,
+        checked_at: gmail.checkedAt,
+        fresh: gmail.fresh,
+        imap_live: gmail.inboundLive,
+        outbound_live: gmail.outboundLive,
+        probe_message_sent: gmail.probeMessageSent,
+        source: gmail.source,
+      };
+      data.outbound = {
+        ...(data.outbound || {}),
+        mail_ready: gmail.live,
+        mail_provider: gmail.provider,
+        mail_status: gmail.status,
+        mail_checked_at: gmail.checkedAt,
+        mail_status_source: gmail.source,
+      };
+      return jsonResponse(data, response, {
+        "x-lumen-public-health-source": "service-binding",
+        "x-lumen-gmail-status-source": "a2a-channel-health",
+      });
     }
 
     if (url.pathname === "/api/control-tower-v2") {
