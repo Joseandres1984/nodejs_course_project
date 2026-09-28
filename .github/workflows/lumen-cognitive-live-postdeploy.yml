@@ -4,6 +4,10 @@ on:
   workflow_run:
     workflows: ["LUMEN Cloudflare deploy"]
     types: [completed]
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-cognitive-live-postdeploy.yml'
   workflow_dispatch:
 
 permissions:
@@ -11,7 +15,7 @@ permissions:
 
 jobs:
   cognitive-live:
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'push' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 8
     env:
