@@ -24,9 +24,11 @@ const providerBacked = await calculateProviderBackedTravelOptions(input, TRAVEL_
 assert.equal(providerBacked.ok, true);
 assert.equal(providerBacked.providerBacked, true);
 assert.equal(providerBacked.providerContractVersion, "1.0");
+assert.equal(providerBacked.providerRegistryVersion, "1.1-travel-provider-registry");
 assert.equal(providerBacked.pricingMode, "ESTIMATED_SEED");
 assert.equal(providerBacked.realTimeCoverage, false);
 assert.equal(providerBacked.affiliateLinksAvailable, false);
+assert.equal(providerBacked.externalProvidersUsed, false);
 assert.deepEqual(
   providerBacked.options.map(option => option.destinationCode),
   legacySeed.options.map(option => option.destinationCode)
@@ -39,6 +41,7 @@ for (const option of providerBacked.options) {
   assert.equal(option.bookingAvailable, false);
   assert.equal(option.affiliateLinksAvailable, false);
   assert.equal(option.providerPricing.contractVersion, "1.0");
+  assert.equal(option.providerPricing.registryVersion, "1.1-travel-provider-registry");
   assert.equal(option.providerPricing.components.length, 3);
   assert.equal(option.providerPricing.allRealtime, false);
   assert.equal(option.providerPricing.anyAffiliateLink, false);
@@ -76,14 +79,15 @@ const policyResponse = await handleProviderBackedTravelDiscovery(
 );
 assert.equal(policyResponse.status, 200);
 const policy = await policyResponse.json();
-assert.equal(policy.version, "1.0-travel-provider-backed-discovery");
+assert.equal(policy.version, "1.1-travel-provider-backed-discovery");
+assert.equal(policy.providerRegistryVersion, "1.1-travel-provider-registry");
 assert.equal(policy.searchUsesProviderRegistry, true);
+assert.equal(policy.currentPricingMode, "DYNAMIC_PROVIDER_REGISTRY");
 assert.equal(policy.providerReplacementWithoutDiscoveryRewrite, true);
-assert.equal(policy.realTimeFares, false);
-assert.equal(policy.affiliateLinksEnabled, false);
 assert.equal(policy.createsBooking, false);
 assert.equal(policy.createsCharge, false);
 assert.equal(policy.autonomousSpend, false);
+assert.equal(policy.autonomousPurchase, false);
 
 const searchResponse = await handleProviderBackedTravelDiscovery(
   new Request("https://example.test/travel/discovery/search", {
@@ -98,7 +102,9 @@ assert.equal(searchResponse.status, 200);
 const payload = await searchResponse.json();
 assert.equal(payload.ok, true);
 assert.equal(payload.providerBacked, true);
+assert.equal(payload.externalProvidersUsed, false);
 assert.equal(payload.guardrails.searchUsesProviderRegistry, true);
+assert.equal(payload.guardrails.realTimeFareClaim, false);
 assert.equal(payload.guardrails.bookingCreated, false);
 assert.equal(payload.guardrails.chargeCreated, false);
 assert.equal(payload.guardrails.autonomousSpend, false);
@@ -118,6 +124,7 @@ console.log(JSON.stringify({
     "provider_quotes_feed_breakdown",
     "provider_evidence_attached",
     "provider_confidence_attached",
+    "dynamic_provider_policy",
     "no_realtime_claims_without_realtime_provider",
     "no_affiliate_claims_without_partner",
     "no_booking_or_charge",
