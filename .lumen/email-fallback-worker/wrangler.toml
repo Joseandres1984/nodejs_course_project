@@ -1,5 +1,5 @@
 name = "lumen-zero-email-fallback"
-main = "provider-entry.js"
+main = "smtp-worker.js"
 compatibility_date = "2026-09-21"
 workers_dev = true
 
@@ -12,7 +12,6 @@ database_id = "e872694a-ed14-4a7f-b2c3-38b8e1bb498b"
 EMAIL_FALLBACK_ENABLED = "true"
 EMAIL_FALLBACK_MAX_PER_RUN = "1"
 EMAIL_FALLBACK_REQUIRE_A2A_FAILURE = "true"
-LUMEN_BREVO_FROM_NAME = "LUMEN B2B"
 
 [triggers]
 crons = ["12 * * * *"]
