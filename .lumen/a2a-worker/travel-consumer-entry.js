@@ -2,9 +2,17 @@ import baseWorker from "./opportunity-entry.js";
 import { handleTravelConsumerEngine, TRAVEL_CONSUMER_DESTINATIONS } from "./travel-consumer-engine.js";
 import { handleTravelDemandBridge, syncTravelDemandToOpportunities } from "./travel-demand-bridge.js";
 import { handleTravelProviderRegistry } from "./travel-provider-registry.js";
+import { handleProviderBackedTravelDiscovery } from "./travel-provider-backed-discovery.js";
 
 export default {
   async fetch(request, env, ctx) {
+    const providerBackedDiscoveryResponse = await handleProviderBackedTravelDiscovery(
+      request,
+      env,
+      TRAVEL_CONSUMER_DESTINATIONS
+    );
+    if (providerBackedDiscoveryResponse) return providerBackedDiscoveryResponse;
+
     const travelProviderResponse = await handleTravelProviderRegistry(request, env, TRAVEL_CONSUMER_DESTINATIONS);
     if (travelProviderResponse) return travelProviderResponse;
 
