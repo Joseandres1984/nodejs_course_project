@@ -7,12 +7,14 @@ on:
       - '.lumen/a2a-worker/chatgpt-mcp.js'
       - '.lumen/a2a-worker/chatgpt-mcp-entry.js'
       - '.lumen/a2a-worker/wrangler.chatgpt.toml'
+      - '.github/scripts/lumen-chatgpt-mcp-smoke.mjs'
       - '.github/workflows/lumen-chatgpt-mcp-ci.yml'
   pull_request:
     paths:
       - '.lumen/a2a-worker/chatgpt-mcp.js'
       - '.lumen/a2a-worker/chatgpt-mcp-entry.js'
       - '.lumen/a2a-worker/wrangler.chatgpt.toml'
+      - '.github/scripts/lumen-chatgpt-mcp-smoke.mjs'
 
 jobs:
   syntax-and-guardrails:
@@ -26,6 +28,9 @@ jobs:
         run: |
           node --check .lumen/a2a-worker/chatgpt-mcp.js
           node --check .lumen/a2a-worker/chatgpt-mcp-entry.js
+          node --check .github/scripts/lumen-chatgpt-mcp-smoke.mjs
+      - name: MCP initialize and tool discovery smoke
+        run: node .github/scripts/lumen-chatgpt-mcp-smoke.mjs
       - name: Read-only deployment guardrails
         run: |
           set -euo pipefail
