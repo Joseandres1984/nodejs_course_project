@@ -1,0 +1,112 @@
+name: LUMEN Mail Route Diagnostic
+
+on:
+  push:
+    branches: [lumen-zero-mail-route-diagnostic]
+    paths:
+      - '.github/workflows/lumen-mail-route-diagnostic.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  smtp-route:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify SMTP secrets exist
+        env:
+          SMTP_HOST: ${{ secrets.LUMEN_SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.LUMEN_SMTP_PORT }}
+          SMTP_USER: ${{ secrets.LUMEN_SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.LUMEN_SMTP_PASSWORD }}
+          SMTP_SSL: ${{ secrets.LUMEN_SMTP_SSL }}
+        run: |
+          set -euo pipefail
+          test -n "${SMTP_HOST:-}"
+          test -n "${SMTP_USER:-}"
+          test -n "${SMTP_PASSWORD:-}"
+          echo 'SMTP_SECRETS_PRESENT'
+      - name: Authenticate SMTP without sending
+        env:
+          SMTP_HOST: ${{ secrets.LUMEN_SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.LUMEN_SMTP_PORT }}
+          SMTP_USER: ${{ secrets.LUMEN_SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.LUMEN_SMTP_PASSWORD }}
+          SMTP_SSL: ${{ secrets.LUMEN_SMTP_SSL }}
+        run: |
+          python - <<'PY'
+          import os, smtplib, ssl
+          host=os.environ['SMTP_HOST'].strip()
+          port=int((os.getenv('SMTP_PORT') or '587').strip() or '587')
+          use_ssl=(os.getenv('SMTP_SSL') or 'false').lower()=='true'
+          if use_ssl:
+              client=smtplib.SMTP_SSL(host,port,timeout=20,context=ssl.create_default_context())
+          else:
+              client=smtplib.SMTP(host,port,timeout=20)
+              client.ehlo(); client.starttls(context=ssl.create_default_context()); client.ehlo()
+          client.login(os.environ['SMTP_USER'],os.environ['SMTP_PASSWORD'])
+          client.quit()
+          print('SMTP_AUTH_OK')
+          PY
+
+  brevo-route:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify Brevo secrets exist
+        env:
+          BREVO_API_KEY: ${{ secrets.LUMEN_BREVO_API_KEY }}
+          BREVO_FROM_EMAIL: ${{ secrets.LUMEN_BREVO_FROM_EMAIL }}
+        run: |
+          set -euo pipefail
+          test -n "${BREVO_API_KEY:-}"
+          test -n "${BREVO_FROM_EMAIL:-}"
+          echo 'BREVO_SECRETS_PRESENT'
+      - name: Authenticate Brevo without sending
+        env:
+          BREVO_API_KEY: ${{ secrets.LUMEN_BREVO_API_KEY }}
+          BREVO_FROM_EMAIL: ${{ secrets.LUMEN_BREVO_FROM_EMAIL }}
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --show-error --silent --max-time 25 \
+            'https://api.brevo.com/v3/account' \
+            -H 'accept: application/json' \
+            -H "api-key: ${BREVO_API_KEY}" >/dev/null
+          echo 'BREVO_AUTH_OK'
+      - name: Verify configured Brevo sender is active
+        env:
+          BREVO_API_KEY: ${{ secrets.LUMEN_BREVO_API_KEY }}
+          BREVO_FROM_EMAIL: ${{ secrets.LUMEN_BREVO_FROM_EMAIL }}
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --show-error --silent --max-time 25 \
+            'https://api.brevo.com/v3/senders' \
+            -H 'accept: application/json' \
+            -H "api-key: ${BREVO_API_KEY}" >/tmp/senders.json
+          jq -e --arg email "$BREVO_FROM_EMAIL" \
+            '.senders[]? | select(((.email // "") | ascii_downcase) == ($email | ascii_downcase) and (.active == true))' \
+            /tmp/senders.json >/dev/null
+          echo 'BREVO_SENDER_ACTIVE'
+
+  resend-route:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify Resend secrets exist
+        env:
+          RESEND_API_KEY: ${{ secrets.LUMEN_RESEND_API_KEY }}
+          RESEND_FROM: ${{ secrets.LUMEN_RESEND_FROM }}
+        run: |
+          set -euo pipefail
+          test -n "${RESEND_API_KEY:-}"
+          test -n "${RESEND_FROM:-}"
+          case "${RESEND_FROM,,}" in *resend.dev*) echo 'RESEND_SANDBOX_FROM_NOT_ALLOWED'; exit 1;; esac
+          echo 'RESEND_SECRETS_PRESENT_NON_SANDBOX'
+      - name: Authenticate Resend without sending
+        env:
+          RESEND_API_KEY: ${{ secrets.LUMEN_RESEND_API_KEY }}
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --show-error --silent --max-time 25 \
+            'https://api.resend.com/domains' \
+            -H 'accept: application/json' \
+            -H "authorization: Bearer ${RESEND_API_KEY}" >/dev/null
+          echo 'RESEND_AUTH_OK'
