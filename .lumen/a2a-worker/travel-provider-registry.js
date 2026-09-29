@@ -2,6 +2,14 @@ const VERSION = "1.0-travel-provider-registry";
 const CONTRACT_VERSION = "1.0";
 const CURRENCY = "USD";
 
+// Provider contract v1:
+// - one adapter owns one commercial component (FLIGHT, ACCOMMODATION, ACTIVITIES)
+// - quote() returns a normalized USD quote envelope
+// - buildAffiliateLink() must return null until a real partner relationship is configured
+// - adapters must declare whether they make network calls, require secrets, support real-time pricing,
+//   support booking, or support affiliate attribution
+// - the Travel engine consumes the normalized contract rather than provider-specific payloads
+
 function clean(value, limit = 400) {
   return String(value ?? "").trim().replace(/\s+/g, " ").slice(0, limit);
 }
