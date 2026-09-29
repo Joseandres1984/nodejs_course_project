@@ -4,6 +4,11 @@ import {
   handleTravelConsumerEngine,
   TRAVEL_CONSUMER_DESTINATIONS
 } from "../../.lumen/a2a-worker/travel-consumer-engine.js";
+import {
+  buildTravelDemandClusters,
+  handleTravelDemandBridge,
+  TRAVEL_DEMAND_MIN_CLUSTER_SIGNALS
+} from "../../.lumen/a2a-worker/travel-demand-bridge.js";
 
 function search(overrides = {}) {
   return calculateTravelOptions({
@@ -116,11 +121,91 @@ assert.equal(searchPayload.guardrails.bookingCreated, false);
 assert.equal(searchPayload.guardrails.chargeCreated, false);
 assert.equal(searchPayload.guardrails.autonomousSpend, false);
 
+const fixedNow = new Date("2026-09-29T18:00:00Z").getTime();
+const clustered = buildTravelDemandClusters([
+  {
+    id: "E1",
+    created_at: "2026-09-29T15:00:00Z",
+    origin_code: "BUE",
+    target_month: 2,
+    budget_bucket_usd: 1200,
+    preferences_json: JSON.stringify(["PLAYA", "RELAX"])
+  },
+  {
+    id: "E2",
+    created_at: "2026-09-29T16:00:00Z",
+    origin_code: "BUE",
+    target_month: 2,
+    budget_bucket_usd: 1200,
+    preferences_json: JSON.stringify(["PLAYA", "GASTRONOMIA"])
+  },
+  {
+    id: "E3",
+    created_at: "2026-09-29T17:00:00Z",
+    origin_code: "BUE",
+    target_month: 2,
+    budget_bucket_usd: 1200,
+    preferences_json: JSON.stringify(["PLAYA", "RELAX"])
+  },
+  {
+    id: "E4",
+    created_at: "2026-09-29T17:30:00Z",
+    origin_code: "BUE",
+    target_month: 3,
+    budget_bucket_usd: 900,
+    preferences_json: JSON.stringify(["CIUDAD"])
+  }
+], fixedNow);
+assert.equal(TRAVEL_DEMAND_MIN_CLUSTER_SIGNALS, 2);
+assert.equal(clustered.length, 2);
+const repeatedCluster = clustered.find(x => x.clusterKey === "BUE|2|1200");
+assert.ok(repeatedCluster);
+assert.equal(repeatedCluster.demandCount, 3);
+assert.equal(repeatedCluster.eligibleForBridge, true);
+assert.equal(repeatedCluster.fit, "A");
+assert.equal(repeatedCluster.topPreferences[0].name, "PLAYA");
+assert.equal(repeatedCluster.topPreferences[0].count, 3);
+const singleCluster = clustered.find(x => x.clusterKey === "BUE|3|900");
+assert.ok(singleCluster);
+assert.equal(singleCluster.demandCount, 1);
+assert.equal(singleCluster.eligibleForBridge, false);
+
+const demandPolicyResponse = await handleTravelDemandBridge(
+  new Request("https://example.test/travel/demand/policy"),
+  {}
+);
+assert.equal(demandPolicyResponse.status, 200);
+const demandPolicy = await demandPolicyResponse.json();
+assert.equal(demandPolicy.version, "1.0-travel-demand-bridge");
+assert.equal(demandPolicy.minimumSignalsPerCluster, 2);
+assert.equal(demandPolicy.storesPii, false);
+assert.equal(demandPolicy.automaticBridging, true);
+assert.equal(demandPolicy.automaticCommercialActivation, false);
+assert.equal(demandPolicy.activationRequiresAdmin, true);
+assert.equal(demandPolicy.automaticOutreach, false);
+assert.equal(demandPolicy.createsBooking, false);
+assert.equal(demandPolicy.createsCharge, false);
+assert.equal(demandPolicy.autonomousSpend, false);
+
+const unauthorizedActivation = await handleTravelDemandBridge(
+  new Request("https://example.test/travel/demand/activate", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ opportunityId: "OPP-TRAVEL-TEST" })
+  }),
+  { OPPORTUNITY_ADMIN_TOKEN: "protected-secret" }
+);
+assert.equal(unauthorizedActivation.status, 403);
+const unauthorizedPayload = await unauthorizedActivation.json();
+assert.equal(unauthorizedPayload.error, "admin_token_required");
+
 console.log(JSON.stringify({
   ok: true,
   version: policy.version,
+  demandBridgeVersion: demandPolicy.version,
   defaultResults: base.options.length,
   topDestination: base.options[0]?.destinationCode || null,
+  repeatedDemandScore: repeatedCluster.score,
   tests: [
     "budget_cap",
     "score_bounds",
@@ -130,6 +215,10 @@ console.log(JSON.stringify({
     "origin_alias",
     "validation",
     "deterministic_scoring",
-    "policy_guardrails"
+    "policy_guardrails",
+    "demand_cluster_aggregation",
+    "minimum_signal_threshold",
+    "no_single_search_promotion",
+    "human_gated_commercial_activation"
   ]
 }, null, 2));
