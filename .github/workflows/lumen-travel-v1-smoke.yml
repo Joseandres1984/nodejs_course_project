@@ -8,9 +8,12 @@ on:
       - '.lumen/a2a-worker/travel-demand-bridge.js'
       - '.lumen/a2a-worker/travel-provider-registry.js'
       - '.lumen/a2a-worker/travel-provider-backed-discovery.js'
+      - '.lumen/a2a-worker/travel-external-providers.js'
+      - '.lumen/a2a-worker/travel-affiliate-registry.js'
       - '.lumen/a2a-worker/travel-consumer-entry.js'
       - '.github/scripts/lumen-travel-v1-test.mjs'
       - '.github/scripts/lumen-travel-provider-backed-test.mjs'
+      - '.github/scripts/lumen-travel-external-providers-test.mjs'
       - '.github/workflows/lumen-travel-v1-smoke.yml'
   workflow_dispatch:
 
@@ -38,6 +41,12 @@ jobs:
       - name: Syntax check provider-backed discovery
         run: node --experimental-default-type=module --check .lumen/a2a-worker/travel-provider-backed-discovery.js
 
+      - name: Syntax check external providers
+        run: node --experimental-default-type=module --check .lumen/a2a-worker/travel-external-providers.js
+
+      - name: Syntax check affiliate registry
+        run: node --experimental-default-type=module --check .lumen/a2a-worker/travel-affiliate-registry.js
+
       - name: Syntax check wrapper entrypoint
         run: node --experimental-default-type=module --check .lumen/a2a-worker/travel-consumer-entry.js
 
@@ -46,6 +55,9 @@ jobs:
 
       - name: Run provider-backed discovery tests
         run: node --experimental-default-type=module .github/scripts/lumen-travel-provider-backed-test.mjs
+
+      - name: Run external provider and affiliate tests
+        run: node --experimental-default-type=module .github/scripts/lumen-travel-external-providers-test.mjs
 
       - name: Verify safety invariants
         run: |
@@ -58,11 +70,15 @@ jobs:
           grep -q 'automaticOutreach: false' .lumen/a2a-worker/travel-demand-bridge.js
           grep -q 'storesPii: false' .lumen/a2a-worker/travel-demand-bridge.js
           grep -q 'activationRequiresAdmin: true' .lumen/a2a-worker/travel-demand-bridge.js
-          grep -q 'externalNetworkCalls: false' .lumen/a2a-worker/travel-provider-registry.js
           grep -q 'createsBooking: false' .lumen/a2a-worker/travel-provider-registry.js
           grep -q 'createsCharge: false' .lumen/a2a-worker/travel-provider-registry.js
-          grep -q 'affiliateLinksEnabled: false' .lumen/a2a-worker/travel-provider-registry.js
           grep -q 'autonomousSpend: false' .lumen/a2a-worker/travel-provider-registry.js
+          grep -q 'supportsRealtime: false' .lumen/a2a-worker/travel-external-providers.js
+          grep -q 'supportsBooking: false' .lumen/a2a-worker/travel-external-providers.js
+          grep -q 'disabledWithoutCredentials: true' .lumen/a2a-worker/travel-external-providers.js
+          grep -q 'noSyntheticAffiliateIds: true' .lumen/a2a-worker/travel-affiliate-registry.js
+          grep -q 'noBookingAuthority: true' .lumen/a2a-worker/travel-affiliate-registry.js
+          grep -q 'autonomousSpend: false' .lumen/a2a-worker/travel-affiliate-registry.js
           grep -q 'searchUsesProviderRegistry: true' .lumen/a2a-worker/travel-provider-backed-discovery.js
           grep -q 'bookingCreated: false' .lumen/a2a-worker/travel-provider-backed-discovery.js
           grep -q 'chargeCreated: false' .lumen/a2a-worker/travel-provider-backed-discovery.js
