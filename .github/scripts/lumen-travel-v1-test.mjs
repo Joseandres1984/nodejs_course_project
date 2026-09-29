@@ -9,6 +9,12 @@ import {
   handleTravelDemandBridge,
   TRAVEL_DEMAND_MIN_CLUSTER_SIGNALS
 } from "../../.lumen/a2a-worker/travel-demand-bridge.js";
+import {
+  handleTravelProviderRegistry,
+  listTravelProviders,
+  quoteTravelComponents,
+  TRAVEL_PROVIDER_CONTRACT_VERSION
+} from "../../.lumen/a2a-worker/travel-provider-registry.js";
 
 function search(overrides = {}) {
   return calculateTravelOptions({
@@ -121,6 +127,85 @@ assert.equal(searchPayload.guardrails.bookingCreated, false);
 assert.equal(searchPayload.guardrails.chargeCreated, false);
 assert.equal(searchPayload.guardrails.autonomousSpend, false);
 
+const providerCatalog = listTravelProviders();
+assert.equal(TRAVEL_PROVIDER_CONTRACT_VERSION, "1.0");
+assert.equal(providerCatalog.length, 3);
+assert.deepEqual(providerCatalog.map(x => x.component).sort(), ["ACCOMMODATION", "ACTIVITIES", "FLIGHT"]);
+for (const provider of providerCatalog) {
+  assert.equal(provider.mode, "ESTIMATED_SEED");
+  assert.equal(provider.supportsRealtime, false);
+  assert.equal(provider.supportsBooking, false);
+  assert.equal(provider.supportsAffiliate, false);
+  assert.equal(provider.externalNetworkCalls, false);
+  assert.equal(provider.requiresSecret, false);
+}
+
+const providerQuote = await quoteTravelComponents({
+  originCode: "EZE",
+  destinationCode: "GIG",
+  durationDays: 7,
+  targetMonth: 2,
+  travelersCount: 2
+}, TRAVEL_CONSUMER_DESTINATIONS);
+assert.equal(providerQuote.ok, true);
+assert.equal(providerQuote.input.originCode, "BUE");
+assert.equal(providerQuote.destination.code, "GIG");
+assert.equal(providerQuote.quotes.length, 3);
+assert.equal(providerQuote.pricingMode, "ESTIMATED_SEED");
+assert.equal(providerQuote.realTimeCoverage, false);
+assert.equal(providerQuote.affiliateLinksAvailable, false);
+assert.equal(providerQuote.guardrails.quoteOnly, true);
+assert.equal(providerQuote.guardrails.externalNetworkCalls, false);
+assert.equal(providerQuote.guardrails.createsBooking, false);
+assert.equal(providerQuote.guardrails.createsCharge, false);
+assert.equal(providerQuote.guardrails.autonomousSpend, false);
+const flightQuote = providerQuote.quotes.find(x => x.component === "FLIGHT");
+const accommodationQuote = providerQuote.quotes.find(x => x.component === "ACCOMMODATION");
+const activityQuote = providerQuote.quotes.find(x => x.component === "ACTIVITIES");
+assert.equal(flightQuote.amountUSD, 840);
+assert.equal(accommodationQuote.amountUSD, 432);
+assert.equal(activityQuote.amountUSD, 252);
+assert.equal(providerQuote.totals.quotedComponentsUSD, 1524);
+for (const quote of providerQuote.quotes) {
+  assert.equal(quote.currency, "USD");
+  assert.equal(quote.isRealtime, false);
+  assert.equal(quote.bookable, false);
+  assert.equal(quote.affiliateEligible, false);
+  assert.equal(quote.affiliateUrl, null);
+  assert.ok(quote.confidence >= 0.25 && quote.confidence <= 0.95);
+}
+
+const providerPolicyResponse = await handleTravelProviderRegistry(
+  new Request("https://example.test/travel/providers/policy"),
+  {},
+  TRAVEL_CONSUMER_DESTINATIONS
+);
+assert.equal(providerPolicyResponse.status, 200);
+const providerPolicy = await providerPolicyResponse.json();
+assert.equal(providerPolicy.version, "1.0-travel-provider-registry");
+assert.equal(providerPolicy.contractVersion, "1.0");
+assert.equal(providerPolicy.providerReplacementWithoutTravelEngineRewrite, true);
+assert.equal(providerPolicy.externalNetworkCalls, false);
+assert.equal(providerPolicy.realTimePrices, false);
+assert.equal(providerPolicy.bookingAuthority, false);
+assert.equal(providerPolicy.affiliateLinksEnabled, false);
+assert.equal(providerPolicy.createsBooking, false);
+assert.equal(providerPolicy.createsCharge, false);
+assert.equal(providerPolicy.autonomousSpend, false);
+
+const unsupportedProviderQuote = await handleTravelProviderRegistry(
+  new Request("https://example.test/travel/providers/quote", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ originCode: "BUE", destinationCode: "XXX", durationDays: 7, targetMonth: 2, travelersCount: 1 })
+  }),
+  {},
+  TRAVEL_CONSUMER_DESTINATIONS
+);
+assert.equal(unsupportedProviderQuote.status, 400);
+const unsupportedProviderPayload = await unsupportedProviderQuote.json();
+assert.ok(unsupportedProviderPayload.errors.includes("unsupported_destination"));
+
 const fixedNow = new Date("2026-09-29T18:00:00Z").getTime();
 const clustered = buildTravelDemandClusters([
   {
@@ -203,9 +288,12 @@ console.log(JSON.stringify({
   ok: true,
   version: policy.version,
   demandBridgeVersion: demandPolicy.version,
+  providerRegistryVersion: providerPolicy.version,
+  providerContractVersion: providerPolicy.contractVersion,
   defaultResults: base.options.length,
   topDestination: base.options[0]?.destinationCode || null,
   repeatedDemandScore: repeatedCluster.score,
+  providerQuotedComponentsUSD: providerQuote.totals.quotedComponentsUSD,
   tests: [
     "budget_cap",
     "score_bounds",
@@ -216,6 +304,12 @@ console.log(JSON.stringify({
     "validation",
     "deterministic_scoring",
     "policy_guardrails",
+    "provider_contract",
+    "provider_normalized_quotes",
+    "provider_amounts",
+    "provider_no_network_calls",
+    "provider_no_booking_or_charge",
+    "provider_affiliate_disabled_until_configured",
     "demand_cluster_aggregation",
     "minimum_signal_threshold",
     "no_single_search_promotion",
