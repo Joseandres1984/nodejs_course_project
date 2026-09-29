@@ -111,8 +111,15 @@ function hydratePanels(html, data) {
 
 export default {
   async fetch(request, env, ctx) {
-    const response = await app.fetch(request, env, ctx);
     const url = new URL(request.url);
+    let downstreamRequest = request;
+    if (request.method === "GET" && ["/secretaria", "/secretaria/"].includes(url.pathname)) {
+      const rootUrl = new URL(request.url);
+      rootUrl.pathname = "/";
+      rootUrl.search = "";
+      downstreamRequest = new Request(rootUrl.toString(), { method: "GET", headers: request.headers });
+    }
+    const response = await app.fetch(downstreamRequest, env, ctx);
     const isDashboardPage = request.method === "GET"
       && response.ok
       && ["/", "/index.html", "/full", "/secretaria", "/secretaria/"].includes(url.pathname)
