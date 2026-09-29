@@ -7,8 +7,10 @@ on:
       - '.lumen/a2a-worker/travel-consumer-engine.js'
       - '.lumen/a2a-worker/travel-demand-bridge.js'
       - '.lumen/a2a-worker/travel-provider-registry.js'
+      - '.lumen/a2a-worker/travel-provider-backed-discovery.js'
       - '.lumen/a2a-worker/travel-consumer-entry.js'
       - '.github/scripts/lumen-travel-v1-test.mjs'
+      - '.github/scripts/lumen-travel-provider-backed-test.mjs'
       - '.github/workflows/lumen-travel-v1-smoke.yml'
   workflow_dispatch:
 
@@ -33,11 +35,17 @@ jobs:
       - name: Syntax check provider registry
         run: node --experimental-default-type=module --check .lumen/a2a-worker/travel-provider-registry.js
 
+      - name: Syntax check provider-backed discovery
+        run: node --experimental-default-type=module --check .lumen/a2a-worker/travel-provider-backed-discovery.js
+
       - name: Syntax check wrapper entrypoint
         run: node --experimental-default-type=module --check .lumen/a2a-worker/travel-consumer-entry.js
 
       - name: Run deterministic travel tests
         run: node --experimental-default-type=module .github/scripts/lumen-travel-v1-test.mjs
+
+      - name: Run provider-backed discovery tests
+        run: node --experimental-default-type=module .github/scripts/lumen-travel-provider-backed-test.mjs
 
       - name: Verify safety invariants
         run: |
@@ -55,3 +63,7 @@ jobs:
           grep -q 'createsCharge: false' .lumen/a2a-worker/travel-provider-registry.js
           grep -q 'affiliateLinksEnabled: false' .lumen/a2a-worker/travel-provider-registry.js
           grep -q 'autonomousSpend: false' .lumen/a2a-worker/travel-provider-registry.js
+          grep -q 'searchUsesProviderRegistry: true' .lumen/a2a-worker/travel-provider-backed-discovery.js
+          grep -q 'bookingCreated: false' .lumen/a2a-worker/travel-provider-backed-discovery.js
+          grep -q 'chargeCreated: false' .lumen/a2a-worker/travel-provider-backed-discovery.js
+          grep -q 'autonomousSpend: false' .lumen/a2a-worker/travel-provider-backed-discovery.js
