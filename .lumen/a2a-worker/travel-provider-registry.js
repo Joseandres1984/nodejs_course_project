@@ -1,4 +1,6 @@
-const VERSION = "1.0-travel-provider-registry";
+import { createExternalTravelProviders, getExternalTravelProviderStatus } from "./travel-external-providers.js";
+
+const VERSION = "1.1-travel-provider-registry";
 const CONTRACT_VERSION = "1.0";
 const CURRENCY = "USD";
 
@@ -6,9 +8,8 @@ const CURRENCY = "USD";
 // - one adapter owns one commercial component (FLIGHT, ACCOMMODATION, ACTIVITIES)
 // - quote() returns a normalized USD quote envelope
 // - buildAffiliateLink() must return null until a real partner relationship is configured
-// - adapters must declare whether they make network calls, require secrets, support real-time pricing,
-//   support booking, or support affiliate attribution
-// - the Travel engine consumes the normalized contract rather than provider-specific payloads
+// - adapters declare network/secrets/realtime/booking/affiliate capabilities
+// - external adapters are opt-in via environment credentials and replace only their component
 
 function clean(value, limit = 400) {
   return String(value ?? "").trim().replace(/\s+/g, " ").slice(0, limit);
@@ -142,14 +143,20 @@ const seedActivitiesProvider = {
   buildAffiliateLink() { return null; }
 };
 
-const PROVIDERS = Object.freeze([
+const SEED_PROVIDERS = Object.freeze([
   seedFlightProvider,
   seedAccommodationProvider,
   seedActivitiesProvider
 ]);
 
-export function listTravelProviders() {
-  return PROVIDERS.map(provider => ({
+function resolveProviders(env = {}, fetchImpl = fetch) {
+  const providers = new Map(SEED_PROVIDERS.map(provider => [provider.component, provider]));
+  for (const external of createExternalTravelProviders(env, fetchImpl)) providers.set(external.component, external);
+  return [...providers.values()];
+}
+
+export function listTravelProviders(env = {}) {
+  return resolveProviders(env).map(provider => ({
     id: provider.id,
     name: provider.name,
     component: provider.component,
@@ -163,19 +170,32 @@ export function listTravelProviders() {
   }));
 }
 
-export async function quoteTravelComponents(rawInput, destinationDataset = []) {
+export async function quoteTravelComponents(rawInput, destinationDataset = [], env = {}, fetchImpl = fetch) {
   const { input, destination, errors } = validateQuoteInput(rawInput, destinationDataset);
   if (errors.length) return { ok: false, version: VERSION, contractVersion: CONTRACT_VERSION, input, errors, quotes: [] };
 
+  const providers = resolveProviders(env, fetchImpl);
   const quotes = [];
-  for (const provider of PROVIDERS) {
-    const quote = await provider.quote({ input, destination });
-    quotes.push(quote);
+  const fallbacks = [];
+
+  for (const provider of providers) {
+    try {
+      const quote = await provider.quote({ input, destination });
+      quotes.push(quote);
+    } catch (error) {
+      const fallback = SEED_PROVIDERS.find(seed => seed.component === provider.component);
+      if (!fallback) throw error;
+      const quote = await fallback.quote({ input, destination });
+      quotes.push({ ...quote, fallbackFromProviderId: provider.id, fallbackReason: clean(error?.message || error, 120) || "provider_error" });
+      fallbacks.push({ component: provider.component, providerId: provider.id, reason: clean(error?.message || error, 120) || "provider_error" });
+    }
   }
 
   const totalQuotedUSD = quotes.reduce((sum, quote) => sum + Number(quote.amountUSD || 0), 0);
   const allRealtime = quotes.length > 0 && quotes.every(quote => quote.isRealtime === true);
   const anyAffiliate = quotes.some(quote => Boolean(quote.affiliateUrl));
+  const modes = [...new Set(quotes.map(quote => quote.providerMode))];
+  const hasNetworkProviders = providers.some(provider => provider.externalNetworkCalls === true);
 
   return {
     ok: true,
@@ -192,12 +212,13 @@ export async function quoteTravelComponents(rawInput, destinationDataset = []) {
       currency: CURRENCY,
       quotedComponentsUSD: Math.round(totalQuotedUSD)
     },
-    pricingMode: "ESTIMATED_SEED",
+    pricingMode: modes.length === 1 ? modes[0] : "MIXED_PROVIDER_MODES",
     realTimeCoverage: allRealtime,
     affiliateLinksAvailable: anyAffiliate,
+    fallbacks,
     guardrails: {
       quoteOnly: true,
-      externalNetworkCalls: false,
+      externalNetworkCalls: hasNetworkProviders,
       createsBooking: false,
       createsCharge: false,
       storesPaymentData: false,
@@ -224,17 +245,18 @@ export async function handleTravelProviderRegistry(request, env, destinationData
   }
 
   if (request.method === "GET" && url.pathname === "/travel/providers/policy") {
+    const providers = listTravelProviders(env);
     return json({
       version: VERSION,
       contractVersion: CONTRACT_VERSION,
       architecture: "adapter_registry",
       components: ["FLIGHT", "ACCOMMODATION", "ACTIVITIES"],
-      providerSelection: "component_based",
-      currentMode: "ESTIMATED_SEED",
-      externalNetworkCalls: false,
-      realTimePrices: false,
+      providerSelection: "external_over_seed_per_component",
+      configuredProviders: providers,
+      externalProviderStatus: getExternalTravelProviderStatus(env),
+      realTimePrices: providers.some(x => x.supportsRealtime),
       bookingAuthority: false,
-      affiliateLinksEnabled: false,
+      affiliateLinksEnabled: providers.some(x => x.supportsAffiliate),
       providerReplacementWithoutTravelEngineRewrite: true,
       createsBooking: false,
       createsCharge: false,
@@ -245,14 +267,14 @@ export async function handleTravelProviderRegistry(request, env, destinationData
   }
 
   if (request.method === "GET" && url.pathname === "/travel/providers") {
-    return json({ version: VERSION, contractVersion: CONTRACT_VERSION, providers: listTravelProviders() });
+    return json({ version: VERSION, contractVersion: CONTRACT_VERSION, providers: listTravelProviders(env), externalProviderStatus: getExternalTravelProviderStatus(env) });
   }
 
   if (request.method === "POST" && url.pathname === "/travel/providers/quote") {
     let body = {};
     try { body = await request.json(); }
     catch { return json({ ok: false, version: VERSION, error: "invalid_json" }, 400); }
-    const result = await quoteTravelComponents(body, destinationDataset);
+    const result = await quoteTravelComponents(body, destinationDataset, env);
     return json(result, result.ok ? 200 : 400);
   }
 
