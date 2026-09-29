@@ -127,7 +127,7 @@ assert.equal(searchPayload.guardrails.bookingCreated, false);
 assert.equal(searchPayload.guardrails.chargeCreated, false);
 assert.equal(searchPayload.guardrails.autonomousSpend, false);
 
-const providerCatalog = listTravelProviders();
+const providerCatalog = listTravelProviders({});
 assert.equal(TRAVEL_PROVIDER_CONTRACT_VERSION, "1.0");
 assert.equal(providerCatalog.length, 3);
 assert.deepEqual(providerCatalog.map(x => x.component).sort(), ["ACCOMMODATION", "ACTIVITIES", "FLIGHT"]);
@@ -146,7 +146,7 @@ const providerQuote = await quoteTravelComponents({
   durationDays: 7,
   targetMonth: 2,
   travelersCount: 2
-}, TRAVEL_CONSUMER_DESTINATIONS);
+}, TRAVEL_CONSUMER_DESTINATIONS, {});
 assert.equal(providerQuote.ok, true);
 assert.equal(providerQuote.input.originCode, "BUE");
 assert.equal(providerQuote.destination.code, "GIG");
@@ -182,16 +182,17 @@ const providerPolicyResponse = await handleTravelProviderRegistry(
 );
 assert.equal(providerPolicyResponse.status, 200);
 const providerPolicy = await providerPolicyResponse.json();
-assert.equal(providerPolicy.version, "1.0-travel-provider-registry");
+assert.equal(providerPolicy.version, "1.1-travel-provider-registry");
 assert.equal(providerPolicy.contractVersion, "1.0");
+assert.equal(providerPolicy.providerSelection, "external_over_seed_per_component");
 assert.equal(providerPolicy.providerReplacementWithoutTravelEngineRewrite, true);
-assert.equal(providerPolicy.externalNetworkCalls, false);
 assert.equal(providerPolicy.realTimePrices, false);
 assert.equal(providerPolicy.bookingAuthority, false);
 assert.equal(providerPolicy.affiliateLinksEnabled, false);
 assert.equal(providerPolicy.createsBooking, false);
 assert.equal(providerPolicy.createsCharge, false);
 assert.equal(providerPolicy.autonomousSpend, false);
+assert.ok(providerPolicy.externalProviderStatus.providers.every(provider => provider.configured === false));
 
 const unsupportedProviderQuote = await handleTravelProviderRegistry(
   new Request("https://example.test/travel/providers/quote", {
@@ -307,7 +308,7 @@ console.log(JSON.stringify({
     "provider_contract",
     "provider_normalized_quotes",
     "provider_amounts",
-    "provider_no_network_calls",
+    "provider_no_network_calls_without_credentials",
     "provider_no_booking_or_charge",
     "provider_affiliate_disabled_until_configured",
     "demand_cluster_aggregation",
