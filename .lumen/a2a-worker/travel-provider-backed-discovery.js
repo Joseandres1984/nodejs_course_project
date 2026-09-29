@@ -1,15 +1,9 @@
-import {
-  calculateTravelOptions,
-  TRAVEL_CONSUMER_DESTINATIONS
-} from "./travel-consumer-engine.js";
-import {
-  quoteTravelComponents,
-  TRAVEL_PROVIDER_CONTRACT_VERSION
-} from "./travel-provider-registry.js";
+import { calculateTravelOptions, TRAVEL_CONSUMER_DESTINATIONS } from "./travel-consumer-engine.js";
+import { quoteTravelComponents, TRAVEL_PROVIDER_CONTRACT_VERSION } from "./travel-provider-registry.js";
 
-const VERSION = "1.0-travel-provider-backed-discovery";
+const VERSION = "1.1-travel-provider-backed-discovery";
 const DISCOVERY_ENGINE_VERSION = "1.0-travel-consumer-discovery";
-const PROVIDER_REGISTRY_VERSION = "1.0-travel-provider-registry";
+const PROVIDER_REGISTRY_VERSION = "1.1-travel-provider-registry";
 
 function clean(value, limit = 500) {
   return String(value ?? "").trim().replace(/\s+/g, " ").slice(0, limit);
@@ -42,9 +36,7 @@ function providerConfidence(bundle) {
   const quotes = bundle?.quotes || [];
   if (!quotes.length) return 0.25;
   const amount = quotes.reduce((sum, quote) => sum + Math.max(0, Number(quote.amountUSD || 0)), 0);
-  if (amount <= 0) {
-    return Number((quotes.reduce((sum, quote) => sum + Number(quote.confidence || 0.25), 0) / quotes.length).toFixed(2));
-  }
+  if (amount <= 0) return Number((quotes.reduce((sum, q) => sum + Number(q.confidence || 0.25), 0) / quotes.length).toFixed(2));
   const weighted = quotes.reduce((sum, quote) => sum + Math.max(0, Number(quote.amountUSD || 0)) * Number(quote.confidence || 0.25), 0) / amount;
   return Number(Math.max(0.25, Math.min(0.95, weighted)).toFixed(2));
 }
@@ -54,7 +46,6 @@ function pricedDestinationFromBundle(destination, bundle) {
   const accommodation = quoteByComponent(bundle, "ACCOMMODATION");
   const activities = quoteByComponent(bundle, "ACTIVITIES");
   if (!flight || !accommodation || !activities) return null;
-
   const originCode = bundle.input.originCode;
   const existingRoute = destination.routes?.[originCode];
   if (!existingRoute) return null;
@@ -65,10 +56,7 @@ function pricedDestinationFromBundle(destination, bundle) {
     activityDailyUSD: Number(activities.unitAmountUSD),
     routes: {
       ...destination.routes,
-      [originCode]: {
-        ...existingRoute,
-        avgFlightUSD: Number(flight.unitAmountUSD)
-      }
+      [originCode]: { ...existingRoute, avgFlightUSD: Number(flight.unitAmountUSD) }
     }
   };
 }
@@ -92,7 +80,10 @@ function attachProviderEvidence(option, bundle) {
     affiliateUrl: quote.affiliateUrl,
     retrievedAt: quote.retrievedAt,
     expiresAt: quote.expiresAt,
-    sourceReference: quote.sourceReference
+    sourceReference: quote.sourceReference,
+    evidence: quote.evidence || null,
+    fallbackFromProviderId: quote.fallbackFromProviderId || null,
+    fallbackReason: quote.fallbackReason || null
   }));
 
   return {
@@ -111,6 +102,7 @@ function attachProviderEvidence(option, bundle) {
       quotedShareOfTrip: Number(Math.min(1, quotedComponentsUSD / totalUSD).toFixed(3)),
       unquotedComponents: ["TRANSFERS", "FOOD_AND_DAILY_EXPENSES"],
       components,
+      fallbacks: bundle?.fallbacks || [],
       allRealtime: components.length > 0 && components.every(component => component.isRealtime === true),
       anyAffiliateLink: components.some(component => Boolean(component.affiliateUrl)),
       anyBookable: components.some(component => component.bookable === true),
@@ -119,7 +111,7 @@ function attachProviderEvidence(option, bundle) {
   };
 }
 
-export async function calculateProviderBackedTravelOptions(rawInput, destinationDataset = TRAVEL_CONSUMER_DESTINATIONS) {
+export async function calculateProviderBackedTravelOptions(rawInput, destinationDataset = TRAVEL_CONSUMER_DESTINATIONS, env = {}, fetchImpl = fetch) {
   const validation = calculateTravelOptions(rawInput, []);
   if (!validation.ok) {
     return {
@@ -139,14 +131,13 @@ export async function calculateProviderBackedTravelOptions(rawInput, destination
 
   for (const destination of destinationDataset) {
     if (!destination?.routes?.[input.originCode]) continue;
-
     const bundle = await quoteTravelComponents({
       originCode: input.originCode,
       destinationCode: destination.code,
       durationDays: input.durationDays,
       targetMonth: input.targetMonth,
       travelersCount: input.travelersCount
-    }, destinationDataset);
+    }, destinationDataset, env, fetchImpl);
 
     if (!bundle.ok) {
       providerErrors.push({ destinationCode: destination.code, errors: bundle.errors || ["provider_quote_failed"] });
@@ -178,7 +169,8 @@ export async function calculateProviderBackedTravelOptions(rawInput, destination
     providerErrors,
     pricingMode: modes.length === 1 ? modes[0] : modes.length > 1 ? "MIXED" : "UNKNOWN",
     realTimeCoverage: options.length > 0 && options.every(option => option.realTimeFare === true),
-    affiliateLinksAvailable: options.some(option => option.affiliateLinksAvailable === true)
+    affiliateLinksAvailable: options.some(option => option.affiliateLinksAvailable === true),
+    externalProvidersUsed: options.some(option => option.providerPricing?.externalNetworkCalls === true)
   };
 }
 
@@ -216,14 +208,7 @@ export async function handleProviderBackedTravelDiscovery(request, env, destinat
   const url = new URL(request.url);
 
   if (request.method === "OPTIONS" && url.pathname.startsWith("/travel/discovery/")) {
-    return new Response(null, {
-      status: 204,
-      headers: {
-        "access-control-allow-origin": "*",
-        "access-control-allow-headers": "content-type",
-        "access-control-allow-methods": "GET,POST,OPTIONS"
-      }
-    });
+    return new Response(null, { status: 204, headers: { "access-control-allow-origin": "*", "access-control-allow-headers": "content-type", "access-control-allow-methods": "GET,POST,OPTIONS" } });
   }
 
   if (request.method === "GET" && url.pathname === "/travel/discovery/policy") {
@@ -235,9 +220,7 @@ export async function handleProviderBackedTravelDiscovery(request, env, destinat
       name: "LUMEN Travel Discovery",
       architecture: "discovery_via_provider_registry",
       searchUsesProviderRegistry: true,
-      currentPricingMode: "ESTIMATED_SEED",
-      realTimeFares: false,
-      affiliateLinksEnabled: false,
+      currentPricingMode: "DYNAMIC_PROVIDER_REGISTRY",
       providerReplacementWithoutDiscoveryRewrite: true,
       exactDatesClaimed: false,
       createsBooking: false,
@@ -258,7 +241,7 @@ export async function handleProviderBackedTravelDiscovery(request, env, destinat
   try { body = await request.json(); }
   catch { return json({ ok: false, version: VERSION, error: "invalid_json" }, 400); }
 
-  const result = await calculateProviderBackedTravelOptions(body, destinationDataset);
+  const result = await calculateProviderBackedTravelOptions(body, destinationDataset, env);
   if (!result.ok) return json(result, 400);
 
   let persistence = { stored: false, reason: "not_attempted" };
