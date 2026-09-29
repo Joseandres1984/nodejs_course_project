@@ -6,6 +6,7 @@ on:
     paths:
       - '.lumen/a2a-worker/travel-consumer-engine.js'
       - '.lumen/a2a-worker/travel-demand-bridge.js'
+      - '.lumen/a2a-worker/travel-provider-registry.js'
       - '.lumen/a2a-worker/travel-consumer-entry.js'
       - '.github/scripts/lumen-travel-v1-test.mjs'
       - '.github/workflows/lumen-travel-v1-smoke.yml'
@@ -29,6 +30,9 @@ jobs:
       - name: Syntax check Demand-First bridge
         run: node --experimental-default-type=module --check .lumen/a2a-worker/travel-demand-bridge.js
 
+      - name: Syntax check provider registry
+        run: node --experimental-default-type=module --check .lumen/a2a-worker/travel-provider-registry.js
+
       - name: Syntax check wrapper entrypoint
         run: node --experimental-default-type=module --check .lumen/a2a-worker/travel-consumer-entry.js
 
@@ -46,3 +50,8 @@ jobs:
           grep -q 'automaticOutreach: false' .lumen/a2a-worker/travel-demand-bridge.js
           grep -q 'storesPii: false' .lumen/a2a-worker/travel-demand-bridge.js
           grep -q 'activationRequiresAdmin: true' .lumen/a2a-worker/travel-demand-bridge.js
+          grep -q 'externalNetworkCalls: false' .lumen/a2a-worker/travel-provider-registry.js
+          grep -q 'createsBooking: false' .lumen/a2a-worker/travel-provider-registry.js
+          grep -q 'createsCharge: false' .lumen/a2a-worker/travel-provider-registry.js
+          grep -q 'affiliateLinksEnabled: false' .lumen/a2a-worker/travel-provider-registry.js
+          grep -q 'autonomousSpend: false' .lumen/a2a-worker/travel-provider-registry.js
