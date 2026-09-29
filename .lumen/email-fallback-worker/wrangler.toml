@@ -1,0 +1,18 @@
+name = "lumen-zero-email-fallback"
+main = "worker.js"
+compatibility_date = "2026-09-21"
+workers_dev = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "lumen-zero"
+database_id = "e872694a-ed14-4a7f-b2c3-38b8e1bb498b"
+
+[vars]
+EMAIL_FALLBACK_ENABLED = "true"
+EMAIL_FALLBACK_MAX_PER_RUN = "1"
+EMAIL_FALLBACK_REQUIRE_A2A_FAILURE = "true"
+LUMEN_BREVO_FROM_NAME = "LUMEN B2B"
+
+[triggers]
+crons = ["12 * * * *"]
