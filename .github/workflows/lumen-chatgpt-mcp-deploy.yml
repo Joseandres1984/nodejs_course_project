@@ -21,11 +21,21 @@ jobs:
         env:
           CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
         run: |
           set -euo pipefail
           test -n "$CF_TOKEN"
           test -n "$CF_ACCOUNT"
+          test -n "$OPPORTUNITY_ADMIN_TOKEN"
           echo 'CLOUDFLARE_CREDENTIALS_PRESENT'
+      - name: Prepare live MCP config
+        working-directory: .lumen/a2a-worker
+        run: |
+          set -euo pipefail
+          cp wrangler.toml wrangler.chatgpt-live.toml
+          sed -i 's/^main = "opportunity-entry.js"$/main = "adaptive-chatgpt-entry.js"/' wrangler.chatgpt-live.toml
+          grep -q '^name = "lumen-zero-a2a"$' wrangler.chatgpt-live.toml
+          grep -q '^main = "adaptive-chatgpt-entry.js"$' wrangler.chatgpt-live.toml
       - name: Deploy MCP on existing LUMEN worker
         working-directory: .lumen/a2a-worker
         env:
@@ -33,14 +43,28 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
-          cp wrangler.toml wrangler.chatgpt-live.toml
-          sed -i 's/^main = "opportunity-entry.js"$/main = "adaptive-chatgpt-entry.js"/' wrangler.chatgpt-live.toml
-          grep -q '^name = "lumen-zero-a2a"$' wrangler.chatgpt-live.toml
-          grep -q '^main = "adaptive-chatgpt-entry.js"$' wrangler.chatgpt-live.toml
           npx --yes wrangler@latest deploy --config wrangler.chatgpt-live.toml
-      - name: Smoke test existing LUMEN plus MCP
+      - name: Restore protected opportunity admin secret
+        working-directory: .lumen/a2a-worker
         env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$OPPORTUNITY_ADMIN_TOKEN" | npx --yes wrangler@latest secret put OPPORTUNITY_ADMIN_TOKEN --config wrangler.chatgpt-live.toml
+      - name: Restore optional Tiendanube credentials
+        working-directory: .lumen/a2a-worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          TIENDANUBE_APP_ID: ${{ secrets.TIENDANUBE_APP_ID }}
+          TIENDANUBE_CLIENT_SECRET: ${{ secrets.TIENDANUBE_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -n "$TIENDANUBE_APP_ID" ]; then printf '%s' "$TIENDANUBE_APP_ID" | npx --yes wrangler@latest secret put TIENDANUBE_APP_ID --config wrangler.chatgpt-live.toml; else echo 'TIENDANUBE_APP_ID_NOT_CONFIGURED'; fi
+          if [ -n "$TIENDANUBE_CLIENT_SECRET" ]; then printf '%s' "$TIENDANUBE_CLIENT_SECRET" | npx --yes wrangler@latest secret put TIENDANUBE_CLIENT_SECRET --config wrangler.chatgpt-live.toml; else echo 'TIENDANUBE_CLIENT_SECRET_NOT_CONFIGURED'; fi
+      - name: Smoke test existing LUMEN plus MCP
         run: |
           set -euo pipefail
           BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
