@@ -1,5 +1,5 @@
 name = "lumen-zero-dashboard"
-main = "mobile_layout_fix_worker.js"
+main = "network_panel_hydration_worker.js"
 compatibility_date = "2026-09-20"
 workers_dev = true
 
