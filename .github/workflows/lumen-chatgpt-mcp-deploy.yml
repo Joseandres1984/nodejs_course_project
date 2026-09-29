@@ -44,18 +44,31 @@ jobs:
         run: |
           set -euo pipefail
           BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
-          ok=0
+          live=0
           for i in $(seq 1 15); do
             if curl -fsS "$BASE/opportunity-factory/policy" -o factory.json && curl -fsS "$BASE/revenue-director/state" -o revenue.json; then
-              ok=1
+              live=1
               break
             fi
             sleep 4
           done
-          test "$ok" -eq 1
+          test "$live" -eq 1
           jq -e '.autonomousSpend == false' factory.json >/dev/null
-          curl -fsS -X POST "$BASE/mcp" -H 'content-type: application/json' --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"ci","version":"1"}}}' -o init.json
-          jq -e '.result.serverInfo.name == "lumen-readonly"' init.json >/dev/null
+
+          mcp=0
+          for i in $(seq 1 15); do
+            if curl -fsS -X POST "$BASE/mcp" -H 'content-type: application/json' --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"ci","version":"1"}}}' -o init.json && jq -e '.result.serverInfo.name == "lumen-readonly"' init.json >/dev/null; then
+              mcp=1
+              break
+            fi
+            sleep 4
+          done
+          if [ "$mcp" -ne 1 ]; then
+            echo 'MCP_INITIALIZE_NOT_READY'
+            cat init.json 2>/dev/null || true
+            exit 1
+          fi
+
           curl -fsS -X POST "$BASE/mcp" -H 'content-type: application/json' --data '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' -o tools.json
           jq -e '[.result.tools[].name] | index("lumen_status") != null and index("lumen_opportunities") != null and index("lumen_top_opportunities") != null and index("lumen_revenue_status") != null and index("lumen_pending_approvals") != null' tools.json >/dev/null
           curl -fsS -X POST "$BASE/mcp" -H 'content-type: application/json' --data '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"lumen_status","arguments":{}}}' -o status.json
