@@ -1,4 +1,4 @@
-import baseWorker from "./opportunity-entry.js";
+import baseWorker from "./adaptive-entry.js";
 import { handleTravelConsumerEngine, TRAVEL_CONSUMER_DESTINATIONS } from "./travel-consumer-engine.js";
 import { handleTravelDemandBridge, syncTravelDemandToOpportunities } from "./travel-demand-bridge.js";
 import { handleTravelProviderRegistry } from "./travel-provider-registry.js";
