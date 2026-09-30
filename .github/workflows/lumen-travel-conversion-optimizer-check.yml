@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - '.lumen/a2a-worker/viator-conversion-sync.js'
+      - '.lumen/a2a-worker/viator-optimized-recommend.js'
       - '.lumen/a2a-worker/adaptive-entry.js'
       - '.lumen/dashboard/travel_conversion_panel_worker.js'
       - '.lumen/dashboard/wrangler.toml'
@@ -23,6 +24,7 @@ jobs:
         run: |
           set -euo pipefail
           node --check .lumen/a2a-worker/viator-conversion-sync.js
+          node --check .lumen/a2a-worker/viator-optimized-recommend.js
           node --check .lumen/a2a-worker/adaptive-entry.js
           node --check .lumen/dashboard/travel_conversion_panel_worker.js
 
@@ -36,7 +38,13 @@ jobs:
           grep -q 'autonomousSpendUsd: 0' .lumen/a2a-worker/viator-conversion-sync.js
           grep -q 'bookingAuthority: false' .lumen/a2a-worker/viator-conversion-sync.js
           grep -q 'paymentAuthority: false' .lumen/a2a-worker/viator-conversion-sync.js
+          grep -q 'MIN_CONFIRMATIONS = 3' .lumen/a2a-worker/viator-optimized-recommend.js
+          grep -q 'MIN_CLICKS = 20' .lumen/a2a-worker/viator-optimized-recommend.js
+          grep -q 'WINNER_SHARE = 0.8' .lumen/a2a-worker/viator-optimized-recommend.js
+          grep -q '/products/bulk' .lumen/a2a-worker/viator-optimized-recommend.js
+          grep -q 'result_shown' .lumen/a2a-worker/viator-optimized-recommend.js
           grep -q 'syncViatorBookingConversions' .lumen/a2a-worker/adaptive-entry.js
+          grep -q 'handleViatorOptimizedRecommend' .lumen/a2a-worker/adaptive-entry.js
           grep -q 'travelApiCvr7' .lumen/dashboard/travel_conversion_panel_worker.js
           grep -q 'commissionNotInferredFromBookings: true' .lumen/dashboard/travel_conversion_panel_worker.js
           grep -q 'main = "travel_conversion_panel_worker.js"' .lumen/dashboard/wrangler.toml
