@@ -10,7 +10,7 @@ function publicJson(data,status=200){return Response.json(data,{status,headers:{
 
 async function recommend(env,text){
   if(!env?.A2A||typeof env.A2A.fetch!=="function")throw new Error("travel_engine_unavailable");
-  const u=new URL("https://a2a.internal/travel/affiliate/recommend");u.searchParams.set("text",text);
+  const u=new URL("https://a2a.internal/travel/affiliate/recommend");u.searchParams.set("text",`Quiero viajar a ${clean(text,220)}`);
   const r=await env.A2A.fetch(new Request(u.toString(),{headers:{"user-agent":"LUMEN-Travel-Storefront/1.0"}}));
   const body=await r.text();let data={};try{data=JSON.parse(body);}catch{throw new Error("travel_engine_invalid_response");}
   if(!r.ok||data?.ok===false)throw new Error(clean(data?.error||`travel_engine_${r.status}`,180));
