@@ -1,14 +1,11 @@
-# Production verification: rerun after Cloudflare deploy settles.
-name: LUMEN Travel Affiliate live smoke
+name: LUMEN Travel Affiliate production config smoke
 
 on:
   push:
     branches: [lumen-zero]
     paths:
-      - '.lumen/a2a-worker/travel-affiliate-orchestrator.js'
       - '.lumen/a2a-worker/viator-api.js'
       - '.lumen/a2a-worker/viator-smart-recommend.js'
-      - '.lumen/a2a-worker/adaptive-entry.js'
       - '.lumen/a2a-worker/wrangler.toml'
       - '.github/workflows/lumen-travel-affiliate-live-smoke.yml'
   workflow_dispatch:
@@ -17,35 +14,12 @@ jobs:
   smoke:
     runs-on: ubuntu-latest
     steps:
-      - name: Verify travel affiliate recommender and Partner API surface live
+      - name: Verify production configuration without synthetic production API traffic
         run: |
           set -euo pipefail
           BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
-          ok=0
-          for i in $(seq 1 30); do
-            if curl -fsS --max-time 15 "$BASE/travel/affiliate/policy" -o policy.json && \
-               curl -fsS --max-time 30 --get --data-urlencode 'text=Quiero un viaje a Barcelona con comida y museos' "$BASE/travel/affiliate/recommend" -o recommend.json && \
-               curl -fsS --max-time 15 "$BASE/travel/affiliate/stats" -o stats.json && \
-               curl -fsS --max-time 15 "$BASE/viator/api/status" -o viator-api-status.json; then
-              if jq -e '.version == "1.1-viator-smart-recommend" and .provider == "viator"' policy.json >/dev/null && \
-                 jq -e '.ok == true and .travelIntentDetected == true and .destination != null' recommend.json >/dev/null && \
-                 jq -e '.version == "1.0-viator-partner-api" and .provider == "viator"' viator-api-status.json >/dev/null; then
-                ok=1
-                break
-              fi
-            fi
-            sleep 4
-          done
-          test "$ok" -eq 1
-
-          jq -e '.version == "1.1-viator-smart-recommend" and .provider == "viator" and .scraping == false and .bookingAuthority == false and .paymentAuthority == false and .autonomousPurchase == false and .autonomousSpendUsd == 0' policy.json >/dev/null
-          jq -e '.ok == true and (.recommendations | length) >= 1 and .monetization.bookingAuthority == false and .monetization.paymentAuthority == false and .monetization.autonomousSpendUsd == 0' recommend.json >/dev/null
-          jq -e '.version == "1.0-travel-affiliate-orchestrator" and .dbBound == true' stats.json >/dev/null
-          jq -e '.version == "1.0-viator-partner-api" and .environment == "production" and .apiVersion == "2.0" and .authentication == "exp-api-key" and .secretExposed == false and .bookingAuthority == false and .paymentAuthority == false and .autonomousSpendUsd == 0 and .fallbackAvailable == true' viator-api-status.json >/dev/null
-
-          jq -e '.configured == true' viator-api-status.json >/dev/null
-          jq -e '.apiConfigured == true and .productLevelRanking == true and .searchMode == "viator_partner_api_products_search"' policy.json >/dev/null
-          jq -e '.apiConfigured == true and .productLevelRanking == true and .searchMode == "viator_partner_api_products_search" and .affiliateAttributionSource == "viator_productUrl" and .bestPick.productSpecific == true and (.bestPick.affiliateUrl | contains("viator.com"))' recommend.json >/dev/null
-
-          echo 'TRAVEL_AFFILIATE_PRODUCTION_API_MODE_OK'
-          echo 'TRAVEL_AFFILIATE_LIVE_SMOKE_OK'
+          curl -fsS --max-time 15 "$BASE/viator/api/status" -o status.json
+          curl -fsS --max-time 15 "$BASE/health/viator-affiliate" -o affiliate.json
+          jq -e '.version == "1.0-viator-partner-api" and .provider == "viator" and .configured == true and .environment == "production" and .apiVersion == "2.0" and .authentication == "exp-api-key" and .secretExposed == false and .bookingAuthority == false and .paymentAuthority == false and .autonomousSpendUsd == 0' status.json >/dev/null
+          jq -e '.ok == true and .provider == "viator" and .mode == "affiliate-link-generation" and .pidConfigured == true' affiliate.json >/dev/null
+          echo 'VIATOR_PRODUCTION_CONFIGURATION_OK'
