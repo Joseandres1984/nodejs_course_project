@@ -1,0 +1,64 @@
+name: LUMEN Viator revenue loop check
+
+on:
+  pull_request:
+    paths:
+      - '.lumen/a2a-worker/viator-affiliate.js'
+      - '.lumen/a2a-worker/viator-smart-recommend.js'
+      - '.lumen/a2a-worker/viator-revenue.js'
+      - '.lumen/a2a-worker/adaptive-entry.js'
+      - '.lumen/dashboard/travel_revenue_panel_worker.js'
+      - '.lumen/dashboard/wrangler.toml'
+      - '.github/workflows/lumen-viator-revenue-loop-check.yml'
+  workflow_dispatch:
+
+jobs:
+  validate-viator-revenue-loop:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Syntax check revenue loop Workers
+        run: |
+          set -euo pipefail
+          node --check .lumen/a2a-worker/viator-affiliate.js
+          node --check .lumen/a2a-worker/viator-smart-recommend.js
+          node --check .lumen/a2a-worker/viator-revenue.js
+          node --check .lumen/a2a-worker/adaptive-entry.js
+          node --check .lumen/dashboard/travel_revenue_panel_worker.js
+
+      - name: Verify attribution and accounting invariants
+        run: |
+          set -euo pipefail
+          grep -q 'validateAttributedViatorUrl' .lumen/a2a-worker/viator-affiliate.js
+          grep -q 'Return the exact API-provided URL string' .lumen/a2a-worker/viator-affiliate.js
+          grep -q 'preserveProviderUrl' .lumen/a2a-worker/viator-smart-recommend.js
+          grep -q 'searchViatorProducts(env, payload, { campaignValue: campaign })' .lumen/a2a-worker/viator-smart-recommend.js
+          grep -q 'viator_productUrl_preserved_exactly' .lumen/a2a-worker/viator-smart-recommend.js
+          grep -q 'VERIFIED_PAYOUT_STATUSES' .lumen/a2a-worker/viator-revenue.js
+          grep -q 'estimatedPerformanceIsNotCash: true' .lumen/a2a-worker/viator-revenue.js
+          grep -q 'unknownOrPendingPayoutIsNotCash: true' .lumen/a2a-worker/viator-revenue.js
+          grep -q 'storesBankDetails: false' .lumen/a2a-worker/viator-revenue.js
+          grep -q 'storesPayPalCredentials: false' .lumen/a2a-worker/viator-revenue.js
+          grep -q 'autonomousSpendUsd: 0' .lumen/a2a-worker/viator-revenue.js
+          grep -q "IN ('PAID','COMPLETED','SENT','PROCESSED')" .lumen/dashboard/travel_revenue_panel_worker.js
+          grep -q 'estimatedIsCash: false' .lumen/dashboard/travel_revenue_panel_worker.js
+          grep -q 'Datos bancarios almacenados' .lumen/dashboard/travel_revenue_panel_worker.js
+          grep -q '^main = "travel_revenue_panel_worker.js"$' .lumen/dashboard/wrangler.toml
+          echo 'VIATOR_REVENUE_LOOP_INVARIANTS_OK'
+
+      - name: Dry-run A2A bundle
+        working-directory: .lumen/a2a-worker
+        run: |
+          set -euo pipefail
+          cp wrangler.toml wrangler.revenue-check.toml
+          sed -i 's/^main = "opportunity-entry.js"$/main = "adaptive-entry.js"/' wrangler.revenue-check.toml
+          grep -q '^main = "adaptive-entry.js"$' wrangler.revenue-check.toml
+          npx --yes wrangler@latest deploy --dry-run --config wrangler.revenue-check.toml
+
+      - name: Dry-run dashboard bundle
+        working-directory: .lumen/dashboard
+        run: npx --yes wrangler@latest deploy --dry-run --config wrangler.toml
