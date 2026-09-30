@@ -5,7 +5,18 @@ on:
     branches: [lumen-zero]
     paths:
       - '.lumen/a2a-worker/viator-api.js'
+      - '.lumen/a2a-worker/viator-affiliate.js'
       - '.lumen/a2a-worker/viator-smart-recommend.js'
+      - '.lumen/a2a-worker/viator-revenue.js'
+      - '.lumen/a2a-worker/wrangler.toml'
+      - '.github/workflows/lumen-travel-affiliate-live-smoke.yml'
+  pull_request:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/a2a-worker/viator-api.js'
+      - '.lumen/a2a-worker/viator-affiliate.js'
+      - '.lumen/a2a-worker/viator-smart-recommend.js'
+      - '.lumen/a2a-worker/viator-revenue.js'
       - '.lumen/a2a-worker/wrangler.toml'
       - '.github/workflows/lumen-travel-affiliate-live-smoke.yml'
   workflow_dispatch:
@@ -20,6 +31,8 @@ jobs:
           BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
           curl -fsS --max-time 15 "$BASE/viator/api/status" -o status.json
           curl -fsS --max-time 15 "$BASE/health/viator-affiliate" -o affiliate.json
+          curl -fsS --max-time 15 "$BASE/viator/revenue/policy" -o revenue.json
           jq -e '.version == "1.0-viator-partner-api" and .provider == "viator" and .configured == true and .environment == "production" and .apiVersion == "2.0" and .authentication == "exp-api-key" and .secretExposed == false and .bookingAuthority == false and .paymentAuthority == false and .autonomousSpendUsd == 0' status.json >/dev/null
-          jq -e '.ok == true and .provider == "viator" and .mode == "affiliate-link-generation" and .pidConfigured == true' affiliate.json >/dev/null
+          jq -e '.ok == true and .provider == "viator" and (.mode | contains("affiliate-link-generation")) and (.mode | contains("click-intelligence")) and (.mode | contains("api-url-preservation")) and .pidConfigured == true and .apiProductUrlPreserved == true' affiliate.json >/dev/null
+          jq -e '.ok == true and .provider == "viator" and .csvImportSupported == true and .reportingApiAvailable == false and .storesBankDetails == false and .storesPayPalCredentials == false and .bookingAuthority == false and .paymentAuthority == false and .autonomousSpendUsd == 0 and (.verifiedPayoutStatuses | index("PAID")) != null' revenue.json >/dev/null
           echo 'VIATOR_PRODUCTION_CONFIGURATION_OK'
