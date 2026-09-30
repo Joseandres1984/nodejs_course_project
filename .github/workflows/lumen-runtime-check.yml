@@ -35,3 +35,5 @@ jobs:
         run: python -m unittest discover -s .lumen/runtime -p 'test_cognitive_engine.py'
       - name: Run Cognitive Shadow independent decision and outcome tests
         run: python -m unittest discover -s .lumen/runtime -p 'test_cognitive_shadow_runtime.py'
+      - name: Run Viator affiliate unit tests
+        run: python -m unittest discover -s .lumen/runtime -p 'test_viator_affiliate_core.py'
