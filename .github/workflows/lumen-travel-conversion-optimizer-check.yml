@@ -1,0 +1,56 @@
+name: LUMEN Travel conversion optimizer check
+
+on:
+  pull_request:
+    paths:
+      - '.lumen/a2a-worker/viator-conversion-sync.js'
+      - '.lumen/a2a-worker/adaptive-entry.js'
+      - '.lumen/dashboard/travel_conversion_panel_worker.js'
+      - '.lumen/dashboard/wrangler.toml'
+      - '.github/workflows/lumen-travel-conversion-optimizer-check.yml'
+  workflow_dispatch:
+
+jobs:
+  validate-travel-conversion-optimizer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Syntax check conversion Workers
+        run: |
+          set -euo pipefail
+          node --check .lumen/a2a-worker/viator-conversion-sync.js
+          node --check .lumen/a2a-worker/adaptive-entry.js
+          node --check .lumen/dashboard/travel_conversion_panel_worker.js
+
+      - name: Verify conversion and safety invariants
+        run: |
+          set -euo pipefail
+          grep -q 'bookings/modified-since' .lumen/a2a-worker/viator-conversion-sync.js
+          grep -q 'SYNC_MIN_INTERVAL_MS = 55' .lumen/a2a-worker/viator-conversion-sync.js
+          grep -q 'lumen_viator_booking_events' .lumen/a2a-worker/viator-conversion-sync.js
+          grep -q 'minimumEvidence' .lumen/a2a-worker/viator-conversion-sync.js
+          grep -q 'autonomousSpendUsd: 0' .lumen/a2a-worker/viator-conversion-sync.js
+          grep -q 'bookingAuthority: false' .lumen/a2a-worker/viator-conversion-sync.js
+          grep -q 'paymentAuthority: false' .lumen/a2a-worker/viator-conversion-sync.js
+          grep -q 'syncViatorBookingConversions' .lumen/a2a-worker/adaptive-entry.js
+          grep -q 'travelApiCvr7' .lumen/dashboard/travel_conversion_panel_worker.js
+          grep -q 'commissionNotInferredFromBookings: true' .lumen/dashboard/travel_conversion_panel_worker.js
+          grep -q 'main = "travel_conversion_panel_worker.js"' .lumen/dashboard/wrangler.toml
+          echo 'TRAVEL_CONVERSION_OPTIMIZER_INVARIANTS_OK'
+
+      - name: Dry-run A2A bundle
+        working-directory: .lumen/a2a-worker
+        run: |
+          set -euo pipefail
+          cp wrangler.toml wrangler.check.toml
+          sed -i 's/^main = "opportunity-entry.js"$/main = "adaptive-entry.js"/' wrangler.check.toml
+          grep -q '^main = "adaptive-entry.js"$' wrangler.check.toml
+          npx --yes wrangler@latest deploy --dry-run --config wrangler.check.toml
+
+      - name: Dry-run dashboard bundle
+        working-directory: .lumen/dashboard
+        run: npx --yes wrangler@latest deploy --dry-run --config wrangler.toml
