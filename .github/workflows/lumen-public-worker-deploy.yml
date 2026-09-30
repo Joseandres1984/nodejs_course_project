@@ -50,23 +50,28 @@ jobs:
             home_code="$(curl -sS --max-time 20 -o home.html -w '%{http_code}' "$BASE/" || true)"
             travel_code="$(curl -sS --max-time 30 -o travel.html -w '%{http_code}' "$BASE/travel?q=Rio%20de%20Janeiro&source=web" || true)"
             travel_json_code="$(curl -sS --max-time 30 -o travel.json -w '%{http_code}' "$BASE/travel.json?q=Rio%20de%20Janeiro&source=web" || true)"
-            if [ "$health_code" = '200' ] && [ "$home_code" = '200' ] && [ "$travel_code" = '200' ] && [ "$travel_json_code" = '200' ] \
+            package_code="$(curl -sS --max-time 40 -o package.html -w '%{http_code}' "$BASE/travel/package?destination=GIG&duration=7&month=11&travelers=2&budget=2500&source=web" || true)"
+            package_json_code="$(curl -sS --max-time 40 -o package.json -w '%{http_code}' "$BASE/travel/package.json?destination=GIG&duration=7&month=11&travelers=2&budget=2500&source=web" || true)"
+            if [ "$health_code" = '200' ] && [ "$home_code" = '200' ] && [ "$travel_code" = '200' ] && [ "$travel_json_code" = '200' ] && [ "$package_code" = '200' ] && [ "$package_json_code" = '200' ] \
               && grep -q '"ok":true' health.json \
               && grep -q 'LUMEN' home.html \
               && grep -q 'LUMEN Travel' travel.html \
               && grep -q 'Transparencia' travel.html \
-              && jq -e '.ok == true and (.version == "3.0-lumen-travel-marketplace" or .version == "2.0-lumen-travel-site") and .affiliateDisclosure == true and .bookingAuthority == false and .paymentAuthority == false and .autonomousSpendUsd == 0' travel.json >/dev/null; then
+              && grep -q 'Armá tu viaje' package.html \
+              && jq -e '.ok == true and (.version == "4.0-lumen-travel-complete-trip" or .version == "3.0-lumen-travel-marketplace" or .version == "2.0-lumen-travel-site") and .affiliateDisclosure == true and .bookingAuthority == false and .paymentAuthority == false and .autonomousSpendUsd == 0' travel.json >/dev/null \
+              && jq -e '.ok == true and .version == "4.0-lumen-travel-complete-trip" and .mode == "complete_trip" and .affiliateDisclosure == true and .bookingAuthority == false and .paymentAuthority == false and .autonomousSpendUsd == 0 and (.packageQuote.guardrails.createsBooking == false) and (.packageQuote.guardrails.createsCharge == false)' package.json >/dev/null; then
               ok=1
               break
             fi
             sleep 4
           done
           if [ "$ok" -ne 1 ]; then
-            echo "PUBLIC_SMOKE_FAILED health=${health_code:-none} home=${home_code:-none} travel=${travel_code:-none} travel_json=${travel_json_code:-none}"
+            echo "PUBLIC_SMOKE_FAILED health=${health_code:-none} home=${home_code:-none} travel=${travel_code:-none} travel_json=${travel_json_code:-none} package=${package_code:-none} package_json=${package_json_code:-none}"
             cat health.json 2>/dev/null || true
             head -c 500 home.html 2>/dev/null || true
             head -c 800 travel.html 2>/dev/null || true
-            cat travel.json 2>/dev/null || true
+            head -c 800 package.html 2>/dev/null || true
+            cat package.json 2>/dev/null || true
             exit 1
           fi
-          echo 'PUBLIC_TRAVEL_STOREFRONT_SMOKE_OK'
+          echo 'PUBLIC_TRAVEL_STOREFRONT_AND_COMPLETE_TRIP_SMOKE_OK'
