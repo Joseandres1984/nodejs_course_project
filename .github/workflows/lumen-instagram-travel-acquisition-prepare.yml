@@ -1,0 +1,101 @@
+name: LUMEN Instagram Travel acquisition prepare
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/runtime/zero_instagram_travel_acquisition_prepare_v1.py'
+      - '.github/workflows/lumen-instagram-travel-acquisition-prepare.yml'
+  schedule:
+    - cron: '20 13 * * *'
+  workflow_dispatch:
+    inputs:
+      destination:
+        description: 'Destino opcional; vacío usa rotación orgánica'
+        required: false
+        default: ''
+      request_id:
+        description: 'ID opcional para idempotencia'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+concurrency:
+  group: lumen-instagram-travel-acquisition-prepare
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      LUMEN_ZERO_COST_MODE: 'true'
+      LIVE_OUTBOUND: 'false'
+      LUMEN_INSTAGRAM_SEND_ENABLED: 'false'
+      LUMEN_PUBLIC_BASE_URL: 'https://lumen-zero-public.lumen-b2b.workers.dev'
+      LUMEN_D1_DATABASE_ID: 'e872694a-ed14-4a7f-b2c3-38b8e1bb498b'
+      D1_ACCOUNT_PRIMARY: ${{ secrets.LUMEN_D1_ACCOUNT_ID }}
+      D1_TOKEN_PRIMARY: ${{ secrets.LUMEN_D1_API_TOKEN }}
+      D1_ACCOUNT_FALLBACK: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      D1_TOKEN_FALLBACK: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      LUMEN_TRAVEL_ACQUISITION_DESTINATION: ${{ inputs.destination }}
+      LUMEN_TRAVEL_ACQUISITION_REQUEST_ID: ${{ inputs.request_id }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: lumen-zero
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install LUMEN runtime dependencies
+        run: python -m pip install --disable-pip-version-check -r .lumen/runtime/requirements.txt
+
+      - name: Select D1 credentials without exposing secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          account="${D1_ACCOUNT_PRIMARY:-${D1_ACCOUNT_FALLBACK:-}}"
+          token="${D1_TOKEN_PRIMARY:-${D1_TOKEN_FALLBACK:-}}"
+          test -n "$account"
+          test -n "$token"
+          echo "LUMEN_D1_ACCOUNT_ID=$account" >> "$GITHUB_ENV"
+          echo "LUMEN_D1_API_TOKEN=$token" >> "$GITHUB_ENV"
+
+      - name: Prepare one buyer-intent Travel campaign in canonical approval state
+        working-directory: .lumen/runtime
+        run: |
+          python - <<'PY'
+          import zero_watchdog_runtime  # noqa: F401
+          import zero_instagram_travel_acquisition_prepare_v1 as acquisition
+          raise SystemExit(acquisition.main())
+          PY
+
+      - name: Assert outbound remains human-gated
+        run: |
+          set -euo pipefail
+          test "$LIVE_OUTBOUND" = 'false'
+          test "$LUMEN_INSTAGRAM_SEND_ENABLED" = 'false'
+          grep -q 'approval_required.*True' .lumen/runtime/zero_instagram_travel_acquisition_prepare_v1.py
+          grep -q 'autonomous_spend_usd.*0' .lumen/runtime/zero_instagram_travel_acquisition_prepare_v1.py
+          echo 'TRAVEL_INSTAGRAM_HUMAN_GATE_OK'
+
+      - name: Commit generated 4x5 acquisition asset
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'LUMEN Zero'
+          git config user.email 'lumen-zero@users.noreply.github.com'
+          git add .lumen/public/instagram/
+          if git diff --cached --quiet; then
+            echo 'NO_NEW_ASSET'
+            exit 0
+          fi
+          git commit -m "LUMEN: prepare Travel buyer acquisition asset"
+          git pull --rebase origin lumen-zero
+          git push origin HEAD:lumen-zero
