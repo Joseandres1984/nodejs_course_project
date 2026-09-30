@@ -11,18 +11,21 @@ jobs:
   diagnostic:
     runs-on: ubuntu-latest
     steps:
-      - name: Validate Viator key and Basic Access flow in sandbox
+      - name: Validate Viator Basic Access flow in sandbox
         env:
-          VIATOR_API_KEY: ${{ secrets.VIATOR_API_KEY }}
+          VIATOR_SANDBOX_API_KEY: ${{ secrets.VIATOR_SANDBOX_API_KEY }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
-          if [ -z "$VIATOR_API_KEY" ]; then
-            echo 'VIATOR_API_KEY_MISSING'
-            exit 2
+          if [ -z "$VIATOR_SANDBOX_API_KEY" ]; then
+            echo 'VIATOR_SANDBOX_API_KEY_NOT_CONFIGURED'
+            echo 'Add the development/sandbox key as GitHub Actions secret VIATOR_SANDBOX_API_KEY.'
+            if [ "$EVENT_NAME" = 'workflow_dispatch' ]; then exit 2; fi
+            exit 0
           fi
 
           BASE='https://api.sandbox.viator.com/partner'
-          COMMON=(-H "exp-api-key: $VIATOR_API_KEY" -H 'Accept-Language: es-AR' -H 'Accept: application/json;version=2.0')
+          COMMON=(-H "exp-api-key: $VIATOR_SANDBOX_API_KEY" -H 'Accept-Language: es-AR' -H 'Accept: application/json;version=2.0')
 
           dest_status=$(curl -sS --max-time 30 -o destinations.json -w '%{http_code}' "${COMMON[@]}" "$BASE/destinations")
           echo "DESTINATIONS_HTTP=$dest_status"
@@ -49,5 +52,5 @@ jobs:
           fi
 
           jq -e '(.products | type == "array") and (.products | length) > 0' search.json >/dev/null
-          jq -c '{productCount:(.products|length),sample:(.products[0] | {productCode,title,productUrl,pricing,reviews})}' search.json
+          jq -c '{productCount:(.products|length),sample:(.products[0] | {productCode,title,hasProductUrl:(.productUrl != null),pricing:{currency:.pricing.currency,fromPrice:.pricing.summary.fromPrice},reviews:{totalReviews:.reviews.totalReviews,combinedAverageRating:.reviews.combinedAverageRating}})}' search.json
           echo 'VIATOR_SANDBOX_BASIC_ACCESS_OK'
