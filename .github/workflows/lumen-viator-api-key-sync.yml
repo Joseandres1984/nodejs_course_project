@@ -4,6 +4,7 @@ on:
   push:
     branches: [lumen-zero]
     paths:
+      - '.lumen/a2a-worker/wrangler.toml'
       - '.github/workflows/lumen-viator-api-key-sync.yml'
   workflow_dispatch:
 

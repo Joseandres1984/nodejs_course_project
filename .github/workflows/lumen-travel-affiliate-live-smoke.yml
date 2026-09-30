@@ -40,16 +40,11 @@ jobs:
           jq -e '.version == "1.1-viator-smart-recommend" and .provider == "viator" and .scraping == false and .bookingAuthority == false and .paymentAuthority == false and .autonomousPurchase == false and .autonomousSpendUsd == 0' policy.json >/dev/null
           jq -e '.ok == true and (.recommendations | length) >= 1 and .monetization.bookingAuthority == false and .monetization.paymentAuthority == false and .monetization.autonomousSpendUsd == 0' recommend.json >/dev/null
           jq -e '.version == "1.0-travel-affiliate-orchestrator" and .dbBound == true' stats.json >/dev/null
-          jq -e '.version == "1.0-viator-partner-api" and .environment == "sandbox" and .apiVersion == "2.0" and .authentication == "exp-api-key" and .secretExposed == false and .bookingAuthority == false and .paymentAuthority == false and .autonomousSpendUsd == 0 and .fallbackAvailable == true' viator-api-status.json >/dev/null
+          jq -e '.version == "1.0-viator-partner-api" and .environment == "production" and .apiVersion == "2.0" and .authentication == "exp-api-key" and .secretExposed == false and .bookingAuthority == false and .paymentAuthority == false and .autonomousSpendUsd == 0 and .fallbackAvailable == true' viator-api-status.json >/dev/null
 
-          if jq -e '.configured == true' viator-api-status.json >/dev/null; then
-            jq -e '.apiConfigured == true and .productLevelRanking == true and .searchMode == "viator_partner_api_products_search"' policy.json >/dev/null
-            jq -e '.apiConfigured == true and .productLevelRanking == true and .searchMode == "viator_partner_api_products_search" and .affiliateAttributionSource == "viator_productUrl" and .bestPick.productSpecific == true and (.bestPick.affiliateUrl | contains("viator.com"))' recommend.json >/dev/null
-            echo 'TRAVEL_AFFILIATE_API_MODE_OK'
-          else
-            jq -e '.apiConfigured == false and .productLevelRanking == false and .searchMode == "affiliate_search_fallback"' policy.json >/dev/null
-            jq -e '.apiConfigured == false and .productLevelRanking == false and .searchMode == "affiliate_search_fallback" and (.bestPick.affiliateUrl | contains("pid=P00322694")) and (.bestPick.affiliateUrl | contains("mcid=42383"))' recommend.json >/dev/null
-            echo 'TRAVEL_AFFILIATE_FALLBACK_MODE_OK'
-          fi
+          jq -e '.configured == true' viator-api-status.json >/dev/null
+          jq -e '.apiConfigured == true and .productLevelRanking == true and .searchMode == "viator_partner_api_products_search"' policy.json >/dev/null
+          jq -e '.apiConfigured == true and .productLevelRanking == true and .searchMode == "viator_partner_api_products_search" and .affiliateAttributionSource == "viator_productUrl" and .bestPick.productSpecific == true and (.bestPick.affiliateUrl | contains("viator.com"))' recommend.json >/dev/null
 
+          echo 'TRAVEL_AFFILIATE_PRODUCTION_API_MODE_OK'
           echo 'TRAVEL_AFFILIATE_LIVE_SMOKE_OK'
