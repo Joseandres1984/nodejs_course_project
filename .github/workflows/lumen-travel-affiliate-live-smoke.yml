@@ -1,0 +1,37 @@
+name: LUMEN Travel Affiliate live smoke
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/a2a-worker/travel-affiliate-orchestrator.js'
+      - '.lumen/a2a-worker/adaptive-entry.js'
+      - '.github/workflows/lumen-travel-affiliate-live-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify travel affiliate orchestrator live
+        run: |
+          set -euo pipefail
+          BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          ok=0
+          for i in $(seq 1 30); do
+            if curl -fsS --max-time 15 "$BASE/travel/affiliate/policy" -o policy.json && \
+               curl -fsS --max-time 15 --get --data-urlencode 'text=Quiero un viaje a Barcelona con comida y museos' "$BASE/travel/affiliate/recommend" -o recommend.json && \
+               curl -fsS --max-time 15 "$BASE/travel/affiliate/stats" -o stats.json; then
+              if grep -q '1.0-travel-affiliate-orchestrator' policy.json && jq -e '.ok == true and .travelIntentDetected == true' recommend.json >/dev/null; then
+                ok=1
+                break
+              fi
+            fi
+            sleep 4
+          done
+          test "$ok" -eq 1
+          jq -e '.version == "1.0-travel-affiliate-orchestrator" and .provider == "viator" and .productLevelRanking == false and .scraping == false and .bookingAuthority == false and .paymentAuthority == false and .autonomousSpendUsd == 0' policy.json >/dev/null
+          jq -e '.ok == true and .destination == "Barcelona" and (.recommendations | length) >= 2 and .monetization.bookingAuthority == false and .monetization.paymentAuthority == false and .monetization.autonomousSpendUsd == 0' recommend.json >/dev/null
+          jq -e '(.bestPick.affiliateUrl | contains("pid=P00322694")) and (.bestPick.affiliateUrl | contains("mcid=42383")) and (.bestPick.affiliateUrl | contains("medium=link")) and (.bestPick.affiliateUrl | contains("medium_version=selector"))' recommend.json >/dev/null
+          jq -e '.version == "1.0-travel-affiliate-orchestrator" and .dbBound == true' stats.json >/dev/null
+          echo 'TRAVEL_AFFILIATE_LIVE_SMOKE_OK'
