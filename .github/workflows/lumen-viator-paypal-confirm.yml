@@ -1,0 +1,48 @@
+name: LUMEN Viator PayPal confirmation
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/a2a-worker/migrations/2026-09-30-confirm-viator-paypal.sql'
+      - '.github/workflows/lumen-viator-paypal-confirm.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  confirm-paypal:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify required secrets
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          test -n "$OPPORTUNITY_ADMIN_TOKEN"
+      - name: Apply idempotent PayPal confirmation to D1
+        working-directory: .lumen/a2a-worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@latest d1 execute lumen-zero --remote --file migrations/2026-09-30-confirm-viator-paypal.sql
+      - name: Verify live Viator payout method
+        env:
+          OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          curl -fsS --max-time 20 -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" "$BASE/viator/revenue/status" -o status.json
+          jq -e '.ok == true and .provider == "viator" and .payoutMethod.configured == true and .payoutMethod.method == "PAYPAL" and .payoutMethod.confirmedByUser == true and .payoutMethod.sensitiveDetailsStored == false and .commissionPolicy.autonomousSpendUsd == 0 and .commissionPolicy.bookingAuthority == false and .commissionPolicy.paymentAuthority == false' status.json >/dev/null
+          echo 'VIATOR_PAYPAL_CONFIRMED_IN_LUMEN'
