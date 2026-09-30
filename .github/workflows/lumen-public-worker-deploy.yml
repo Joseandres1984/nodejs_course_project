@@ -40,24 +40,33 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx --yes wrangler@latest deploy --config wrangler.toml
 
-      - name: Smoke public health and home
+      - name: Smoke public health, home and Travel storefront
         run: |
           set -euo pipefail
           BASE='https://lumen-zero-public.lumen-b2b.workers.dev'
           ok=0
-          for i in $(seq 1 15); do
-            health_code="$(curl -sS --max-time 15 -o health.json -w '%{http_code}' "$BASE/health" || true)"
-            home_code="$(curl -sS --max-time 15 -o home.html -w '%{http_code}' "$BASE/" || true)"
-            if [ "$health_code" = '200' ] && [ "$home_code" = '200' ] && grep -q '"ok":true' health.json && grep -q 'LUMEN' home.html; then
+          for i in $(seq 1 20); do
+            health_code="$(curl -sS --max-time 20 -o health.json -w '%{http_code}' "$BASE/health" || true)"
+            home_code="$(curl -sS --max-time 20 -o home.html -w '%{http_code}' "$BASE/" || true)"
+            travel_code="$(curl -sS --max-time 30 -o travel.html -w '%{http_code}' "$BASE/travel?q=Rio%20de%20Janeiro&source=web" || true)"
+            travel_json_code="$(curl -sS --max-time 30 -o travel.json -w '%{http_code}' "$BASE/travel.json?q=Rio%20de%20Janeiro&source=web" || true)"
+            if [ "$health_code" = '200' ] && [ "$home_code" = '200' ] && [ "$travel_code" = '200' ] && [ "$travel_json_code" = '200' ] \
+              && grep -q '"ok":true' health.json \
+              && grep -q 'LUMEN' home.html \
+              && grep -q 'LUMEN TRAVEL' travel.html \
+              && grep -q 'Transparencia' travel.html \
+              && jq -e '.ok == true and .affiliateDisclosure == true and .bookingAuthority == false and .paymentAuthority == false' travel.json >/dev/null; then
               ok=1
               break
             fi
             sleep 4
           done
           if [ "$ok" -ne 1 ]; then
-            echo "PUBLIC_SMOKE_FAILED health=${health_code:-none} home=${home_code:-none}"
+            echo "PUBLIC_SMOKE_FAILED health=${health_code:-none} home=${home_code:-none} travel=${travel_code:-none} travel_json=${travel_json_code:-none}"
             cat health.json 2>/dev/null || true
             head -c 500 home.html 2>/dev/null || true
+            head -c 800 travel.html 2>/dev/null || true
+            cat travel.json 2>/dev/null || true
             exit 1
           fi
-          echo 'PUBLIC_SMOKE_OK'
+          echo 'PUBLIC_TRAVEL_STOREFRONT_SMOKE_OK'

@@ -11,6 +11,7 @@ import { handleTravelDemandBridge, syncTravelDemandToOpportunities } from "./tra
 import { handleTravelProviderRegistry } from "./travel-provider-registry.js";
 import { handleProviderBackedTravelDiscovery } from "./travel-provider-backed-discovery.js";
 import { handleTravelAffiliateRegistry } from "./travel-affiliate-registry.js";
+import { handleTravelAcquisitionEngine, runTravelAcquisitionEngine } from "./travel-acquisition-engine.js";
 
 export default {
   async fetch(request, env, ctx) {
@@ -32,6 +33,9 @@ export default {
 
     const travelConsumerResponse = await handleTravelConsumerEngine(request, env);
     if (travelConsumerResponse) return travelConsumerResponse;
+
+    const travelAcquisitionResponse = await handleTravelAcquisitionEngine(request, env);
+    if (travelAcquisitionResponse) return travelAcquisitionResponse;
 
     const viatorApiResponse = await handleViatorApi(request, env);
     if (viatorApiResponse) return viatorApiResponse;
@@ -61,6 +65,7 @@ export default {
     ctx.waitUntil(syncTravelDemandToOpportunities(env).catch(() => ({ ok:false, isolatedFailure:true })));
     ctx.waitUntil(runTravelAffiliateOrchestrator(env).catch(() => ({ ok:false, isolatedFailure:true })));
     ctx.waitUntil(syncViatorBookingConversions(env).catch(() => ({ ok:false, isolatedFailure:true })));
+    ctx.waitUntil(runTravelAcquisitionEngine(env).catch(() => ({ ok:false, isolatedFailure:true })));
     return adaptiveCore.scheduled(controller, env, ctx);
   }
 };

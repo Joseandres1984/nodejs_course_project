@@ -1,0 +1,67 @@
+name: LUMEN Travel acquisition v2 check
+
+on:
+  pull_request:
+    paths:
+      - '.lumen/a2a-worker/travel-acquisition-engine.js'
+      - '.lumen/a2a-worker/adaptive-entry.js'
+      - '.lumen/public-worker/travel-storefront.js'
+      - '.lumen/public-worker/gateway.js'
+      - '.lumen/runtime/zero_instagram_travel_acquisition_prepare_v1.py'
+      - '.github/workflows/lumen-instagram-travel-acquisition-prepare.yml'
+      - '.github/workflows/lumen-public-worker-deploy.yml'
+      - '.github/workflows/lumen-travel-acquisition-v2-check.yml'
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Syntax checks
+        run: |
+          set -euo pipefail
+          node --check .lumen/a2a-worker/travel-acquisition-engine.js
+          node --check .lumen/a2a-worker/adaptive-entry.js
+          node --check .lumen/public-worker/travel-storefront.js
+          node --check .lumen/public-worker/gateway.js
+          python -m py_compile .lumen/runtime/zero_instagram_travel_acquisition_prepare_v1.py
+
+      - name: Buyer acquisition and safety invariants
+        run: |
+          set -euo pipefail
+          grep -q 'lumen_viator_booking_events' .lumen/a2a-worker/travel-acquisition-engine.js
+          grep -q 'confirmations' .lumen/a2a-worker/travel-acquisition-engine.js
+          grep -q 'autonomousSpendUsd:0' .lumen/a2a-worker/travel-acquisition-engine.js
+          grep -q 'publicationAuthority:false' .lumen/a2a-worker/travel-acquisition-engine.js
+          grep -q 'runTravelAcquisitionEngine' .lumen/a2a-worker/adaptive-entry.js
+          grep -q 'Transparencia:' .lumen/public-worker/travel-storefront.js
+          grep -q 'affiliateDisclosure:true' .lumen/public-worker/travel-storefront.js
+          grep -q 'bookingAuthority:false' .lumen/public-worker/travel-storefront.js
+          grep -q 'paymentAuthority:false' .lumen/public-worker/travel-storefront.js
+          grep -q 'handleTravelStorefront' .lumen/public-worker/gateway.js
+          grep -q 'approval_required.*True' .lumen/runtime/zero_instagram_travel_acquisition_prepare_v1.py
+          grep -q 'autonomous_spend_usd.*0' .lumen/runtime/zero_instagram_travel_acquisition_prepare_v1.py
+          grep -q "LIVE_OUTBOUND: 'false'" .github/workflows/lumen-instagram-travel-acquisition-prepare.yml
+          grep -q "LUMEN_INSTAGRAM_SEND_ENABLED: 'false'" .github/workflows/lumen-instagram-travel-acquisition-prepare.yml
+          echo 'TRAVEL_ACQUISITION_V2_INVARIANTS_OK'
+
+      - name: Dry-run A2A bundle
+        working-directory: .lumen/a2a-worker
+        run: |
+          set -euo pipefail
+          cp wrangler.toml wrangler.acquisition-check.toml
+          sed -i 's/^main = "opportunity-entry.js"$/main = "adaptive-entry.js"/' wrangler.acquisition-check.toml
+          grep -q '^main = "adaptive-entry.js"$' wrangler.acquisition-check.toml
+          npx --yes wrangler@latest deploy --dry-run --config wrangler.acquisition-check.toml
+
+      - name: Dry-run public buyer storefront
+        working-directory: .lumen/public-worker
+        run: npx --yes wrangler@latest deploy --dry-run --config wrangler.toml
