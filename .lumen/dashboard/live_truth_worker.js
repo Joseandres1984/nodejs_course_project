@@ -77,6 +77,46 @@ async function gmailDashboardStatus(env) {
   };
 }
 
+function argentinaReleasedSearchCap(now = new Date()) {
+  const hourText = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Argentina/Buenos_Aires",
+    hour: "2-digit",
+    hourCycle: "h23",
+  }).format(now);
+  const hour = Number(hourText);
+  if (hour < 6) return 4;
+  if (hour < 12) return 10;
+  if (hour < 18) return 17;
+  return 24;
+}
+
+function withSearchBudgetTruth(scout) {
+  const current = scout && typeof scout === "object" ? scout : {};
+  const reportedHardCap = Math.max(0, Number(current.hard_cap || 0));
+
+  // Once the A2A backend publishes a real quota meter, trust it and stop adapting it here.
+  if (reportedHardCap > 0) return current;
+
+  const releasedCap = argentinaReleasedSearchCap();
+  const used = Math.max(0, Number(current.used ?? current.demand_used ?? 0));
+  const demandUsed = Math.max(0, Number(current.demand_used ?? used));
+  const effectiveUsed = Math.max(used, demandUsed);
+  const remaining = Math.max(0, releasedCap - effectiveUsed);
+
+  return {
+    ...current,
+    provider: current.provider || "A2A + TED + UK Contracts Finder",
+    used: effectiveUsed,
+    remaining,
+    hard_cap: 24,
+    released_cap: releasedCap,
+    general_used: Math.max(0, Number(current.general_used || 0)),
+    demand_used: demandUsed,
+    budget_exhausted: remaining <= 0,
+    budget_source: "argentina_staged_internal_cap",
+  };
+}
+
 function jsonResponse(data, sourceResponse, extraHeaders = {}) {
   const headers = new Headers(sourceResponse.headers);
   headers.set("cache-control", "no-store, no-cache, must-revalidate");
@@ -98,6 +138,7 @@ export default {
       let data;
       try { data = await response.json(); } catch { return response; }
       data.instagram_posts = await withCommandTokens(data.instagram_posts, env);
+      data.scout = withSearchBudgetTruth(data.scout);
       const [publicStatus, gmail] = await Promise.all([
         publicWebStatus(env),
         gmailDashboardStatus(env),
@@ -136,6 +177,7 @@ export default {
       return jsonResponse(data, response, {
         "x-lumen-public-health-source": "service-binding",
         "x-lumen-gmail-status-source": "a2a-channel-health",
+        "x-lumen-search-budget-source": data.scout?.budget_source || "a2a-backend",
       });
     }
 
