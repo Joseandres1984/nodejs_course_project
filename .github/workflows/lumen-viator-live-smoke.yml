@@ -6,6 +6,8 @@ on:
     paths:
       - '.lumen/a2a-worker/viator-affiliate.js'
       - '.lumen/a2a-worker/viator-api.js'
+      - '.lumen/a2a-worker/viator-conversion-sync.js'
+      - '.lumen/a2a-worker/viator-optimized-recommend.js'
       - '.lumen/a2a-worker/adaptive-entry.js'
       - '.lumen/a2a-worker/travel-consumer-engine.js'
       - '.lumen/a2a-worker/travel-provider-registry.js'
@@ -24,7 +26,7 @@ jobs:
           ok=0
           for i in $(seq 1 30); do
             if curl -fsS --max-time 15 "$BASE/health/viator-affiliate" -o viator-health.json; then
-              if jq -e '.ok == true and .provider == "viator" and .mode == "affiliate-link-generation" and .networkCalls == 0' viator-health.json >/dev/null; then
+              if jq -e '.ok == true and .provider == "viator" and (.mode | startswith("affiliate-link-generation")) and .networkCalls == 0 and .analyticsReady == true and .apiProductUrlPreserved == true' viator-health.json >/dev/null; then
                 location=$(curl -sS --max-time 15 -o /dev/null -w '%{redirect_url}' "$BASE/go/viator?url=$(python -c 'import urllib.parse; print(urllib.parse.quote("https://www.viator.com/San-Juan/d903-ttd", safe=""))')")
                 if echo "$location" | grep -q 'viator.com/San-Juan/d903-ttd' && echo "$location" | grep -q 'pid=P00322694' && echo "$location" | grep -q 'mcid=42383' && echo "$location" | grep -q 'medium=link' && echo "$location" | grep -q 'medium_version=selector'; then
                   ok=1
@@ -37,7 +39,7 @@ jobs:
           test "$ok" -eq 1
           echo 'VIATOR_AFFILIATE_LIVE_SMOKE_OK'
 
-      - name: Verify live Travel B2C and Viator API configuration
+      - name: Verify live Travel B2C Viator API and conversion health
         run: |
           set -euo pipefail
           BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
@@ -45,10 +47,12 @@ jobs:
           for i in $(seq 1 30); do
             if curl -fsS --max-time 15 "$BASE/travel/discovery/policy" -o travel-policy.json \
               && curl -fsS --max-time 15 "$BASE/travel/providers/policy" -o provider-policy.json \
-              && curl -fsS --max-time 15 "$BASE/viator/api/status" -o viator-api-status.json; then
+              && curl -fsS --max-time 15 "$BASE/viator/api/status" -o viator-api-status.json \
+              && curl -fsS --max-time 15 "$BASE/health/viator-conversions" -o viator-conversions.json; then
               if jq -e '.name == "LUMEN Travel Discovery" and .autonomousSpend == false and .createsBooking == false' travel-policy.json >/dev/null \
                 && jq -e '.version == "1.1-travel-provider-registry" and .createsBooking == false and .createsCharge == false and .autonomousSpend == false' provider-policy.json >/dev/null \
-                && jq -e '.provider == "viator" and .environment == "production" and .configured == true and .secretExposed == false and .bookingAuthority == false and .paymentAuthority == false' viator-api-status.json >/dev/null; then
+                && jq -e '.provider == "viator" and .environment == "production" and .configured == true and .secretExposed == false and .bookingAuthority == false and .paymentAuthority == false' viator-api-status.json >/dev/null \
+                && jq -e '.ok == true and .configured == true and .environment == "production" and .mode == "booking-event-attribution" and .recommendedPolling == "hourly" and .bookingAuthority == false and .paymentAuthority == false and .autonomousSpendUsd == 0' viator-conversions.json >/dev/null; then
                 ok=1
                 break
               fi
@@ -57,4 +61,4 @@ jobs:
           done
           test "$ok" -eq 1
           jq -e '.externalProviderStatus.providers[] | select(.id == "viator-basic-affiliate-v1") | .configured == true and .mappedDestinations >= 8' provider-policy.json >/dev/null
-          echo 'TRAVEL_VIATOR_API_LIVE_SMOKE_OK'
+          echo 'TRAVEL_VIATOR_API_CONVERSION_LIVE_SMOKE_OK'
