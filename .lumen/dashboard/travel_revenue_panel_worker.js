@@ -31,7 +31,7 @@ async function safeFirst(env, sql, binds = []) {
 async function revenueSnapshot(env) {
   const [performance, payouts, settings, campaignPerformance, recentPayouts, recentPerformance] = await Promise.all([
     safeRows(env, "SELECT currency,SUM(sessions) sessions,SUM(pageviews) pageviews,SUM(bookings) bookings,SUM(booking_value) booking_value,SUM(commission_amount) estimated_commission,MAX(imported_at) last_import FROM lumen_viator_performance GROUP BY currency ORDER BY currency"),
-    safeRows(env, "SELECT currency,SUM(bookings) bookings,SUM(commission_amount) paid_commission,MAX(payout_date) last_payout,MAX(imported_at) last_import FROM lumen_viator_payouts WHERE UPPER(COALESCE(payout_status,'PAID')) NOT IN ('CANCELLED','CANCELED','FAILED','REJECTED') GROUP BY currency ORDER BY currency"),
+    safeRows(env, "SELECT currency,SUM(bookings) bookings,SUM(commission_amount) paid_commission,MAX(payout_date) last_payout,MAX(imported_at) last_import FROM lumen_viator_payouts WHERE UPPER(COALESCE(payout_status,'UNKNOWN')) IN ('PAID','COMPLETED','SENT','PROCESSED') GROUP BY currency ORDER BY currency"),
     safeFirst(env, "SELECT configured,method,currency,confirmed_by_user,updated_at FROM lumen_viator_payout_settings WHERE id='primary'"),
     safeRows(env, "SELECT COALESCE(NULLIF(campaign,''),'sin campaña') campaign,currency,SUM(sessions) sessions,SUM(bookings) bookings,SUM(booking_value) booking_value,SUM(commission_amount) estimated_commission FROM lumen_viator_performance GROUP BY COALESCE(NULLIF(campaign,''),'sin campaña'),currency ORDER BY estimated_commission DESC,bookings DESC LIMIT 12"),
     safeRows(env, "SELECT payout_date,payout_reference,payout_status,payout_method,bookings,commission_amount,currency,source_reference,imported_at FROM lumen_viator_payouts ORDER BY COALESCE(payout_date,imported_at) DESC LIMIT 12"),
@@ -85,8 +85,8 @@ async function revenueSnapshot(env) {
     recentPerformance,
     accountingRules: {
       estimatedIsCash: false,
-      payoutsAreVerifiedRevenue: true,
-      cancelledOrFailedPayoutsExcluded: true
+      onlyVerifiedPayoutStatusesCountAsCash: true,
+      verifiedPayoutStatuses: ["PAID", "COMPLETED", "SENT", "PROCESSED"]
     }
   };
 }
@@ -100,7 +100,7 @@ const REVENUE_RENDER_JS = `function renderTravelRevenue(t){
   const paid=moneyRows(r.paidByCurrency,'paidCommission');
   const value=moneyRows(r.estimatedByCurrency,'bookingValue');
   const payout=r.payoutMethod||{};
-  $('travelRevenueTotals').innerHTML=line('Reservas reportadas',num(r.estimatedBookings||0))+line('Valor de reservas',value)+line('Comisión estimada',estimated)+line('Pagado por Viator','<strong class="good">'+paid+'</strong>')+'<p class="note">La comisión estimada no se trata como efectivo. Sólo los payouts importados desde Finance cuentan como ingreso cobrado.</p>';
+  $('travelRevenueTotals').innerHTML=line('Reservas reportadas',num(r.estimatedBookings||0))+line('Valor de reservas',value)+line('Comisión estimada',estimated)+line('Pagado por Viator','<strong class="good">'+paid+'</strong>')+'<p class="note">La comisión estimada no se trata como efectivo. Sólo payouts PAID/COMPLETED/SENT/PROCESSED cuentan como ingreso cobrado.</p>';
   $('travelPayoutStatus').innerHTML=line('Método',payout.configured?'<span class="chip ok">'+esc(payout.method||'CONFIGURADO')+'</span>':'<span class="chip no">PENDIENTE</span>')+line('Confirmación',payout.confirmedByUser?'<span class="chip ok">CONFIRMADO</span>':'<span class="chip">NO CONFIRMADO</span>')+line('Moneda',esc(payout.currency||'—'))+line('Reservas pagadas',num(r.paidBookings||0))+line('Datos bancarios almacenados','NO');
   $('travelRevenueCampaigns').innerHTML=table([['Campaña',x=>esc(x.campaign)],['Sesiones',x=>num(x.sessions)],['Reservas',x=>num(x.bookings)],['Valor',x=>esc(x.currency)+' '+num(x.bookingValue).toLocaleString('es-AR',{maximumFractionDigits:2})],['Comisión est.',x=>esc(x.currency)+' '+num(x.estimatedCommission).toLocaleString('es-AR',{maximumFractionDigits:2})]],r.campaignPerformance||[]);
   $('travelRevenuePayouts').innerHTML=table([['Fecha',x=>esc(x.payout_date||'—')],['Estado',x=>esc(x.payout_status||'—')],['Método',x=>esc(x.payout_method||'—')],['Importe',x=>esc(x.currency||'USD')+' '+num(x.commission_amount).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})]],r.recentPayouts||[]);
