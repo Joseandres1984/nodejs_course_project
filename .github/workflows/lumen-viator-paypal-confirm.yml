@@ -4,7 +4,6 @@ on:
   push:
     branches: [lumen-zero]
     paths:
-      - '.lumen/a2a-worker/migrations/2026-09-30-confirm-viator-paypal.sql'
       - '.github/workflows/lumen-viator-paypal-confirm.yml'
   workflow_dispatch:
 
@@ -15,28 +14,25 @@ jobs:
   confirm-paypal:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-      - name: Verify required secrets
+      - name: Verify protected admin secret
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
         run: |
           set -euo pipefail
-          test -n "$CLOUDFLARE_API_TOKEN"
-          test -n "$CLOUDFLARE_ACCOUNT_ID"
           test -n "$OPPORTUNITY_ADMIN_TOKEN"
-      - name: Apply idempotent PayPal confirmation to D1
-        working-directory: .lumen/a2a-worker
+      - name: Confirm PayPal through protected LUMEN runtime
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
         run: |
           set -euo pipefail
-          npx --yes wrangler@latest d1 execute lumen-zero --remote --file migrations/2026-09-30-confirm-viator-paypal.sql
+          BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          curl -fsS --max-time 20 \
+            -X POST \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'content-type: application/json' \
+            --data '{"method":"PAYPAL","configured":true,"confirmedByUser":true}' \
+            "$BASE/viator/revenue/payout-method" -o confirm.json
+          jq -e '.ok == true and .payoutMethod.configured == true and .payoutMethod.method == "PAYPAL" and .payoutMethod.confirmedByUser == true' confirm.json >/dev/null
       - name: Verify live Viator payout method
         env:
           OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
