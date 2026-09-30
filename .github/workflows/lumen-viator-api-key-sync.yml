@@ -16,10 +16,12 @@ jobs:
         with:
           node-version: '24'
       - name: Verify required secrets
+        id: secrets
         env:
           CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           VIATOR_API_KEY: ${{ secrets.VIATOR_API_KEY }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
           if [ -z "$CF_TOKEN" ] || [ -z "$CF_ACCOUNT" ]; then
@@ -27,11 +29,17 @@ jobs:
             exit 2
           fi
           if [ -z "$VIATOR_API_KEY" ]; then
-            echo 'VIATOR_API_KEY_MISSING'
-            exit 3
+            echo 'viator_configured=false' >> "$GITHUB_OUTPUT"
+            echo 'VIATOR_API_KEY_NOT_CONFIGURED'
+            if [ "$EVENT_NAME" = 'workflow_dispatch' ]; then
+              exit 3
+            fi
+            exit 0
           fi
+          echo 'viator_configured=true' >> "$GITHUB_OUTPUT"
           echo 'VIATOR_API_KEY_PRESENT'
       - name: Sync Viator API key to Cloudflare Worker
+        if: steps.secrets.outputs.viator_configured == 'true'
         working-directory: .lumen/a2a-worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -43,6 +51,7 @@ jobs:
           printf '%s' "$VIATOR_API_KEY" | npx --yes wrangler@latest secret put VIATOR_API_KEY --config wrangler.toml
           echo 'VIATOR_API_KEY_SYNCED'
       - name: Verify runtime sees API configuration
+        if: steps.secrets.outputs.viator_configured == 'true'
         run: |
           set -euo pipefail
           BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
@@ -56,3 +65,6 @@ jobs:
           done
           test "$ok" -eq 1
           echo 'VIATOR_API_CONFIGURED'
+      - name: Report fallback mode
+        if: steps.secrets.outputs.viator_configured != 'true'
+        run: echo 'VIATOR_FALLBACK_AFFILIATE_MODE_REMAINS_ACTIVE'
