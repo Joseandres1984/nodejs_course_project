@@ -1,0 +1,53 @@
+name: LUMEN Viator sandbox diagnostic
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-viator-sandbox-diagnostic.yml'
+  workflow_dispatch:
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate Viator key and Basic Access flow in sandbox
+        env:
+          VIATOR_API_KEY: ${{ secrets.VIATOR_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$VIATOR_API_KEY" ]; then
+            echo 'VIATOR_API_KEY_MISSING'
+            exit 2
+          fi
+
+          BASE='https://api.sandbox.viator.com/partner'
+          COMMON=(-H "exp-api-key: $VIATOR_API_KEY" -H 'Accept-Language: es-AR' -H 'Accept: application/json;version=2.0')
+
+          dest_status=$(curl -sS --max-time 30 -o destinations.json -w '%{http_code}' "${COMMON[@]}" "$BASE/destinations")
+          echo "DESTINATIONS_HTTP=$dest_status"
+          if [ "$dest_status" != '200' ]; then
+            jq -c '{code,message,trackingId}' destinations.json 2>/dev/null || head -c 500 destinations.json
+            exit 3
+          fi
+
+          dest_id=$(jq -r '.destinations // . | map(select((.name // "") | ascii_downcase == "barcelona")) | (map(select(.type == "CITY"))[0] // .[0]) | .destinationId // empty' destinations.json)
+          if [ -z "$dest_id" ]; then
+            echo 'BARCELONA_DESTINATION_NOT_FOUND'
+            exit 4
+          fi
+          echo "BARCELONA_DESTINATION_ID=$dest_id"
+
+          jq -n --arg destination "$dest_id" '{filtering:{destination:$destination},sorting:{sort:"DEFAULT",order:"ASCENDING"},pagination:{start:1,count:4},currency:"USD"}' > search-request.json
+          search_status=$(curl -sS --max-time 30 -o search.json -w '%{http_code}' \
+            -X POST "${COMMON[@]}" -H 'Content-Type: application/json;version=2.0' \
+            --data-binary @search-request.json "$BASE/products/search?campaign-value=lumen-api")
+          echo "PRODUCT_SEARCH_HTTP=$search_status"
+          if [ "$search_status" != '200' ]; then
+            jq -c '{code,message,trackingId}' search.json 2>/dev/null || head -c 500 search.json
+            exit 5
+          fi
+
+          jq -e '(.products | type == "array") and (.products | length) > 0' search.json >/dev/null
+          jq -c '{productCount:(.products|length),sample:(.products[0] | {productCode,title,productUrl,pricing,reviews})}' search.json
+          echo 'VIATOR_SANDBOX_BASIC_ACCESS_OK'
