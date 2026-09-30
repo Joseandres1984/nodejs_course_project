@@ -1,5 +1,6 @@
-const VERSION = "1.0-viator-revenue-reconciliation";
+const VERSION = "1.1-viator-revenue-reconciliation";
 const MAX_IMPORT_ROWS = 5000;
+const VERIFIED_PAYOUT_STATUSES = new Set(["PAID", "COMPLETED", "SENT", "PROCESSED"]);
 
 function clean(value, limit = 4000) {
   return String(value ?? "").trim().slice(0, limit);
@@ -102,7 +103,7 @@ function integer(value) {
 }
 
 function currencyFrom(row, fallback = "USD") {
-  const explicit = clean(pick(row, ["currency", "currency code", "payout currency"]), 12).toUpperCase();
+  const explicit = clean(pick(row, ["currency", "currency code", "currencyCode", "payout currency", "payoutCurrency"]), 12).toUpperCase();
   if (explicit) return explicit;
   const joined = Object.values(row || {}).map(v => clean(v, 200)).join(" ").toUpperCase();
   const match = joined.match(/\b(USD|EUR|GBP|AUD|CAD|ARS|BRL|MXN)\b/);
@@ -129,35 +130,36 @@ async function stableKey(kind, row) {
 function performanceRow(raw, defaults = {}) {
   const row = Object.fromEntries(Object.entries(raw || {}).map(([k, v]) => [normalizedHeader(k), v]));
   return {
-    reportDate: isoDate(pick(row, ["date", "report date", "booking date", "travel date"])),
-    periodStart: isoDate(defaults.periodStart || pick(row, ["period start", "start date", "from"])),
-    periodEnd: isoDate(defaults.periodEnd || pick(row, ["period end", "end date", "to"])),
-    campaign: clean(pick(row, ["campaign", "campaign name", "campaign value"]), 200),
-    source: clean(pick(row, ["source", "traffic source", "link source"]), 120),
+    reportDate: isoDate(pick(row, ["date", "report date", "reportDate", "booking date", "bookingDate", "travel date", "travelDate"])),
+    periodStart: isoDate(defaults.periodStart || pick(row, ["period start", "periodStart", "start date", "startDate", "from"])),
+    periodEnd: isoDate(defaults.periodEnd || pick(row, ["period end", "periodEnd", "end date", "endDate", "to"])),
+    campaign: clean(pick(row, ["campaign", "campaign name", "campaignName", "campaign value", "campaignValue"]), 200),
+    source: clean(pick(row, ["source", "traffic source", "trafficSource", "link source", "linkSource"]), 120),
     sessions: integer(pick(row, ["sessions", "visitors", "visits"])),
-    pageviews: integer(pick(row, ["pageviews", "page views", "views"])),
-    bookings: integer(pick(row, ["bookings", "booking count", "orders"])),
-    bookingValue: amount(pick(row, ["booking value", "booking value usd", "gross booking value", "sales"])),
-    commissionAmount: amount(pick(row, ["commission", "gross commission", "estimated commission", "commission amount"])),
+    pageviews: integer(pick(row, ["pageviews", "page views", "pageViews", "views"])),
+    bookings: integer(pick(row, ["bookings", "booking count", "bookingCount", "orders"])),
+    bookingValue: amount(pick(row, ["booking value", "bookingValue", "booking value usd", "gross booking value", "grossBookingValue", "sales"])),
+    commissionAmount: amount(pick(row, ["commission", "gross commission", "grossCommission", "estimated commission", "estimatedCommission", "commission amount", "commissionAmount"])),
     currency: currencyFrom(row, defaults.currency),
-    bookingStatus: clean(pick(row, ["booking status", "status"]), 80),
+    bookingStatus: clean(pick(row, ["booking status", "bookingStatus", "status"]), 80),
     raw: raw || {}
   };
 }
 
 function payoutRow(raw, defaults = {}) {
   const row = Object.fromEntries(Object.entries(raw || {}).map(([k, v]) => [normalizedHeader(k), v]));
+  const explicitStatus = clean(pick(row, ["payout status", "payoutStatus", "payment status", "paymentStatus", "status"]), 80).toUpperCase();
   return {
-    payoutDate: isoDate(pick(row, ["payout date", "payment date", "paid date", "date"])),
-    periodStart: isoDate(defaults.periodStart || pick(row, ["period start", "start date", "from"])),
-    periodEnd: isoDate(defaults.periodEnd || pick(row, ["period end", "end date", "to"])),
-    payoutReference: clean(pick(row, ["payout reference", "payment reference", "reference", "remittance id"]), 200),
-    payoutStatus: clean(pick(row, ["payout status", "payment status", "status"]), 80) || "PAID",
-    payoutMethod: clean(pick(row, ["payout method", "payment method", "method"]), 80),
-    bookings: integer(pick(row, ["bookings", "booking count"])),
-    commissionAmount: amount(pick(row, ["commission", "commission amount", "payout amount", "payment amount", "amount"])),
+    payoutDate: isoDate(pick(row, ["payout date", "payoutDate", "payment date", "paymentDate", "paid date", "paidDate", "date"])),
+    periodStart: isoDate(defaults.periodStart || pick(row, ["period start", "periodStart", "start date", "startDate", "from"])),
+    periodEnd: isoDate(defaults.periodEnd || pick(row, ["period end", "periodEnd", "end date", "endDate", "to"])),
+    payoutReference: clean(pick(row, ["payout reference", "payoutReference", "payment reference", "paymentReference", "reference", "remittance id", "remittanceId"]), 200),
+    payoutStatus: explicitStatus || (defaults.assumePaid === true ? "PAID" : "UNKNOWN"),
+    payoutMethod: clean(pick(row, ["payout method", "payoutMethod", "payment method", "paymentMethod", "method"]), 80).toUpperCase(),
+    bookings: integer(pick(row, ["bookings", "booking count", "bookingCount"])),
+    commissionAmount: amount(pick(row, ["commission", "commission amount", "commissionAmount", "payout amount", "payoutAmount", "payment amount", "paymentAmount", "amount"])),
     currency: currencyFrom(row, defaults.currency),
-    sourceReference: clean(pick(row, ["booking reference", "source reference", "booking id"]), 200),
+    sourceReference: clean(pick(row, ["booking reference", "bookingReference", "source reference", "sourceReference", "booking id", "bookingId"]), 200),
     raw: raw || {}
   };
 }
@@ -180,7 +182,7 @@ async function importPerformance(env, payload) {
       .bind(`VPERF-${key.slice(0,24)}`, key, item.reportDate, item.periodStart, item.periodEnd, item.campaign, item.source, item.sessions, item.pageviews, item.bookings, item.bookingValue, item.commissionAmount, item.currency, item.bookingStatus, new Date().toISOString(), JSON.stringify(item.raw)).run();
     if (Number(result?.meta?.changes || 0) > 0) inserted += 1; else duplicates += 1;
   }
-  return { ok: true, reportType: "performance", received: rows.length, inserted, duplicates, version: VERSION };
+  return { ok: true, reportType: "performance", received: rows.length, inserted, duplicates, commissionClassification: "estimated_not_cash", version: VERSION };
 }
 
 async function importPayouts(env, payload) {
@@ -189,21 +191,32 @@ async function importPayouts(env, payload) {
   if (!rows.length) return { ok: false, error: "payout_rows_required" };
   let inserted = 0;
   let duplicates = 0;
+  let verifiedRows = 0;
   for (const raw of rows) {
     const item = payoutRow(raw, payload || {});
+    if (VERIFIED_PAYOUT_STATUSES.has(item.payoutStatus)) verifiedRows += 1;
     const key = await stableKey("payout", item);
     const result = await env.DB.prepare("INSERT OR IGNORE INTO lumen_viator_payouts(id,row_key,payout_date,period_start,period_end,payout_reference,payout_status,payout_method,bookings,commission_amount,currency,source_reference,imported_at,raw_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
       .bind(`VPAY-${key.slice(0,24)}`, key, item.payoutDate, item.periodStart, item.periodEnd, item.payoutReference, item.payoutStatus, item.payoutMethod, item.bookings, item.commissionAmount, item.currency, item.sourceReference, new Date().toISOString(), JSON.stringify(item.raw)).run();
     if (Number(result?.meta?.changes || 0) > 0) inserted += 1; else duplicates += 1;
   }
-  return { ok: true, reportType: "payout", received: rows.length, inserted, duplicates, verifiedRevenueSource: "viator_finance_export", version: VERSION };
+  return {
+    ok: true,
+    reportType: "payout",
+    received: rows.length,
+    inserted,
+    duplicates,
+    verifiedRows,
+    verifiedRevenueStatuses: [...VERIFIED_PAYOUT_STATUSES],
+    version: VERSION
+  };
 }
 
 async function revenueStatus(env) {
   await ensureSchema(env);
   const [performance, payouts, settings] = await Promise.all([
     env.DB.prepare("SELECT currency,SUM(sessions) sessions,SUM(bookings) bookings,SUM(booking_value) booking_value,SUM(commission_amount) estimated_commission,MAX(imported_at) last_import FROM lumen_viator_performance GROUP BY currency ORDER BY currency").all(),
-    env.DB.prepare("SELECT currency,SUM(bookings) bookings,SUM(commission_amount) paid_commission,MAX(payout_date) last_payout,MAX(imported_at) last_import FROM lumen_viator_payouts WHERE UPPER(COALESCE(payout_status,'PAID')) NOT IN ('CANCELLED','CANCELED','FAILED','REJECTED') GROUP BY currency ORDER BY currency").all(),
+    env.DB.prepare("SELECT currency,SUM(bookings) bookings,SUM(commission_amount) paid_commission,MAX(payout_date) last_payout,MAX(imported_at) last_import FROM lumen_viator_payouts WHERE UPPER(COALESCE(payout_status,'UNKNOWN')) IN ('PAID','COMPLETED','SENT','PROCESSED') GROUP BY currency ORDER BY currency").all(),
     env.DB.prepare("SELECT configured,method,currency,confirmed_by_user,updated_at FROM lumen_viator_payout_settings WHERE id='primary'").first()
   ]);
   return {
@@ -223,7 +236,8 @@ async function revenueStatus(env) {
     },
     commissionPolicy: {
       estimatedPerformanceIsNotCash: true,
-      payoutRowsCountAsVerifiedRevenue: true,
+      verifiedPayoutStatuses: [...VERIFIED_PAYOUT_STATUSES],
+      unknownOrPendingPayoutIsNotCash: true,
       autonomousSpendUsd: 0,
       bookingAuthority: false,
       paymentAuthority: false
@@ -255,12 +269,13 @@ export async function handleViatorRevenue(request, env) {
       provider: "viator",
       sourceOfTruth: {
         estimatedCommission: "Viator Partner Platform performance export",
-        paidCommission: "Viator Finance payout export"
+        paidCommission: "Viator Finance payout export with verified paid status"
       },
       reportingApiAvailable: false,
       csvImportSupported: true,
       storesBankDetails: false,
       storesPayPalCredentials: false,
+      verifiedPayoutStatuses: [...VERIFIED_PAYOUT_STATUSES],
       bookingAuthority: false,
       paymentAuthority: false,
       autonomousSpendUsd: 0
