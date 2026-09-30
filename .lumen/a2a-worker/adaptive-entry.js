@@ -1,6 +1,7 @@
 import adaptiveCore from "./adaptive-core-entry.js";
 import { handleViatorAffiliate } from "./viator-affiliate.js";
 import { handleViatorApi } from "./viator-api.js";
+import { handleViatorRevenue } from "./viator-revenue.js";
 import { handleViatorSmartRecommend } from "./viator-smart-recommend.js";
 import { handleTravelAffiliateOrchestrator, runTravelAffiliateOrchestrator } from "./travel-affiliate-orchestrator.js";
 import { handleTravelConsumerEngine, TRAVEL_CONSUMER_DESTINATIONS } from "./travel-consumer-engine.js";
@@ -32,6 +33,9 @@ export default {
 
     const viatorApiResponse = await handleViatorApi(request, env);
     if (viatorApiResponse) return viatorApiResponse;
+
+    const viatorRevenueResponse = await handleViatorRevenue(request, env);
+    if (viatorRevenueResponse) return viatorRevenueResponse;
 
     const viatorResponse = await handleViatorAffiliate(request, env);
     if (viatorResponse) return viatorResponse;
