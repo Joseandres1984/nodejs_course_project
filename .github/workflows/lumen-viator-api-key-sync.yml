@@ -1,6 +1,10 @@
 name: LUMEN Viator API key sync
 
 on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-viator-api-key-sync.yml'
   workflow_dispatch:
 
 jobs:
