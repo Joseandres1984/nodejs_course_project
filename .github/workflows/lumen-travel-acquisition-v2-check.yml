@@ -42,13 +42,13 @@ jobs:
           grep -q 'autonomousSpendUsd:0' .lumen/a2a-worker/travel-acquisition-engine.js
           grep -q 'publicationAuthority:false' .lumen/a2a-worker/travel-acquisition-engine.js
           grep -q 'runTravelAcquisitionEngine' .lumen/a2a-worker/adaptive-entry.js
-          grep -q '2.0-lumen-travel-site' .lumen/public-worker/travel-storefront.js
+          grep -Eq 'VERSION = "(2\.0-lumen-travel-site|3\.0-lumen-travel-marketplace)"' .lumen/public-worker/travel-storefront.js
           grep -q 'Transparencia' .lumen/public-worker/travel-storefront.js
           grep -q 'imageUrl' .lumen/public-worker/travel-storefront.js
-          grep -q 'affiliateDisclosure:true' .lumen/public-worker/travel-storefront.js
-          grep -q 'bookingAuthority:false' .lumen/public-worker/travel-storefront.js
-          grep -q 'paymentAuthority:false' .lumen/public-worker/travel-storefront.js
-          grep -q 'autonomousSpendUsd:0' .lumen/public-worker/travel-storefront.js
+          grep -q 'affiliateDisclosure: true' .lumen/public-worker/travel-storefront.js
+          grep -q 'bookingAuthority: false' .lumen/public-worker/travel-storefront.js
+          grep -q 'paymentAuthority: false' .lumen/public-worker/travel-storefront.js
+          grep -q 'autonomousSpendUsd: 0' .lumen/public-worker/travel-storefront.js
           grep -q 'handleTravelStorefront' .lumen/public-worker/gateway.js
           grep -q 'approval_required.*True' .lumen/runtime/zero_instagram_travel_acquisition_prepare_v1.py
           grep -q 'autonomous_spend_usd.*0' .lumen/runtime/zero_instagram_travel_acquisition_prepare_v1.py
