@@ -1,0 +1,51 @@
+name: LUMEN Travel click intelligence check
+
+on:
+  pull_request:
+    paths:
+      - '.lumen/a2a-worker/viator-affiliate.js'
+      - '.lumen/a2a-worker/viator-smart-recommend.js'
+      - '.lumen/dashboard/network_panel_hydration_worker.js'
+      - '.github/workflows/lumen-travel-click-intelligence-check.yml'
+  workflow_dispatch:
+
+jobs:
+  validate-travel-click-intelligence:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Syntax check changed Workers
+        run: |
+          set -euo pipefail
+          node --check .lumen/a2a-worker/viator-affiliate.js
+          node --check .lumen/a2a-worker/viator-smart-recommend.js
+          node --check .lumen/dashboard/network_panel_hydration_worker.js
+
+      - name: Verify tracking and CTA invariants
+        run: |
+          set -euo pipefail
+          grep -q 'lumen_travel_events' .lumen/a2a-worker/viator-affiliate.js
+          grep -q 'Analytics must never block a monetized redirect' .lumen/a2a-worker/viator-affiliate.js
+          grep -q 'price_availability_v1' .lumen/a2a-worker/viator-smart-recommend.js
+          grep -q 'dates_available_v1' .lumen/a2a-worker/viator-smart-recommend.js
+          grep -q 'data-tab="travel"' .lumen/dashboard/network_panel_hydration_worker.js
+          grep -q 'travelCtr7' .lumen/dashboard/network_panel_hydration_worker.js
+          grep -q 'autonomousSpendUsd: 0' .lumen/a2a-worker/viator-smart-recommend.js
+          echo 'TRAVEL_CLICK_INTELLIGENCE_INVARIANTS_OK'
+
+      - name: Dry-run A2A bundle
+        working-directory: .lumen/a2a-worker
+        run: |
+          set -euo pipefail
+          cp wrangler.toml wrangler.check.toml
+          sed -i 's/^main = "opportunity-entry.js"$/main = "adaptive-entry.js"/' wrangler.check.toml
+          grep -q '^main = "adaptive-entry.js"$' wrangler.check.toml
+          npx --yes wrangler@latest deploy --dry-run --config wrangler.check.toml
+
+      - name: Dry-run dashboard bundle
+        working-directory: .lumen/dashboard
+        run: npx --yes wrangler@latest deploy --dry-run --config wrangler.toml
