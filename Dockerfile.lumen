@@ -3,4 +3,6 @@ WORKDIR /app
 COPY requirements-lumen.txt ./requirements-lumen.txt
 RUN pip install --no-cache-dir -r requirements-lumen.txt
 COPY lumen_app.py ./lumen_app.py
-CMD ["sh","-c","uvicorn lumen_app:app --host 0.0.0.0 --port ${PORT:-8000}"]
+COPY viator_affiliate_core.py ./viator_affiliate_core.py
+COPY lumen_viator_app.py ./lumen_viator_app.py
+CMD ["sh","-c","uvicorn lumen_viator_app:app --host 0.0.0.0 --port ${PORT:-8000}"]
