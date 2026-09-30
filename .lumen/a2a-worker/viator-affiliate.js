@@ -1,4 +1,4 @@
-const VERSION = "1.1-viator-affiliate-click-intelligence";
+const VERSION = "1.2-viator-affiliate-attribution-safe";
 const DEFAULT_PID = "P00322694";
 const DEFAULT_MCID = "42383";
 const DEFAULT_MEDIUM = "link";
@@ -29,6 +29,22 @@ function dimension(value, limit = 160) {
 function isViatorHost(hostname) {
   const host = clean(hostname, 300).toLowerCase().replace(/\.$/, "");
   return host === "viator.com" || host.endsWith(".viator.com");
+}
+
+function validateAttributedViatorUrl(rawUrl, expectedPid) {
+  const raw = clean(rawUrl, 4000);
+  if (!raw) throw new Error("viator_url_required");
+  let url;
+  try { url = new URL(raw); }
+  catch { throw new Error("invalid_viator_url"); }
+  if (url.protocol !== "https:") throw new Error("https_viator_url_required");
+  if (!isViatorHost(url.hostname)) throw new Error("only_viator_urls_allowed");
+  if (url.username || url.password) throw new Error("credentials_not_allowed");
+  if (url.port && url.port !== "443") throw new Error("unexpected_viator_port");
+  const pid = clean(url.searchParams.get("pid"), 100);
+  if (!pid || pid !== clean(expectedPid, 100)) throw new Error("attributed_viator_pid_mismatch");
+  // Return the exact API-provided URL string. Viator warns that changing productUrl can break attribution.
+  return raw;
 }
 
 export function buildViatorAffiliateUrl(rawUrl, options = {}) {
@@ -133,7 +149,16 @@ export async function handleViatorAffiliate(request, env) {
   if (url.pathname === "/health/viator-affiliate" && request.method === "GET") {
     let analyticsReady = false;
     try { analyticsReady = await ensureTravelAnalyticsSchema(env); } catch {}
-    return json({ ok: Boolean(config.pid), provider: "viator", version: VERSION, mode: "affiliate-link-generation+click-intelligence", networkCalls: 0, pidConfigured: Boolean(config.pid), analyticsReady });
+    return json({
+      ok: Boolean(config.pid),
+      provider: "viator",
+      version: VERSION,
+      mode: "affiliate-link-generation+click-intelligence+api-url-preservation",
+      networkCalls: 0,
+      pidConfigured: Boolean(config.pid),
+      analyticsReady,
+      apiProductUrlPreserved: true
+    });
   }
 
   if (url.pathname === "/travel/event" && request.method === "POST") {
@@ -151,7 +176,11 @@ export async function handleViatorAffiliate(request, env) {
 
   if (url.pathname === "/go/viator" && request.method === "GET") {
     try {
-      const target = buildViatorAffiliateUrl(url.searchParams.get("url") || "", config);
+      const rawTarget = url.searchParams.get("url") || "";
+      const preserveProviderUrl = url.searchParams.get("preserve") === "1";
+      const target = preserveProviderUrl
+        ? validateAttributedViatorUrl(rawTarget, config.pid)
+        : buildViatorAffiliateUrl(rawTarget, config);
       try {
         await recordTravelEvent(env, "click", Object.fromEntries(url.searchParams.entries()), target);
       } catch {
