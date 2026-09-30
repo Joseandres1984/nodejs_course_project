@@ -63,10 +63,13 @@ const fallback = {
 const wrangler = fs.readFileSync("./wrangler.toml", "utf8");
 assert.match(wrangler, /\[ai\]\s*\nbinding\s*=\s*"AI"/m);
 
-const adaptive = fs.readFileSync("./adaptive-entry.js", "utf8");
-assert.match(adaptive, /cognitiveCanExecuteTools:\s*false/);
-assert.match(adaptive, /cognitiveCanOverrideConversionPriority:\s*false/);
-assert.match(adaptive, /autonomousSpendUsd:\s*0/);
+const adaptiveWrapper = fs.readFileSync("./adaptive-entry.js", "utf8");
+assert.match(adaptiveWrapper, /import adaptiveCore from "\.\/adaptive-core-entry\.js"/);
+
+const adaptiveCore = fs.readFileSync("./adaptive-core-entry.js", "utf8");
+assert.match(adaptiveCore, /cognitiveCanExecuteTools:\s*false/);
+assert.match(adaptiveCore, /cognitiveCanOverrideConversionPriority:\s*false/);
+assert.match(adaptiveCore, /autonomousSpendUsd:\s*0/);
 
 const core = fs.readFileSync("./cognitive-core-live.js", "utf8");
 assert.match(core, /AI_MONETARY_BUDGET_USD\s*=\s*0/);
