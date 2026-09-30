@@ -5,8 +5,11 @@ on:
     branches: [lumen-zero]
     paths:
       - '.lumen/a2a-worker/viator-affiliate.js'
+      - '.lumen/a2a-worker/viator-api.js'
       - '.lumen/a2a-worker/adaptive-entry.js'
-      - '.lumen/a2a-worker/adaptive-core-entry.js'
+      - '.lumen/a2a-worker/travel-consumer-engine.js'
+      - '.lumen/a2a-worker/travel-provider-registry.js'
+      - '.lumen/a2a-worker/travel-external-providers.js'
       - '.github/workflows/lumen-viator-live-smoke.yml'
   workflow_dispatch:
 
@@ -18,7 +21,6 @@ jobs:
         run: |
           set -euo pipefail
           BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
-          TARGET='https://www.viator.com/San-Juan/d903-ttd'
           ok=0
           for i in $(seq 1 30); do
             if curl -fsS --max-time 15 "$BASE/health/viator-affiliate" -o viator-health.json; then
@@ -34,3 +36,25 @@ jobs:
           done
           test "$ok" -eq 1
           echo 'VIATOR_AFFILIATE_LIVE_SMOKE_OK'
+
+      - name: Verify live Travel B2C and Viator API configuration
+        run: |
+          set -euo pipefail
+          BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          ok=0
+          for i in $(seq 1 30); do
+            if curl -fsS --max-time 15 "$BASE/travel/discovery/policy" -o travel-policy.json \
+              && curl -fsS --max-time 15 "$BASE/travel/providers/policy" -o provider-policy.json \
+              && curl -fsS --max-time 15 "$BASE/viator/api/status" -o viator-api-status.json; then
+              if jq -e '.name == "LUMEN Travel Discovery" and .autonomousSpend == false and .createsBooking == false' travel-policy.json >/dev/null \
+                && jq -e '.version == "1.1-travel-provider-registry" and .createsBooking == false and .createsCharge == false and .autonomousSpend == false' provider-policy.json >/dev/null \
+                && jq -e '.provider == "viator" and .environment == "production" and .configured == true and .secretExposed == false and .bookingAuthority == false and .paymentAuthority == false' viator-api-status.json >/dev/null; then
+                ok=1
+                break
+              fi
+            fi
+            sleep 4
+          done
+          test "$ok" -eq 1
+          jq -e '.externalProviderStatus.providers[] | select(.id == "viator-basic-affiliate-v1") | .configured == true and .mappedDestinations >= 8' provider-policy.json >/dev/null
+          echo 'TRAVEL_VIATOR_API_LIVE_SMOKE_OK'
