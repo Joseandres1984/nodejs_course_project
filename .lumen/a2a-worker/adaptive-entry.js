@@ -3,6 +3,7 @@ import { handleViatorAffiliate } from "./viator-affiliate.js";
 import { handleViatorApi } from "./viator-api.js";
 import { handleViatorRevenue } from "./viator-revenue.js";
 import { handleViatorConversionSync, syncViatorBookingConversions } from "./viator-conversion-sync.js";
+import { handleViatorOptimizedRecommend } from "./viator-optimized-recommend.js";
 import { handleViatorSmartRecommend } from "./viator-smart-recommend.js";
 import { handleTravelAffiliateOrchestrator, runTravelAffiliateOrchestrator } from "./travel-affiliate-orchestrator.js";
 import { handleTravelConsumerEngine, TRAVEL_CONSUMER_DESTINATIONS } from "./travel-consumer-engine.js";
@@ -43,6 +44,9 @@ export default {
 
     const viatorResponse = await handleViatorAffiliate(request, env);
     if (viatorResponse) return viatorResponse;
+
+    const optimizedRecommendResponse = await handleViatorOptimizedRecommend(request, env);
+    if (optimizedRecommendResponse) return optimizedRecommendResponse;
 
     const viatorSmartResponse = await handleViatorSmartRecommend(request, env);
     if (viatorSmartResponse) return viatorSmartResponse;
