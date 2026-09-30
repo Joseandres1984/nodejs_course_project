@@ -6,6 +6,7 @@ on:
     paths:
       - '.lumen/a2a-worker/cognitive-core-live.js'
       - '.lumen/a2a-worker/adaptive-entry.js'
+      - '.lumen/a2a-worker/adaptive-core-entry.js'
       - '.lumen/a2a-worker/wrangler.toml'
       - '.lumen/a2a-worker/test-cognitive-core-live.mjs'
       - '.github/workflows/lumen-cognitive-live-smoke.yml'
@@ -29,7 +30,9 @@ jobs:
         run: node --check cognitive-core-live.js
       - name: Syntax check adaptive runtime
         working-directory: .lumen/a2a-worker
-        run: node --check adaptive-entry.js
+        run: |
+          node --check adaptive-entry.js
+          node --check adaptive-core-entry.js
       - name: Run live cognitive safety tests
         working-directory: .lumen/a2a-worker
         run: node test-cognitive-core-live.mjs
@@ -41,3 +44,5 @@ jobs:
           grep -q 'AI_MONETARY_BUDGET_USD = 0' cognitive-core-live.js
           grep -q 'paidAiAllowed: false' cognitive-core-live.js
           grep -q 'modelCanExecuteTools: false' cognitive-core-live.js
+          grep -q 'cognitiveCanExecuteTools: false' adaptive-core-entry.js
+          grep -q 'autonomousSpendUsd: 0' adaptive-core-entry.js
