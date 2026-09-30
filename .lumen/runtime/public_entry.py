@@ -122,6 +122,10 @@ import revenue_cockpit_dedicated_runtime  # noqa: E402,F401
 # Command Center so navigation is bidirectional rather than relying on browser history.
 import command_center_revenue_launcher_runtime  # noqa: E402,F401
 
+# Register the zero-cost Viator affiliate monetization layer. Admin APIs generate tracked links;
+# the public redirect accepts only validated viator.com URLs and performs no paid/network search.
+import viator_affiliate_runtime  # noqa: E402,F401
+
 
 @app.middleware("http")
 async def public_root_landing(request: Request, call_next):
