@@ -53,9 +53,9 @@ jobs:
             if [ "$health_code" = '200' ] && [ "$home_code" = '200' ] && [ "$travel_code" = '200' ] && [ "$travel_json_code" = '200' ] \
               && grep -q '"ok":true' health.json \
               && grep -q 'LUMEN' home.html \
-              && grep -q 'LUMEN TRAVEL' travel.html \
+              && grep -q 'LUMEN Travel' travel.html \
               && grep -q 'Transparencia' travel.html \
-              && jq -e '.ok == true and .affiliateDisclosure == true and .bookingAuthority == false and .paymentAuthority == false' travel.json >/dev/null; then
+              && jq -e '.ok == true and (.version == "3.0-lumen-travel-marketplace" or .version == "2.0-lumen-travel-site") and .affiliateDisclosure == true and .bookingAuthority == false and .paymentAuthority == false and .autonomousSpendUsd == 0' travel.json >/dev/null; then
               ok=1
               break
             fi
