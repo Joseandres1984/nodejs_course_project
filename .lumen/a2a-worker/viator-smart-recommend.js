@@ -1,7 +1,7 @@
 import { getViatorApiStatus, getViatorDestinations, searchViatorProducts } from "./viator-api.js";
 import { planTravelAffiliateIntent } from "./travel-affiliate-orchestrator.js";
 
-const VERSION = "1.2-viator-smart-recommend-click-optimized";
+const VERSION = "1.3-viator-smart-recommend-revenue-attribution";
 const DESTINATION_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const PRODUCT_SEARCH_COUNT = 30;
 const MAX_RECOMMENDATIONS = 4;
@@ -147,13 +147,14 @@ function bestImage(product) {
 }
 
 function safeProductUrl(value) {
-  const raw = clean(value, 2000);
+  const raw = clean(value, 2400);
   if (!raw) return null;
   try {
     const url = new URL(raw);
     const host = url.hostname.toLowerCase();
     if (url.protocol !== "https:" || !(host === "viator.com" || host.endsWith(".viator.com"))) return null;
-    return url.toString();
+    if (url.username || url.password) return null;
+    return raw;
   } catch {
     return null;
   }
@@ -218,14 +219,21 @@ function chooseCtaVariant() {
   return CTA_VARIANTS[Math.random() < 0.5 ? 0 : 1];
 }
 
-function trackedClickUrl(targetUrl, { destination = "", productId = "", campaign = "viator_recommend", variant = "default" } = {}) {
+function providerCampaignValue(destinationId, cta) {
+  return clean(`lumen_travel_${cta.id}_${destinationId || "generic"}`, 200)
+    .replace(/[^A-Za-z0-9_]/g, "_")
+    .slice(0, 200);
+}
+
+function trackedClickUrl(targetUrl, { destination = "", productId = "", campaign = "viator_recommend", variant = "default", preserveProviderUrl = false } = {}) {
   if (!targetUrl) return null;
   try {
     const tracked = new URL("/go/viator", PUBLIC_A2A_ORIGIN);
     tracked.searchParams.set("url", targetUrl);
     tracked.searchParams.set("source", "travel_recommender");
-    tracked.searchParams.set("campaign", clean(campaign, 120));
+    tracked.searchParams.set("campaign", clean(campaign, 200));
     tracked.searchParams.set("variant", clean(variant, 120));
+    if (preserveProviderUrl) tracked.searchParams.set("preserve", "1");
     if (destination) tracked.searchParams.set("destination", clean(destination, 160));
     if (productId) tracked.searchParams.set("product_id", clean(productId, 180));
     return tracked.toString();
@@ -234,8 +242,9 @@ function trackedClickUrl(targetUrl, { destination = "", productId = "", campaign
   }
 }
 
-function decoratePlan(plan, campaign) {
-  const cta = chooseCtaVariant();
+function decoratePlan(plan, { campaign, cta, preserveProviderUrls = false } = {}) {
+  const selectedCta = cta || chooseCtaVariant();
+  const selectedCampaign = clean(campaign || `lumen_travel_${selectedCta.id}`, 200);
   const destination = clean(plan?.destination, 160);
   const recommendations = (Array.isArray(plan?.recommendations) ? plan.recommendations : []).map((item, index) => {
     const providerAffiliateUrl = clean(item?.affiliateUrl, 2400);
@@ -243,9 +252,15 @@ function decoratePlan(plan, campaign) {
     return {
       ...item,
       providerAffiliateUrl: providerAffiliateUrl || null,
-      affiliateUrl: providerAffiliateUrl ? trackedClickUrl(providerAffiliateUrl, { destination, productId, campaign, variant: cta.id }) : null,
-      ctaLabel: cta.label,
-      ctaVariant: cta.id
+      affiliateUrl: providerAffiliateUrl ? trackedClickUrl(providerAffiliateUrl, {
+        destination,
+        productId,
+        campaign: selectedCampaign,
+        variant: selectedCta.id,
+        preserveProviderUrl: preserveProviderUrls && item?.productSpecific === true
+      }) : null,
+      ctaLabel: selectedCta.label,
+      ctaVariant: selectedCta.id
     };
   });
   return {
@@ -255,10 +270,12 @@ function decoratePlan(plan, campaign) {
     clickTracking: {
       enabled: true,
       source: "travel_recommender",
-      campaign,
-      variant: cta.id,
-      ctaLabel: cta.label,
-      redirectPath: "/go/viator"
+      campaign: selectedCampaign,
+      providerCampaign: selectedCampaign,
+      variant: selectedCta.id,
+      ctaLabel: selectedCta.label,
+      redirectPath: "/go/viator",
+      providerProductUrlPreserved: preserveProviderUrls
     }
   };
 }
@@ -290,6 +307,7 @@ async function recordRecommendationImpression(env, plan) {
 
 function fallbackPlan(text, env, reason, apiStatus) {
   const fallback = planTravelAffiliateIntent(text, env);
+  const cta = chooseCtaVariant();
   return decoratePlan({
     ...fallback,
     version: VERSION,
@@ -298,7 +316,7 @@ function fallbackPlan(text, env, reason, apiStatus) {
     productLevelRanking: false,
     searchMode: "affiliate_search_fallback",
     apiFallbackReason: clean(reason, 220) || "viator_api_unavailable"
-  }, "viator_search_fallback");
+  }, { campaign: `lumen_travel_fallback_${cta.id}`, cta, preserveProviderUrls: false });
 }
 
 export async function recommendViatorProducts(text, env = {}) {
@@ -319,6 +337,8 @@ export async function recommendViatorProducts(text, env = {}) {
     const destination = resolveDestination(destinations, basePlan.destination);
     if (!destination?.destinationId) return fallbackPlan(text, env, "viator_destination_not_found", apiStatus);
 
+    const cta = chooseCtaVariant();
+    const campaign = providerCampaignValue(destination.destinationId, cta);
     const currency = clean(env?.VIATOR_API_CURRENCY, 20) || "USD";
     const payload = {
       filtering: { destination: String(destination.destinationId) },
@@ -326,7 +346,7 @@ export async function recommendViatorProducts(text, env = {}) {
       pagination: { start: 1, count: PRODUCT_SEARCH_COUNT },
       currency
     };
-    const result = await searchViatorProducts(env, payload);
+    const result = await searchViatorProducts(env, payload, { campaignValue: campaign });
     const products = Array.isArray(result?.data?.products) ? result.data.products : [];
     const terms = queryTerms(text, basePlan.destination);
     const recommendations = products
@@ -351,18 +371,20 @@ export async function recommendViatorProducts(text, env = {}) {
       apiEnvironment: apiStatus.environment,
       productLevelRanking: true,
       searchMode: "viator_partner_api_products_search",
-      affiliateAttributionSource: "viator_productUrl",
+      affiliateAttributionSource: "viator_productUrl_preserved_exactly",
+      providerCampaign: campaign,
       trackingId: result.trackingId || null,
       rateLimitRemaining: result.rateLimitRemaining || null,
       monetization: {
         model: "viator_affiliate_api",
         linksMonetized: recommendations.length,
+        providerCampaign: campaign,
         bookingAuthority: false,
         paymentAuthority: false,
         autonomousSpendUsd: 0
       },
-      note: "Product recommendations are retrieved from Viator Partner API; measurable CTA redirects preserve affiliate attribution and checkout remains on Viator."
-    }, "viator_api_products");
+      note: "Viator Partner API productUrl is preserved exactly through the measurable LUMEN redirect; checkout remains on Viator."
+    }, { campaign, cta, preserveProviderUrls: true });
   } catch (error) {
     return fallbackPlan(text, env, clean(error?.message || error, 220), apiStatus);
   }
@@ -385,15 +407,17 @@ export async function handleViatorSmartRecommend(request, env) {
         "detect travel intent",
         "resolve Viator destination",
         "retrieve product summaries with Partner API",
+        "assign Viator campaign-value before productUrl generation",
+        "preserve API productUrl exactly through tracked redirect",
         "rank product-level recommendations",
-        "route recommendations through measurable affiliate redirects",
         "A/B test action-oriented CTA labels",
-        "fall back to measurable affiliate search links when API is unavailable"
+        "reconcile campaign performance with Viator exports"
       ],
       productLevelRanking: apiStatus.configured,
       searchMode: apiStatus.configured ? "viator_partner_api_products_search" : "affiliate_search_fallback",
-      affiliateAttributionSource: apiStatus.configured ? "viator_productUrl_via_lumen_redirect" : "selector_deep_link_via_lumen_redirect",
+      affiliateAttributionSource: apiStatus.configured ? "viator_productUrl_preserved_via_lumen_redirect" : "selector_deep_link_via_lumen_redirect",
       ctaVariants: CTA_VARIANTS,
+      campaignLevelReconciliation: apiStatus.configured,
       scraping: false,
       bookingAuthority: false,
       paymentAuthority: false,
