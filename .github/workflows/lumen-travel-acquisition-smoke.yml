@@ -1,0 +1,62 @@
+name: LUMEN Travel Acquisition smoke
+
+on:
+  pull_request:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/a2a-worker/travel-acquisition-engine.js'
+      - '.lumen/a2a-worker/adaptive-entry.js'
+      - '.github/workflows/lumen-travel-acquisition-smoke.yml'
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/a2a-worker/travel-acquisition-engine.js'
+      - '.lumen/a2a-worker/adaptive-entry.js'
+      - '.github/workflows/lumen-travel-acquisition-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  acquisition-safety:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validate module syntax
+        run: |
+          node --check .lumen/a2a-worker/travel-acquisition-engine.js
+          node --check .lumen/a2a-worker/adaptive-entry.js
+      - name: Validate acquisition policy and guardrails
+        run: |
+          node --experimental-default-type=module --input-type=module <<'NODE'
+          import { handleTravelAcquisitionEngine } from './.lumen/a2a-worker/travel-acquisition-engine.js';
+          const response = await handleTravelAcquisitionEngine(new Request('https://local/travel/acquisition/policy'), {});
+          if (!response || response.status !== 200) throw new Error('policy_unavailable');
+          const p = await response.json();
+          const required = [
+            p.ok === true,
+            p.version === '1.0-travel-acquisition-engine',
+            p.paidAds === false,
+            p.autonomousSpendUsd === 0,
+            p.publicationAuthority === false,
+            p.unsolicitedMassMessaging === false,
+            p.storesPersonalData === false,
+            p.bookingAuthority === false,
+            p.paymentAuthority === false,
+            p.autonomousPurchase === false,
+            p.bindingActionsHumanGated === true,
+            p.portfolioPolicy?.prematureWinnerClaims === false
+          ];
+          if (required.some(v => !v)) throw new Error('acquisition_guardrail_failed');
+          console.log('TRAVEL_ACQUISITION_POLICY_OK');
+          NODE
+      - name: Validate adaptive wiring
+        run: |
+          grep -q 'handleTravelAcquisitionEngine' .lumen/a2a-worker/adaptive-entry.js
+          grep -q 'runTravelAcquisitionEngine' .lumen/a2a-worker/adaptive-entry.js
+          grep -q 'runTravelAffiliateOrchestrator' .lumen/a2a-worker/adaptive-entry.js
+          echo 'TRAVEL_ACQUISITION_WIRING_OK'
