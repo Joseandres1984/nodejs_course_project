@@ -1,5 +1,6 @@
 import core from "./worker.js";
 import {handleRevenueStorefront} from "./revenue-storefront.js";
+import {handleTravelStorefront} from "./travel-storefront.js";
 
 const CONVERSION_BASE = "https://lumen-zero-conversion.lumen-b2b.workers.dev";
 const X402_BASE = "https://lumen-zero-x402.lumen-b2b.workers.dev";
@@ -49,8 +50,8 @@ function rewriteText(text, origin) {
     .replaceAll(X402_BASE, origin)
     .replaceAll(X402_INTERNAL, origin)
     .replaceAll('href="/catalog"', 'href="/store"')
-    .replaceAll('<a href="/services">Servicios</a>', '<a href="/services">Servicios</a><a href="/catalogo">Catálogo</a><a href="/store">Comprar</a>')
-    .replaceAll('<a class="cta" href="/services">Ver servicios</a>', '<a class="cta" href="/catalogo">Ver catálogo</a> <a class="cta" href="/services">Servicios a medida</a>');
+    .replaceAll('<a href="/services">Servicios</a>', '<a href="/services">Servicios</a><a href="/catalogo">Catálogo</a><a href="/travel">Travel</a><a href="/store">Comprar</a>')
+    .replaceAll('<a class="cta" href="/services">Ver servicios</a>', '<a class="cta" href="/travel">Experiencias de viaje</a> <a class="cta" href="/catalogo">Ver catálogo</a> <a class="cta" href="/services">Servicios a medida</a>');
   return humanCheckout(rewritten, origin);
 }
 
@@ -131,7 +132,6 @@ async function proxyX402(request, binding, origin, targetPath) {
   if (!binding || typeof binding.fetch !== "function") {
     return Response.json({ok:false,error:"internal_service_unavailable"},{status:503});
   }
-  // x402 paid resources are GET-based. Hide transient cold-start 500s from buyers.
   if (request.method !== "GET") return proxyBinding(request,binding,origin,targetPath,origin,true);
 
   const incoming = new URL(request.url);
@@ -144,25 +144,14 @@ async function proxyX402(request, binding, origin, targetPath) {
     try {
       const upstream = await binding.fetch(new Request(target.toString(), {method:"GET",headers,redirect:"manual"}));
       if (upstream.status !== 500) return normalizeResponse(upstream, origin, {rewriteBody:true});
-      last = {
-        status:upstream.status,
-        headers:new Headers(upstream.headers),
-        body:await upstream.text(),
-      };
+      last = { status:upstream.status, headers:new Headers(upstream.headers), body:await upstream.text() };
     } catch (error) {
-      last = {
-        status:503,
-        headers:new Headers({"content-type":"application/json"}),
-        body:JSON.stringify({ok:false,error:"x402_internal_retry",detail:String(error?.message||error).slice(0,180)}),
-      };
+      last = { status:503, headers:new Headers({"content-type":"application/json"}), body:JSON.stringify({ok:false,error:"x402_internal_retry",detail:String(error?.message||error).slice(0,180)}) };
     }
     if (attempt < 4) await new Promise(resolve => setTimeout(resolve, 350 * attempt));
   }
 
-  return normalizeResponse(new Response(last?.body || '{"error":"Internal Server Error"}', {
-    status:last?.status || 503,
-    headers:last?.headers || {"content-type":"application/json"},
-  }), origin, {rewriteBody:true});
+  return normalizeResponse(new Response(last?.body || '{"error":"Internal Server Error"}', { status:last?.status || 503, headers:last?.headers || {"content-type":"application/json"} }), origin, {rewriteBody:true});
 }
 
 export default {
@@ -171,6 +160,9 @@ export default {
     const path = url.pathname.replace(/\/+$/, "") || "/";
     const origin = url.origin;
 
+    const travelResponse = await handleTravelStorefront(request, env);
+    if (travelResponse) return travelResponse;
+
     const revenueResponse = await handleRevenueStorefront(request, env);
     if (revenueResponse) return revenueResponse;
 
@@ -178,30 +170,20 @@ export default {
       if (ctx?.waitUntil) ctx.waitUntil(warmX402(env.X402, origin));
       return proxyBinding(request, env.CONVERSION, CONVERSION_INTERNAL, "/catalog", origin, true);
     }
-    if (request.method === "GET" && path === "/store.json") {
-      return proxyBinding(request, env.CONVERSION, CONVERSION_INTERNAL, "/catalog.json", origin, true);
-    }
+    if (request.method === "GET" && path === "/store.json") return proxyBinding(request, env.CONVERSION, CONVERSION_INTERNAL, "/catalog.json", origin, true);
     if (/^\/offer\/[a-z0-9-]+$/.test(path) && request.method === "GET") {
       if (ctx?.waitUntil) ctx.waitUntil(warmX402(env.X402, origin));
       return proxyBinding(request, env.CONVERSION, CONVERSION_INTERNAL, path, origin, true);
     }
-    if (/^\/go\/[a-z0-9-]+$/.test(path) && request.method === "GET") {
-      return proxyBinding(request, env.CONVERSION, CONVERSION_INTERNAL, path, origin, false);
-    }
-    if (/^\/intent\/[a-z0-9-]+$/.test(path) && request.method === "POST") {
-      return proxyBinding(request, env.CONVERSION, CONVERSION_INTERNAL, path, origin, true);
-    }
-
-    // Service Binding handles transport; the buyer sees only the public LUMEN URL.
+    if (/^\/go\/[a-z0-9-]+$/.test(path) && request.method === "GET") return proxyBinding(request, env.CONVERSION, CONVERSION_INTERNAL, path, origin, false);
+    if (/^\/intent\/[a-z0-9-]+$/.test(path) && request.method === "POST") return proxyBinding(request, env.CONVERSION, CONVERSION_INTERNAL, path, origin, true);
     if (/^\/buy\/[a-z0-9-]+$/.test(path) && ["GET","POST"].includes(request.method)) {
       return proxyX402(request, env.X402, origin, path);
     }
 
     const response = await core.fetch(request, env, ctx);
     const type = response.headers.get("content-type") || "";
-    if (request.method === "GET" && type.includes("text/html")) {
-      return normalizeResponse(response, origin, {rewriteBody:true});
-    }
+    if (request.method === "GET" && type.includes("text/html")) return normalizeResponse(response, origin, {rewriteBody:true});
     return response;
   }
 };
