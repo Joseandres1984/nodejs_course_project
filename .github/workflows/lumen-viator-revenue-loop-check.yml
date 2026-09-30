@@ -6,8 +6,10 @@ on:
       - '.lumen/a2a-worker/viator-affiliate.js'
       - '.lumen/a2a-worker/viator-smart-recommend.js'
       - '.lumen/a2a-worker/viator-revenue.js'
+      - '.lumen/a2a-worker/viator-conversion-sync.js'
       - '.lumen/a2a-worker/adaptive-entry.js'
       - '.lumen/dashboard/travel_revenue_panel_worker.js'
+      - '.lumen/dashboard/travel_conversion_panel_worker.js'
       - '.lumen/dashboard/wrangler.toml'
       - '.github/workflows/lumen-viator-revenue-loop-check.yml'
   workflow_dispatch:
@@ -27,8 +29,10 @@ jobs:
           node --check .lumen/a2a-worker/viator-affiliate.js
           node --check .lumen/a2a-worker/viator-smart-recommend.js
           node --check .lumen/a2a-worker/viator-revenue.js
+          node --check .lumen/a2a-worker/viator-conversion-sync.js
           node --check .lumen/a2a-worker/adaptive-entry.js
           node --check .lumen/dashboard/travel_revenue_panel_worker.js
+          node --check .lumen/dashboard/travel_conversion_panel_worker.js
 
       - name: Verify attribution and accounting invariants
         run: |
@@ -47,7 +51,9 @@ jobs:
           grep -q "IN ('PAID','COMPLETED','SENT','PROCESSED')" .lumen/dashboard/travel_revenue_panel_worker.js
           grep -q 'estimatedIsCash: false' .lumen/dashboard/travel_revenue_panel_worker.js
           grep -q 'Datos bancarios almacenados' .lumen/dashboard/travel_revenue_panel_worker.js
-          grep -q '^main = "travel_revenue_panel_worker.js"$' .lumen/dashboard/wrangler.toml
+          grep -q 'import app from "./travel_revenue_panel_worker.js"' .lumen/dashboard/travel_conversion_panel_worker.js
+          grep -q 'commissionNotInferredFromBookings: true' .lumen/dashboard/travel_conversion_panel_worker.js
+          grep -q '^main = "travel_conversion_panel_worker.js"$' .lumen/dashboard/wrangler.toml
           echo 'VIATOR_REVENUE_LOOP_INVARIANTS_OK'
 
       - name: Dry-run A2A bundle
