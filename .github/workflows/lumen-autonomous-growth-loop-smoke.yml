@@ -5,8 +5,10 @@ on:
     branches: [lumen-zero]
     paths:
       - '.lumen/a2a-worker/autonomous-growth-loop.js'
+      - '.lumen/a2a-worker/autonomous-growth-loop-v11.js'
       - '.lumen/a2a-worker/adaptive-entry.js'
       - '.lumen/a2a-worker/test-autonomous-growth-loop.mjs'
+      - '.lumen/a2a-worker/test-autonomous-growth-loop-v11.mjs'
       - '.lumen/a2a-worker/wrangler.toml'
       - '.github/workflows/lumen-autonomous-growth-loop-smoke.yml'
   workflow_dispatch:
@@ -26,13 +28,14 @@ jobs:
       - name: Check Growth Loop and adaptive entrypoint syntax
         working-directory: .lumen/a2a-worker
         run: |
-          node --check autonomous-growth-loop.js
+          node --check autonomous-growth-loop-v11.js
           node --check adaptive-entry.js
-      - name: Run Growth Loop decision and learning tests
+      - name: Run Growth Loop v1.1 truth tests
         working-directory: .lumen/a2a-worker
-        run: node test-autonomous-growth-loop.mjs
+        run: node test-autonomous-growth-loop-v11.mjs
       - name: Verify deployment-compatible base entrypoint
         run: |
           grep -F 'main = "opportunity-entry.js"' .lumen/a2a-worker/wrangler.toml
+          grep -F 'autonomous-growth-loop-v11.js' .lumen/a2a-worker/adaptive-entry.js
           grep -F 'handleAutonomousGrowthLoop' .lumen/a2a-worker/adaptive-entry.js
           grep -F 'runAutonomousGrowthLoop' .lumen/a2a-worker/adaptive-entry.js
