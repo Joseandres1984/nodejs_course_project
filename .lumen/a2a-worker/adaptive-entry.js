@@ -1,4 +1,5 @@
 import adaptiveCore from "./adaptive-core-entry.js";
+import { handleAutonomousGrowthLoop, runAutonomousGrowthLoop } from "./autonomous-growth-loop.js";
 import { handleViatorAffiliate } from "./viator-affiliate.js";
 import { handleViatorApi } from "./viator-api.js";
 import { handleViatorRevenue } from "./viator-revenue.js";
@@ -15,6 +16,9 @@ import { handleTravelAcquisitionEngine, runTravelAcquisitionEngine } from "./tra
 
 export default {
   async fetch(request, env, ctx) {
+    const growthResponse = await handleAutonomousGrowthLoop(request, env);
+    if (growthResponse) return growthResponse;
+
     const providerBackedDiscoveryResponse = await handleProviderBackedTravelDiscovery(
       request,
       env,
@@ -66,6 +70,15 @@ export default {
     ctx.waitUntil(runTravelAffiliateOrchestrator(env).catch(() => ({ ok:false, isolatedFailure:true })));
     ctx.waitUntil(syncViatorBookingConversions(env).catch(() => ({ ok:false, isolatedFailure:true })));
     ctx.waitUntil(runTravelAcquisitionEngine(env).catch(() => ({ ok:false, isolatedFailure:true })));
+
+    const scheduledAt = new Date(controller?.scheduledTime || Date.now());
+    if (scheduledAt.getUTCMinutes() === 7) {
+      ctx.waitUntil(runAutonomousGrowthLoop(env, {
+        trigger: "cloudflare_hourly_growth",
+        scheduledTime: controller?.scheduledTime || null,
+      }).catch(() => ({ ok:false, isolatedFailure:true })));
+    }
+
     return adaptiveCore.scheduled(controller, env, ctx);
   }
 };
