@@ -7,6 +7,7 @@ on:
       - '.lumen/a2a-worker/lumen-conversation-v2.js'
       - '.lumen/a2a-worker/self-learning-engine.js'
       - '.lumen/a2a-worker/adaptive-entry.js'
+      - '.lumen/a2a-worker/test-lumen-mind-v2-static.mjs'
       - '.lumen/dashboard/conversation_panel_worker_v2.js'
       - '.lumen/dashboard/wrangler.toml'
       - '.github/workflows/lumen-mind-v2-check.yml'
@@ -16,6 +17,7 @@ on:
       - '.lumen/a2a-worker/lumen-conversation-v2.js'
       - '.lumen/a2a-worker/self-learning-engine.js'
       - '.lumen/a2a-worker/adaptive-entry.js'
+      - '.lumen/a2a-worker/test-lumen-mind-v2-static.mjs'
       - '.lumen/dashboard/conversation_panel_worker_v2.js'
       - '.lumen/dashboard/wrangler.toml'
       - '.github/workflows/lumen-mind-v2-check.yml'
@@ -35,6 +37,9 @@ jobs:
           node --check .lumen/a2a-worker/self-learning-engine.js
           node --check .lumen/a2a-worker/adaptive-entry.js
           node --check .lumen/dashboard/conversation_panel_worker_v2.js
+      - name: Run Mind v2 static assertions
+        working-directory: .lumen/a2a-worker
+        run: node test-lumen-mind-v2-static.mjs
       - name: Verify responsive conversation invariants
         run: |
           set -euo pipefail
