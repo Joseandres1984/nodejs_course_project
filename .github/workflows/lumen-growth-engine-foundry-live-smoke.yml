@@ -1,0 +1,90 @@
+name: LUMEN Growth Engine Foundry Live Smoke
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/a2a-worker/growth-engine-foundry.js'
+      - '.lumen/a2a-worker/adaptive-entry.js'
+      - '.github/workflows/lumen-growth-engine-foundry-live-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  growth-foundry-live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Verify protected admin token
+        env:
+          ADMIN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+        run: |
+          test -n "${ADMIN:-}"
+          echo 'GROWTH_FOUNDRY_ADMIN_TOKEN_PRESENT'
+
+      - name: Wait for Growth Engine Foundry production endpoint
+        run: |
+          set -euo pipefail
+          BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          ok=0
+          for i in $(seq 1 48); do
+            if curl -fsS --max-time 15 "$BASE/growth-foundry/policy" -o /tmp/policy.json; then
+              if jq -e '.version == "1.0-growth-engine-foundry" and .guardrails.autonomousSpendUsd == 0 and .guardrails.createsExternalMessages == false and .guardrails.executesGeneratedCode == false and .guardrails.selfModifyingCode == false and .guardrails.newConnectors == false and .guardrails.primitiveExecutionRequiresStaticWhitelist == true and .guardrails.bindingActionsHumanGated == true and .guardrails.verifiedRevenueOnly == true' /tmp/policy.json >/dev/null; then
+                ok=1
+                break
+              fi
+            fi
+            sleep 5
+          done
+          test "$ok" -eq 1
+          echo 'GROWTH_ENGINE_FOUNDRY_POLICY_LIVE_OK'
+
+      - name: Run one bounded production Foundry cycle
+        env:
+          ADMIN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          code=$(curl --show-error --silent --max-time 90 -o /tmp/run.json -w '%{http_code}' \
+            -X POST "$BASE/growth-foundry/run" \
+            -H "x-lumen-admin: $ADMIN" \
+            -H 'content-type: application/json' -d '{}')
+          cat /tmp/run.json
+          echo
+          case "$code" in 200|202) ;; *) echo "unexpected HTTP $code"; exit 1 ;; esac
+          jq -e '
+            .ok == true and
+            .version == "1.0-growth-engine-foundry" and
+            (.cycle >= 1) and
+            (.directive.action == "NONE" or .directive.action == "PROBE_CANDIDATE" or .directive.action == "RUN_PROMOTED_MOTOR") and
+            .guardrails.autonomousSpendUsd == 0 and
+            .guardrails.autonomousPurchase == false and
+            .guardrails.autonomousContract == false and
+            .guardrails.createsExternalMessages == false and
+            .guardrails.executesGeneratedCode == false and
+            .guardrails.selfModifyingCode == false and
+            .guardrails.newConnectors == false and
+            .guardrails.primitiveExecutionRequiresStaticWhitelist == true and
+            .guardrails.bindingActionsHumanGated == true and
+            .guardrails.verifiedRevenueOnly == true
+          ' /tmp/run.json >/dev/null
+          echo 'GROWTH_ENGINE_FOUNDRY_BOUNDED_CYCLE_LIVE_OK'
+
+      - name: Verify persisted Foundry state
+        run: |
+          set -euo pipefail
+          BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          curl -fsS --max-time 30 "$BASE/growth-foundry/status" -o /tmp/status.json
+          jq -e '
+            .version == "1.0-growth-engine-foundry" and
+            .initialized == true and
+            (.cycle >= 1) and
+            .guardrails.autonomousSpendUsd == 0 and
+            .guardrails.createsExternalMessages == false and
+            .guardrails.executesGeneratedCode == false and
+            .guardrails.primitiveExecutionRequiresStaticWhitelist == true and
+            .guardrails.bindingActionsHumanGated == true
+          ' /tmp/status.json >/dev/null
+          echo 'GROWTH_ENGINE_FOUNDRY_STATE_PERSISTED_OK'
