@@ -14,6 +14,15 @@ jobs:
   diagnose:
     runs-on: ubuntu-latest
     steps:
+      - name: Check whether Travelpayouts token exists in GitHub secrets
+        env:
+          TRAVELPAYOUTS_API_TOKEN: ${{ secrets.TRAVELPAYOUTS_API_TOKEN }}
+        run: |
+          if [ -n "$TRAVELPAYOUTS_API_TOKEN" ]; then
+            echo 'TRAVELPAYOUTS_API_TOKEN_PRESENT'
+          else
+            echo 'TRAVELPAYOUTS_API_TOKEN_MISSING'
+          fi
       - name: Inspect live provider status and BUE-GIG quote safely
         run: |
           set -euo pipefail
