@@ -13,6 +13,7 @@ import { handleProviderBackedTravelDiscovery } from "./travel-provider-backed-di
 import { handleTravelAffiliateRegistry } from "./travel-affiliate-registry.js";
 import { handleTravelAcquisitionEngine, runTravelAcquisitionEngine } from "./travel-acquisition-engine.js";
 import { handleAutonomousGrowthLoop, runAutonomousGrowthLoop } from "./autonomous-growth-loop-v11.js";
+import { handleGrowthMultiplierV2, runGrowthMultiplierV2Cycle } from "./growth-multiplier-v2.js";
 import { handleTravelpayoutsFinance, syncTravelpayoutsFinance } from "./travelpayouts-finance-sync.js";
 import { syncX402SettlementsToRevenue } from "./x402-revenue-bridge.js";
 import { syncReferralSettlements } from "./referral-network.js";
@@ -60,6 +61,7 @@ async function refreshCommercialTruth(env) {
       "referral_settlements",
       "revenue_attribution",
       "profit_feedback",
+      "growth_multiplier_allocation",
       "growth_decision"
     ],
     guardrails: {
@@ -90,6 +92,9 @@ export default {
 
     const superautonomyResponse = await handleSuperautonomy(request, env);
     if (superautonomyResponse) return superautonomyResponse;
+
+    const growthMultiplierResponse = await handleGrowthMultiplierV2(request, env);
+    if (growthMultiplierResponse) return growthMultiplierResponse;
 
     const growthResponse = await handleAutonomousGrowthLoop(request, env);
     if (growthResponse) return growthResponse;
@@ -189,12 +194,15 @@ export default {
       }
 
       const commercialTruth = await refreshCommercialTruth(env);
+      const growthMultiplier = await isolated(() => runGrowthMultiplierV2Cycle(env, {
+        trigger: recoveryGrowth && !growthSlot ? "superautonomy_anti_stall_growth_multiplier" : "cloudflare_hourly_growth_multiplier"
+      }));
       const growth = await runAutonomousGrowthLoop(env, {
         trigger: recoveryGrowth && !growthSlot ? "superautonomy_anti_stall_recovery" : "cloudflare_hourly_growth_after_commercial_truth",
         scheduledTime:controller?.scheduledTime || null,
       });
 
-      return { ok:Boolean(growth?.ok), commercialTruth, growth, metaPrepare, superautonomy, selfLearning, metaLearn, selfCritic, superautonomyV3 };
+      return { ok:Boolean(growth?.ok), commercialTruth, growthMultiplier, growth, metaPrepare, superautonomy, selfLearning, metaLearn, selfCritic, superautonomyV3 };
     })().catch(() => ({ ok:false, isolatedFailure:true })));
 
     return adaptiveCore.scheduled(controller, env, ctx);
