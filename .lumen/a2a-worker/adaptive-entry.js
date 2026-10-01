@@ -13,6 +13,52 @@ import { handleProviderBackedTravelDiscovery } from "./travel-provider-backed-di
 import { handleTravelAffiliateRegistry } from "./travel-affiliate-registry.js";
 import { handleTravelAcquisitionEngine, runTravelAcquisitionEngine } from "./travel-acquisition-engine.js";
 import { handleAutonomousGrowthLoop, runAutonomousGrowthLoop } from "./autonomous-growth-loop-v11.js";
+import { syncX402SettlementsToRevenue } from "./x402-revenue-bridge.js";
+import { syncReferralSettlements } from "./referral-network.js";
+import { syncReferralCommissionSettlements } from "./referral-commission-engine.js";
+import { recomputeRevenueAttribution } from "./revenue-attribution-engine.js";
+import { recomputeProfitFeedback } from "./profit-feedback-engine.js";
+
+async function isolated(step) {
+  try {
+    return await step();
+  } catch (error) {
+    return {
+      ok: false,
+      isolatedFailure: true,
+      error: String(error?.message || error || "commercial_truth_refresh_failed").slice(0, 240)
+    };
+  }
+}
+
+async function refreshCommercialTruth(env) {
+  const x402 = await isolated(() => syncX402SettlementsToRevenue(env));
+  const referralCommissions = await isolated(() => syncReferralCommissionSettlements(env));
+  const referrals = await isolated(() => syncReferralSettlements(env));
+  const revenueAttribution = await isolated(() => recomputeRevenueAttribution(env));
+  const profitFeedback = await isolated(() => recomputeProfitFeedback(env));
+
+  return {
+    ok: [x402, referralCommissions, referrals, revenueAttribution, profitFeedback].every(result => result?.ok !== false),
+    x402,
+    referralCommissions,
+    referrals,
+    revenueAttribution,
+    profitFeedback,
+    truthOrder: [
+      "verified_settlements",
+      "referral_settlements",
+      "revenue_attribution",
+      "profit_feedback",
+      "growth_decision"
+    ],
+    guardrails: {
+      verifiedSettlementRequiredForRevenue: true,
+      autonomousSpendUsd: 0,
+      bindingActionsHumanGated: true
+    }
+  };
+}
 
 export default {
   async fetch(request, env, ctx) {
@@ -68,15 +114,25 @@ export default {
   async scheduled(controller, env, ctx) {
     ctx.waitUntil(syncTravelDemandToOpportunities(env).catch(() => ({ ok:false, isolatedFailure:true })));
     ctx.waitUntil(runTravelAffiliateOrchestrator(env).catch(() => ({ ok:false, isolatedFailure:true })));
-    ctx.waitUntil(syncViatorBookingConversions(env).catch(() => ({ ok:false, isolatedFailure:true })));
-    ctx.waitUntil(runTravelAcquisitionEngine(env).catch(() => ({ ok:false, isolatedFailure:true })));
+
     const scheduledAt = new Date(controller?.scheduledTime || Date.now());
-    if (scheduledAt.getUTCMinutes() === 7) {
-      ctx.waitUntil(runAutonomousGrowthLoop(env, {
-        trigger:"cloudflare_hourly_growth",
+    const growthSlot = scheduledAt.getUTCMinutes() === 7;
+
+    ctx.waitUntil((async () => {
+      await isolated(() => syncViatorBookingConversions(env));
+      await isolated(() => runTravelAcquisitionEngine(env));
+
+      if (!growthSlot) return { ok:true, growthSkipped:true };
+
+      const commercialTruth = await refreshCommercialTruth(env);
+      const growth = await runAutonomousGrowthLoop(env, {
+        trigger:"cloudflare_hourly_growth_after_commercial_truth",
         scheduledTime:controller?.scheduledTime || null,
-      }).catch(() => ({ ok:false, isolatedFailure:true })));
-    }
+      });
+
+      return { ok:Boolean(growth?.ok), commercialTruth, growth };
+    })().catch(() => ({ ok:false, isolatedFailure:true })));
+
     return adaptiveCore.scheduled(controller, env, ctx);
   }
 };
