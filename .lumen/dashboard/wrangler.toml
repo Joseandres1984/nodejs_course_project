@@ -1,5 +1,5 @@
 name = "lumen-zero-dashboard"
-main = "conversation_panel_worker_v2.js"
+main = "travel_conversion_panel_worker.js"
 compatibility_date = "2026-09-20"
 workers_dev = true
 
