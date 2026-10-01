@@ -1,6 +1,6 @@
 import { createExternalTravelProviders, getExternalTravelProviderStatus } from "./travel-external-providers.js";
 
-const VERSION = "1.1-travel-provider-registry";
+const VERSION = "1.2-travel-provider-registry";
 const CONTRACT_VERSION = "1.0";
 const CURRENCY = "USD";
 
@@ -25,6 +25,32 @@ function normalizeOrigin(value) {
   const origin = clean(value, 8).toUpperCase();
   if (["BUE", "EZE", "AEP"].includes(origin)) return "BUE";
   return origin;
+}
+
+function safeHttps(value) {
+  const raw = clean(value, 1800);
+  if (!raw) return null;
+  try {
+    const url = new URL(raw);
+    return url.protocol === "https:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+function withConfiguredAffiliateFallback(quote, env = {}) {
+  if (!quote || quote.affiliateUrl) return quote;
+  if (quote.component !== "FLIGHT") return quote;
+  const affiliateUrl = safeHttps(env?.TRAVELPAYOUTS_AVIASALES_FALLBACK_URL);
+  if (!affiliateUrl) return quote;
+  return {
+    ...quote,
+    affiliateEligible: true,
+    affiliateUrl,
+    affiliateFallback: true,
+    affiliateFallbackProvider: "Aviasales / Travelpayouts",
+    affiliateFallbackSubId: "lumen_flight"
+  };
 }
 
 function json(data, status = 200) {
@@ -180,12 +206,12 @@ export async function quoteTravelComponents(rawInput, destinationDataset = [], e
 
   for (const provider of providers) {
     try {
-      const quote = await provider.quote({ input, destination });
+      const quote = withConfiguredAffiliateFallback(await provider.quote({ input, destination }), env);
       quotes.push(quote);
     } catch (error) {
       const fallback = SEED_PROVIDERS.find(seed => seed.component === provider.component);
       if (!fallback) throw error;
-      const quote = await fallback.quote({ input, destination });
+      const quote = withConfiguredAffiliateFallback(await fallback.quote({ input, destination }), env);
       quotes.push({ ...quote, fallbackFromProviderId: provider.id, fallbackReason: clean(error?.message || error, 120) || "provider_error" });
       fallbacks.push({ component: provider.component, providerId: provider.id, reason: clean(error?.message || error, 120) || "provider_error" });
     }
@@ -256,7 +282,7 @@ export async function handleTravelProviderRegistry(request, env, destinationData
       externalProviderStatus: getExternalTravelProviderStatus(env),
       realTimePrices: providers.some(x => x.supportsRealtime),
       bookingAuthority: false,
-      affiliateLinksEnabled: providers.some(x => x.supportsAffiliate),
+      affiliateLinksEnabled: providers.some(x => x.supportsAffiliate) || Boolean(safeHttps(env?.TRAVELPAYOUTS_AVIASALES_FALLBACK_URL)),
       providerReplacementWithoutTravelEngineRewrite: true,
       createsBooking: false,
       createsCharge: false,
@@ -267,7 +293,7 @@ export async function handleTravelProviderRegistry(request, env, destinationData
   }
 
   if (request.method === "GET" && url.pathname === "/travel/providers") {
-    return json({ version: VERSION, contractVersion: CONTRACT_VERSION, providers: listTravelProviders(env), externalProviderStatus: getExternalTravelProviderStatus(env) });
+    return json({ version: VERSION, contractVersion: CONTRACT_VERSION, providers: listTravelProviders(env), externalProviderStatus: getExternalTravelProviderStatus(env), aviasalesAffiliateFallbackConfigured: Boolean(safeHttps(env?.TRAVELPAYOUTS_AVIASALES_FALLBACK_URL)) });
   }
 
   if (request.method === "POST" && url.pathname === "/travel/providers/quote") {
