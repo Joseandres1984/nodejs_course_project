@@ -44,7 +44,7 @@ jobs:
             -H 'accept: application/json')
           cat /tmp/growth.json
           echo
-          test "$code" = '200'
+          case "$code" in 200|202) ;; *) echo "unexpected growth HTTP $code"; exit 1 ;; esac
           jq -e '.ok == true and .version == "1.1-autonomous-growth-loop"' /tmp/growth.json >/dev/null
           lane=$(jq -r '.decision.lane' /tmp/growth.json)
           echo "LUMEN_GROWTH_LANE=$lane"
