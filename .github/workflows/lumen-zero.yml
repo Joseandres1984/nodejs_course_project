@@ -246,6 +246,7 @@ jobs:
 
       - name: Materialize Instagram media for approved pipeline
         if: steps.preflight.outputs.ready == 'true'
+        continue-on-error: true
         working-directory: .lumen/runtime
         run: python zero_instagram_assets.py
 
