@@ -5,7 +5,8 @@ on:
     branches: [lumen-zero]
     paths:
       - '.lumen/a2a-worker/autonomous-growth-loop.js'
-      - '.lumen/a2a-worker/autonomous-growth-entry.js'
+      - '.lumen/a2a-worker/adaptive-entry.js'
+      - '.lumen/a2a-worker/opportunity-entry.js'
       - '.lumen/a2a-worker/test-autonomous-growth-loop.mjs'
       - '.lumen/a2a-worker/wrangler.toml'
       - '.github/workflows/lumen-autonomous-growth-loop-smoke.yml'
@@ -27,9 +28,16 @@ jobs:
         working-directory: .lumen/a2a-worker
         run: |
           node --check autonomous-growth-loop.js
-          node --check autonomous-growth-entry.js
+          node --check adaptive-entry.js
+          node --check opportunity-entry.js
       - name: Run Growth Loop decision and learning tests
         working-directory: .lumen/a2a-worker
         run: node test-autonomous-growth-loop.mjs
-      - name: Verify Cloudflare entrypoint
-        run: grep -F 'main = "autonomous-growth-entry.js"' .lumen/a2a-worker/wrangler.toml
+      - name: Verify adaptive production integration
+        run: |
+          grep -F 'main = "opportunity-entry.js"' .lumen/a2a-worker/wrangler.toml
+          grep -F 'handleAutonomousGrowthLoop' .lumen/a2a-worker/adaptive-entry.js
+          grep -F 'runAutonomousGrowthLoop' .lumen/a2a-worker/adaptive-entry.js
+          grep -F 'lumen_growth_guidance' .lumen/a2a-worker/opportunity-entry.js
+          grep -F 'TRAVEL_REFERRAL' .lumen/a2a-worker/opportunity-entry.js
+          grep -F 'main = "adaptive-entry.js"' .github/workflows/lumen-cloudflare-deploy.yml
