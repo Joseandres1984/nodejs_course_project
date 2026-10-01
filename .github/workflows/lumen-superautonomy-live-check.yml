@@ -31,14 +31,23 @@ jobs:
           node --check .lumen/a2a-worker/superautonomy-live.js
           node --check .lumen/a2a-worker/superautonomy-entry.js
           node --check .lumen/a2a-worker/adaptive-entry.js
-      - name: Superautonomy decision tests
+      - name: Superautonomy v2 decision tests
         working-directory: .lumen/a2a-worker
         run: node test-superautonomy-live.mjs
-      - name: Verify deployed entrypoint wiring
+      - name: Verify deployed entrypoint wiring and v2 guardrails
         working-directory: .lumen/a2a-worker
         run: |
           grep -q 'handleSuperautonomy' adaptive-entry.js
           grep -q 'runSuperautonomyCycle' adaptive-entry.js
           grep -q 'superautonomy_anti_stall_recovery' adaptive-entry.js
+          grep -q '2.0-superautonomy-live' superautonomy-live.js
+          grep -q 'goalManager:true' superautonomy-live.js
+          grep -q 'opportunityPortfolio:true' superautonomy-live.js
+          grep -q 'postmortems:true' superautonomy-live.js
+          grep -q '/superautonomy/goals' superautonomy-live.js
+          grep -q '/superautonomy/debt' superautonomy-live.js
+          grep -q '/superautonomy/postmortems' superautonomy-live.js
           grep -q 'autonomousSpendUsd:0' superautonomy-live.js
+          grep -q 'autonomousPurchase:false' superautonomy-live.js
+          grep -q 'autonomousContract:false' superautonomy-live.js
           grep -q 'bindingActionsHumanGated:true' superautonomy-live.js
