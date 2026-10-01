@@ -1,0 +1,136 @@
+name: LUMEN Mail Health Scheduler
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/lumen-mail-health-scheduler.yml'
+  workflow_dispatch:
+  schedule:
+    - cron: '17 * * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  probe-mail:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      LUMEN_SMTP_HOST: ${{ secrets.LUMEN_SMTP_HOST }}
+      LUMEN_SMTP_PORT: ${{ secrets.LUMEN_SMTP_PORT }}
+      LUMEN_SMTP_USER: ${{ secrets.LUMEN_SMTP_USER }}
+      LUMEN_SMTP_PASSWORD: ${{ secrets.LUMEN_SMTP_PASSWORD }}
+      LUMEN_SMTP_SSL: ${{ secrets.LUMEN_SMTP_SSL }}
+      LUMEN_IMAP_HOST: ${{ secrets.LUMEN_IMAP_HOST }}
+      LUMEN_IMAP_PORT: ${{ secrets.LUMEN_IMAP_PORT }}
+      LUMEN_IMAP_USER: ${{ secrets.LUMEN_IMAP_USER }}
+      LUMEN_IMAP_PASSWORD: ${{ secrets.LUMEN_IMAP_PASSWORD }}
+      LUMEN_IMAP_SSL: ${{ secrets.LUMEN_IMAP_SSL }}
+      LUMEN_BREVO_API_KEY: ${{ secrets.LUMEN_BREVO_API_KEY }}
+      LUMEN_BREVO_FROM_EMAIL: ${{ secrets.LUMEN_BREVO_FROM_EMAIL }}
+      LUMEN_BREVO_SENDER_VERIFIED: ${{ secrets.LUMEN_BREVO_SENDER_VERIFIED }}
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Probe configured mail routes without sending
+        id: probe
+        shell: bash
+        run: |
+          python - <<'PY'
+          import imaplib, json, os, smtplib, ssl, urllib.request
+
+          def present(*names):
+              return all(bool((os.getenv(n) or '').strip()) for n in names)
+
+          result = {
+              'probe_message_sent': False,
+              'smtp': {'configured': False, 'authenticated': False},
+              'imap': {'configured': False, 'authenticated': False, 'inbox_readable': False},
+              'brevo': {'configured': False, 'authenticated': False},
+          }
+
+          if present('LUMEN_SMTP_HOST','LUMEN_SMTP_USER','LUMEN_SMTP_PASSWORD'):
+              result['smtp']['configured'] = True
+              try:
+                  host = os.environ['LUMEN_SMTP_HOST'].strip()
+                  port = int((os.getenv('LUMEN_SMTP_PORT') or '587').strip() or '587')
+                  use_ssl = (os.getenv('LUMEN_SMTP_SSL') or 'false').lower() == 'true'
+                  if use_ssl:
+                      client = smtplib.SMTP_SSL(host, port, timeout=20, context=ssl.create_default_context())
+                  else:
+                      client = smtplib.SMTP(host, port, timeout=20)
+                      client.ehlo(); client.starttls(context=ssl.create_default_context()); client.ehlo()
+                  client.login(os.environ['LUMEN_SMTP_USER'], os.environ['LUMEN_SMTP_PASSWORD'])
+                  result['smtp']['authenticated'] = True
+                  client.quit()
+              except Exception as exc:
+                  result['smtp']['error_type'] = type(exc).__name__
+
+          if present('LUMEN_IMAP_HOST','LUMEN_IMAP_USER','LUMEN_IMAP_PASSWORD'):
+              result['imap']['configured'] = True
+              try:
+                  host = os.environ['LUMEN_IMAP_HOST'].strip()
+                  port = int((os.getenv('LUMEN_IMAP_PORT') or '993').strip() or '993')
+                  use_ssl = (os.getenv('LUMEN_IMAP_SSL') or 'true').lower() != 'false'
+                  client = imaplib.IMAP4_SSL(host, port) if use_ssl else imaplib.IMAP4(host, port)
+                  client.login(os.environ['LUMEN_IMAP_USER'], os.environ['LUMEN_IMAP_PASSWORD'])
+                  result['imap']['authenticated'] = True
+                  typ, _ = client.select('INBOX', readonly=True)
+                  result['imap']['inbox_readable'] = typ == 'OK'
+                  client.logout()
+              except Exception as exc:
+                  result['imap']['error_type'] = type(exc).__name__
+
+          if present('LUMEN_BREVO_API_KEY','LUMEN_BREVO_FROM_EMAIL'):
+              result['brevo']['configured'] = True
+              try:
+                  req = urllib.request.Request('https://api.brevo.com/v3/account', headers={
+                      'accept': 'application/json',
+                      'api-key': os.environ['LUMEN_BREVO_API_KEY'],
+                  })
+                  with urllib.request.urlopen(req, timeout=20) as resp:
+                      result['brevo']['authenticated'] = 200 <= int(resp.status) < 300
+              except Exception as exc:
+                  result['brevo']['error_type'] = type(exc).__name__
+
+          gmail_live = result['imap']['authenticated'] and result['imap']['inbox_readable']
+          outbound_live = result['smtp']['authenticated'] or result['brevo']['authenticated']
+          result['gmail_live'] = bool(gmail_live)
+          result['outbound_mail_live'] = bool(outbound_live)
+          result['mail_live'] = bool(gmail_live and outbound_live)
+          print('LUMEN_MAIL_HEALTH=' + json.dumps(result, sort_keys=True))
+
+          if result['probe_message_sent']:
+              raise SystemExit('mail_health_probe_must_never_send')
+
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as fh:
+              fh.write(f"gmail_live={'true' if gmail_live else 'false'}\n")
+              fh.write(f"smtp_live={'true' if result['smtp']['authenticated'] else 'false'}\n")
+              fh.write(f"brevo_live={'true' if result['brevo']['authenticated'] else 'false'}\n")
+              fh.write(f"outbound_live={'true' if outbound_live else 'false'}\n")
+              fh.write(f"mail_live={'true' if result['mail_live'] else 'false'}\n")
+          PY
+      - name: Publish verified mail health to LUMEN
+        env:
+          OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+          GMAIL_LIVE: ${{ steps.probe.outputs.gmail_live }}
+          SMTP_LIVE: ${{ steps.probe.outputs.smtp_live }}
+          BREVO_LIVE: ${{ steps.probe.outputs.brevo_live }}
+          OUTBOUND_LIVE: ${{ steps.probe.outputs.outbound_live }}
+          MAIL_LIVE: ${{ steps.probe.outputs.mail_live }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${OPPORTUNITY_ADMIN_TOKEN:-}"
+          if [ "$MAIL_LIVE" = 'true' ]; then STATUS='online'; elif [ "$GMAIL_LIVE" = 'true' ]; then STATUS='degraded'; else STATUS='offline'; fi
+          if [ "$SMTP_LIVE" = 'true' ]; then PROVIDER='gmail_smtp'; elif [ "$BREVO_LIVE" = 'true' ]; then PROVIDER='brevo'; else PROVIDER='none'; fi
+          BODY="{\"channel\":\"gmail\",\"status\":\"${STATUS}\",\"provider\":\"${PROVIDER}\",\"details\":{\"gmail_live\":${GMAIL_LIVE},\"smtp_live\":${SMTP_LIVE},\"brevo_live\":${BREVO_LIVE},\"outbound_live\":${OUTBOUND_LIVE},\"mail_live\":${MAIL_LIVE},\"probe_message_sent\":false}}"
+          curl --fail-with-body --show-error --silent --max-time 30 \
+            -X POST 'https://lumen-zero-a2a.lumen-b2b.workers.dev/channel-health' \
+            -H "x-lumen-admin: ${OPPORTUNITY_ADMIN_TOKEN}" \
+            -H 'content-type: application/json' \
+            --data "$BODY"
+          echo
+          echo "LUMEN_MAIL_HEALTH_PUBLISHED status=${STATUS} provider=${PROVIDER}"
