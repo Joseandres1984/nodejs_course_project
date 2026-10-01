@@ -1,0 +1,86 @@
+name: LUMEN Autonomous Operator
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 */6 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lumen-autonomous-operator
+  cancel-in-progress: false
+
+jobs:
+  autonomous-cycle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Verify protected runtime access
+        env:
+          ADMIN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "${ADMIN:-}"
+          base='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          curl --fail --show-error --silent --max-time 30 "$base/health" >/dev/null
+          echo 'AUTONOMOUS_RUNTIME_READY'
+
+      - name: Observe decide act and learn
+        id: growth
+        env:
+          ADMIN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          base='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          code=$(curl --show-error --silent --max-time 60 -o /tmp/growth.json -w '%{http_code}' \
+            -X POST "$base/growth/run" \
+            -H "x-lumen-admin: $ADMIN" \
+            -H 'accept: application/json')
+          cat /tmp/growth.json
+          echo
+          test "$code" = '200'
+          jq -e '.ok == true and .version == "1.1-autonomous-growth-loop"' /tmp/growth.json >/dev/null
+          lane=$(jq -r '.decision.lane' /tmp/growth.json)
+          echo "LUMEN_GROWTH_LANE=$lane"
+          echo "lane=$lane" >> "$GITHUB_OUTPUT"
+
+      - name: Buyer Hunter discovery and qualification
+        if: steps.growth.outputs.lane == 'B2B_FIRST_CASH' || steps.growth.outputs.lane == 'B2B_CONVERSION'
+        env:
+          ADMIN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          base='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          for endpoint in source-intelligence/cycle market-hunter/run commercial/reassess proposals/prepare-top quality/review-next; do
+            body="/tmp/${endpoint//\//-}.json"
+            code=$(curl --show-error --silent --max-time 90 -o "$body" -w '%{http_code}' \
+              -X POST "$base/$endpoint" \
+              -H "x-lumen-admin: $ADMIN" \
+              -H 'accept: application/json')
+            echo "===== $endpoint HTTP $code ====="
+            cat "$body"; echo
+            test "$code" = '202'
+          done
+          echo 'BUYER_HUNTER_PREPARED_NEXT_OPPORTUNITY'
+          echo 'OUTBOUND_CONTACT_REMAINS_GOVERNED'
+
+      - name: Read autonomous state
+        run: |
+          set -euo pipefail
+          base='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          for endpoint in growth/status market-hunter/state commercial/next proposals/next quality/stats travel/acquisition/status; do
+            echo "===== /$endpoint ====="
+            curl --fail --show-error --silent --max-time 30 "$base/$endpoint" || true
+            echo
+          done
+
+      - name: Verify persisted learning and guardrails
+        run: |
+          set -euo pipefail
+          base='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          curl --fail --show-error --silent --max-time 30 "$base/growth/status" -o /tmp/growth-status.json
+          jq -e '.version == "1.1-autonomous-growth-loop" and .initialized == true and .latest.selected_lane and .guidance.selected_lane' /tmp/growth-status.json >/dev/null
+          jq -e '.guardrails.autonomousOutgoingSpend == false and .guardrails.bindingActionsHumanGated == true' /tmp/growth-status.json >/dev/null
+          echo 'AUTONOMOUS_CYCLE_PERSISTED_OK'
