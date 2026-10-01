@@ -1,0 +1,42 @@
+name: LUMEN Travel Aviasales live diagnostic
+
+on:
+  pull_request:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-travel-aviasales-live-diagnostic.yml'
+      - '.lumen/a2a-worker/travel-external-providers.js'
+      - '.lumen/a2a-worker/travel-provider-registry.js'
+      - '.lumen/a2a-worker/wrangler.toml'
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check whether Travelpayouts token exists in GitHub secrets
+        env:
+          TRAVELPAYOUTS_API_TOKEN: ${{ secrets.TRAVELPAYOUTS_API_TOKEN }}
+        run: |
+          if [ -n "$TRAVELPAYOUTS_API_TOKEN" ]; then
+            echo 'TRAVELPAYOUTS_API_TOKEN_PRESENT'
+          else
+            echo 'TRAVELPAYOUTS_API_TOKEN_MISSING'
+          fi
+      - name: Inspect live provider status and BUE-GIG quote safely
+        run: |
+          set -euo pipefail
+          BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          curl -fsS --max-time 20 "$BASE/travel/providers" -o providers.json
+          curl -fsS --max-time 35 -X POST \
+            -H 'content-type: application/json' \
+            -d '{"originCode":"BUE","destinationCode":"GIG","durationDays":7,"targetMonth":11,"travelersCount":2}' \
+            "$BASE/travel/providers/quote" -o quote.json
+
+          echo '--- SAFE_PROVIDER_STATUS ---'
+          jq '{externalProviderStatus, aviasalesAffiliateFallbackConfigured}' providers.json
+          echo '--- SAFE_FLIGHT_QUOTE ---'
+          jq '{ok, input, flight: (.quotes[] | select(.component == "FLIGHT") | {providerId,providerName,providerMode,affiliateEligible,affiliateFallback,affiliateFallbackProvider,fallbackFromProviderId,fallbackReason,affiliateUrl,evidence})}' quote.json
+
+          jq -e '.ok == true' quote.json >/dev/null
+          jq -e '.input.originCode == "BUE" and .input.destinationCode == "GIG" and .input.travelersCount == 2' quote.json >/dev/null
