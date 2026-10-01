@@ -13,6 +13,7 @@ import { handleProviderBackedTravelDiscovery } from "./travel-provider-backed-di
 import { handleTravelAffiliateRegistry } from "./travel-affiliate-registry.js";
 import { handleTravelAcquisitionEngine, runTravelAcquisitionEngine } from "./travel-acquisition-engine.js";
 import { handleAutonomousGrowthLoop, runAutonomousGrowthLoop } from "./autonomous-growth-loop-v11.js";
+import { handleTravelpayoutsFinance, syncTravelpayoutsFinance } from "./travelpayouts-finance-sync.js";
 import { syncX402SettlementsToRevenue } from "./x402-revenue-bridge.js";
 import { syncReferralSettlements } from "./referral-network.js";
 import { syncReferralCommissionSettlements } from "./referral-commission-engine.js";
@@ -33,27 +34,31 @@ async function isolated(step) {
 
 async function refreshCommercialTruth(env) {
   const x402 = await isolated(() => syncX402SettlementsToRevenue(env));
+  const travelpayoutsFinance = await isolated(() => syncTravelpayoutsFinance(env));
   const referralCommissions = await isolated(() => syncReferralCommissionSettlements(env));
   const referrals = await isolated(() => syncReferralSettlements(env));
   const revenueAttribution = await isolated(() => recomputeRevenueAttribution(env));
   const profitFeedback = await isolated(() => recomputeProfitFeedback(env));
 
   return {
-    ok: [x402, referralCommissions, referrals, revenueAttribution, profitFeedback].every(result => result?.ok !== false),
+    ok: [x402, travelpayoutsFinance, referralCommissions, referrals, revenueAttribution, profitFeedback].every(result => result?.ok !== false),
     x402,
+    travelpayoutsFinance,
     referralCommissions,
     referrals,
     revenueAttribution,
     profitFeedback,
     truthOrder: [
-      "verified_settlements",
+      "verified_x402_settlements",
+      "travelpayouts_verified_affiliate_rewards",
       "referral_settlements",
       "revenue_attribution",
       "profit_feedback",
       "growth_decision"
     ],
     guardrails: {
-      verifiedSettlementRequiredForRevenue: true,
+      verifiedRevenueEvidenceRequired: true,
+      affiliatePayoutsNotDoubleCountedAsRevenue: true,
       autonomousSpendUsd: 0,
       bindingActionsHumanGated: true
     }
@@ -64,6 +69,9 @@ export default {
   async fetch(request, env, ctx) {
     const growthResponse = await handleAutonomousGrowthLoop(request, env);
     if (growthResponse) return growthResponse;
+
+    const travelpayoutsFinanceResponse = await handleTravelpayoutsFinance(request, env);
+    if (travelpayoutsFinanceResponse) return travelpayoutsFinanceResponse;
 
     const providerBackedDiscoveryResponse = await handleProviderBackedTravelDiscovery(
       request,
