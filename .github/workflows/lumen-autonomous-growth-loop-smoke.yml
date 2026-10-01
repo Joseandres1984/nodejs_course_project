@@ -1,0 +1,35 @@
+name: LUMEN Autonomous Growth Loop Smoke
+
+on:
+  pull_request:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/a2a-worker/autonomous-growth-loop.js'
+      - '.lumen/a2a-worker/autonomous-growth-entry.js'
+      - '.lumen/a2a-worker/test-autonomous-growth-loop.mjs'
+      - '.lumen/a2a-worker/wrangler.toml'
+      - '.github/workflows/lumen-autonomous-growth-loop-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  autonomous-growth-loop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Check Growth Loop syntax
+        working-directory: .lumen/a2a-worker
+        run: |
+          node --check autonomous-growth-loop.js
+          node --check autonomous-growth-entry.js
+      - name: Run Growth Loop decision and learning tests
+        working-directory: .lumen/a2a-worker
+        run: node test-autonomous-growth-loop.mjs
+      - name: Verify Cloudflare entrypoint
+        run: grep -F 'main = "autonomous-growth-entry.js"' .lumen/a2a-worker/wrangler.toml
