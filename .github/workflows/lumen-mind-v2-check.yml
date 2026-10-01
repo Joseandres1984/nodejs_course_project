@@ -6,6 +6,7 @@ on:
     paths:
       - '.lumen/a2a-worker/lumen-conversation-v2.js'
       - '.lumen/a2a-worker/self-learning-engine.js'
+      - '.lumen/a2a-worker/meta-controller.js'
       - '.lumen/a2a-worker/adaptive-entry.js'
       - '.lumen/a2a-worker/test-lumen-mind-v2-static.mjs'
       - '.github/workflows/lumen-mind-v2-check.yml'
@@ -14,6 +15,7 @@ on:
     paths:
       - '.lumen/a2a-worker/lumen-conversation-v2.js'
       - '.lumen/a2a-worker/self-learning-engine.js'
+      - '.lumen/a2a-worker/meta-controller.js'
       - '.lumen/a2a-worker/adaptive-entry.js'
       - '.lumen/a2a-worker/test-lumen-mind-v2-static.mjs'
       - '.github/workflows/lumen-mind-v2-check.yml'
@@ -31,6 +33,7 @@ jobs:
         run: |
           node --check .lumen/a2a-worker/lumen-conversation-v2.js
           node --check .lumen/a2a-worker/self-learning-engine.js
+          node --check .lumen/a2a-worker/meta-controller.js
           node --check .lumen/a2a-worker/adaptive-entry.js
       - name: Run Mind v2 static assertions
         working-directory: .lumen/a2a-worker
@@ -50,4 +53,17 @@ jobs:
           grep -q 'autonomousSpendUsd:0' .lumen/a2a-worker/self-learning-engine.js
           grep -q 'bindingActionsHumanGated:true' .lumen/a2a-worker/self-learning-engine.js
           grep -q 'verifiedProgressRequiredForPromotion:true' .lumen/a2a-worker/self-learning-engine.js
-          echo 'LUMEN_MIND_V2_GUARDRAILS_OK'
+      - name: Verify context meta-controller guardrails and wiring
+        run: |
+          set -euo pipefail
+          grep -q 'runMetaControllerCycle' .lumen/a2a-worker/adaptive-entry.js
+          grep -q 'handleMetaController' .lumen/a2a-worker/adaptive-entry.js
+          grep -q 'scheduled_pre_superautonomy' .lumen/a2a-worker/adaptive-entry.js
+          grep -q 'scheduled_after_self_learning' .lumen/a2a-worker/adaptive-entry.js
+          grep -q 'contextAwareLearning:true' .lumen/a2a-worker/meta-controller.js
+          grep -q 'falsificationRequired:true' .lumen/a2a-worker/meta-controller.js
+          grep -q 'selfModifyingCode:false' .lumen/a2a-worker/meta-controller.js
+          grep -q 'autonomousSpendUsd:0' .lumen/a2a-worker/meta-controller.js
+          grep -q 'bindingActionsHumanGated:true' .lumen/a2a-worker/meta-controller.js
+          grep -q 'maxScoreNudgePerCycle:MAX_SCORE_NUDGE' .lumen/a2a-worker/meta-controller.js
+          echo 'LUMEN_META_CONTROLLER_V1_GUARDRAILS_OK'
