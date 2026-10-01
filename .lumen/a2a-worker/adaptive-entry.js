@@ -190,7 +190,7 @@ export default {
 
       const commercialTruth = await refreshCommercialTruth(env);
       const growth = await runAutonomousGrowthLoop(env, {
-        trigger: recoveryGrowth && !growthSlot ? "superautonomy_v3_anti_stall_recovery" : "cloudflare_hourly_growth_after_commercial_truth",
+        trigger: recoveryGrowth && !growthSlot ? "superautonomy_anti_stall_recovery" : "cloudflare_hourly_growth_after_commercial_truth",
         scheduledTime:controller?.scheduledTime || null,
       });
 
