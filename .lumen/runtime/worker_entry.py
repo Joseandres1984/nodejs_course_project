@@ -42,6 +42,9 @@ import autonomous_director_runtime  # noqa: F401
 # Feed real Cognitive Engine outcomes into Director attention only after the base Director is installed.
 # This bridge is read-only, keeps the hard funnel bottleneck authoritative and cannot widen execution authority.
 import cognitive_director_learning_runtime  # noqa: F401
+# Superautonomy sits above the existing autonomy stack: it observes the verified bottleneck,
+# chooses the next reversible action, learns from outcomes and recovers from stalls without widening authority.
+import superautonomy_runtime  # noqa: F401
 # Run bounded 80/20 commercial experiments after Cognitive learning is installed. The Experiment
 # Engine may rotate reversible variants/attention only and cannot add spend, search budget or binding authority.
 import experiment_engine_runtime  # noqa: F401
