@@ -5,6 +5,7 @@ on:
     branches: [lumen-zero]
     paths:
       - '.lumen/a2a-worker/autonomous-growth-loop.js'
+      - '.lumen/a2a-worker/autonomous-growth-loop-v11.js'
       - '.lumen/a2a-worker/adaptive-entry.js'
       - '.github/workflows/lumen-autonomous-growth-live-smoke.yml'
   workflow_dispatch:
@@ -23,14 +24,14 @@ jobs:
         run: |
           test -n "$ADMIN"
           echo 'GROWTH_ADMIN_TOKEN_PRESENT'
-      - name: Wait for Growth Loop production endpoint
+      - name: Wait for Growth Loop v1.1 production endpoint
         run: |
           set -euo pipefail
           BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
           ok=0
-          for i in $(seq 1 30); do
+          for i in $(seq 1 36); do
             if curl -fsS --max-time 15 "$BASE/growth/policy" -o growth-policy.json; then
-              if grep -q '1.0-autonomous-growth-loop' growth-policy.json && grep -q 'addsExternalMessagesPerCycle' growth-policy.json; then
+              if grep -q '1.1-autonomous-growth-loop' growth-policy.json && grep -q 'nonbinding_demand_signal_not_order_not_revenue' growth-policy.json; then
                 ok=1
                 break
               fi
@@ -41,12 +42,14 @@ jobs:
           python - <<'PY'
           import json
           p=json.load(open('growth-policy.json'))
+          assert p['version']=='1.1-autonomous-growth-loop'
+          assert p['truthRules']['machineRequest']=='nonbinding_demand_signal_not_order_not_revenue'
           g=p['guardrails']
           assert g['autonomousOutgoingSpend'] is False
           assert g['paidAds'] is False
           assert g['addsExternalMessagesPerCycle']==0
           assert g['bindingActionsHumanGated'] is True
-          print('GROWTH_POLICY_LIVE_OK')
+          print('GROWTH_V11_POLICY_LIVE_OK')
           PY
       - name: Run one safe production growth cycle
         env:
@@ -59,15 +62,16 @@ jobs:
           import json
           x=json.load(open('growth-run.json'))
           assert x['ok'] is True, x
-          assert x['version']=='1.0-autonomous-growth-loop'
+          assert x['version']=='1.1-autonomous-growth-loop'
           assert x['decision']['lane']
           assert x['action']['status'] in ('COMPLETED','OBSERVE_ONLY')
+          assert x['truth']['nonbindingMachineRequestsArePaidOrders'] is False
           g=x['guardrails']
           assert g['autonomousOutgoingSpend'] is False
           assert g['paidAds'] is False
           assert g['addsExternalMessagesPerCycle']==0
           assert g['bindingActionsHumanGated'] is True
-          print('GROWTH_SAFE_CYCLE_LIVE_OK', x['cycleId'], x['decision']['lane'], x['action']['status'])
+          print('GROWTH_V11_SAFE_CYCLE_LIVE_OK', x['cycleId'], x['decision']['lane'], x['action']['status'])
           PY
       - name: Verify persisted Growth Loop status
         run: |
@@ -77,10 +81,12 @@ jobs:
           python - <<'PY'
           import json
           x=json.load(open('growth-status.json'))
+          assert x['version']=='1.1-autonomous-growth-loop'
           assert x['initialized'] is True, x
           assert x['latest']['selected_lane']
           assert x['guidance']['selected_lane']
+          assert x['truth']['nonbindingMachineRequestsArePaidOrders'] is False
           assert x['guardrails']['autonomousOutgoingSpend'] is False
           assert x['guardrails']['addsExternalMessagesPerCycle']==0
-          print('GROWTH_STATUS_PERSISTED_OK', x['latest']['selected_lane'])
+          print('GROWTH_V11_STATUS_PERSISTED_OK', x['latest']['selected_lane'])
           PY
