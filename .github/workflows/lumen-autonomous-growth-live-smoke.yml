@@ -1,0 +1,86 @@
+name: LUMEN Autonomous Growth Loop Live Smoke
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/a2a-worker/autonomous-growth-loop.js'
+      - '.lumen/a2a-worker/adaptive-entry.js'
+      - '.github/workflows/lumen-autonomous-growth-live-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  growth-live-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Verify protected admin token
+        env:
+          ADMIN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+        run: |
+          test -n "$ADMIN"
+          echo 'GROWTH_ADMIN_TOKEN_PRESENT'
+      - name: Wait for Growth Loop production endpoint
+        run: |
+          set -euo pipefail
+          BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          ok=0
+          for i in $(seq 1 30); do
+            if curl -fsS --max-time 15 "$BASE/growth/policy" -o growth-policy.json; then
+              if grep -q '1.0-autonomous-growth-loop' growth-policy.json && grep -q 'addsExternalMessagesPerCycle' growth-policy.json; then
+                ok=1
+                break
+              fi
+            fi
+            sleep 5
+          done
+          test "$ok" -eq 1
+          python - <<'PY'
+          import json
+          p=json.load(open('growth-policy.json'))
+          g=p['guardrails']
+          assert g['autonomousOutgoingSpend'] is False
+          assert g['paidAds'] is False
+          assert g['addsExternalMessagesPerCycle']==0
+          assert g['bindingActionsHumanGated'] is True
+          print('GROWTH_POLICY_LIVE_OK')
+          PY
+      - name: Run one safe production growth cycle
+        env:
+          ADMIN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          curl -fsS --max-time 45 -X POST -H "x-lumen-admin: $ADMIN" "$BASE/growth/run" -o growth-run.json
+          python - <<'PY'
+          import json
+          x=json.load(open('growth-run.json'))
+          assert x['ok'] is True, x
+          assert x['version']=='1.0-autonomous-growth-loop'
+          assert x['decision']['lane']
+          assert x['action']['status'] in ('COMPLETED','OBSERVE_ONLY')
+          g=x['guardrails']
+          assert g['autonomousOutgoingSpend'] is False
+          assert g['paidAds'] is False
+          assert g['addsExternalMessagesPerCycle']==0
+          assert g['bindingActionsHumanGated'] is True
+          print('GROWTH_SAFE_CYCLE_LIVE_OK', x['cycleId'], x['decision']['lane'], x['action']['status'])
+          PY
+      - name: Verify persisted Growth Loop status
+        run: |
+          set -euo pipefail
+          BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          curl -fsS --max-time 20 "$BASE/growth/status" -o growth-status.json
+          python - <<'PY'
+          import json
+          x=json.load(open('growth-status.json'))
+          assert x['initialized'] is True, x
+          assert x['latest']['selected_lane']
+          assert x['guidance']['selected_lane']
+          assert x['guardrails']['autonomousOutgoingSpend'] is False
+          assert x['guardrails']['addsExternalMessagesPerCycle']==0
+          print('GROWTH_STATUS_PERSISTED_OK', x['latest']['selected_lane'])
+          PY
