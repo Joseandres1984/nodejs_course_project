@@ -132,10 +132,59 @@ function injectConversionUI(html) {
   return html;
 }
 
+function injectConversationLink(html) {
+  if (html.includes('href="/conversar"')) return html;
+  const link = `<a href="/conversar" style="position:fixed;right:18px;bottom:18px;z-index:9999;text-decoration:none;background:#d9ff65;color:#061019;border:1px solid #e8ff9d;border-radius:999px;padding:12px 16px;font:900 13px Inter,system-ui,-apple-system,Segoe UI,Arial,sans-serif;box-shadow:0 12px 30px #0008">Hablar con LUMEN</a>`;
+  return html.includes("</body>") ? html.replace("</body>", `${link}</body>`) : `${html}${link}`;
+}
+
+function conversationPage() {
+  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#061019"><title>LUMEN · Conversación operativa</title><style>
+  :root{color-scheme:dark;--bg:#061019;--panel:#0d1b24;--line:#21404e;--text:#edf5f7;--muted:#8da6b2;--lime:#d9ff65;--good:#9de8c5;--bad:#ff9992;--blue:#83d9ff}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 100% 0,#12303d 0,#061019 38%) fixed;color:var(--text);font:14px Inter,system-ui,-apple-system,Segoe UI,Arial,sans-serif}.wrap{max-width:980px;margin:auto;padding:20px}.top{display:flex;justify-content:space-between;align-items:center;gap:15px;margin-bottom:16px}.brand{font-size:28px;font-weight:950;letter-spacing:.1em}.sub{color:var(--muted);margin-top:4px}.back{color:#d9edf5;text-decoration:none;border:1px solid #2c5264;border-radius:10px;padding:9px 12px;font-weight:800}.mind{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;margin-bottom:12px}.k{background:#0b1720;border:1px solid var(--line);border-radius:13px;padding:12px}.kl{font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);font-weight:900}.kv{font-size:16px;font-weight:900;margin-top:6px;overflow-wrap:anywhere}.chat{background:linear-gradient(180deg,#0e1b24,#09151d);border:1px solid var(--line);border-radius:18px;overflow:hidden;box-shadow:0 18px 45px #0005}.messages{min-height:430px;max-height:62vh;overflow:auto;padding:18px}.msg{display:flex;margin:0 0 12px}.bubble{max-width:82%;padding:12px 14px;border-radius:15px;line-height:1.55;white-space:pre-wrap}.user{justify-content:flex-end}.user .bubble{background:#193342;border:1px solid #2d566a}.assistant .bubble{background:#132018;border:1px solid #38552a}.meta{font-size:10px;color:var(--muted);margin-top:5px}.quick{display:flex;gap:7px;flex-wrap:wrap;padding:0 16px 12px}.quick button{background:#0d202a;color:#cfe6ef;border:1px solid #294b5b;border-radius:999px;padding:8px 10px;cursor:pointer;font-weight:750}.composer{display:grid;grid-template-columns:1fr auto;gap:8px;border-top:1px solid var(--line);padding:14px;background:#08141b}.composer textarea{resize:vertical;min-height:50px;max-height:150px;background:#061019;color:var(--text);border:1px solid #294857;border-radius:12px;padding:12px;font:inherit}.send{border:0;border-radius:12px;background:var(--lime);color:#061019;font-weight:950;padding:0 18px;cursor:pointer}.send:disabled{opacity:.5;cursor:wait}.truth{color:var(--muted);font-size:12px;line-height:1.5;margin:12px 2px 0}.status-good{color:var(--good)}.status-bad{color:var(--bad)}@media(max-width:700px){.mind{grid-template-columns:1fr 1fr}.wrap{padding:12px}.top{align-items:flex-start}.bubble{max-width:94%}.composer{grid-template-columns:1fr}.send{padding:12px}.messages{min-height:360px}}
+  </style></head><body><main class="wrap"><header class="top"><div><div class="brand">LUMEN</div><div class="sub">Conversación operativa · Superautonomía + estado real</div></div><a class="back" href="/">← Centro de Comando</a></header><section class="mind"><div class="k"><div class="kl">Fase</div><div class="kv" id="phase">—</div></div><div class="k"><div class="kl">Cuello de botella</div><div class="kv" id="bottleneck">—</div></div><div class="k"><div class="kl">Próxima acción</div><div class="kv" id="next">—</div></div><div class="k"><div class="kl">Autonomía acotada</div><div class="kv" id="ratio">—</div></div></section><section class="chat"><div class="messages" id="messages"></div><div class="quick"><button data-q="¿Qué estás haciendo ahora y por qué?">¿Qué estás haciendo?</button><button data-q="¿Qué aprendiste últimamente y qué cambió por eso?">¿Qué aprendiste?</button><button data-q="¿Cómo pensás mejorar a partir de ahora?">¿Cómo vas a mejorar?</button><button data-q="¿Qué necesitás de mí y qué podés resolver solo?">¿Qué necesitás de mí?</button><button data-q="¿Qué pasa con Gmail y cómo afecta tu autonomía?">¿Qué pasa con Gmail?</button></div><form class="composer" id="form"><textarea id="input" maxlength="1800" placeholder="Preguntale a LUMEN qué está haciendo, qué aprendió o qué piensa probar después…"></textarea><button class="send" id="send" type="submit">Enviar</button></form></section><p class="truth">LUMEN responde desde datos operativos registrados y memoria de Superautonomía. Puede resumir razones, evidencia y próximos pasos, pero no expone cadena de pensamiento privada ni afirma conciencia. Los pagos, contratos y otras acciones vinculantes siguen bajo aprobación humana.</p></main><script>
+  const $=id=>document.getElementById(id), box=$('messages'), form=$('form'), input=$('input'), send=$('send');
+  function add(role,text,meta=''){const row=document.createElement('div');row.className='msg '+role;const b=document.createElement('div');b.className='bubble';b.textContent=text;row.appendChild(b);if(meta){const m=document.createElement('div');m.className='meta';m.textContent=meta;b.appendChild(document.createElement('br'));b.appendChild(m)}box.appendChild(row);box.scrollTop=box.scrollHeight;}
+  function setMind(s){const x=s?.snapshot?.superautonomy||s?.superautonomy||{};$('phase').textContent=x.phase||'—';$('bottleneck').textContent=x.bottleneck||'—';$('next').textContent=x.nextAction||x.next_action||'—';const r=Number(x.boundedAutonomyRatio??x.autonomy_ratio);$('ratio').textContent=Number.isFinite(r)?Math.round(r*100)+'%':'—';}
+  async function load(){try{const [mind,hist]=await Promise.all([fetch('/api/lumen-mind',{cache:'no-store'}),fetch('/api/lumen-conversation',{cache:'no-store'})]);if(mind.ok){const d=await mind.json();setMind(d.snapshot||d);if(!hist.ok&&d.summary)add('assistant',d.summary,'estado actual')}if(hist.ok){const h=await hist.json();for(const t of h.history||[])add(t.role==='user'?'user':'assistant',t.message,t.role==='assistant'?'memoria persistente':'')}}catch(e){add('assistant','No pude leer mi estado conversacional en este momento. El resto de LUMEN puede seguir operando; revisá el estado del sistema.','fallback local')}}
+  async function ask(text){text=String(text||'').trim();if(!text)return;add('user',text);input.value='';send.disabled=true;try{const r=await fetch('/api/lumen-talk',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({message:text})});const d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||('HTTP '+r.status));add('assistant',d.reply,d.provider==='cloudflare_workers_ai_grounded'?'Workers AI · grounded':'fallback determinístico · grounded');setMind(d.snapshot||{});}catch(e){add('assistant','No pude responder con estado verificado ahora: '+String(e.message||e),'error');}finally{send.disabled=false;input.focus()}}
+  form.addEventListener('submit',e=>{e.preventDefault();ask(input.value)});document.querySelectorAll('[data-q]').forEach(b=>b.addEventListener('click',()=>ask(b.dataset.q)));input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();form.requestSubmit()}});load();
+</script></body></html>`;
+}
+
+async function proxyConversation(request, env, targetPath) {
+  const token = String(env.OPPORTUNITY_ADMIN_TOKEN || "");
+  if (!token) return Response.json({ ok:false, error:"dashboard_a2a_admin_token_missing" }, { status:503, headers:{"cache-control":"no-store"} });
+  try {
+    let body;
+    if (request.method === "POST") {
+      body = await request.text();
+      if (body.length > 6000) return Response.json({ ok:false, error:"request_too_large" }, { status:413 });
+    }
+    const headers = new Headers({ "accept":"application/json", "x-lumen-admin":token });
+    if (request.method === "POST") headers.set("content-type","application/json");
+    const upstream = await env.A2A.fetch(new Request(`https://lumen.internal${targetPath}`, { method:request.method, headers, body }));
+    const text = await upstream.text();
+    const outHeaders = new Headers({ "content-type":upstream.headers.get("content-type") || "application/json; charset=utf-8", "cache-control":"no-store", "x-lumen-conversation-proxy":"v1" });
+    return new Response(text, { status:upstream.status, headers:outHeaders });
+  } catch (error) {
+    return Response.json({ ok:false, error:"conversation_upstream_unavailable", detail:String(error?.message || error).slice(0,160) }, { status:502, headers:{"cache-control":"no-store"} });
+  }
+}
+
 export default {
   async fetch(request, env, ctx) {
-    const response = await app.fetch(request, env, ctx);
     const url = new URL(request.url);
+    const baseRequest = request.clone();
+    const response = await app.fetch(baseRequest, env, ctx);
+
+    const authenticated = response.status !== 401 && response.status !== 503;
+    if (url.pathname === "/conversar" && request.method === "GET") {
+      if (!authenticated) return response;
+      return new Response(conversationPage(), { headers:{ "content-type":"text/html; charset=utf-8", "cache-control":"no-store", "x-frame-options":"DENY", "referrer-policy":"no-referrer", "x-content-type-options":"nosniff", "content-security-policy":"default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'" } });
+    }
+    if (authenticated && request.method === "POST" && url.pathname === "/api/lumen-talk") return proxyConversation(request, env, "/lumen/talk");
+    if (authenticated && request.method === "GET" && url.pathname === "/api/lumen-mind") return proxyConversation(request, env, "/lumen/mind");
+    if (authenticated && request.method === "GET" && url.pathname === "/api/lumen-conversation") return proxyConversation(request, env, "/lumen/conversation");
 
     if (request.method === "GET" && url.pathname === "/api/data" && response.ok && String(response.headers.get("content-type") || "").includes("application/json")) {
       try {
@@ -160,10 +209,12 @@ export default {
 
     let html = await response.text();
     html = injectConversionUI(html);
+    html = injectConversationLink(html);
     const headers = new Headers(response.headers);
     headers.delete("content-length");
     headers.set("cache-control", "no-store, no-cache, must-revalidate");
     headers.set("x-lumen-travel-conversion-panel", "v2");
+    headers.set("x-lumen-conversational-mind", "v1");
     return new Response(html, { status: response.status, statusText: response.statusText, headers });
   }
 };
