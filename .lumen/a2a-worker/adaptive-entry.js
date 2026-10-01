@@ -14,6 +14,7 @@ import { handleTravelAffiliateRegistry } from "./travel-affiliate-registry.js";
 import { handleTravelAcquisitionEngine, runTravelAcquisitionEngine } from "./travel-acquisition-engine.js";
 import { handleAutonomousGrowthLoop, runAutonomousGrowthLoop } from "./autonomous-growth-loop-v11.js";
 import { handleGrowthMultiplierV2, runGrowthMultiplierV2Cycle } from "./growth-multiplier-v2.js";
+import { handleGrowthEngineFoundry } from "./growth-engine-foundry.js";
 import { handleTravelpayoutsFinance, syncTravelpayoutsFinance } from "./travelpayouts-finance-sync.js";
 import { syncX402SettlementsToRevenue } from "./x402-revenue-bridge.js";
 import { syncReferralSettlements } from "./referral-network.js";
@@ -92,6 +93,9 @@ export default {
 
     const superautonomyResponse = await handleSuperautonomy(request, env);
     if (superautonomyResponse) return superautonomyResponse;
+
+    const growthFoundryResponse = await handleGrowthEngineFoundry(request, env);
+    if (growthFoundryResponse) return growthFoundryResponse;
 
     const growthMultiplierResponse = await handleGrowthMultiplierV2(request, env);
     if (growthMultiplierResponse) return growthMultiplierResponse;

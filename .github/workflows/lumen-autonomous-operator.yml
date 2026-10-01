@@ -9,6 +9,7 @@ on:
     paths:
       - '.github/workflows/lumen-autonomous-operator.yml'
       - '.lumen/a2a-worker/growth-multiplier-v2.js'
+      - '.lumen/a2a-worker/growth-engine-foundry.js'
 
 permissions:
   contents: read
@@ -20,7 +21,7 @@ concurrency:
 jobs:
   autonomous-cycle:
     runs-on: ubuntu-latest
-    timeout-minutes: 18
+    timeout-minutes: 24
     steps:
       - name: Verify protected runtime access
         env:
@@ -48,6 +49,23 @@ jobs:
           done
           test "$ok" -eq 1
           echo 'GROWTH_MULTIPLIER_V2_LIVE'
+
+      - name: Wait for Growth Engine Foundry production endpoint
+        run: |
+          set -euo pipefail
+          base='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          ok=0
+          for i in $(seq 1 48); do
+            if curl --fail --show-error --silent --max-time 15 "$base/growth-foundry/policy" -o /tmp/foundry-policy.json; then
+              if jq -e '.version == "1.0-growth-engine-foundry" and .guardrails.autonomousSpendUsd == 0 and .guardrails.createsExternalMessages == false and .guardrails.executesGeneratedCode == false and .guardrails.primitiveExecutionRequiresStaticWhitelist == true' /tmp/foundry-policy.json >/dev/null; then
+                ok=1
+                break
+              fi
+            fi
+            sleep 5
+          done
+          test "$ok" -eq 1
+          echo 'GROWTH_ENGINE_FOUNDRY_LIVE'
 
       - name: Allocate compounding growth attention
         id: multiplier
@@ -89,6 +107,27 @@ jobs:
           lane=$(jq -r '.decision.lane' /tmp/growth.json)
           echo "LUMEN_GROWTH_LANE=$lane"
           echo "lane=$lane" >> "$GITHUB_OUTPUT"
+
+      - name: Discover test and select a new growth motor
+        id: foundry
+        env:
+          ADMIN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          base='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          code=$(curl --show-error --silent --max-time 90 -o /tmp/foundry.json -w '%{http_code}' \
+            -X POST "$base/growth-foundry/run" \
+            -H "x-lumen-admin: $ADMIN" \
+            -H 'content-type: application/json' -d '{}')
+          cat /tmp/foundry.json
+          echo
+          case "$code" in 200|202) ;; *) echo "unexpected foundry HTTP $code"; exit 1 ;; esac
+          jq -e '.ok == true and .version == "1.0-growth-engine-foundry" and (.directive.action == "NONE" or .directive.action == "PROBE_CANDIDATE" or .directive.action == "RUN_PROMOTED_MOTOR") and .guardrails.autonomousSpendUsd == 0 and .guardrails.createsExternalMessages == false and .guardrails.executesGeneratedCode == false and .guardrails.primitiveExecutionRequiresStaticWhitelist == true and .guardrails.bindingActionsHumanGated == true' /tmp/foundry.json >/dev/null
+          action=$(jq -r '.directive.action' /tmp/foundry.json)
+          candidate=$(jq -r '.directive.candidate.name // "NONE"' /tmp/foundry.json)
+          echo "LUMEN_FOUNDRY_ACTION=$action"
+          echo "LUMEN_FOUNDRY_CANDIDATE=$candidate"
+          echo "action=$action" >> "$GITHUB_OUTPUT"
 
       - name: Activate selected safe growth lanes
         env:
@@ -157,11 +196,71 @@ jobs:
           echo 'GROWTH_MULTIPLIER_SAFE_ACTIVATION_COMPLETE'
           echo 'NO_NEW_SPEND_OR_BINDING_AUTHORITY_GRANTED'
 
+      - name: Execute one generated Foundry motor safely
+        if: steps.foundry.outputs.action != 'NONE'
+        env:
+          ADMIN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          base='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          test -s /tmp/foundry.json
+          jq -e '.directive.candidate and (.directive.candidate.primitives | length) >= 1 and (.directive.candidate.primitives | length) <= 3' /tmp/foundry.json >/dev/null
+
+          post_endpoint() {
+            local endpoint="$1"
+            local timeout="${2:-90}"
+            local body="/tmp/gf-${endpoint//\//-}.json"
+            local code
+            code=$(curl --show-error --silent --max-time "$timeout" -o "$body" -w '%{http_code}' \
+              -X POST "$base/$endpoint" \
+              -H "x-lumen-admin: $ADMIN" \
+              -H 'content-type: application/json' -d '{}')
+            echo "===== FOUNDRY $endpoint HTTP $code ====="
+            cat "$body"; echo
+            case "$code" in 200|202) ;; *) echo "unexpected Foundry primitive $endpoint HTTP $code"; exit 1 ;; esac
+          }
+
+          while IFS= read -r primitive; do
+            echo "===== FOUNDRY STATIC PRIMITIVE: $primitive ====="
+            case "$primitive" in
+              B2B_DISCOVERY)
+                post_endpoint source-intelligence/cycle 120
+                post_endpoint market-hunter/run 120
+                ;;
+              B2B_CONVERSION)
+                post_endpoint commercial/reassess 90
+                post_endpoint proposals/prepare-top 60
+                post_endpoint quality/review-next 60
+                ;;
+              PARTNER_NETWORK)
+                post_endpoint partners/discover 180
+                post_endpoint partners/match 90
+                ;;
+              VENTURE_INTAKE)
+                post_endpoint venture-intake/run 90
+                ;;
+              REFERRAL_MONETIZATION)
+                post_endpoint referrals/commissions/plan 90
+                ;;
+              TRAVEL_ACQUISITION)
+                post_endpoint travel/acquisition/run 90
+                ;;
+              *)
+                echo "UNKNOWN_FOUNDRY_PRIMITIVE=$primitive"
+                exit 1
+                ;;
+            esac
+          done < <(jq -r '.directive.candidate.primitives[]' /tmp/foundry.json)
+
+          echo 'GROWTH_FOUNDRY_MOTOR_EXECUTED'
+          echo 'STATIC_WHITELIST_ONLY_NO_GENERATED_CODE'
+          echo 'NO_NEW_SPEND_OR_BINDING_AUTHORITY_GRANTED'
+
       - name: Read autonomous state
         run: |
           set -euo pipefail
           base='https://lumen-zero-a2a.lumen-b2b.workers.dev'
-          for endpoint in growth-multiplier/status growth/status market-hunter/state commercial/next proposals/next quality/stats travel/acquisition/status partners/ideas/stats venture-intake/stats referrals/commissions/stats; do
+          for endpoint in growth-foundry/status growth-multiplier/status growth/status market-hunter/state commercial/next proposals/next quality/stats travel/acquisition/status partners/ideas/stats venture-intake/stats referrals/commissions/stats; do
             echo "===== /$endpoint ====="
             curl --fail --show-error --silent --max-time 30 "$base/$endpoint" || true
             echo
@@ -171,9 +270,11 @@ jobs:
         run: |
           set -euo pipefail
           base='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          curl --fail --show-error --silent --max-time 30 "$base/growth-foundry/status" -o /tmp/foundry-status.json
           curl --fail --show-error --silent --max-time 30 "$base/growth-multiplier/status" -o /tmp/multiplier-status.json
           curl --fail --show-error --silent --max-time 30 "$base/growth/status" -o /tmp/growth-status.json
+          jq -e '.version == "1.0-growth-engine-foundry" and .initialized == true and (.cycle >= 1) and .guardrails.autonomousSpendUsd == 0 and .guardrails.createsExternalMessages == false and .guardrails.executesGeneratedCode == false and .guardrails.primitiveExecutionRequiresStaticWhitelist == true and .guardrails.bindingActionsHumanGated == true' /tmp/foundry-status.json >/dev/null
           jq -e '.version == "2.0-growth-multiplier-compounding" and .initialized == true and .primaryLane and .guardrails.autonomousSpendUsd == 0 and .guardrails.createsExternalMessages == false and .guardrails.bindingActionsHumanGated == true and .guardrails.verifiedRevenueOnly == true' /tmp/multiplier-status.json >/dev/null
           jq -e '.version == "1.2-autonomous-growth-loop-commercial-truth" and .initialized == true and .latest.selected_lane and .guidance.selected_lane' /tmp/growth-status.json >/dev/null
           jq -e '.guardrails.autonomousOutgoingSpend == false and .guardrails.bindingActionsHumanGated == true' /tmp/growth-status.json >/dev/null
-          echo 'AUTONOMOUS_COMPOUNDING_CYCLE_PERSISTED_OK'
+          echo 'AUTONOMOUS_SELF_EXPANDING_CYCLE_PERSISTED_OK'
