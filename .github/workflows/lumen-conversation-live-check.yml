@@ -1,0 +1,46 @@
+name: LUMEN Conversational Mind check
+
+on:
+  pull_request:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/a2a-worker/lumen-conversation.js'
+      - '.lumen/a2a-worker/adaptive-entry.js'
+      - '.lumen/a2a-worker/test-lumen-conversation.mjs'
+      - '.github/workflows/lumen-conversation-live-check.yml'
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/a2a-worker/lumen-conversation.js'
+      - '.lumen/a2a-worker/adaptive-entry.js'
+      - '.lumen/a2a-worker/test-lumen-conversation.mjs'
+      - '.github/workflows/lumen-conversation-live-check.yml'
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Syntax check
+        run: |
+          node --check .lumen/a2a-worker/lumen-conversation.js
+          node --check .lumen/a2a-worker/adaptive-entry.js
+      - name: Grounded conversation tests
+        working-directory: .lumen/a2a-worker
+        run: node test-lumen-conversation.mjs
+      - name: Verify live wiring and guardrails
+        working-directory: .lumen/a2a-worker
+        run: |
+          set -euo pipefail
+          grep -q 'handleLumenConversation' adaptive-entry.js
+          grep -q '/lumen/talk' lumen-conversation.js
+          grep -q '/lumen/mind' lumen-conversation.js
+          grep -q 'autonomousSpendUsd: 0' lumen-conversation.js
+          grep -q 'bindingActionsHumanGated: true' lumen-conversation.js
+          grep -q 'No afirmes conciencia' lumen-conversation.js
+          grep -q 'Only verified settled payment counts as revenue' lumen-conversation.js
+          echo 'LUMEN_CONVERSATIONAL_MIND_WIRING_OK'

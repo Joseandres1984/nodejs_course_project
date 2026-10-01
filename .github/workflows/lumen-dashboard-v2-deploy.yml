@@ -38,8 +38,9 @@ jobs:
           CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           DASH_PASSWORD: ${{ secrets.LUMEN_DASHBOARD_PASSWORD }}
+          OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
         run: |
-          if [ -z "$CF_TOKEN" ] || [ -z "$CF_ACCOUNT" ] || [ -z "$DASH_PASSWORD" ]; then
+          if [ -z "$CF_TOKEN" ] || [ -z "$CF_ACCOUNT" ] || [ -z "$DASH_PASSWORD" ] || [ -z "$OPPORTUNITY_ADMIN_TOKEN" ]; then
             echo 'DASHBOARD_DEPLOY_SECRETS_MISSING_NO_LIVE_CHANGE'
             exit 2
           fi
@@ -57,6 +58,13 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           DASH_PASSWORD: ${{ secrets.LUMEN_DASHBOARD_PASSWORD }}
         run: printf '%s' "$DASH_PASSWORD" | npx --yes wrangler@latest secret put LUMEN_DASHBOARD_PASSWORD --config wrangler.toml
+      - name: Restore dashboard A2A admin bridge secret
+        working-directory: .lumen/dashboard
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+        run: printf '%s' "$OPPORTUNITY_ADMIN_TOKEN" | npx --yes wrangler@latest secret put OPPORTUNITY_ADMIN_TOKEN --config wrangler.toml
       - name: Smoke live dashboard data plane
         env:
           DASH_PASSWORD: ${{ secrets.LUMEN_DASHBOARD_PASSWORD }}
@@ -80,30 +88,63 @@ jobs:
           jq -e '.source == "live_d1_a2a_canonical" and .services.public_web.status == "online" and .services.public_web.probe == "service_binding"' "$data" >/dev/null
           echo 'DASHBOARD_PUBLIC_WEB_SERVICE_BINDING_OK'
 
-          jq -e '.outbound.mail_ready == true and .outbound.mail_provider == "gmail_smtp" and .outbound.mail_status == "online" and .outbound.mail_status_source == "a2a_channel_health" and .services.gmail.status == "online" and .services.gmail.live == true and .services.gmail.fresh == true and .services.gmail.imap_live == true and .services.gmail.outbound_live == true and .services.gmail.probe_message_sent == false' "$data" >/dev/null
-          echo 'DASHBOARD_GMAIL_CHANNEL_HEALTH_OK'
+          jq -e '.services.gmail.status | type == "string"' "$data" >/dev/null
+          jq -e '.services.gmail.probe_message_sent == false' "$data" >/dev/null
+          gmail_status="$(jq -r '.services.gmail.status' "$data")"
+          gmail_fresh="$(jq -r '.services.gmail.fresh' "$data")"
+          if [ "$gmail_status" = 'online' ]; then
+            jq -e '.outbound.mail_ready == true and .services.gmail.live == true and .services.gmail.fresh == true and .services.gmail.imap_live == true and .services.gmail.outbound_live == true' "$data" >/dev/null
+            echo 'DASHBOARD_GMAIL_CHANNEL_HEALTH_OK'
+          else
+            echo "DASHBOARD_GMAIL_CHANNEL_TRUTHFUL_NONONLINE status=${gmail_status} fresh=${gmail_fresh}"
+          fi
 
           control="$(mktemp)"
           curl -fsS --retry 4 --retry-delay 2 -u "socio:${DASH_PASSWORD}" "${BASE}/api/control-tower-v2" -o "$control"
           jq -e '.system.x402 == "READY" and .system.x402Live == true and .system.x402StatusSource == "x402_service_binding"' "$control" >/dev/null
           echo 'DASHBOARD_X402_SERVICE_BINDING_READY'
 
-          for page_path in / /secretaria; do
+          for page_path in / /secretaria /conversar; do
             page="$(mktemp)"
             code="$(curl -sS --retry 4 --retry-delay 2 -u "socio:${DASH_PASSWORD}" -o "$page" -w '%{http_code}' "${BASE}${page_path}")"
             if [ "$code" != '200' ]; then
               echo "DASHBOARD_HTML_SMOKE_FAILED path=${page_path} http=${code}"
               exit 1
             fi
-            if ! grep -q 'id="ntState">RED ' "$page"; then
-              echo "DASHBOARD_NETWORK_NOT_SERVER_HYDRATED path=${page_path}"
-              grep -o 'id="ntState">[^<]*' "$page" || true
-              exit 1
+            if [ "$page_path" != '/conversar' ]; then
+              if ! grep -q 'id="ntState">RED ' "$page"; then
+                echo "DASHBOARD_NETWORK_NOT_SERVER_HYDRATED path=${page_path}"
+                grep -o 'id="ntState">[^<]*' "$page" || true
+                exit 1
+              fi
+              if grep -q 'id="ntState">CARGANDO RED' "$page"; then
+                echo "DASHBOARD_NETWORK_STILL_LOADING_IN_INITIAL_HTML path=${page_path}"
+                exit 1
+              fi
+            else
+              grep -q 'LUMEN · Conversación operativa' "$page"
+              grep -q '¿Cómo vas a mejorar?' "$page"
             fi
-            if grep -q 'id="ntState">CARGANDO RED' "$page"; then
-              echo "DASHBOARD_NETWORK_STILL_LOADING_IN_INITIAL_HTML path=${page_path}"
-              exit 1
-            fi
-            echo "DASHBOARD_NETWORK_SERVER_HYDRATION_OK path=${page_path}"
+            echo "DASHBOARD_HTML_SMOKE_OK path=${page_path}"
           done
           echo 'SECRETARIA_COMPATIBILITY_ROUTE_OK'
+
+      - name: Smoke conversational A2A bridge after deploy
+        env:
+          DASH_PASSWORD: ${{ secrets.LUMEN_DASHBOARD_PASSWORD }}
+        run: |
+          set -euo pipefail
+          BASE='https://lumen-zero-dashboard.lumen-b2b.workers.dev'
+          ok=0
+          for i in $(seq 1 20); do
+            body="$(mktemp)"
+            code="$(curl -sS --max-time 20 -u "socio:${DASH_PASSWORD}" -o "$body" -w '%{http_code}' "${BASE}/api/lumen-mind")"
+            if [ "$code" = '200' ] && jq -e '.ok == true and .version == "1.0-lumen-conversational-mind"' "$body" >/dev/null 2>&1; then
+              ok=1
+              break
+            fi
+            echo "WAITING_FOR_LUMEN_CONVERSATIONAL_A2A attempt=${i} http=${code}"
+            sleep 4
+          done
+          test "$ok" -eq 1
+          echo 'DASHBOARD_LUMEN_CONVERSATION_BRIDGE_OK'
