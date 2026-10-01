@@ -20,7 +20,8 @@ import { syncReferralCommissionSettlements } from "./referral-commission-engine.
 import { recomputeRevenueAttribution } from "./revenue-attribution-engine.js";
 import { recomputeProfitFeedback } from "./profit-feedback-engine.js";
 import { handleSuperautonomy, runSuperautonomyCycle } from "./superautonomy-live.js";
-import { handleLumenConversation } from "./lumen-conversation.js";
+import { handleLumenConversation } from "./lumen-conversation-v2.js";
+import { handleSelfLearning, runSelfLearningCycle } from "./self-learning-engine.js";
 
 async function isolated(step) {
   try {
@@ -71,6 +72,9 @@ export default {
   async fetch(request, env, ctx) {
     const conversationResponse = await handleLumenConversation(request, env);
     if (conversationResponse) return conversationResponse;
+
+    const learningResponse = await handleSelfLearning(request, env);
+    if (learningResponse) return learningResponse;
 
     const superautonomyResponse = await handleSuperautonomy(request, env);
     if (superautonomyResponse) return superautonomyResponse;
@@ -139,11 +143,15 @@ export default {
         trigger: "cloudflare_scheduled_superautonomy"
       }));
 
+      const selfLearning = await isolated(() => runSelfLearningCycle(env, {
+        trigger: "scheduled_after_superautonomy"
+      }));
+
       await isolated(() => syncViatorBookingConversions(env));
       await isolated(() => runTravelAcquisitionEngine(env));
 
       const recoveryGrowth = superautonomy?.ok === true && superautonomy?.recovery?.accelerateGrowthLoop === true;
-      if (!growthSlot && !recoveryGrowth) return { ok:true, growthSkipped:true, superautonomy };
+      if (!growthSlot && !recoveryGrowth) return { ok:true, growthSkipped:true, superautonomy, selfLearning };
 
       const commercialTruth = await refreshCommercialTruth(env);
       const growth = await runAutonomousGrowthLoop(env, {
@@ -151,7 +159,7 @@ export default {
         scheduledTime:controller?.scheduledTime || null,
       });
 
-      return { ok:Boolean(growth?.ok), commercialTruth, growth, superautonomy };
+      return { ok:Boolean(growth?.ok), commercialTruth, growth, superautonomy, selfLearning };
     })().catch(() => ({ ok:false, isolatedFailure:true })));
 
     return adaptiveCore.scheduled(controller, env, ctx);
