@@ -1,0 +1,1 @@
+LUMEN Mind v2 combines responsive grounded conversation with a bounded self-learning loop. The runtime never waits indefinitely on Workers AI, preserves a deterministic response path, and adapts tactic preference scores from verified postmortems without self-modifying code or financial authority.
