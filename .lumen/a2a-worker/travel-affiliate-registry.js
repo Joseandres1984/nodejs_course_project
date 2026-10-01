@@ -1,4 +1,4 @@
-const VERSION = "1.0-travel-affiliate-registry";
+const VERSION = "1.1-travel-affiliate-registry";
 
 function clean(value, limit = 1400) {
   return String(value ?? "").trim().replace(/\s+/g, " ").slice(0, limit);
@@ -32,12 +32,32 @@ function json(data, status = 200) {
 export function listTravelAffiliateOffers(env = {}) {
   const offers = [
     {
+      id: "intui-transfer",
+      category: "TRANSFER",
+      brand: "Intui.travel",
+      commissionModel: "AFFILIATE_REWARD",
+      publicBenchmark: "Travelpayouts partner program",
+      configuredUrl: safeUrl(env?.INTUI_AFFILIATE_URL),
+      requiresApplication: true,
+      bookingOnPartnerSite: true
+    },
+    {
       id: "airalo-esim",
       category: "ESIM",
       brand: "Airalo",
       commissionModel: "PERCENT_OF_SALE",
       publicBenchmark: "10% standard commission",
       configuredUrl: safeUrl(env?.AIRALO_AFFILIATE_URL),
+      requiresApplication: true,
+      bookingOnPartnerSite: true
+    },
+    {
+      id: "qeeq-car-rental",
+      category: "CAR_RENTAL",
+      brand: "QEEQ",
+      commissionModel: "AFFILIATE_REWARD",
+      publicBenchmark: "Travelpayouts partner program",
+      configuredUrl: safeUrl(env?.QEEQ_AFFILIATE_URL),
       requiresApplication: true,
       bookingOnPartnerSite: true
     },
