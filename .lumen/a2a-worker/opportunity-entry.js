@@ -65,6 +65,38 @@ function consumedExternalSlot(result) {
   );
 }
 
+async function readGrowthCommercialGuidance(env, fallbackAction) {
+  if (!env?.DB) return null;
+  try {
+    const row = await env.DB.prepare("SELECT expires_at,selected_lane,preferred_action,confidence,reason,observed_bottleneck FROM lumen_growth_guidance WHERE id='CURRENT' LIMIT 1").first();
+    if (!row) return null;
+    const expiresAt = Date.parse(String(row.expires_at || ""));
+    if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) return null;
+    if (String(row.confidence || "").toUpperCase() === "LOW") return null;
+
+    const preferred = String(row.preferred_action || "").toUpperCase();
+    let externalAction = null;
+    if (["CONVERT_EXISTING_INTEREST", "QUALIFY_AND_CONVERT"].includes(preferred)) externalAction = "COMMERCIAL_REPLY";
+    else if (preferred === "FIND_AND_CONVERT_BUYER_DEMAND") externalAction = "FIRST_CASH";
+    else if (["GENERATE_TRAVEL_DEMAND", "SCALE_TRAVEL_WINNERS"].includes(preferred)) externalAction = "TRAVEL_REFERRAL";
+    else if (preferred === "SCALE_VERIFIED_WINNER") externalAction = ["FIRST_CASH","COMMERCIAL_REPLY","FOLLOWUP","NEW_OUTREACH"].includes(fallbackAction) ? fallbackAction : "NEW_OUTREACH";
+    else if (preferred === "VERIFY_SETTLEMENT_THEN_DELIVER") externalAction = "NONE";
+    if (!externalAction) return null;
+
+    return {
+      externalAction,
+      selectedLane: row.selected_lane || null,
+      preferredAction: row.preferred_action || null,
+      confidence: row.confidence || null,
+      reason: row.reason || null,
+      observedBottleneck: row.observed_bottleneck || null,
+      expiresAt: row.expires_at || null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export default {
   async fetch(request, env, ctx) {
     const opportunityResponse = await handleOpportunityEngine(request, env); if (opportunityResponse) return opportunityResponse;
@@ -163,9 +195,14 @@ export default {
       await runOpportunityFactory(env);
       const portfolio = await recomputePortfolioGovernor(env);
       const firstCashModeActive = String(env?.LUMEN_FIRST_CASH_MODE || "").toLowerCase() === "true" && Number(portfolio?.metrics?.verifiedRevenueUsd || 0) < 1;
-      const preferredExternalAction = firstCashModeActive ? "FIRST_CASH" : (portfolio?.recommendedExternalAction || "NONE");
+      const portfolioPreferredAction = firstCashModeActive ? "FIRST_CASH" : (portfolio?.recommendedExternalAction || "NONE");
+      const growthGuidance = await readGrowthCommercialGuidance(env, portfolioPreferredAction);
+      const conversionInventoryProtected = ["COMMERCIAL_REPLY", "FOLLOWUP"].includes(portfolioPreferredAction);
+      const preferredExternalAction = conversionInventoryProtected
+        ? portfolioPreferredAction
+        : (growthGuidance?.externalAction || portfolioPreferredAction);
 
-      let conversionExternalMessageSent = false;
+      let conversionExternalMessageSent = preferredExternalAction === "NONE";
       let firstCash = null;
       let commercialReply = null;
       let commissionAction = null;
@@ -173,9 +210,8 @@ export default {
       let newOutreach = null;
       let travelAction = null;
 
-      // Downstream commercial inventory always gets the single external slot first.
-      // Expansive actions (fresh outreach, commissions, travel, councils and terms)
-      // are attempted only after close intent, qualified replies and due follow-ups.
+      // Growth guidance may steer the one bounded commercial slot, but existing
+      // conversion/follow-up inventory keeps priority and all original send guards remain.
       if (preferredExternalAction === "FIRST_CASH") {
         firstCash = await runFirstCashCloser(env, { force: false });
         conversionExternalMessageSent = consumedExternalSlot(firstCash);
@@ -185,6 +221,15 @@ export default {
       } else if (preferredExternalAction === "FOLLOWUP") {
         priorityFollowup = await processFollowupCycle(env);
         conversionExternalMessageSent = consumedExternalSlot(priorityFollowup);
+      } else if (preferredExternalAction === "NEW_OUTREACH") {
+        await prepareTopProposal(env);
+        await reviewNextProposal(env);
+        newOutreach = await sendNextApproved(env, { force: false });
+        conversionExternalMessageSent = consumedExternalSlot(newOutreach);
+      } else if (preferredExternalAction === "TRAVEL_REFERRAL") {
+        travelAction = await runTravelReferralAction(env, { force: false });
+        conversionExternalMessageSent = consumedExternalSlot(travelAction);
+        if (travelAction?.referralId) await planReferralCommissions(env);
       }
 
       if (!conversionExternalMessageSent && !firstCash) {
@@ -200,7 +245,7 @@ export default {
         conversionExternalMessageSent = consumedExternalSlot(priorityFollowup);
       }
 
-      if (!conversionExternalMessageSent && preferredExternalAction === "NEW_OUTREACH") {
+      if (!conversionExternalMessageSent && preferredExternalAction === "NEW_OUTREACH" && !newOutreach) {
         await prepareTopProposal(env);
         await reviewNextProposal(env);
         newOutreach = await sendNextApproved(env, { force: false });
@@ -210,14 +255,14 @@ export default {
         commissionAction = await runReferralCommissionAutopilot(env, { force: false });
         conversionExternalMessageSent = consumedExternalSlot(commissionAction);
       }
-      if (!conversionExternalMessageSent) {
+      if (!conversionExternalMessageSent && !travelAction) {
         travelAction = await runTravelReferralAction(env, { force: false });
         conversionExternalMessageSent = consumedExternalSlot(travelAction);
         if (travelAction?.referralId) await planReferralCommissions(env);
       }
 
       const councilRound = conversionExternalMessageSent
-        ? { acted: false, reason: "commercial_portfolio_has_external_priority" }
+        ? { acted: false, reason: preferredExternalAction === "NONE" ? "growth_loop_reserved_slot_for_settlement_truth" : "commercial_portfolio_has_external_priority" }
         : await runCouncilRoundManager(env, { force: false });
       const councilExternalMessageSent = Boolean(councilRound?.invite?.sent || councilRound?.invite?.status === "SEND_FAILED");
 
