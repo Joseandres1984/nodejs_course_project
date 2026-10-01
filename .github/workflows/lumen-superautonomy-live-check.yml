@@ -1,0 +1,44 @@
+name: LUMEN Superautonomy live check
+
+on:
+  pull_request:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/a2a-worker/superautonomy-live.js'
+      - '.lumen/a2a-worker/superautonomy-entry.js'
+      - '.lumen/a2a-worker/adaptive-entry.js'
+      - '.lumen/a2a-worker/test-superautonomy-live.mjs'
+      - '.github/workflows/lumen-superautonomy-live-check.yml'
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/a2a-worker/superautonomy-live.js'
+      - '.lumen/a2a-worker/adaptive-entry.js'
+      - '.lumen/a2a-worker/test-superautonomy-live.mjs'
+      - '.github/workflows/lumen-superautonomy-live-check.yml'
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Syntax check
+        run: |
+          node --check .lumen/a2a-worker/superautonomy-live.js
+          node --check .lumen/a2a-worker/superautonomy-entry.js
+          node --check .lumen/a2a-worker/adaptive-entry.js
+      - name: Superautonomy decision tests
+        working-directory: .lumen/a2a-worker
+        run: node test-superautonomy-live.mjs
+      - name: Verify deployed entrypoint wiring
+        working-directory: .lumen/a2a-worker
+        run: |
+          grep -q 'handleSuperautonomy' adaptive-entry.js
+          grep -q 'runSuperautonomyCycle' adaptive-entry.js
+          grep -q 'superautonomy_anti_stall_recovery' adaptive-entry.js
+          grep -q 'autonomousSpendUsd:0' superautonomy-live.js
+          grep -q 'bindingActionsHumanGated:true' superautonomy-live.js
