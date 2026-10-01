@@ -1,0 +1,42 @@
+name: LUMEN Superautonomy v3 check
+
+on:
+  pull_request:
+    paths:
+      - '.lumen/a2a-worker/superautonomy-v3.js'
+      - '.lumen/a2a-worker/adaptive-entry.js'
+      - '.lumen/a2a-worker/test-superautonomy-v3.mjs'
+      - '.github/workflows/lumen-superautonomy-v3-check.yml'
+  workflow_dispatch:
+
+jobs:
+  superautonomy-v3:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Run Superautonomy v3 behavior tests
+        working-directory: .lumen/a2a-worker
+        run: node test-superautonomy-v3.mjs
+
+      - name: Verify four engines and guardrails
+        working-directory: .lumen/a2a-worker
+        run: |
+          set -euo pipefail
+          grep -q 'lumen_v3_self_model' superautonomy-v3.js
+          grep -q 'lumen_v3_plans' superautonomy-v3.js
+          grep -q 'lumen_v3_strategy_experiments' superautonomy-v3.js
+          grep -q 'lumen_v3_swarm_state' superautonomy-v3.js
+          grep -q 'autonomousSpendUsd:0' superautonomy-v3.js
+          grep -q 'bindingActionsHumanGated:true' superautonomy-v3.js
+          grep -q 'selfModifyingCode:false' superautonomy-v3.js
+          grep -q 'handleSuperautonomyV3' adaptive-entry.js
+          grep -q 'runSuperautonomyV3Cycle' adaptive-entry.js
+          echo 'SUPER_AUTONOMY_V3_STATIC_GUARDRAILS_OK'
+
+      - name: Validate Cloudflare A2A bundle
+        working-directory: .lumen/a2a-worker
+        run: npx --yes wrangler@latest deploy --dry-run --config wrangler.toml
