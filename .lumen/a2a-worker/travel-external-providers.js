@@ -27,6 +27,82 @@ function safeJson(value, fallback = {}) {
   try { return JSON.parse(value); } catch { return fallback; }
 }
 
+function safeHttps(value) {
+  const raw = clean(value, 2400);
+  if (!raw) return null;
+  try {
+    const url = new URL(raw);
+    return url.protocol === "https:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+function ddmm(value) {
+  const raw = clean(value, 80);
+  if (!raw) return "";
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return "";
+  return `${String(date.getUTCDate()).padStart(2, "0")}${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+function aviasalesSearchUrl(input, destination, best = {}) {
+  const origin = clean(input?.originCode, 8).toUpperCase();
+  const target = clean(destination?.code, 8).toUpperCase();
+  const adults = Math.max(1, Math.min(8, Math.round(Number(input?.travelersCount) || 1)));
+  if (!origin || !target) return null;
+
+  const departure = ddmm(best?.departure_at);
+  const returnDate = ddmm(best?.return_at);
+  if (departure) {
+    const params = `${origin}${departure}${target}${returnDate}${adults}`;
+    return `https://www.aviasales.com/search/${params}`;
+  }
+  return `https://www.aviasales.com/?params=${origin}${target}${adults}`;
+}
+
+function travelpayoutsPartnerLinkConfig(env = {}) {
+  const projectId = Number(clean(env?.TRAVELPAYOUTS_PROJECT_ID, 40));
+  const marker = Number(clean(env?.TRAVELPAYOUTS_MARKER, 40));
+  const token = clean(env?.TRAVELPAYOUTS_API_TOKEN, 500);
+  return {
+    projectId,
+    marker,
+    token,
+    configured: Boolean(token && Number.isInteger(projectId) && projectId > 0 && Number.isInteger(marker) && marker > 0)
+  };
+}
+
+async function convertTravelpayoutsPartnerLink(env, fetchImpl, targetUrl, subId) {
+  const config = travelpayoutsPartnerLinkConfig(env);
+  const url = safeHttps(targetUrl);
+  if (!config.configured || !url) return null;
+
+  try {
+    const response = await fetchImpl("https://api.travelpayouts.com/links/v1/create", {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+        "X-Access-Token": config.token
+      },
+      body: JSON.stringify({
+        trs: config.projectId,
+        marker: config.marker,
+        shorten: true,
+        links: [{ url, sub_id: clean(subId, 80) || "lumen_flight" }]
+      })
+    });
+    if (!response.ok) return null;
+    const payload = await response.json().catch(() => ({}));
+    const row = payload?.result?.links?.[0];
+    if (row?.code !== "success") return null;
+    return safeHttps(row?.partner_url);
+  } catch {
+    return null;
+  }
+}
+
 function quoteEnvelope(provider, component, amountUSD, unitAmountUSD, quantity, confidence, sourceReference, extras = {}) {
   return {
     component,
@@ -53,15 +129,16 @@ function quoteEnvelope(provider, component, amountUSD, unitAmountUSD, quantity, 
 function aviasalesProvider(env, fetchImpl) {
   const token = clean(env?.TRAVELPAYOUTS_API_TOKEN, 500);
   if (!token) return null;
+  const partnerConfig = travelpayoutsPartnerLinkConfig(env);
 
   return {
-    id: "aviasales-data-v1",
-    name: "Aviasales Data API",
+    id: "aviasales-data-v2",
+    name: "Aviasales Data + Travelpayouts Deep Links",
     component: "FLIGHT",
     mode: "CACHED_MARKET_DATA",
     supportsRealtime: false,
     supportsBooking: false,
-    supportsAffiliate: false,
+    supportsAffiliate: partnerConfig.configured,
     externalNetworkCalls: true,
     requiresSecret: true,
     async quote({ input, destination }) {
@@ -92,11 +169,11 @@ function aviasalesProvider(env, fetchImpl) {
       const best = offers[0];
       const travelers = input.travelersCount;
       const amountUSD = best.price * travelers;
-      const affiliateBase = clean(env?.TRAVELPAYOUTS_AVIASALES_AFFILIATE_BASE_URL, 1000);
-      const rawLink = clean(best?.link, 1000);
-      const affiliateUrl = affiliateBase && rawLink ? `${affiliateBase.replace(/\/$/, "")}${rawLink.startsWith("/") ? "" : "/"}${rawLink}` : null;
+      const searchUrl = aviasalesSearchUrl(input, destination, best);
+      const subId = `lumen_flight_${clean(input.originCode, 8).toLowerCase()}_${clean(destination.code, 8).toLowerCase()}`;
+      const affiliateUrl = await convertTravelpayoutsPartnerLink(env, fetchImpl, searchUrl, subId);
 
-      return quoteEnvelope(this, this.component, amountUSD, best.price, travelers, 0.78, `aviasales:${input.originCode}-${destination.code}:${month}`, {
+      return quoteEnvelope(this, this.component, amountUSD, best.price, travelers, 0.8, `aviasales:${input.originCode}-${destination.code}:${month}`, {
         isRealtime: false,
         affiliateEligible: Boolean(affiliateUrl),
         affiliateUrl,
@@ -106,7 +183,11 @@ function aviasalesProvider(env, fetchImpl) {
           airline: best.airline || null,
           transfers: Number.isFinite(Number(best.transfers)) ? Number(best.transfers) : null,
           returnTransfers: Number.isFinite(Number(best.return_transfers)) ? Number(best.return_transfers) : null,
-          cacheWindow: "recent_user_search_data"
+          cacheWindow: "recent_user_search_data",
+          searchUrl,
+          routeSpecificSearch: Boolean(ddmm(best?.departure_at)),
+          affiliateStrategy: affiliateUrl ? "travelpayouts_partner_links_api" : "registry_fallback",
+          affiliateSubId: subId
         }
       });
     },
@@ -196,17 +277,20 @@ export function createExternalTravelProviders(env = {}, fetchImpl = fetch) {
 
 export function getExternalTravelProviderStatus(env = {}) {
   const viatorMap = safeJson(env?.VIATOR_DESTINATION_MAP_JSON, {});
+  const partnerConfig = travelpayoutsPartnerLinkConfig(env);
   return {
-    version: "1.0-external-travel-providers",
+    version: "1.1-external-travel-providers",
     providers: [
       {
-        id: "aviasales-data-v1",
+        id: "aviasales-data-v2",
         component: "FLIGHT",
         configured: Boolean(clean(env?.TRAVELPAYOUTS_API_TOKEN, 500)),
         mode: "CACHED_MARKET_DATA",
         realTime: false,
         booking: false,
-        affiliateLinkConfigured: Boolean(clean(env?.TRAVELPAYOUTS_AVIASALES_AFFILIATE_BASE_URL, 1000))
+        dynamicDeepLinksConfigured: partnerConfig.configured,
+        affiliateLinkConfigured: partnerConfig.configured || Boolean(clean(env?.TRAVELPAYOUTS_AVIASALES_FALLBACK_URL, 1800)),
+        genericAffiliateFallbackConfigured: Boolean(clean(env?.TRAVELPAYOUTS_AVIASALES_FALLBACK_URL, 1800))
       },
       {
         id: "viator-basic-affiliate-v1",
