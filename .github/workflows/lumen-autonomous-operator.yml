@@ -3,7 +3,7 @@ name: LUMEN Autonomous Operator
 on:
   workflow_dispatch:
   schedule:
-    - cron: '17 */6 * * *'
+    - cron: '17 * * * *'
   push:
     branches: [lumen-zero]
     paths:
@@ -45,7 +45,7 @@ jobs:
           cat /tmp/growth.json
           echo
           case "$code" in 200|202) ;; *) echo "unexpected growth HTTP $code"; exit 1 ;; esac
-          jq -e '.ok == true and .version == "1.1-autonomous-growth-loop"' /tmp/growth.json >/dev/null
+          jq -e '.ok == true and .version == "1.2-autonomous-growth-loop-commercial-truth"' /tmp/growth.json >/dev/null
           lane=$(jq -r '.decision.lane' /tmp/growth.json)
           echo "LUMEN_GROWTH_LANE=$lane"
           echo "lane=$lane" >> "$GITHUB_OUTPUT"
@@ -85,6 +85,6 @@ jobs:
           set -euo pipefail
           base='https://lumen-zero-a2a.lumen-b2b.workers.dev'
           curl --fail --show-error --silent --max-time 30 "$base/growth/status" -o /tmp/growth-status.json
-          jq -e '.version == "1.1-autonomous-growth-loop" and .initialized == true and .latest.selected_lane and .guidance.selected_lane' /tmp/growth-status.json >/dev/null
+          jq -e '.version == "1.2-autonomous-growth-loop-commercial-truth" and .initialized == true and .latest.selected_lane and .guidance.selected_lane' /tmp/growth-status.json >/dev/null
           jq -e '.guardrails.autonomousOutgoingSpend == false and .guardrails.bindingActionsHumanGated == true' /tmp/growth-status.json >/dev/null
           echo 'AUTONOMOUS_CYCLE_PERSISTED_OK'
