@@ -37,17 +37,21 @@ function state(overrides={}) {
 }
 
 {
-  const prev={cycle:3,stall_cycles:2,autonomy_ratio:1,state:{targetMetric:"activeCandidates",currentValue:4,selectedTactic:"discover_score_demand"}};
-  const d=decideSuperautonomy(state({metrics:{activeCandidates:4}}),prev);
+  const prev={cycle:3,stall_cycles:2,autonomy_ratio:1,state:{targetMetric:"actionableOpportunities",currentValue:0,selectedTactic:"qualify_strongest"}};
+  const d=decideSuperautonomy(state({metrics:{activeCandidates:4,actionableOpportunities:0}}),prev);
   assert.equal(d.stallCycles,3);
   assert.equal(d.recovery.accelerateGrowthLoop,true);
   assert.equal(d.recovery.level,2);
+  assert.equal(d.verifiedProgress,false);
 }
 
 {
-  const prev={cycle:4,stall_cycles:4,autonomy_ratio:1,state:{targetMetric:"activeCandidates",currentValue:4,selectedTactic:"discover_score_demand"}};
-  const d=decideSuperautonomy(state({metrics:{activeCandidates:6}}),prev);
+  const prev={cycle:4,stall_cycles:4,autonomy_ratio:1,state:{targetMetric:"actionableOpportunities",currentValue:0,selectedTactic:"qualify_strongest"}};
+  const d=decideSuperautonomy(state({metrics:{activeCandidates:4,actionableOpportunities:1}}),prev);
   assert.equal(d.verifiedProgress,true);
+  assert.equal(d.bottleneckAdvanced,true);
+  assert.equal(d.progressMetric,"actionableOpportunities");
+  assert.equal(d.metricDelta,1);
   assert.equal(d.stallCycles,0);
   assert.equal(d.recovery.level,0);
 }
