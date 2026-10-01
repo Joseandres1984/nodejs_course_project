@@ -1,6 +1,7 @@
 const VERSION = "1.1-travel-affiliate-registry";
 const DEFAULT_INTUI_AFFILIATE_URL = "https://intui.tpo.lu/bAzIRmam";
 const DEFAULT_AIRALO_AFFILIATE_URL = "https://airalo.tpo.lu/iqbQnTg6";
+const DEFAULT_QEEQ_AFFILIATE_URL = "https://qeeq.tpo.lu/JzOOEBh5";
 
 function clean(value, limit = 1400) {
   return String(value ?? "").trim().replace(/\s+/g, " ").slice(0, limit);
@@ -59,7 +60,7 @@ export function listTravelAffiliateOffers(env = {}) {
       brand: "QEEQ",
       commissionModel: "AFFILIATE_REWARD",
       publicBenchmark: "Travelpayouts partner program",
-      configuredUrl: safeUrl(env?.QEEQ_AFFILIATE_URL),
+      configuredUrl: safeUrl(env?.QEEQ_AFFILIATE_URL || DEFAULT_QEEQ_AFFILIATE_URL),
       requiresApplication: true,
       bookingOnPartnerSite: true
     },
