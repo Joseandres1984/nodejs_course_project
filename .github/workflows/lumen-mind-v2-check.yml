@@ -7,8 +7,10 @@ on:
       - '.lumen/a2a-worker/lumen-conversation-v2.js'
       - '.lumen/a2a-worker/self-learning-engine.js'
       - '.lumen/a2a-worker/meta-controller.js'
+      - '.lumen/a2a-worker/teacher-self-critic.js'
       - '.lumen/a2a-worker/adaptive-entry.js'
       - '.lumen/a2a-worker/test-lumen-mind-v2-static.mjs'
+      - '.lumen/a2a-worker/test-teacher-self-critic-static.mjs'
       - '.github/workflows/lumen-mind-v2-check.yml'
   push:
     branches: [lumen-zero]
@@ -16,8 +18,10 @@ on:
       - '.lumen/a2a-worker/lumen-conversation-v2.js'
       - '.lumen/a2a-worker/self-learning-engine.js'
       - '.lumen/a2a-worker/meta-controller.js'
+      - '.lumen/a2a-worker/teacher-self-critic.js'
       - '.lumen/a2a-worker/adaptive-entry.js'
       - '.lumen/a2a-worker/test-lumen-mind-v2-static.mjs'
+      - '.lumen/a2a-worker/test-teacher-self-critic-static.mjs'
       - '.github/workflows/lumen-mind-v2-check.yml'
   workflow_dispatch:
 
@@ -34,10 +38,13 @@ jobs:
           node --check .lumen/a2a-worker/lumen-conversation-v2.js
           node --check .lumen/a2a-worker/self-learning-engine.js
           node --check .lumen/a2a-worker/meta-controller.js
+          node --check .lumen/a2a-worker/teacher-self-critic.js
           node --check .lumen/a2a-worker/adaptive-entry.js
       - name: Run Mind v2 static assertions
         working-directory: .lumen/a2a-worker
-        run: node test-lumen-mind-v2-static.mjs
+        run: |
+          node test-lumen-mind-v2-static.mjs
+          node test-teacher-self-critic-static.mjs
       - name: Verify responsive conversation invariants
         run: |
           set -euo pipefail
@@ -66,4 +73,16 @@ jobs:
           grep -q 'autonomousSpendUsd:0' .lumen/a2a-worker/meta-controller.js
           grep -q 'bindingActionsHumanGated:true' .lumen/a2a-worker/meta-controller.js
           grep -q 'maxScoreNudgePerCycle:MAX_SCORE_NUDGE' .lumen/a2a-worker/meta-controller.js
-          echo 'LUMEN_META_CONTROLLER_V1_GUARDRAILS_OK'
+      - name: Verify Human Teacher + Self-Critic guardrails and wiring
+        run: |
+          set -euo pipefail
+          grep -q 'handleTeacherSelfCritic' .lumen/a2a-worker/adaptive-entry.js
+          grep -q 'runSelfCriticCycle' .lumen/a2a-worker/adaptive-entry.js
+          grep -q 'scheduled_after_meta_learning' .lumen/a2a-worker/adaptive-entry.js
+          grep -q 'human_feedback_is_a_hypothesis_not_ground_truth' .lumen/a2a-worker/teacher-self-critic.js
+          grep -q 'verifiedEvidenceOverridesAdvice:true' .lumen/a2a-worker/teacher-self-critic.js
+          grep -q 'MAX_TEACHER_NUDGE = 0.04' .lumen/a2a-worker/teacher-self-critic.js
+          grep -q 'selfModifyingCode:false' .lumen/a2a-worker/teacher-self-critic.js
+          grep -q 'autonomousSpendUsd:0' .lumen/a2a-worker/teacher-self-critic.js
+          grep -q 'bindingActionsHumanGated:true' .lumen/a2a-worker/teacher-self-critic.js
+          echo 'LUMEN_TEACHER_SELF_CRITIC_V1_GUARDRAILS_OK'

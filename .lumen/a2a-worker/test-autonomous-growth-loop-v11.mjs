@@ -63,7 +63,11 @@ function base(){return{
 }
 
 {
-  const before=base(),after=base();after.revenue.verifiedSettlements=1;after.revenue.realizedRevenueUsd=12;
+  const before=base(),after=base();
+  after.revenue.verifiedSettlements=1;
+  after.revenue.verifiedSettlements7d=1;
+  after.revenue.realizedRevenueUsd=12;
+  after.revenue.realizedRevenueUsd7d=12;
   const e=evaluateGrowthDelta(before,after);
   assert.equal(e.outcome,"VERIFIED_REVENUE");
   assert.ok(e.reward>=170);
