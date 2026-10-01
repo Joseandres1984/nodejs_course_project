@@ -50,7 +50,7 @@ jobs:
               && curl -fsS --max-time 15 "$BASE/viator/api/status" -o viator-api-status.json \
               && curl -fsS --max-time 15 "$BASE/health/viator-conversions" -o viator-conversions.json; then
               if jq -e '.name == "LUMEN Travel Discovery" and .autonomousSpend == false and .createsBooking == false' travel-policy.json >/dev/null \
-                && jq -e '.version == "1.1-travel-provider-registry" and .createsBooking == false and .createsCharge == false and .autonomousSpend == false' provider-policy.json >/dev/null \
+                && jq -e '.version == "1.2-travel-provider-registry" and .createsBooking == false and .createsCharge == false and .autonomousSpend == false' provider-policy.json >/dev/null \
                 && jq -e '.provider == "viator" and .environment == "production" and .configured == true and .secretExposed == false and .bookingAuthority == false and .paymentAuthority == false' viator-api-status.json >/dev/null \
                 && jq -e '.ok == true and .configured == true and .environment == "production" and .mode == "booking-event-attribution" and .recommendedPolling == "hourly" and .bookingAuthority == false and .paymentAuthority == false and .autonomousSpendUsd == 0' viator-conversions.json >/dev/null; then
                 ok=1
