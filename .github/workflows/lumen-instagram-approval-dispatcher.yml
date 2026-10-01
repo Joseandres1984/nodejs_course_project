@@ -1,0 +1,35 @@
+name: LUMEN Instagram approval dispatcher
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-instagram-approval-dispatcher.yml'
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: lumen-instagram-approval-dispatcher
+  cancel-in-progress: false
+
+jobs:
+  wake-publisher:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Dispatch approved Instagram flush
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api \
+            --method POST \
+            -H 'Accept: application/vnd.github+json' \
+            "repos/${{ github.repository }}/actions/workflows/lumen-instagram-approved-flush.yml/dispatches" \
+            -f ref=lumen-zero
+          echo 'INSTAGRAM_APPROVED_FLUSH_DISPATCHED'
