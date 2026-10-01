@@ -1,4 +1,5 @@
 name: LUMEN Instagram approved flush
+# Reliability wake-up: changing this workflow intentionally triggers one flush after merge.
 
 on:
   push:
@@ -93,10 +94,6 @@ jobs:
           import instagram_content_dedupe_runtime as dedupe
           import zero_instagram_control_bridge_runtime as bridge
 
-          # The dashboard writes signed approve/reject commands to the D1 command queue.
-          # Fold those commands into canonical state BEFORE looking for approved posts.
-          # This was the missing link that caused a valid dashboard click to be followed by
-          # NO_PENDING_APPROVED_POSTS.
           consume = bridge.consume_commands()
           print({'instagram_control_commands_before_flush': consume}, flush=True)
           if consume.get('status') != 'ok':
