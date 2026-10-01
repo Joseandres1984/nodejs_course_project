@@ -8,6 +8,7 @@ on:
     branches: [lumen-zero]
     paths:
       - '.github/workflows/lumen-autonomous-operator.yml'
+      - '.lumen/a2a-worker/growth-multiplier-v2.js'
 
 permissions:
   contents: read
@@ -19,7 +20,7 @@ concurrency:
 jobs:
   autonomous-cycle:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 18
     steps:
       - name: Verify protected runtime access
         env:
@@ -30,6 +31,45 @@ jobs:
           base='https://lumen-zero-a2a.lumen-b2b.workers.dev'
           curl --fail --show-error --silent --max-time 30 "$base/health" >/dev/null
           echo 'AUTONOMOUS_RUNTIME_READY'
+
+      - name: Wait for Growth Multiplier v2 production endpoint
+        run: |
+          set -euo pipefail
+          base='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          ok=0
+          for i in $(seq 1 36); do
+            if curl --fail --show-error --silent --max-time 15 "$base/growth-multiplier/policy" -o /tmp/multiplier-policy.json; then
+              if jq -e '.version == "2.0-growth-multiplier-compounding" and .guardrails.autonomousSpendUsd == 0 and .guardrails.createsExternalMessages == false' /tmp/multiplier-policy.json >/dev/null; then
+                ok=1
+                break
+              fi
+            fi
+            sleep 5
+          done
+          test "$ok" -eq 1
+          echo 'GROWTH_MULTIPLIER_V2_LIVE'
+
+      - name: Allocate compounding growth attention
+        id: multiplier
+        env:
+          ADMIN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          base='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          code=$(curl --show-error --silent --max-time 60 -o /tmp/multiplier.json -w '%{http_code}' \
+            -X POST "$base/growth-multiplier/run" \
+            -H "x-lumen-admin: $ADMIN" \
+            -H 'content-type: application/json' -d '{}')
+          cat /tmp/multiplier.json
+          echo
+          case "$code" in 200|202) ;; *) echo "unexpected multiplier HTTP $code"; exit 1 ;; esac
+          jq -e '.ok == true and .version == "2.0-growth-multiplier-compounding" and .primaryLane and .guardrails.autonomousSpendUsd == 0 and .guardrails.createsExternalMessages == false and .guardrails.bindingActionsHumanGated == true' /tmp/multiplier.json >/dev/null
+          primary=$(jq -r '.primaryLane' /tmp/multiplier.json)
+          exploration=$(jq -r '.explorationLane // ""' /tmp/multiplier.json)
+          echo "LUMEN_MULTIPLIER_PRIMARY=$primary"
+          echo "LUMEN_MULTIPLIER_EXPLORATION=${exploration:-NONE}"
+          echo "primary=$primary" >> "$GITHUB_OUTPUT"
+          echo "exploration=$exploration" >> "$GITHUB_OUTPUT"
 
       - name: Observe decide act and learn
         id: growth
@@ -50,31 +90,78 @@ jobs:
           echo "LUMEN_GROWTH_LANE=$lane"
           echo "lane=$lane" >> "$GITHUB_OUTPUT"
 
-      - name: Buyer Hunter discovery and qualification
-        if: steps.growth.outputs.lane == 'B2B_FIRST_CASH' || steps.growth.outputs.lane == 'B2B_CONVERSION'
+      - name: Activate selected safe growth lanes
         env:
           ADMIN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+          PRIMARY: ${{ steps.multiplier.outputs.primary }}
+          EXPLORATION: ${{ steps.multiplier.outputs.exploration }}
         run: |
           set -euo pipefail
           base='https://lumen-zero-a2a.lumen-b2b.workers.dev'
-          for endpoint in source-intelligence/cycle market-hunter/run commercial/reassess proposals/prepare-top quality/review-next; do
-            body="/tmp/${endpoint//\//-}.json"
-            code=$(curl --show-error --silent --max-time 90 -o "$body" -w '%{http_code}' \
+
+          post_endpoint() {
+            local endpoint="$1"
+            local timeout="${2:-90}"
+            local body="/tmp/gm-${endpoint//\//-}.json"
+            local code
+            code=$(curl --show-error --silent --max-time "$timeout" -o "$body" -w '%{http_code}' \
               -X POST "$base/$endpoint" \
               -H "x-lumen-admin: $ADMIN" \
-              -H 'accept: application/json')
+              -H 'content-type: application/json' -d '{}')
             echo "===== $endpoint HTTP $code ====="
             cat "$body"; echo
-            test "$code" = '202'
-          done
-          echo 'BUYER_HUNTER_PREPARED_NEXT_OPPORTUNITY'
-          echo 'OUTBOUND_CONTACT_REMAINS_GOVERNED'
+            case "$code" in 200|202) ;; *) echo "unexpected $endpoint HTTP $code"; exit 1 ;; esac
+          }
+
+          activate_lane() {
+            local lane="$1"
+            local role="$2"
+            [ -n "$lane" ] || return 0
+            echo "===== GROWTH MULTIPLIER $role: $lane ====="
+            case "$lane" in
+              B2B)
+                post_endpoint source-intelligence/cycle 120
+                post_endpoint market-hunter/run 120
+                post_endpoint commercial/reassess 90
+                if [ "$role" = 'PRIMARY' ]; then
+                  post_endpoint proposals/prepare-top 60
+                  post_endpoint quality/review-next 60
+                fi
+                ;;
+              TRAVEL)
+                post_endpoint travel/acquisition/run 90
+                ;;
+              REFERRAL)
+                post_endpoint referrals/commissions/plan 90
+                ;;
+              PARTNER)
+                post_endpoint partners/discover 180
+                post_endpoint partners/match 90
+                if [ "$role" = 'PRIMARY' ]; then post_endpoint partners/council 90; fi
+                ;;
+              VENTURE)
+                post_endpoint venture-intake/run 90
+                ;;
+              *)
+                echo "UNKNOWN_MULTIPLIER_LANE=$lane"
+                exit 1
+                ;;
+            esac
+          }
+
+          activate_lane "$PRIMARY" PRIMARY
+          if [ -n "${EXPLORATION:-}" ] && [ "$EXPLORATION" != "$PRIMARY" ]; then
+            activate_lane "$EXPLORATION" EXPLORATION
+          fi
+
+          echo 'GROWTH_MULTIPLIER_SAFE_ACTIVATION_COMPLETE'
+          echo 'NO_NEW_SPEND_OR_BINDING_AUTHORITY_GRANTED'
 
       - name: Read autonomous state
         run: |
           set -euo pipefail
           base='https://lumen-zero-a2a.lumen-b2b.workers.dev'
-          for endpoint in growth/status market-hunter/state commercial/next proposals/next quality/stats travel/acquisition/status; do
+          for endpoint in growth-multiplier/status growth/status market-hunter/state commercial/next proposals/next quality/stats travel/acquisition/status partners/ideas/stats venture-intake/stats referrals/commissions/stats; do
             echo "===== /$endpoint ====="
             curl --fail --show-error --silent --max-time 30 "$base/$endpoint" || true
             echo
@@ -84,7 +171,9 @@ jobs:
         run: |
           set -euo pipefail
           base='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          curl --fail --show-error --silent --max-time 30 "$base/growth-multiplier/status" -o /tmp/multiplier-status.json
           curl --fail --show-error --silent --max-time 30 "$base/growth/status" -o /tmp/growth-status.json
+          jq -e '.version == "2.0-growth-multiplier-compounding" and .initialized == true and .primaryLane and .guardrails.autonomousSpendUsd == 0 and .guardrails.createsExternalMessages == false and .guardrails.bindingActionsHumanGated == true and .guardrails.verifiedRevenueOnly == true' /tmp/multiplier-status.json >/dev/null
           jq -e '.version == "1.2-autonomous-growth-loop-commercial-truth" and .initialized == true and .latest.selected_lane and .guidance.selected_lane' /tmp/growth-status.json >/dev/null
           jq -e '.guardrails.autonomousOutgoingSpend == false and .guardrails.bindingActionsHumanGated == true' /tmp/growth-status.json >/dev/null
-          echo 'AUTONOMOUS_CYCLE_PERSISTED_OK'
+          echo 'AUTONOMOUS_COMPOUNDING_CYCLE_PERSISTED_OK'

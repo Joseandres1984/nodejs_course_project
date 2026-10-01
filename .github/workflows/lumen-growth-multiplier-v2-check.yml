@@ -1,0 +1,66 @@
+name: LUMEN Growth Multiplier v2 check
+
+on:
+  pull_request:
+    paths:
+      - '.lumen/a2a-worker/growth-multiplier-v2.js'
+      - '.lumen/a2a-worker/test-growth-multiplier-v2.mjs'
+      - '.lumen/a2a-worker/adaptive-entry.js'
+      - '.github/workflows/lumen-autonomous-operator.yml'
+      - '.github/workflows/lumen-growth-multiplier-v2-check.yml'
+      - '.github/workflows/lumen-growth-multiplier-live-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Syntax checks
+        run: |
+          set -euo pipefail
+          node --check .lumen/a2a-worker/growth-multiplier-v2.js
+          node --check .lumen/a2a-worker/test-growth-multiplier-v2.mjs
+          node --check .lumen/a2a-worker/adaptive-entry.js
+
+      - name: Growth Multiplier decision tests
+        run: node .lumen/a2a-worker/test-growth-multiplier-v2.mjs
+
+      - name: Verify control plane and guardrails
+        run: |
+          set -euo pipefail
+          f=.lumen/a2a-worker/growth-multiplier-v2.js
+          grep -q '2.0-growth-multiplier-compounding' "$f"
+          grep -q '/growth-multiplier/policy' "$f"
+          grep -q '/growth-multiplier/status' "$f"
+          grep -q '/growth-multiplier/history' "$f"
+          grep -q '/growth-multiplier/run' "$f"
+          grep -q 'autonomousSpendUsd:0' "$f"
+          grep -q 'createsExternalMessages:false' "$f"
+          grep -q 'bindingActionsHumanGated:true' "$f"
+          grep -q 'verifiedRevenueOnly:true' "$f"
+          grep -q 'selfModifyingCode:false' "$f"
+          grep -q 'observational_not_causal' "$f"
+          grep -q 'handleGrowthMultiplierV2' .lumen/a2a-worker/adaptive-entry.js
+          grep -q 'runGrowthMultiplierV2Cycle' .lumen/a2a-worker/adaptive-entry.js
+          grep -q 'growthMultiplier' .lumen/a2a-worker/adaptive-entry.js
+          grep -q 'growth-multiplier/run' .github/workflows/lumen-autonomous-operator.yml
+          grep -q "cron: '17 \* \* \* \*'" .github/workflows/lumen-autonomous-operator.yml
+          echo 'GROWTH_MULTIPLIER_V2_GUARDRAILS_OK'
+
+      - name: Dry-run adaptive Worker bundle
+        working-directory: .lumen/a2a-worker
+        run: |
+          set -euo pipefail
+          cp wrangler.toml wrangler.growth-multiplier-check.toml
+          sed -i 's/^main = "opportunity-entry.js"$/main = "adaptive-entry.js"/' wrangler.growth-multiplier-check.toml
+          grep -q '^main = "adaptive-entry.js"$' wrangler.growth-multiplier-check.toml
+          npx --yes wrangler@latest deploy --dry-run --config wrangler.growth-multiplier-check.toml
