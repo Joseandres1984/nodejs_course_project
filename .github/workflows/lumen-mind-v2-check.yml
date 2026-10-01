@@ -1,0 +1,55 @@
+name: LUMEN Mind v2 check
+
+on:
+  pull_request:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/a2a-worker/lumen-conversation-v2.js'
+      - '.lumen/a2a-worker/self-learning-engine.js'
+      - '.lumen/a2a-worker/adaptive-entry.js'
+      - '.lumen/dashboard/conversation_panel_worker_v2.js'
+      - '.lumen/dashboard/wrangler.toml'
+      - '.github/workflows/lumen-mind-v2-check.yml'
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/a2a-worker/lumen-conversation-v2.js'
+      - '.lumen/a2a-worker/self-learning-engine.js'
+      - '.lumen/a2a-worker/adaptive-entry.js'
+      - '.lumen/dashboard/conversation_panel_worker_v2.js'
+      - '.lumen/dashboard/wrangler.toml'
+      - '.github/workflows/lumen-mind-v2-check.yml'
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Syntax check
+        run: |
+          node --check .lumen/a2a-worker/lumen-conversation-v2.js
+          node --check .lumen/a2a-worker/self-learning-engine.js
+          node --check .lumen/a2a-worker/adaptive-entry.js
+          node --check .lumen/dashboard/conversation_panel_worker_v2.js
+      - name: Verify responsive conversation invariants
+        run: |
+          set -euo pipefail
+          grep -q '@cf/meta/llama-3.1-8b-instruct-fast' .lumen/a2a-worker/lumen-conversation-v2.js
+          grep -q 'AI_TIMEOUT_MS = 6500' .lumen/a2a-worker/lumen-conversation-v2.js
+          grep -q 'deterministic_grounded_fallback' .lumen/a2a-worker/lumen-conversation-v2.js
+          grep -q 'no implica conciencia' .lumen/dashboard/conversation_panel_worker_v2.js
+          grep -q 'conversation_panel_worker_v2.js' .lumen/dashboard/wrangler.toml
+      - name: Verify self-learning guardrails and wiring
+        run: |
+          set -euo pipefail
+          grep -q 'runSelfLearningCycle' .lumen/a2a-worker/adaptive-entry.js
+          grep -q 'handleSelfLearning' .lumen/a2a-worker/adaptive-entry.js
+          grep -q 'selfModifyingCode:false' .lumen/a2a-worker/self-learning-engine.js
+          grep -q 'autonomousSpendUsd:0' .lumen/a2a-worker/self-learning-engine.js
+          grep -q 'bindingActionsHumanGated:true' .lumen/a2a-worker/self-learning-engine.js
+          grep -q 'verifiedProgressRequiredForPromotion:true' .lumen/a2a-worker/self-learning-engine.js
+          echo 'LUMEN_MIND_V2_GUARDRAILS_OK'
