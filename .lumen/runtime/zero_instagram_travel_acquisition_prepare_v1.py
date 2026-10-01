@@ -4,12 +4,21 @@ import hashlib
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import quote_plus
+from urllib.parse import urlencode
 
-VERSION = "1.0-instagram-travel-affiliate-acquisition"
+VERSION = "1.1-instagram-travel-full-trip-acquisition"
 PUBLIC_BASE_URL = (os.getenv("LUMEN_PUBLIC_BASE_URL") or "https://lumen-zero-public.lumen-b2b.workers.dev").rstrip("/")
 OUT_DIR = Path(__file__).resolve().parent.parent / "public" / "instagram"
-DESTINATIONS = ["Rio de Janeiro", "Cancún", "Madrid", "Bangkok", "Santiago de Chile", "Lima", "Montevideo", "São Paulo"]
+DESTINATIONS = [
+    {"name": "Rio de Janeiro", "code": "GIG"},
+    {"name": "Cancún", "code": "CUN"},
+    {"name": "Madrid", "code": "MAD"},
+    {"name": "Bangkok", "code": "BKK"},
+    {"name": "Santiago de Chile", "code": "SCL"},
+    {"name": "Lima", "code": "LIM"},
+    {"name": "Montevideo", "code": "MVD"},
+    {"name": "São Paulo", "code": "GRU"},
+]
 
 
 def now():
@@ -21,32 +30,45 @@ def clean(value, limit=600):
 
 
 def destination_for_today():
-    explicit = clean(os.getenv("LUMEN_TRAVEL_ACQUISITION_DESTINATION"), 120)
+    explicit = clean(os.getenv("LUMEN_TRAVEL_ACQUISITION_DESTINATION"), 120).lower()
     if explicit:
-        return explicit
+        match = next(
+            (
+                item
+                for item in DESTINATIONS
+                if explicit in {item["name"].lower(), item["code"].lower()}
+                or explicit in item["name"].lower()
+            ),
+            None,
+        )
+        if match:
+            return match
     return DESTINATIONS[datetime.now(timezone.utc).timetuple().tm_yday % len(DESTINATIONS)]
 
 
 def build_job(destination, request_id):
-    landing = f"{PUBLIC_BASE_URL}/travel?q={quote_plus(destination)}&source=instagram"
-    stable = f"travel-affiliate-v1|{destination}|{request_id}"
+    destination_name = destination["name"]
+    destination_code = destination["code"]
+    query = urlencode({"destination": destination_code, "source": "instagram"})
+    landing = f"{PUBLIC_BASE_URL}/travel/package?{query}"
+    stable = f"travel-full-trip-v1|{destination_code}|{request_id}"
     token = hashlib.sha1(stable.encode()).hexdigest()[:12].upper()
     jid = f"IGTRAVEL-{token}"
     caption = (
-        f"¿Viajás a {destination}? ✈️\n\n"
-        "LUMEN Travel reúne experiencias y actividades para comparar antes de cerrar tu itinerario. "
-        "Podés revisar opciones, disponibilidad y precio directamente con el proveedor.\n\n"
-        f"Ver experiencias: {landing}\n\n"
-        "Transparencia: el enlace puede ser de afiliado. Si reservás a través de él, LUMEN puede recibir "
-        "una comisión sin costo adicional para vos. La reserva y el cobro son gestionados por Viator.\n\n"
-        "#LUMENTravel #Viajes #Experiencias #Turismo #Viator"
+        f"¿Viajás a {destination_name}? ✈️\n\n"
+        "LUMEN Travel te ayuda a armar el viaje base con vuelo + alojamiento y, si querés, sumar experiencias. "
+        "Elegís destino, días, pasajeros y presupuesto; después continuás con los proveedores externos.\n\n"
+        f"Armá tu viaje: {landing}\n\n"
+        "Transparencia: LUMEN puede utilizar enlaces de afiliado y recibir una comisión si reservás con un partner, "
+        "sin costo adicional para vos. Las reservas y los cobros se completan siempre con el proveedor externo.\n\n"
+        "#LUMENTravel #Viajes #Vuelos #Hoteles #Turismo"
     )
     t = now()
     return {
         "id": jid,
-        "queue_key": f"IGTRAVEL|{destination}|{request_id}",
-        "campaign_id": "IG-TRAVEL-AFFILIATE-ACQUISITION-V1",
-        "variant_id": f"IGTRAVEL-{destination.upper().replace(' ', '-')[:40]}-V1",
+        "queue_key": f"IGTRAVEL|{destination_code}|{request_id}",
+        "campaign_id": "IG-TRAVEL-FULL-TRIP-ACQUISITION-V1",
+        "variant_id": f"IGTRAVEL-{destination_code}-FULLTRIP-V1",
         "audience": "travel_consumers",
         "channel": "instagram",
         "status": "awaiting_human_approval",
@@ -55,21 +77,21 @@ def build_job(destination, request_id):
         "attempts": 0,
         "copy": caption,
         "caption": caption,
-        "headline": f"¿Viajás a {destination}?",
-        "visual_subtitle": "Experiencias para mirar antes de cerrar tu itinerario.",
-        "cta": "VER EXPERIENCIAS",
-        "hashtags": ["#LUMENTravel", "#Viajes", "#Experiencias", "#Turismo", "#Viator"],
-        "content_pillar": "travel_affiliate_discovery",
-        "content_goal": "qualified_travel_buyer_click",
+        "headline": f"¿Viajás a {destination_name}?",
+        "visual_subtitle": "Armá vuelo + alojamiento. Experiencias, sólo si querés.",
+        "cta": "ARMÁ TU VIAJE",
+        "hashtags": ["#LUMENTravel", "#Viajes", "#Vuelos", "#Hoteles", "#Turismo"],
+        "content_pillar": "travel_full_trip_acquisition",
+        "content_goal": "qualified_travel_package_builder_visit",
         "creative_style": "travel_consumer_editorial",
-        "creative_label": "LUMEN TRAVEL  |  EXPERIENCIAS",
+        "creative_label": "LUMEN TRAVEL  |  ARMÁ TU VIAJE",
         "editorial_slot": request_id,
-        "editorial_strategy": "buyer_intent_affiliate_discovery",
+        "editorial_strategy": "buyer_intent_full_trip_builder",
         "content_mode": "travel_affiliate_acquisition",
         "theme": "travel",
         "format": "instagram_feed_4x5",
         "hide_tracking_url_in_caption": False,
-        "tracking_path": f"/travel?q={quote_plus(destination)}&source=instagram",
+        "tracking_path": f"/travel/package?{query}",
         "tracking_url": landing,
         "requires_connector": True,
         "requires_budget_approval": False,
@@ -80,7 +102,9 @@ def build_job(destination, request_id):
         "payment_authority": False,
         "autonomous_spend_usd": 0,
         "authority": "prepare_autonomously_publish_only_after_explicit_human_approval",
-        "destination": destination,
+        "destination": destination_name,
+        "destination_code": destination_code,
+        "funnel_stage": "travel_builder_visit",
     }
 
 
@@ -118,10 +142,13 @@ def render_asset(job):
     draw.rectangle((0, 0, width, height), fill=(0, 8, 14, 32))
 
     def font(size, bold=False):
-        paths = ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"]
-        for p in paths:
+        paths = [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf",
+        ]
+        for path in paths:
             try:
-                return ImageFont.truetype(p, size=size)
+                return ImageFont.truetype(path, size=size)
             except Exception:
                 pass
         return ImageFont.load_default()
@@ -132,12 +159,12 @@ def render_asset(job):
     draw.text((72, 70), "L U M E N   T R A V E L", font=font(32, True), fill=gold)
     draw.text((72, 225), clean(job["headline"], 60), font=font(66, True), fill=white)
     draw.multiline_text((76, 350), clean(job["visual_subtitle"], 120), font=font(28), fill=soft, spacing=12)
-    draw.text((76, 875), "DESCUBRÍ", font=font(20, True), fill=gold)
-    draw.text((76, 910), "actividades y experiencias", font=font(30, True), fill=white)
+    draw.text((76, 875), "ELEGÍ", font=font(20, True), fill=gold)
+    draw.text((76, 910), "destino, días y pasajeros", font=font(30, True), fill=white)
     draw.text((76, 990), "COMPARÁ", font=font(20, True), fill=gold)
-    draw.text((76, 1025), "precio, fechas y disponibilidad", font=font(30, True), fill=white)
+    draw.text((76, 1025), "vuelo, alojamiento y extras", font=font(30, True), fill=white)
     draw.rounded_rectangle((72, 1160, 420, 1235), radius=36, fill=gold)
-    draw.text((115, 1182), "VER EXPERIENCIAS", font=font(19, True), fill=(10, 28, 36, 255))
+    draw.text((120, 1182), "ARMÁ TU VIAJE", font=font(19, True), fill=(10, 28, 36, 255))
     draw.text((72, 1285), "@lumen.b2b", font=font(17), fill=soft)
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     path = OUT_DIR / f"{job['id']}.jpg"
@@ -157,18 +184,41 @@ def main():
     job = build_job(destination, request_id)
     existing = next((r for r in lumen_app.STATE.get("distribution_operator_jobs", []) if isinstance(r, dict) and r.get("id") == job["id"]), None)
     if existing:
-        print({"travel_instagram_acquisition": {"status": "already_prepared", "job_id": job["id"], "destination": destination, "approval_required": True}}, flush=True)
+        print({"travel_instagram_acquisition": {"status": "already_prepared", "job_id": job["id"], "destination": destination["name"], "approval_required": True}}, flush=True)
         return 0
     supersede_previous(lumen_app.STATE, job)
     path = render_asset(job)
-    job.update({"image_url": f"{PUBLIC_BASE_URL}/media/instagram/{job['id']}.jpg", "media_source": VERSION, "media_prepared_at": now(), "visual_qa": {"status": "PASS", "score": 100, "asset_width": 1080, "asset_height": 1350}, "visual_qa_score": 100, "updated_at": now()})
+    job.update({
+        "image_url": f"{PUBLIC_BASE_URL}/media/instagram/{job['id']}.jpg",
+        "media_source": VERSION,
+        "media_prepared_at": now(),
+        "visual_qa": {"status": "PASS", "score": 100, "asset_width": 1080, "asset_height": 1350},
+        "visual_qa_score": 100,
+        "updated_at": now(),
+    })
     jobs = lumen_app.STATE.setdefault("distribution_operator_jobs", [])
     jobs.append(job)
     lumen_app.STATE["distribution_operator_jobs"] = jobs[-500:]
     if not lumen_app.save_state():
         raise RuntimeError("lumen_zero_state_persistence_failed")
     projection = bridge.export_posts()
-    print({"travel_instagram_acquisition": {"status": "prepared", "version": VERSION, "job_id": job["id"], "destination": destination, "landing_url": job["tracking_url"], "image_path": str(path), "approval_required": True, "autonomous_publish": False, "paid_media": False, "autonomous_spend_usd": 0, "projection_status": projection.get("status"), "posts_exported": projection.get("posts_exported")}}, flush=True)
+    print({
+        "travel_instagram_acquisition": {
+            "status": "prepared",
+            "version": VERSION,
+            "job_id": job["id"],
+            "destination": destination["name"],
+            "destination_code": destination["code"],
+            "landing_url": job["tracking_url"],
+            "image_path": str(path),
+            "approval_required": True,
+            "autonomous_publish": False,
+            "paid_media": False,
+            "autonomous_spend_usd": 0,
+            "projection_status": projection.get("status"),
+            "posts_exported": projection.get("posts_exported"),
+        }
+    }, flush=True)
     return 0
 
 
