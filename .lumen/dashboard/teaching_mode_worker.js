@@ -1,4 +1,5 @@
 import app from "./travel_conversion_panel_worker.js";
+import { handleInstagramFastPath } from "./instagram_fast_path.js";
 
 const TEACHING_CSS = `<style>
 .teacher{margin:0 0 12px;background:linear-gradient(180deg,#101b19,#0a1617);border:1px solid #365143;border-radius:16px;padding:14px;box-shadow:0 14px 35px #0003}.teacher-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:10px}.teacher-title{font-size:16px;font-weight:950}.teacher-copy{color:#9fb2aa;font-size:12px;line-height:1.5;margin-top:4px;max-width:720px}.teacher-grid{display:grid;grid-template-columns:1.25fr .75fr;gap:10px}.teach-types{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:9px}.teach-type{background:#0c2020;color:#dceee7;border:1px solid #31544b;border-radius:999px;padding:8px 10px;cursor:pointer;font-weight:800}.teach-type.active{background:#d9ff65;color:#061019;border-color:#e7ff9e}.teachbox{width:100%;min-height:82px;resize:vertical;background:#061019;color:#edf5f7;border:1px solid #2c4b47;border-radius:11px;padding:11px;font:inherit;outline:none}.teachbox:focus{border-color:#6d927c;box-shadow:0 0 0 2px #395d4866}.teach-actions{display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap}.teach-send,.critic-run{border:0;border-radius:10px;padding:10px 13px;font-weight:950;cursor:pointer}.teach-send{background:#d9ff65;color:#061019}.critic-run{background:#153341;color:#d9edf5;border:1px solid #315a6a}.teach-send:disabled,.critic-run:disabled{opacity:.5;cursor:wait}.teacher-state{background:#08151a;border:1px solid #263f42;border-radius:12px;padding:11px;min-height:100%}.teacher-status{font-weight:850;line-height:1.45;margin-top:5px}.teacher-detail{font-size:11px;color:#90a8aa;line-height:1.5;margin-top:6px}.critic-verdict{color:#ffd98a}.supported{color:#9de8c5}.contradicted{color:#ff9992}.provisional{color:#83d9ff}@media(max-width:700px){.teacher-grid{grid-template-columns:1fr}.teacher-head{display:block}.teacher{padding:11px}}
@@ -42,6 +43,9 @@ async function proxyTeacher(request, env, targetPath) {
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    const instagramFastPath = await handleInstagramFastPath(request, env);
+    if (instagramFastPath) return instagramFastPath;
+
     const response = await app.fetch(request.clone(), env, ctx);
     const authenticated = response.status !== 401 && response.status !== 503;
     if (!authenticated) return response;
