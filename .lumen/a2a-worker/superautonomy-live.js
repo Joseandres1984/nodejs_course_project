@@ -217,9 +217,13 @@ export function decideSuperautonomy(economicState,previous=null,context={}){
   const bottleneck=chooseBottleneck(economicState);
   const current=metricValue(economicState,bottleneck.targetMetric);
   const prevState=previous?.state||{};
-  const comparable=String(prevState?.targetMetric||previous?.target_metric||"")===bottleneck.targetMetric;
-  const baseline=comparable?num(prevState?.currentValue??previous?.current_value):current;
-  const progress=current>baseline;
+  const previousTarget=clean(prevState?.targetMetric||previous?.target_metric,120);
+  const previousValue=num(prevState?.currentValue??previous?.current_value);
+  const currentPreviousMetric=previousTarget?metricValue(economicState,previousTarget):0;
+  const learningDelta=previousTarget?currentPreviousMetric-previousValue:0;
+  const progress=Boolean(previousTarget&&learningDelta>0);
+  const comparable=previousTarget===bottleneck.targetMetric;
+  const baseline=comparable?previousValue:current;
   const stallCycles=progress?0:(comparable?num(previous?.stall_cycles)+1:0);
   const tactic=chooseTactic(bottleneck.bottleneck,context.actionMemory||{},stallCycles);
   const recovery=recoveryPlan(stallCycles);
@@ -244,8 +248,12 @@ export function decideSuperautonomy(economicState,previous=null,context={}){
     roles:tactic.roles,
     baselineValue:baseline,
     currentValue:current,
-    metricDelta:Number((current-baseline).toFixed(4)),
+    progressMetric:previousTarget||bottleneck.targetMetric,
+    progressBaseline:previousTarget?previousValue:current,
+    progressCurrent:previousTarget?currentPreviousMetric:current,
+    metricDelta:Number(learningDelta.toFixed(4)),
     verifiedProgress:progress,
+    bottleneckAdvanced:Boolean(previousTarget&&previousTarget!==bottleneck.targetMetric&&progress),
     stallCycles,
     recovery,
     portfolio,
@@ -278,7 +286,7 @@ async function readActionMemory(env){
 }
 
 async function readPortfolioRows(env){
-  return all(env,"SELECT id,source_type,source_id,lane,stage,title,estimated_value_usd,probability,urgency,evidence_score,signal_score,economic_score,action_kind,action_ref,rationale,updated_at FROM lumen_opportunity_factory_candidates WHERE active=1 ORDER BY CASE lane WHEN 'COLLECTION' THEN 0 WHEN 'CLOSE' THEN 1 WHEN 'INBOUND' THEN 2 WHEN 'FOLLOW_UP' THEN 3 WHEN 'NEW_BUSINESS' THEN 4 ELSE 5 END,economic_score DESC,updated_at DESC LIMIT ?",[MAX_PORTFOLIO]);
+  return all(env,"SELECT id,source_type,source_id,lane,stage,title,estimated_value_usd,probability,urgency,evidence_score,signal_score,economic_score,action_kind,action_ref,rationale,updated_at FROM lumen_opportunity_factory_candidates WHERE active=1 ORDER BY CASE lane WHEN 'COLLECTION' THEN 0 WHEN 'CLOSE' THEN 1 WHEN 'INBOUND' THEN 2 WHEN 'FOLLOW_UP' THEN 3 WHEN 'NEW_BUSINESS' THEN 4 ELSE 5 END,economic_score DESC,updated_at DESC LIMIT 12");
 }
 
 async function readOpenDebt(env){
@@ -288,18 +296,17 @@ async function readOpenDebt(env){
 async function updateActionMemory(env,previous,decision){
   const previousState=previous?.state||{};
   const actionKey=clean(previousState?.selectedTactic,120);
-  if(!actionKey)return null;
-  const comparable=String(previousState?.targetMetric||"")===String(decision.targetMetric||"");
-  if(!comparable)return null;
+  const previousTarget=clean(previousState?.targetMetric,120);
+  if(!actionKey||!previousTarget||decision.progressMetric!==previousTarget)return null;
   const delta=num(decision.metricDelta);
   const won=decision.verifiedProgress?1:0;
   const stalled=won?0:1;
   const prior=await first(env,"SELECT attempts,wins,stalls,score FROM lumen_superautonomy_action_memory WHERE action_key=? LIMIT 1",[actionKey]);
   const score=clamp((num(prior?.score)||1)+(won?0.18:-0.10),0.2,2);
   const outcome=won?"VERIFIED_PROGRESS":"NO_VERIFIED_PROGRESS";
-  await env.DB.prepare("INSERT INTO lumen_superautonomy_action_memory(action_key,updated_at,attempts,wins,stalls,score,last_outcome,last_metric,last_delta,engine_version) VALUES(?,?,1,?,?,?, ?,?,?,?) ON CONFLICT(action_key) DO UPDATE SET updated_at=excluded.updated_at,attempts=lumen_superautonomy_action_memory.attempts+1,wins=lumen_superautonomy_action_memory.wins+?,stalls=lumen_superautonomy_action_memory.stalls+?,score=?,last_outcome=?,last_metric=?,last_delta=?,engine_version=excluded.engine_version")
-    .bind(actionKey,now(),won,stalled,score,outcome,decision.targetMetric,delta,VERSION,won,stalled,score,outcome,decision.targetMetric,delta).run();
-  return {actionKey,outcome,delta,score};
+  await env.DB.prepare("INSERT INTO lumen_superautonomy_action_memory(action_key,updated_at,attempts,wins,stalls,score,last_outcome,last_metric,last_delta,engine_version) VALUES(?,?,1,?,?,?,?,?,?,?) ON CONFLICT(action_key) DO UPDATE SET updated_at=excluded.updated_at,attempts=lumen_superautonomy_action_memory.attempts+1,wins=lumen_superautonomy_action_memory.wins+?,stalls=lumen_superautonomy_action_memory.stalls+?,score=?,last_outcome=?,last_metric=?,last_delta=?,engine_version=excluded.engine_version")
+    .bind(actionKey,now(),won,stalled,score,outcome,previousTarget,delta,VERSION,won,stalled,score,outcome,previousTarget,delta).run();
+  return {actionKey,outcome,metric:previousTarget,delta,score};
 }
 
 async function persistGoals(env,goals){
@@ -326,15 +333,14 @@ async function recordHumanDebt(env,decision){
 async function maybePostmortem(env,previous,decision){
   const prev=previous?.state||{};
   const actionKey=clean(prev?.selectedTactic,120);
-  if(!actionKey)return null;
-  const comparable=String(prev?.targetMetric||"")===String(decision.targetMetric||"");
-  if(!comparable)return null;
+  const previousTarget=clean(prev?.targetMetric,120);
+  if(!actionKey||!previousTarget||decision.progressMetric!==previousTarget)return null;
   const important=decision.verifiedProgress||decision.stallCycles===STALL_ROTATE_AFTER||decision.stallCycles===STALL_PARALLEL_AFTER||decision.stallCycles===STALL_CHALLENGE_AFTER;
   if(!important)return null;
   const outcome=decision.verifiedProgress?"VERIFIED_PROGRESS":`STALL_LEVEL_${decision.recovery.level}`;
   const observation=decision.verifiedProgress
-    ? `Observed ${decision.targetMetric} improvement of ${decision.metricDelta} after tactic ${actionKey}.`
-    : `No observed ${decision.targetMetric} improvement across ${decision.stallCycles} comparable cycles after tactic ${actionKey}.`;
+    ? `Observed ${previousTarget} improvement of ${decision.metricDelta} after tactic ${actionKey}.`
+    : `No observed ${previousTarget} improvement across ${decision.stallCycles} comparable cycles after tactic ${actionKey}.`;
   const lesson=decision.verifiedProgress
     ? `Increase preference for ${actionKey} in comparable conditions, while keeping attribution observational.`
     : `Reduce preference for ${actionKey}, rotate tactic, refresh portfolio evidence and preserve authority gates.`;
@@ -342,8 +348,8 @@ async function maybePostmortem(env,previous,decision){
   const confidence=decision.verifiedProgress&&Math.abs(num(decision.metricDelta))>0?"MEDIUM":"LOW";
   const id=`PM-${String(decision.cycle).padStart(8,"0")}-${actionKey.slice(0,40)}`;
   await env.DB.prepare("INSERT OR REPLACE INTO lumen_superautonomy_postmortems(postmortem_id,created_at,cycle,outcome,action_key,target_metric,delta,observation,lesson,promotion,confidence,engine_version) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)")
-    .bind(id,now(),decision.cycle,outcome,actionKey,decision.targetMetric,num(decision.metricDelta),observation,lesson,promotion,confidence,VERSION).run();
-  return {id,outcome,actionKey,lesson,promotion,confidence};
+    .bind(id,now(),decision.cycle,outcome,actionKey,previousTarget,num(decision.metricDelta),observation,lesson,promotion,confidence,VERSION).run();
+  return {id,outcome,actionKey,targetMetric:previousTarget,lesson,promotion,confidence};
 }
 
 async function persist(env,decision){
@@ -353,7 +359,7 @@ async function persist(env,decision){
     env.DB.prepare("INSERT OR REPLACE INTO lumen_superautonomy_state(id,updated_at,cycle,phase,bottleneck,next_action,target_metric,stall_cycles,recovery_level,autonomy_ratio,state_json,engine_version) VALUES('GLOBAL',?,?,?,?,?,?,?,?,?,?,?)").bind(ts,decision.cycle,decision.phase,decision.bottleneck,decision.nextAction,decision.targetMetric,decision.stallCycles,decision.recovery.level,decision.boundedAutonomyRatio,stateJson,VERSION),
     env.DB.prepare("INSERT OR REPLACE INTO lumen_superautonomy_history(cycle_id,created_at,phase,bottleneck,next_action,target_metric,baseline_value,current_value,progress,human_gate_required,recovery_level,decision_json,engine_version) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(cycleId,ts,decision.phase,decision.bottleneck,decision.nextAction,decision.targetMetric,decision.baselineValue,decision.currentValue,decision.verifiedProgress?1:0,decision.humanGateRequired?1:0,decision.recovery.level,stateJson,VERSION)
   ]);
-  await env.DB.prepare("DELETE FROM lumen_superautonomy_history WHERE cycle_id NOT IN (SELECT cycle_id FROM lumen_superautonomy_history ORDER BY created_at DESC LIMIT ?)").bind(MAX_HISTORY).run();
+  await env.DB.prepare("DELETE FROM lumen_superautonomy_history WHERE cycle_id NOT IN (SELECT cycle_id FROM lumen_superautonomy_history ORDER BY created_at DESC LIMIT 120)").run();
   return {...decision,updatedAt:ts};
 }
 
@@ -375,11 +381,9 @@ export async function runSuperautonomyCycle(env,{trigger="scheduled"}={}){
     readOpenDebt(env)
   ]);
   const decision=decideSuperautonomy(economicState,previous,{actionMemory,portfolioRows,openDebt});
-  const [memoryUpdate,humanDebt,postmortem]=await Promise.all([
-    updateActionMemory(env,previous,decision),
-    recordHumanDebt(env,decision),
-    maybePostmortem(env,previous,decision)
-  ]);
+  const memoryUpdate=await updateActionMemory(env,previous,decision);
+  const humanDebt=await recordHumanDebt(env,decision);
+  const postmortem=await maybePostmortem(env,previous,decision);
   await persistGoals(env,decision.goals);
   const persisted=await persist(env,{...decision,trigger,internalRefresh:refresh,memoryUpdate,humanDebt,postmortem});
   return {ok:true,...persisted,trigger};
