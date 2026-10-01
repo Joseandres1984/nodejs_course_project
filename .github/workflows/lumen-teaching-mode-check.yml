@@ -1,0 +1,42 @@
+name: LUMEN Teaching Mode check
+
+on:
+  pull_request:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/dashboard/teaching_mode_worker.js'
+      - '.lumen/dashboard/wrangler.toml'
+      - '.github/workflows/lumen-teaching-mode-check.yml'
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/dashboard/teaching_mode_worker.js'
+      - '.lumen/dashboard/wrangler.toml'
+      - '.github/workflows/lumen-teaching-mode-check.yml'
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Syntax check teaching dashboard wrapper
+        run: node --check .lumen/dashboard/teaching_mode_worker.js
+      - name: Verify teaching mode entrypoint and security bridge
+        run: |
+          set -euo pipefail
+          grep -q '^main = "teaching_mode_worker.js"$' .lumen/dashboard/wrangler.toml
+          grep -q 'Modo enseñanza' .lumen/dashboard/teaching_mode_worker.js
+          grep -q '/api/lumen-teacher-feedback' .lumen/dashboard/teaching_mode_worker.js
+          grep -q '/api/lumen-self-critic-run' .lumen/dashboard/teaching_mode_worker.js
+          grep -q 'x-lumen-admin' .lumen/dashboard/teaching_mode_worker.js
+          grep -q 'OPPORTUNITY_ADMIN_TOKEN' .lumen/dashboard/teaching_mode_worker.js
+          grep -q 'Tu aporte entra como una hipótesis provisional' .lumen/dashboard/teaching_mode_worker.js
+          if grep -q 'x-lumen-admin.*teachInput' .lumen/dashboard/teaching_mode_worker.js; then
+            echo 'ADMIN_TOKEN_MUST_NOT_BE_EXPOSED_TO_BROWSER'
+            exit 1
+          fi
+          echo 'LUMEN_TEACHING_MODE_V1_OK'
