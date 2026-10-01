@@ -20,6 +20,7 @@ import { syncReferralCommissionSettlements } from "./referral-commission-engine.
 import { recomputeRevenueAttribution } from "./revenue-attribution-engine.js";
 import { recomputeProfitFeedback } from "./profit-feedback-engine.js";
 import { handleSuperautonomy, runSuperautonomyCycle } from "./superautonomy-live.js";
+import { handleSuperautonomyV3, runSuperautonomyV3Cycle } from "./superautonomy-v3.js";
 import { handleLumenConversation } from "./lumen-conversation-v2.js";
 import { handleSelfLearning, runSelfLearningCycle } from "./self-learning-engine.js";
 import { handleMetaController, runMetaControllerCycle } from "./meta-controller.js";
@@ -83,6 +84,9 @@ export default {
 
     const teacherCriticResponse = await handleTeacherSelfCritic(request, env);
     if (teacherCriticResponse) return teacherCriticResponse;
+
+    const superautonomyV3Response = await handleSuperautonomyV3(request, env);
+    if (superautonomyV3Response) return superautonomyV3Response;
 
     const superautonomyResponse = await handleSuperautonomy(request, env);
     if (superautonomyResponse) return superautonomyResponse;
@@ -169,11 +173,20 @@ export default {
         trigger: "scheduled_after_meta_learning"
       }));
 
+      const superautonomyV3 = await isolated(() => runSuperautonomyV3Cycle(env, {
+        trigger: "scheduled_after_self_critic"
+      }));
+
       await isolated(() => syncViatorBookingConversions(env));
       await isolated(() => runTravelAcquisitionEngine(env));
 
-      const recoveryGrowth = superautonomy?.ok === true && superautonomy?.recovery?.accelerateGrowthLoop === true;
-      if (!growthSlot && !recoveryGrowth) return { ok:true, growthSkipped:true, metaPrepare, superautonomy, selfLearning, metaLearn, selfCritic };
+      const recoveryGrowth =
+        (superautonomy?.ok === true && superautonomy?.recovery?.accelerateGrowthLoop === true) ||
+        (superautonomyV3?.ok === true && superautonomyV3?.accelerateGrowthLoop === true);
+
+      if (!growthSlot && !recoveryGrowth) {
+        return { ok:true, growthSkipped:true, metaPrepare, superautonomy, selfLearning, metaLearn, selfCritic, superautonomyV3 };
+      }
 
       const commercialTruth = await refreshCommercialTruth(env);
       const growth = await runAutonomousGrowthLoop(env, {
@@ -181,7 +194,7 @@ export default {
         scheduledTime:controller?.scheduledTime || null,
       });
 
-      return { ok:Boolean(growth?.ok), commercialTruth, growth, metaPrepare, superautonomy, selfLearning, metaLearn, selfCritic };
+      return { ok:Boolean(growth?.ok), commercialTruth, growth, metaPrepare, superautonomy, selfLearning, metaLearn, selfCritic, superautonomyV3 };
     })().catch(() => ({ ok:false, isolatedFailure:true })));
 
     return adaptiveCore.scheduled(controller, env, ctx);

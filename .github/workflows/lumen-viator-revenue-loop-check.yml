@@ -33,6 +33,7 @@ jobs:
           node --check .lumen/a2a-worker/adaptive-entry.js
           node --check .lumen/dashboard/travel_revenue_panel_worker.js
           node --check .lumen/dashboard/travel_conversion_panel_worker.js
+          node --check .lumen/dashboard/teaching_mode_worker.js
 
       - name: Verify attribution and accounting invariants
         run: |
@@ -53,7 +54,8 @@ jobs:
           grep -q 'Datos bancarios almacenados' .lumen/dashboard/travel_revenue_panel_worker.js
           grep -q 'import app from "./travel_revenue_panel_worker.js"' .lumen/dashboard/travel_conversion_panel_worker.js
           grep -q 'commissionNotInferredFromBookings: true' .lumen/dashboard/travel_conversion_panel_worker.js
-          grep -q '^main = "travel_conversion_panel_worker.js"$' .lumen/dashboard/wrangler.toml
+          grep -q '^main = "teaching_mode_worker.js"$' .lumen/dashboard/wrangler.toml
+          grep -q 'import app from "./travel_conversion_panel_worker.js"' .lumen/dashboard/teaching_mode_worker.js
           echo 'VIATOR_REVENUE_LOOP_INVARIANTS_OK'
 
       - name: Dry-run A2A bundle
