@@ -12,7 +12,7 @@ import { handleTravelProviderRegistry } from "./travel-provider-registry.js";
 import { handleProviderBackedTravelDiscovery } from "./travel-provider-backed-discovery.js";
 import { handleTravelAffiliateRegistry } from "./travel-affiliate-registry.js";
 import { handleTravelAcquisitionEngine, runTravelAcquisitionEngine } from "./travel-acquisition-engine.js";
-import { handleAutonomousGrowthLoop, runAutonomousGrowthLoop } from "./autonomous-growth-loop.js";
+import { handleAutonomousGrowthLoop, runAutonomousGrowthLoop } from "./autonomous-growth-loop-v11.js";
 
 export default {
   async fetch(request, env, ctx) {
