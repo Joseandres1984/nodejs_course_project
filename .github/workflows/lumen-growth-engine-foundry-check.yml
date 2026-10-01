@@ -1,0 +1,68 @@
+name: LUMEN Growth Engine Foundry check
+
+on:
+  pull_request:
+    paths:
+      - '.lumen/a2a-worker/growth-engine-foundry.js'
+      - '.lumen/a2a-worker/test-growth-engine-foundry.mjs'
+      - '.lumen/a2a-worker/adaptive-entry.js'
+      - '.github/workflows/lumen-autonomous-operator.yml'
+      - '.github/workflows/lumen-growth-engine-foundry-check.yml'
+      - '.github/workflows/lumen-growth-engine-foundry-live-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Syntax checks
+        run: |
+          set -euo pipefail
+          node --check .lumen/a2a-worker/growth-engine-foundry.js
+          node --check .lumen/a2a-worker/test-growth-engine-foundry.mjs
+          node --check .lumen/a2a-worker/adaptive-entry.js
+
+      - name: Growth Foundry decision tests
+        run: node .lumen/a2a-worker/test-growth-engine-foundry.mjs
+
+      - name: Verify control plane and guardrails
+        run: |
+          set -euo pipefail
+          f=.lumen/a2a-worker/growth-engine-foundry.js
+          grep -q '1.0-growth-engine-foundry' "$f"
+          grep -q '/growth-foundry/policy' "$f"
+          grep -q '/growth-foundry/status' "$f"
+          grep -q '/growth-foundry/candidates' "$f"
+          grep -q '/growth-foundry/history' "$f"
+          grep -q '/growth-foundry/run' "$f"
+          grep -q 'autonomousSpendUsd:0' "$f"
+          grep -q 'createsExternalMessages:false' "$f"
+          grep -q 'executesGeneratedCode:false' "$f"
+          grep -q 'selfModifyingCode:false' "$f"
+          grep -q 'newConnectors:false' "$f"
+          grep -q 'primitiveExecutionRequiresStaticWhitelist:true' "$f"
+          grep -q 'bindingActionsHumanGated:true' "$f"
+          grep -q 'verifiedRevenueOnly:true' "$f"
+          grep -q 'observational_not_causal' "$f"
+          grep -q 'handleGrowthEngineFoundry' .lumen/a2a-worker/adaptive-entry.js
+          grep -q 'growth-foundry/run' .github/workflows/lumen-autonomous-operator.yml
+          grep -q 'UNKNOWN_FOUNDRY_PRIMITIVE' .github/workflows/lumen-autonomous-operator.yml
+          echo 'GROWTH_ENGINE_FOUNDRY_GUARDRAILS_OK'
+
+      - name: Dry-run adaptive Worker bundle
+        working-directory: .lumen/a2a-worker
+        run: |
+          set -euo pipefail
+          cp wrangler.toml wrangler.growth-foundry-check.toml
+          sed -i 's/^main = "opportunity-entry.js"$/main = "adaptive-entry.js"/' wrangler.growth-foundry-check.toml
+          grep -q '^main = "adaptive-entry.js"$' wrangler.growth-foundry-check.toml
+          npx --yes wrangler@latest deploy --dry-run --config wrangler.growth-foundry-check.toml
