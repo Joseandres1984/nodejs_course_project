@@ -19,6 +19,7 @@ import { syncReferralSettlements } from "./referral-network.js";
 import { syncReferralCommissionSettlements } from "./referral-commission-engine.js";
 import { recomputeRevenueAttribution } from "./revenue-attribution-engine.js";
 import { recomputeProfitFeedback } from "./profit-feedback-engine.js";
+import { handleSuperautonomy, runSuperautonomyCycle } from "./superautonomy-live.js";
 
 async function isolated(step) {
   try {
@@ -67,6 +68,9 @@ async function refreshCommercialTruth(env) {
 
 export default {
   async fetch(request, env, ctx) {
+    const superautonomyResponse = await handleSuperautonomy(request, env);
+    if (superautonomyResponse) return superautonomyResponse;
+
     const growthResponse = await handleAutonomousGrowthLoop(request, env);
     if (growthResponse) return growthResponse;
 
@@ -127,18 +131,23 @@ export default {
     const growthSlot = scheduledAt.getUTCMinutes() === 7;
 
     ctx.waitUntil((async () => {
+      const superautonomy = await isolated(() => runSuperautonomyCycle(env, {
+        trigger: "cloudflare_scheduled_superautonomy"
+      }));
+
       await isolated(() => syncViatorBookingConversions(env));
       await isolated(() => runTravelAcquisitionEngine(env));
 
-      if (!growthSlot) return { ok:true, growthSkipped:true };
+      const recoveryGrowth = superautonomy?.ok === true && superautonomy?.recovery?.accelerateGrowthLoop === true;
+      if (!growthSlot && !recoveryGrowth) return { ok:true, growthSkipped:true, superautonomy };
 
       const commercialTruth = await refreshCommercialTruth(env);
       const growth = await runAutonomousGrowthLoop(env, {
-        trigger:"cloudflare_hourly_growth_after_commercial_truth",
+        trigger: recoveryGrowth && !growthSlot ? "superautonomy_anti_stall_recovery" : "cloudflare_hourly_growth_after_commercial_truth",
         scheduledTime:controller?.scheduledTime || null,
       });
 
-      return { ok:Boolean(growth?.ok), commercialTruth, growth };
+      return { ok:Boolean(growth?.ok), commercialTruth, growth, superautonomy };
     })().catch(() => ({ ok:false, isolatedFailure:true })));
 
     return adaptiveCore.scheduled(controller, env, ctx);
