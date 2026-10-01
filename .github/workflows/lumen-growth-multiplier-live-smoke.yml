@@ -1,0 +1,88 @@
+name: LUMEN Growth Multiplier v2 Live Smoke
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/a2a-worker/growth-multiplier-v2.js'
+      - '.lumen/a2a-worker/adaptive-entry.js'
+      - '.github/workflows/lumen-growth-multiplier-live-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  growth-multiplier-live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Verify protected admin token
+        env:
+          ADMIN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+        run: |
+          test -n "${ADMIN:-}"
+          echo 'GROWTH_MULTIPLIER_ADMIN_TOKEN_PRESENT'
+
+      - name: Wait for Growth Multiplier v2 production endpoint
+        run: |
+          set -euo pipefail
+          BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          ok=0
+          for i in $(seq 1 48); do
+            if curl -fsS --max-time 15 "$BASE/growth-multiplier/policy" -o /tmp/policy.json; then
+              if jq -e '.version == "2.0-growth-multiplier-compounding" and .guardrails.autonomousSpendUsd == 0 and .guardrails.createsExternalMessages == false and .guardrails.bindingActionsHumanGated == true and .guardrails.verifiedRevenueOnly == true and .guardrails.selfModifyingCode == false' /tmp/policy.json >/dev/null; then
+                ok=1
+                break
+              fi
+            fi
+            sleep 5
+          done
+          test "$ok" -eq 1
+          echo 'GROWTH_MULTIPLIER_V2_POLICY_LIVE_OK'
+
+      - name: Run one safe production multiplier cycle
+        env:
+          ADMIN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          code=$(curl --show-error --silent --max-time 60 -o /tmp/run.json -w '%{http_code}' \
+            -X POST "$BASE/growth-multiplier/run" \
+            -H "x-lumen-admin: $ADMIN" \
+            -H 'content-type: application/json' -d '{}')
+          cat /tmp/run.json
+          echo
+          case "$code" in 200|202) ;; *) echo "unexpected HTTP $code"; exit 1 ;; esac
+          jq -e '
+            .ok == true and
+            .version == "2.0-growth-multiplier-compounding" and
+            (.primaryLane | length) > 0 and
+            (.scores | length) >= 5 and
+            .activationPlan.primary.createsExternalMessages == false and
+            .activationPlan.primary.autonomousSpendUsd == 0 and
+            .guardrails.autonomousSpendUsd == 0 and
+            .guardrails.autonomousPurchase == false and
+            .guardrails.autonomousContract == false and
+            .guardrails.createsExternalMessages == false and
+            .guardrails.bindingActionsHumanGated == true and
+            .guardrails.verifiedRevenueOnly == true
+          ' /tmp/run.json >/dev/null
+          echo 'GROWTH_MULTIPLIER_V2_SAFE_CYCLE_LIVE_OK'
+
+      - name: Verify persisted multiplier state
+        run: |
+          set -euo pipefail
+          BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          curl -fsS --max-time 30 "$BASE/growth-multiplier/status" -o /tmp/status.json
+          jq -e '
+            .version == "2.0-growth-multiplier-compounding" and
+            .initialized == true and
+            (.cycle >= 1) and
+            (.primaryLane | length) > 0 and
+            (.scores | length) >= 5 and
+            .guardrails.autonomousSpendUsd == 0 and
+            .guardrails.createsExternalMessages == false and
+            .guardrails.bindingActionsHumanGated == true
+          ' /tmp/status.json >/dev/null
+          echo 'GROWTH_MULTIPLIER_V2_STATE_PERSISTED_OK'
