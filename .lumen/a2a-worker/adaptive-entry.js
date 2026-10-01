@@ -20,6 +20,7 @@ import { syncReferralCommissionSettlements } from "./referral-commission-engine.
 import { recomputeRevenueAttribution } from "./revenue-attribution-engine.js";
 import { recomputeProfitFeedback } from "./profit-feedback-engine.js";
 import { handleSuperautonomy, runSuperautonomyCycle } from "./superautonomy-live.js";
+import { handleLumenConversation } from "./lumen-conversation.js";
 
 async function isolated(step) {
   try {
@@ -68,6 +69,9 @@ async function refreshCommercialTruth(env) {
 
 export default {
   async fetch(request, env, ctx) {
+    const conversationResponse = await handleLumenConversation(request, env);
+    if (conversationResponse) return conversationResponse;
+
     const superautonomyResponse = await handleSuperautonomy(request, env);
     if (superautonomyResponse) return superautonomyResponse;
 
