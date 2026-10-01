@@ -1,5 +1,5 @@
 name = "lumen-zero-a2a"
-main = "opportunity-entry.js"
+main = "autonomous-runtime-entry.js"
 compatibility_date = "2026-09-21"
 workers_dev = true
 
@@ -19,6 +19,7 @@ A2A_AUTONOMOUS_CONVERSION_CLOSE = "true"
 A2A_AUTONOMOUS_RECRUITMENT = "false"
 A2A_AUTONOMOUS_DELEGATION = "false"
 LUMEN_FIRST_CASH_MODE = "true"
+LUMEN_AUTONOMOUS_GROWTH = "true"
 TRAVELPAYOUTS_PROJECT_ID = "579890"
 TRAVELPAYOUTS_MARKER = "783590"
 TRAVELPAYOUTS_AVIASALES_FALLBACK_URL = "https://aviasales.tpo.lu/IzEhC2gz"
@@ -33,4 +34,4 @@ X402_NETWORK = "base"
 X402_FACILITATOR = "https://facilitator.xpay.sh"
 
 [triggers]
-crons = ["7,22,37,52 * * * *"]
+crons = ["7,22,37,52 * * * *", "12 * * * *"]
