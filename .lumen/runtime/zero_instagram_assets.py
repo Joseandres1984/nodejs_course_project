@@ -7,8 +7,9 @@ those generated images. LUMEN Zero instead stores deterministic JPEGs in the pub
 and serves them through the zero-cost Cloudflare public Worker.
 
 The renderer is pixel-safe: visible text is measured with Pillow bounding boxes, wrapped only at
-word boundaries, reduced in size when necessary, and rejected before materialization if it cannot
-fit inside the declared safe area. This prevents source assets from clipping long headlines.
+word boundaries, reduced in size when necessary, and safely shortened with an ellipsis when a full
+caption cannot fit in the image. The canonical Instagram caption is never modified. A single media
+rendering failure is isolated so it cannot stop the complete LUMEN business cycle.
 """
 
 import os
@@ -32,7 +33,7 @@ SAFE_WIDTH = SAFE_RIGHT - SAFE_LEFT
 TITLE_TOP = 345
 FOOTER_TOP = 1128
 BODY_BOTTOM = 1082
-RENDERER_VERSION = "2.0-source-pixel-safe"
+RENDERER_VERSION = "2.1-source-pixel-safe-failsoft"
 
 
 def _now() -> str:
@@ -71,7 +72,7 @@ def _wrap_pixels(draw: ImageDraw.ImageDraw, text: str, font: Any, max_width: int
     if not words:
         return []
     # Never split a visible word in the middle. If even one word cannot fit,
-    # the caller must reduce font size or reject the asset.
+    # the caller must reduce font size or shorten only the visible image copy.
     if any(_text_width(draw, word, font) > max_width for word in words):
         return []
 
@@ -108,6 +109,20 @@ def _fit_text(
             continue
         if all(_text_width(draw, line, font) <= max_width for line in lines):
             return font, lines, size
+
+    # Pixel-safe fallback: shorten only the words painted on the JPEG. The job's canonical
+    # caption/copy remains untouched and is what the Instagram publisher sends to Meta.
+    font = _font(min_size, bold)
+    words = cleaned.split()
+    while words:
+        shortened = " ".join(words)
+        if shortened != cleaned:
+            shortened = shortened.rstrip(" .,;:!?-") + "…"
+        lines = _wrap_pixels(draw, shortened, font, max_width)
+        if lines and len(lines) <= max_lines and all(_text_width(draw, line, font) <= max_width for line in lines):
+            return font, lines, min_size
+        words.pop()
+
     raise ValueError(f"pixel_safe_text_does_not_fit:{cleaned[:100]}")
 
 
@@ -163,7 +178,19 @@ def _render(job: Dict[str, Any], path: Path) -> Dict[str, Any]:
     body_step = max(int(body_size * 1.48), body_size + 10)
     body_end = y + len(body_lines) * body_step
     if body_end > BODY_BOTTOM:
-        raise ValueError(f"pixel_safe_vertical_overflow:body_end={body_end}:limit={BODY_BOTTOM}")
+        # Keep the image safe without failing the whole cycle. This affects only image-visible copy.
+        while len(body_lines) > 1 and y + len(body_lines) * body_step > BODY_BOTTOM:
+            body_lines.pop()
+        if body_lines:
+            tail = body_lines[-1].rstrip(" .,;:!?-")
+            if not tail.endswith("…"):
+                tail += "…"
+            while tail and _text_width(draw, tail, body_font) > SAFE_WIDTH:
+                tail = tail[:-2].rstrip() + "…"
+            body_lines[-1] = tail
+        body_end = y + len(body_lines) * body_step
+        if not body_lines or body_end > BODY_BOTTOM:
+            raise ValueError(f"pixel_safe_vertical_overflow:body_end={body_end}:limit={BODY_BOTTOM}")
     for line in body_lines:
         draw.text((SAFE_LEFT, y), line, font=body_font, fill=(202, 218, 226))
         y += body_step
@@ -227,7 +254,15 @@ def _render(job: Dict[str, Any], path: Path) -> Dict[str, Any]:
 
 
 def main() -> int:
-    report = {"status": "ok", "jobs_seen": 0, "assets_written": 0, "state_urls_repaired": 0, "renderer_version": RENDERER_VERSION}
+    report = {
+        "status": "ok",
+        "jobs_seen": 0,
+        "assets_written": 0,
+        "assets_failed": 0,
+        "failures": [],
+        "state_urls_repaired": 0,
+        "renderer_version": RENDERER_VERSION,
+    }
     if not load_state():
         print({"zero_instagram_assets": {**report, "status": "state_unavailable"}}, flush=True)
         return 1
@@ -245,10 +280,29 @@ def main() -> int:
         if not needs_zero_media:
             continue
         path = OUT_DIR / f"{jid}.jpg"
-        render_report = _render(job, path)
+        try:
+            render_report = _render(job, path)
+        except Exception as exc:
+            error = f"{type(exc).__name__}: {str(exc)[:220]}"
+            report["assets_failed"] += 1
+            report["failures"].append({"job_id": jid, "error": error})
+            job["media_layout_qa"] = {
+                "status": "FAILED",
+                "renderer_version": RENDERER_VERSION,
+                "error": error,
+            }
+            job["media_last_error"] = error
+            job["media_failed_at"] = _now()
+            changed = True
+            continue
+
         report["assets_written"] += 1
         desired = f"{PUBLIC_BASE_URL}/media/instagram/{jid}.jpg"
-        if str(job.get("image_url") or "") != desired or str(job.get("media_source") or "") != "lumen_zero_git_asset_v2_pixel_safe":
+        if (
+            str(job.get("image_url") or "") != desired
+            or str(job.get("media_source") or "") != "lumen_zero_git_asset_v2_pixel_safe"
+            or str(job.get("media_renderer_version") or "") != RENDERER_VERSION
+        ):
             job["image_url"] = desired
             job["media_source"] = "lumen_zero_git_asset_v2_pixel_safe"
             job["media_renderer_version"] = render_report["version"]
@@ -259,6 +313,7 @@ def main() -> int:
                 "headline_max_width": render_report["headline_max_width"],
                 "overflow_blocks": render_report["overflow_blocks"],
             }
+            job["media_last_error"] = None
             job["media_prepared_at"] = _now()
             report["state_urls_repaired"] += 1
             changed = True
