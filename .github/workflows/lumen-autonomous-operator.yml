@@ -4,6 +4,10 @@ on:
   workflow_dispatch:
   schedule:
     - cron: '17 */6 * * *'
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-autonomous-operator.yml'
 
 permissions:
   contents: read
