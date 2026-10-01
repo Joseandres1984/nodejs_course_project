@@ -55,6 +55,56 @@ function rewriteText(text, origin) {
   return humanCheckout(rewritten, origin);
 }
 
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+
+async function fetchTravelExtras(env) {
+  if (!env?.A2A || typeof env.A2A.fetch !== "function") return [];
+  try {
+    const response = await env.A2A.fetch(new Request("https://a2a.internal/travel/affiliates", {
+      method:"GET",
+      headers:{"user-agent":"LUMEN-Public-Gateway/1.1"}
+    }));
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !Array.isArray(data?.offers)) return [];
+    return data.offers.filter(x => x?.enabled === true && ["TRANSFER","ESIM","CAR_RENTAL"].includes(String(x?.category || "")) && /^https:\/\//.test(String(x?.affiliateUrl || "")));
+  } catch (_) {
+    return [];
+  }
+}
+
+async function decorateTravelContinuation(response, env) {
+  const type = response.headers.get("content-type") || "";
+  if (!type.includes("text/html")) return response;
+  const offers = await fetchTravelExtras(env);
+  if (!offers.length) return response;
+
+  const labelByCategory = {
+    TRANSFER:["🚐 Transfer aeropuerto","Agregar transfer"],
+    ESIM:["📶 eSIM para el viaje","Agregar eSIM"],
+    CAR_RENTAL:["🚗 Alquiler de auto","Ver autos"]
+  };
+  const seen = new Set();
+  const cards = offers.filter(offer => {
+    if (seen.has(offer.category)) return false;
+    seen.add(offer.category);
+    return true;
+  }).map(offer => {
+    const [title,cta] = labelByCategory[offer.category] || [offer.brand,"Ver opción"];
+    return `<article style="border:1px solid #e0e0e0;border-radius:13px;padding:18px;background:#fff"><div style="font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:#0f6b66;font-weight:900">Extra opcional</div><h3 style="margin:6px 0">${escapeHtml(title)}</h3><p style="font-size:12px;line-height:1.5;color:#687078">Proveedor: ${escapeHtml(offer.brand)}. Se contrata por separado y no modifica el total base de vuelo + alojamiento.</p><a href="${escapeHtml(offer.affiliateUrl)}" rel="nofollow sponsored" style="display:inline-flex;align-items:center;justify-content:center;text-decoration:none;background:#0f6b66;color:#fff;font-weight:800;padding:12px 14px;border-radius:9px">${escapeHtml(cta)} →</a></article>`;
+  }).join("");
+  if (!cards) return response;
+
+  const block = `<div style="margin-top:28px"><div style="font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:#0f6b66;font-weight:900">Extras opcionales</div><h2 style="margin:6px 0 8px">Completá el viaje sólo si querés</h2><p style="color:#677078;line-height:1.55">Transfer, conectividad y auto son opcionales. Podés ignorarlos y continuar con tu viaje base.</p><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-top:16px">${cards}</div></div>`;
+  const text = await response.text();
+  const decorated = text.includes('<div class="disclosure">') ? text.replace('<div class="disclosure">', `${block}<div class="disclosure">`) : text.replace("</main>", `${block}</main>`);
+  const headers = new Headers(response.headers);
+  headers.set("cache-control","no-store");
+  headers.set("x-lumen-travel-extras","enabled");
+  return new Response(decorated,{status:response.status,headers});
+}
+
 function base64ToUtf8(raw) {
   let s = String(raw || "").replace(/-/g,"+").replace(/_/g,"/");
   while (s.length % 4) s += "=";
@@ -161,7 +211,10 @@ export default {
     const origin = url.origin;
 
     const travelResponse = await handleTravelStorefront(request, env);
-    if (travelResponse) return travelResponse;
+    if (travelResponse) {
+      if (request.method === "GET" && path === "/travel/package/continue") return decorateTravelContinuation(travelResponse, env);
+      return travelResponse;
+    }
 
     const revenueResponse = await handleRevenueStorefront(request, env);
     if (revenueResponse) return revenueResponse;
