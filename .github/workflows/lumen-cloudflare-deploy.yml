@@ -27,6 +27,12 @@ jobs:
             exit 2
           fi
           echo 'REQUIRED_SECRETS_PRESENT'
+      - name: Capture observable revenue baseline before deployment
+        run: |
+          set -euo pipefail
+          BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          curl -fsS --max-time 20 "$BASE/portfolio-governor/state" -o sovereign-before.json
+          jq '{phase:"before_deploy",verifiedRevenueUsd:.metrics.verifiedRevenueUsd,verifiedSettlements:.metrics.verifiedSettlements,activeCandidates:.metrics.activeCandidates}' sovereign-before.json
       - name: Verify Paid Boost before deploy
         run: node .lumen/a2a-worker/test-paid-boost.mjs
       - name: Verify Sovereign Revenue v4 before deploy
@@ -107,6 +113,32 @@ jobs:
           grep -q '"autonomousSpend":false' governor-policy.json
           grep -q '"maxExternalMessagesPerCycle":1' governor-policy.json
           echo 'PORTFOLIO_PUBLIC_SMOKE_OK'
+      - name: Verify Sovereign v4 live artifacts and record measurements
+        env:
+          OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          curl -fsS --max-time 20 "$BASE/sovereign/policy" -o sovereign-policy.json
+          jq -e '.version=="4.0-sovereign-revenue" and .autonomousSpendUsd==0 and .sendsMessages==false and .releasesDelivery==false' sovereign-policy.json >/dev/null
+          protected_code=$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' "$BASE/sovereign/status")
+          test "$protected_code" = '403'
+          curl -fsS --max-time 30 -X POST -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" "$BASE/sovereign/verify" -o sovereign-start.json
+          jq -e '.ok==true and .sendsMessages==false' sovereign-start.json >/dev/null
+          run_id=$(jq -r '.runId' sovereign-start.json)
+          for attempt in $(seq 1 30); do
+            curl -fsS --max-time 30 -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" "$BASE/sovereign/status" -o sovereign-status.json
+            if jq -e --arg id "$run_id" '.initialized==true and .state.runId==$id' sovereign-status.json >/dev/null; then
+              jq -e '.state.autonomy.autonomousSpendUsd==0 and .state.autonomy.sendsMessages==false and .state.autonomy.releasesDelivery==false' sovereign-status.json >/dev/null
+              jq '{phase:"after_deploy",version:.version,runId:.state.runId,cycleOk:.state.ok,elapsedWallMs:.state.elapsedWallMs,candidatesEvaluated:.state.metrics.current.candidatesEvaluatedThisCycle,allocatedInternalTasks:.state.metrics.current.allocatedInternalTasks,productDrafts:(.state.products.drafts|length),dealsObserved:(.state.deals.deals|length),nodesByKind:.state.graph.nodesByKind,missingCapabilities:.state.missingCapabilities,metrics:.state.metrics.current,comparison:.state.metrics.comparison}' sovereign-status.json > sovereign-measurements.json
+              cat sovereign-measurements.json
+              echo 'SOVEREIGN_V4_LIVE_ARTIFACTS_VERIFIED'
+              exit 0
+            fi
+            sleep 3
+          done
+          echo 'SOVEREIGN_V4_CYCLE_NOT_OBSERVED'
+          exit 1
       - name: Smoke test adaptive market hunter control plane
         run: |
           set -euo pipefail

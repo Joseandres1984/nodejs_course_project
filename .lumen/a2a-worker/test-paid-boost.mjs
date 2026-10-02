@@ -99,5 +99,11 @@ try {
   const count = sqlite.prepare("SELECT COUNT(*) n FROM lumen_paid_boost_steps WHERE run_id='deep-test'").get().n;
   assert.deepEqual(await deep.run({ instanceId: "deep-test", payload: { scheduledTime: 3600000 } }, durableSteps), result);
   assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM lumen_paid_boost_steps WHERE run_id='deep-test'").get().n, count);
+  const canarySteps = [];
+  const canary = await deep.run({ instanceId: "verify-test", payload: { sovereignOnly: true } }, {
+    async do(name, config, action) { canarySteps.push(name); return action(); }
+  });
+  assert.equal(canary.steps, 1);
+  assert.deepEqual(canarySteps, ["initialize", "sovereign-revenue-v4", "finish"]);
 } finally { globalThis.fetch = originalFetch; }
 console.log("PAID_BOOST_TESTS_OK: atomic budgets, recovery, authorization, cadence, exact settlement evidence");

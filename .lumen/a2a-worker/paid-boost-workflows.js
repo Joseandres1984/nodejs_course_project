@@ -26,7 +26,9 @@ export class LumenDeepWorkflow extends WorkflowEntrypoint {
       await recordRun(env, id, "DEEP", "RUNNING");
       return { ok: true };
     });
-    const tasks = [
+    const tasks = event.payload?.sovereignOnly === true ? [
+      ["sovereign-revenue-v4", () => runSovereignCycle(env, { runId: `v4-${id}` })]
+    ] : [
       ["verified-commercial-truth", () => refreshCommercialTruth(env)],
       ["cognitive-reasoning", () => runLiveCognitiveCycle(env, { trigger: "paid_boost_hourly_workflow" })],
       ["meta-prepare", () => runMetaControllerCycle(env, { trigger: "paid_boost_pre_superautonomy", applyNudge: true })],

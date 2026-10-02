@@ -40,6 +40,16 @@ assert.throws(() => validateGoal({ targetMonthlyRevenueUsd: "1000" }), /target/)
 assert.equal((await handleSovereign(req("/sovereign/goal", { targetMonthlyRevenueUsd: 1000 }), env)).status, 200);
 assert.equal((await handleSovereign(new Request("https://lumen.test/sovereign/goal", { method: "POST", headers: admin, body: "x".repeat(17000) }), env)).status, 400);
 assert.equal((await handleSovereign(req("/sovereign/run", {}), env)).status, 503);
+assert.equal((await handleSovereign(req("/sovereign/verify", {}), env)).status, 503);
+assert.equal((await handleSovereign(req("/sovereign/verify", {}, {}), env)).status, 403);
+const verificationBatches = [];
+const verificationEnv = { ...env, LUMEN_DEEP_WORKFLOW: { async createBatch(batch) { verificationBatches.push(batch); } } };
+const verificationResponse = await handleSovereign(req("/sovereign/verify", {}), verificationEnv);
+const verification = await verificationResponse.json();
+assert.equal(verificationResponse.status, 202);
+assert.equal(verification.sendsMessages, false);
+assert.equal(verificationBatches[0][0].params.sovereignOnly, true);
+assert.equal(verification.runId, `v4-${verification.instanceId}`);
 
 // Estimates are conservative, finite, bounded and explicitly distinct from
 // realized income. Invalid/self-scored worlds cannot win an authority override.

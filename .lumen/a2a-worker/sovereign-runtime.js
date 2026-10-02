@@ -77,6 +77,7 @@ export async function sampleMetrics(env, allocation, data, now = Date.now()) {
 }
 
 export async function runSovereignCycle(env, { runId = `v4-${Math.floor(Date.now()/3600000)}` } = {}) {
+  const startedMs = Date.now();
   await ensureSovereignSchema(env);
   const claim = await env.DB.prepare("INSERT OR IGNORE INTO lumen_v4_runs VALUES(?,? ,NULL,'RUNNING',NULL)").bind(runId, iso()).run();
   if (Number(claim.meta?.changes) !== 1) {
@@ -102,6 +103,7 @@ export async function runSovereignCycle(env, { runId = `v4-${Math.floor(Date.now
     const ceo = planCeo(goal, data, allocation);
     const metrics = await sampleMetrics(env, allocation, data);
     const result = { ok: data.missingCapabilities.length === 0, version: V4_VERSION, runId,
+      elapsedWallMs: Date.now() - startedMs, elapsedIsCpuTime: false,
       allocation, graph, radar, products, deals, health, autocoder, ceo, metrics,
       missingCapabilities: [...new Set(data.missingCapabilities)], invalidReceiptEvidence: data.invalidReceiptEvidence,
       evidenceWindow: data.evidenceWindow, autonomy: { internalArtifactsPrepared: true, sendsMessages: false, releasesDelivery: false, autonomousSpendUsd: 0 } };
@@ -149,6 +151,12 @@ export async function handleSovereign(request, env) {
   if (request.method === "POST" && path === "/sovereign/run") {
     if (!env.LUMEN_DEEP_WORKFLOW) return json({ ok: false, error: "workflow_binding_missing" }, 503);
     return json({ ok: true, instanceId: await startDeepCycle(env, Date.now()), hourlyDeduplication: true }, 202);
+  }
+  if (request.method === "POST" && path === "/sovereign/verify") {
+    if (!env.LUMEN_DEEP_WORKFLOW) return json({ ok: false, error: "workflow_binding_missing" }, 503);
+    const instanceId = `sovereign-verify-${Math.floor(Date.now()/3600000)}`;
+    await env.LUMEN_DEEP_WORKFLOW.createBatch([{ id: instanceId, params: { sovereignOnly: true, scheduledTime: Date.now() } }]);
+    return json({ ok: true, instanceId, runId: `v4-${instanceId}`, hourlyDeduplication: true, sendsMessages: false }, 202);
   }
   if ((request.method === "POST" && ["/sovereign/goal", "/sovereign/protocol/prepare"].includes(path)) ||
       request.method === "POST" && /^\/sovereign\/approvals\/V4-AP-[a-f0-9]{64}\/decision$/.test(path)) {

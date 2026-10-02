@@ -97,6 +97,7 @@ Except for the policy, all routes require `x-lumen-admin` matching the configure
 | GET `/sovereign/memory?offerId=MP-SUPPLIER-SNAPSHOT` | Up to 20 exact proposal peers for an offer |
 | GET `/sovereign/autocoder/candidate` | Latest evidenced isolated patch candidate |
 | POST `/sovereign/run` | Start the existing deduplicated hourly deep Workflow; not a second executor |
+| POST `/sovereign/verify` | Deduplicated v4-only Workflow for deployment verification; never runs legacy senders or growth actions |
 | POST `/sovereign/goal` | `{"targetMonthlyRevenueUsd":1000,"objective":"..."}`; rejects authority fields |
 | POST `/sovereign/protocol/prepare` | `{ "protocol":"a2a", "task":{ "id":"...", "text":"...", "endpoint":"https://..." } }` |
 | POST `/sovereign/approvals/{id}/decision` | `{"decision":"APPROVE","scopeHash":"..."}` or `REJECT`; review only |
@@ -112,6 +113,10 @@ npx --yes wrangler@latest deploy paid-boost-entry.js --dry-run --config wrangler
 ```
 
 The v4 suite uses a real SQLite-backed D1 facade and disables provider networking.
+The deployment workflow records the pre-deploy public revenue baseline, verifies
+the v4 public policy and protected status, and observes an isolated v4 cycle.
+It logs aggregate artifact counts and elapsed wall time without proposal copy,
+buyer identities or admin credentials. Wall time is not CPU usage.
 It covers complete cycles, persisted replay, exact payment evidence, redeemed
 receipts, scope changes, concurrent decisions, forged authority, host dedup,
 governor integration, missing capabilities, honest benchmarks and hostile lab
