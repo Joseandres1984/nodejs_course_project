@@ -1,3 +1,5 @@
+import deliverySchema from "./paid-delivery-schema.json" with { type: "json" };
+
 export const V4_VERSION = "4.0-sovereign-revenue";
 export const V4_POLICY = Object.freeze({
   version: V4_VERSION, mode: "SUPERVISED_INTERNAL_EXECUTION", hourlyWorkflow: true,
@@ -54,7 +56,10 @@ export async function optionalRows(env, sql, missing, args = []) {
 
 export async function ensureSovereignSchema(env) {
   if (!env.DB) throw new Error("v4_persistence_required");
+  // The legacy delivery observer needs its canonical empty table even before
+  // the first paid report. These CREATEs never queue or send a delivery.
   await env.DB.batch([
+    ...deliverySchema.map(sql => env.DB.prepare(sql)),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS lumen_v4_runs (id TEXT PRIMARY KEY,started_at TEXT NOT NULL,finished_at TEXT,status TEXT NOT NULL,result_json TEXT)"),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS lumen_v4_state (id TEXT PRIMARY KEY,updated_at TEXT NOT NULL,state_json TEXT NOT NULL)"),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS lumen_v4_goals (id TEXT PRIMARY KEY,updated_at TEXT NOT NULL,goal_json TEXT NOT NULL)"),
