@@ -39,4 +39,4 @@ jobs:
 
       - name: Validate Cloudflare A2A bundle
         working-directory: .lumen/a2a-worker
-        run: npx --yes wrangler@latest deploy --dry-run --config wrangler.toml
+        run: npx --yes wrangler@latest deploy paid-boost-entry.js --dry-run --config wrangler.toml

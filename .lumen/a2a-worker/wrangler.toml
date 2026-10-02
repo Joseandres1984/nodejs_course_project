@@ -3,6 +3,20 @@ main = "opportunity-entry.js"
 compatibility_date = "2026-09-21"
 workers_dev = true
 
+# Per-invocation CPU limit, not an account billing cap.
+[limits]
+cpu_ms = 30000
+
+[[workflows]]
+name = "lumen-deep-cycle"
+binding = "LUMEN_DEEP_WORKFLOW"
+class_name = "LumenDeepWorkflow"
+
+[[workflows]]
+name = "lumen-opportunity-lifecycle"
+binding = "LUMEN_OPPORTUNITY_WORKFLOW"
+class_name = "LumenOpportunityWorkflow"
+
 [ai]
 binding = "AI"
 
@@ -33,4 +47,4 @@ X402_NETWORK = "base"
 X402_FACILITATOR = "https://facilitator.xpay.sh"
 
 [triggers]
-crons = ["7,22,37,52 * * * *"]
+crons = ["7,22,37,52 * * * *", "12 * * * *"]

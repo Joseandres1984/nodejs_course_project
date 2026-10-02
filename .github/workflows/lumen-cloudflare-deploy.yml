@@ -27,15 +27,17 @@ jobs:
             exit 2
           fi
           echo 'REQUIRED_SECRETS_PRESENT'
-      - name: Deploy lumen-zero-a2a with adaptive entrypoint
+      - name: Verify Paid Boost before deploy
+        run: node .lumen/a2a-worker/test-paid-boost.mjs
+      - name: Deploy lumen-zero-a2a with Paid Boost entrypoint
         working-directory: .lumen/a2a-worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
-          sed -i 's/^main = "opportunity-entry.js"$/main = "adaptive-entry.js"/' wrangler.toml
-          grep -q '^main = "adaptive-entry.js"$' wrangler.toml
+          sed -i 's/^main = "opportunity-entry.js"$/main = "paid-boost-entry.js"/' wrangler.toml
+          grep -q '^main = "paid-boost-entry.js"$' wrangler.toml
           npx --yes wrangler@latest deploy --config wrangler.toml
       - name: Restore protected opportunity admin secret
         working-directory: .lumen/a2a-worker
@@ -44,7 +46,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
         run: |
-          sed -i 's/^main = "opportunity-entry.js"$/main = "adaptive-entry.js"/' wrangler.toml
+          sed -i 's/^main = "opportunity-entry.js"$/main = "paid-boost-entry.js"/' wrangler.toml
           printf '%s' "$OPPORTUNITY_ADMIN_TOKEN" | npx --yes wrangler@latest secret put OPPORTUNITY_ADMIN_TOKEN --config wrangler.toml
       - name: Restore optional Tiendanube credentials
         working-directory: .lumen/a2a-worker
@@ -55,10 +57,36 @@ jobs:
           TIENDANUBE_CLIENT_SECRET: ${{ secrets.TIENDANUBE_CLIENT_SECRET }}
         run: |
           set -euo pipefail
-          sed -i 's/^main = "opportunity-entry.js"$/main = "adaptive-entry.js"/' wrangler.toml
+          sed -i 's/^main = "opportunity-entry.js"$/main = "paid-boost-entry.js"/' wrangler.toml
           if [ -n "$TIENDANUBE_APP_ID" ]; then printf '%s' "$TIENDANUBE_APP_ID" | npx --yes wrangler@latest secret put TIENDANUBE_APP_ID --config wrangler.toml; else echo 'TIENDANUBE_APP_ID_NOT_CONFIGURED'; fi
           if [ -n "$TIENDANUBE_CLIENT_SECRET" ]; then printf '%s' "$TIENDANUBE_CLIENT_SECRET" | npx --yes wrangler@latest secret put TIENDANUBE_CLIENT_SECRET --config wrangler.toml; else echo 'TIENDANUBE_CLIENT_SECRET_NOT_CONFIGURED'; fi
-      - name: Smoke test public portfolio endpoints
+      - name: Smoke test Paid Boost public policy
+        run: |
+          set -euo pipefail
+          BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          curl -fsS --retry 5 --retry-delay 3 "$BASE/paid-boost/policy" -o paid-boost-policy.json
+          jq -e '.version == "1.0-lumen-paid-boost" and .durableDeepCycle == true and .deepCron == "12 * * * *" and .autonomousSpendUsd == 0 and .extraAiSpendAuthorized == false and .workflowSendsMessages == false' paid-boost-policy.json >/dev/null
+          echo 'PAID_BOOST_PUBLIC_POLICY_OK'
+      - name: Start and verify a durable deep cycle
+        env:
+          OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          curl -fsS --max-time 30 -X POST -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" "$BASE/paid-boost/deep/run" -o paid-boost-start.json
+          jq -e '.ok == true and .hourlyDeduplication == true' paid-boost-start.json >/dev/null
+          id=$(jq -r '.instanceId' paid-boost-start.json)
+          for attempt in $(seq 1 15); do
+            curl -fsS --max-time 20 -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" "$BASE/paid-boost/status" -o paid-boost-status.json
+            if jq -e --arg id "$id" '.workflowBindingsReady == true and any(.runs[]; .id == $id)' paid-boost-status.json >/dev/null; then
+              echo 'PAID_BOOST_DURABLE_INSTANCE_STARTED'
+              exit 0
+            fi
+            sleep 2
+          done
+          echo 'PAID_BOOST_INSTANCE_NOT_OBSERVED'
+          exit 1
+      - name: Smoke test existing portfolio endpoints
         run: |
           set -euo pipefail
           BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
