@@ -1,0 +1,192 @@
+import { prepareTopProposal, OFFERS } from "./proposal-engine.js";
+import { processFollowupCycle } from "./followup-engine.js";
+import { runFirstCashCloser } from "./first-cash-closer.js";
+import { syncX402SettlementsToRevenue } from "./x402-revenue-bridge.js";
+
+export const REVENUE_LOOP_V5_POLICY = Object.freeze({
+  version: "5.0-revenue-closer-loop",
+  objective: "minimize_time_to_verified_settlement_then_replicate_verified_winners",
+  lifecycle: ["DISCOVERED","QUALIFIED","PROPOSAL_READY","SENT","REPLIED","NEGOTIATING","PAID","DELIVERED"],
+  buyerIntent: "bounded_explainable_heuristic_not_calibrated_probability",
+  firstCashFormula: "estimated_value_usd * payment_probability / estimated_time_to_cash_hours",
+  revenueTruth: "settled_verified_x402_bridge_only",
+  deliveryTruth: "canonical_lumen_paid_deliveries_delivered_only",
+  autonomousSpendUsd: 0,
+  autonomousPurchase: false,
+  autonomousContract: false,
+  changesPrices: false,
+  createsNewSenderAuthority: false,
+  bindingActionsHumanGated: true
+});
+
+const STAGE_RANK = Object.freeze({ DISCOVERED:10, QUALIFIED:20, PROPOSAL_READY:30, SENT:40, REPLIED:50, NEGOTIATING:60, PAID:70, DELIVERED:80 });
+const TTC_HOURS = Object.freeze({ DISCOVERED:168, QUALIFIED:120, PROPOSAL_READY:96, SENT:72, REPLIED:48, NEGOTIATING:24, PAID:1, DELIVERED:1 });
+
+function clamp(value, min=0, max=1) { const n = Number(value); return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : min; }
+function clean(value, limit=1000) { return String(value ?? "").trim().replace(/\s+/g," ").slice(0,limit); }
+function safeJson(value, fallback={}) { try { return JSON.parse(value || ""); } catch { return fallback; } }
+function authorized(request, env) { const expected=clean(env?.OPPORTUNITY_ADMIN_TOKEN,500), supplied=clean(request.headers.get("x-lumen-admin"),500); return Boolean(expected && supplied && expected===supplied); }
+
+export function scoreBuyerIntent(row={}) {
+  const reasons = Array.isArray(row.reasons) ? row.reasons : safeJson(row.reasons_json, []);
+  let score = clamp(Number(row.commercial_score || 0) / 100) * 0.42;
+  const evidence = clean(row.evidence_strength,40).toLowerCase();
+  if (["strong","high","verified"].includes(evidence)) score += 0.16;
+  else if (["medium","moderate"].includes(evidence)) score += 0.08;
+  if (reasons.includes("microbuyer_fit")) score += 0.10;
+  if (row.quality_gate_status === "PASS") score += 0.06;
+  const responseClass = clean(row.response_class,80).toUpperCase();
+  if (responseClass === "PURCHASE_INTENT") score += 0.34;
+  else if (responseClass === "COMMERCIAL_INTEREST") score += 0.24;
+  else if (responseClass === "SCOPE_QUESTION") score += 0.16;
+  else if (responseClass && !["DECLINED","SPAM","IRRELEVANT"].includes(responseClass)) score += 0.05;
+  if (row.verified_receipt_id) score = 1;
+  return Number(clamp(score).toFixed(4));
+}
+
+export function deriveLifecycleStage(row={}) {
+  if (clean(row.delivery_status,60).toLowerCase() === "delivered" && row.verified_receipt_id) return "DELIVERED";
+  if (row.verified_receipt_id) return "PAID";
+  const pipeline = clean(row.pipeline_stage,80).toUpperCase();
+  const responseClass = clean(row.response_class,80).toUpperCase();
+  if (pipeline === "NEGOTIATING" || ["PURCHASE_INTENT","COMMERCIAL_INTEREST","SCOPE_QUESTION"].includes(responseClass)) return "NEGOTIATING";
+  if (row.response_text || row.proposal_status === "RESPONDED" || pipeline === "RESPONDED") return "REPLIED";
+  if (row.proposal_status === "SENT" || ["WAITING","WAITING_TASK"].includes(pipeline) || row.outreach_status === "SENT" || row.outreach_status === "SENT_TASK") return "SENT";
+  if (row.proposal_id) return "PROPOSAL_READY";
+  if (Number(row.commercially_actionable) === 1 && Number(row.synthetic_or_test_only) === 0) return "QUALIFIED";
+  return "DISCOVERED";
+}
+
+export function paymentProbability(intentScore, stage) {
+  if (stage === "DELIVERED" || stage === "PAID") return 1;
+  const stageFloor = { DISCOVERED:0.01, QUALIFIED:0.02, PROPOSAL_READY:0.03, SENT:0.05, REPLIED:0.12, NEGOTIATING:0.20 }[stage] || 0.01;
+  const stageCeiling = { DISCOVERED:0.08, QUALIFIED:0.12, PROPOSAL_READY:0.16, SENT:0.22, REPLIED:0.42, NEGOTIATING:0.65 }[stage] || 0.08;
+  return Number((stageFloor + clamp(intentScore) * (stageCeiling-stageFloor)).toFixed(4));
+}
+
+export function firstCashScore({ estimatedValueUsd=0, probability=0, stage="DISCOVERED", winnerBoost=0 }={}) {
+  const hours = TTC_HOURS[stage] || 168;
+  const raw = Math.max(0, Number(estimatedValueUsd||0)) * clamp(probability) / Math.max(1,hours);
+  return Number((raw * (1 + clamp(winnerBoost,0,0.15))).toFixed(6));
+}
+
+export async function ensureRevenueLoopV5Schema(env) {
+  if (!env?.DB) throw new Error("revenue_loop_v5_persistence_required");
+  await env.DB.batch([
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS lumen_revenue_loop_v5 (opportunity_id TEXT PRIMARY KEY,proposal_id TEXT,offer_id TEXT,stage TEXT NOT NULL,stage_rank INTEGER NOT NULL,intent_score REAL NOT NULL DEFAULT 0,payment_probability REAL NOT NULL DEFAULT 0,estimated_value_usd REAL NOT NULL DEFAULT 0,estimated_time_to_cash_hours REAL NOT NULL DEFAULT 168,first_cash_score REAL NOT NULL DEFAULT 0,next_action TEXT,next_action_at TEXT,evidence_json TEXT NOT NULL,updated_at TEXT NOT NULL)"),
+    env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_lumen_revenue_loop_v5_priority ON lumen_revenue_loop_v5(stage,first_cash_score DESC,updated_at)"),
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS lumen_revenue_memory_v5 (offer_id TEXT PRIMARY KEY,verified_settlements INTEGER NOT NULL DEFAULT 0,verified_revenue_usd REAL NOT NULL DEFAULT 0,delivered_count INTEGER NOT NULL DEFAULT 0,winner_score REAL NOT NULL DEFAULT 0,updated_at TEXT NOT NULL)"),
+    env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_lumen_revenue_memory_v5_winner ON lumen_revenue_memory_v5(winner_score DESC,updated_at)")
+  ]);
+}
+
+async function safeAll(env, sql, bind=[]) { try { const s=env.DB.prepare(sql); const r=bind.length?await s.bind(...bind).all():await s.all(); return r.results||[]; } catch { return []; } }
+async function safeFirst(env, sql, bind=[]) { try { const s=env.DB.prepare(sql); return bind.length?await s.bind(...bind).first():await s.first(); } catch { return null; } }
+
+async function syncRevenueMemory(env) {
+  const now = new Date().toISOString();
+  const rows = await safeAll(env, `SELECT b.offer_id,COUNT(*) verified_settlements,COALESCE(SUM(b.amount_usd),0) verified_revenue_usd,
+    SUM(CASE WHEN LOWER(COALESCE(d.status,''))='delivered' THEN 1 ELSE 0 END) delivered_count
+    FROM lumen_x402_revenue_bridge b
+    LEFT JOIN lumen_paid_deliveries d ON d.receipt_id=b.receipt_id
+    WHERE b.offer_id IS NOT NULL AND b.bridge_status IN ('ATTRIBUTABLE','REFERRAL_ATTRIBUTABLE')
+    GROUP BY b.offer_id`);
+  for (const row of rows) {
+    const settlements = Number(row.verified_settlements||0), revenue = Number(row.verified_revenue_usd||0), delivered = Number(row.delivered_count||0);
+    const winner = Number(Math.min(1, settlements*0.18 + delivered*0.12 + Math.min(revenue,100)/500).toFixed(4));
+    await env.DB.prepare("INSERT INTO lumen_revenue_memory_v5(offer_id,verified_settlements,verified_revenue_usd,delivered_count,winner_score,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(offer_id) DO UPDATE SET verified_settlements=excluded.verified_settlements,verified_revenue_usd=excluded.verified_revenue_usd,delivered_count=excluded.delivered_count,winner_score=excluded.winner_score,updated_at=excluded.updated_at")
+      .bind(row.offer_id,settlements,revenue,delivered,winner,now).run();
+  }
+  return { offers: rows.length, verifiedSettlements: rows.reduce((n,r)=>n+Number(r.verified_settlements||0),0), verifiedRevenueUsd: rows.reduce((n,r)=>n+Number(r.verified_revenue_usd||0),0) };
+}
+
+async function loadRows(env) {
+  const rows = await safeAll(env, `SELECT o.id AS opportunity_id,o.revenue_offer_id,o.score AS discovery_score,a.commercial_score,a.commercially_actionable,a.synthetic_or_test_only,a.evidence_strength,a.reasons_json,
+    p.proposal_id,p.offer_id,p.amount_usd,p.status AS proposal_status,p.quality_gate_status,p.created_at AS proposal_created_at,
+    s.stage AS pipeline_stage,s.response_class,s.next_action,s.next_action_at,
+    x.status AS outreach_status,x.response_text,
+    b.receipt_id AS verified_receipt_id,b.amount_usd AS verified_amount_usd,
+    d.status AS delivery_status,
+    COALESCE(m.winner_score,0) AS winner_score
+    FROM lumen_opportunities o
+    JOIN lumen_opportunity_assessments a ON a.opportunity_id=o.id
+    LEFT JOIN lumen_proposal_drafts p ON p.opportunity_id=o.id
+    LEFT JOIN lumen_sales_pipeline s ON s.proposal_id=p.proposal_id
+    LEFT JOIN lumen_outreach_attempts x ON x.proposal_id=p.proposal_id
+    LEFT JOIN lumen_x402_revenue_bridge b ON b.proposal_id=p.proposal_id AND b.bridge_status='ATTRIBUTABLE'
+    LEFT JOIN lumen_paid_deliveries d ON d.receipt_id=b.receipt_id
+    LEFT JOIN lumen_revenue_memory_v5 m ON m.offer_id=COALESCE(p.offer_id,o.revenue_offer_id)
+    WHERE a.synthetic_or_test_only=0
+    ORDER BY o.updated_at DESC LIMIT 500`);
+  if (rows.length) return rows;
+  return safeAll(env, `SELECT o.id AS opportunity_id,o.revenue_offer_id,o.score AS discovery_score,a.commercial_score,a.commercially_actionable,a.synthetic_or_test_only,a.evidence_strength,a.reasons_json,
+    p.proposal_id,p.offer_id,p.amount_usd,p.status AS proposal_status,p.quality_gate_status,p.created_at AS proposal_created_at
+    FROM lumen_opportunities o JOIN lumen_opportunity_assessments a ON a.opportunity_id=o.id LEFT JOIN lumen_proposal_drafts p ON p.opportunity_id=o.id
+    WHERE a.synthetic_or_test_only=0 ORDER BY o.updated_at DESC LIMIT 500`);
+}
+
+function nextActionFor(stage,row) {
+  if (stage === "DELIVERED") return "replicate_verified_winner";
+  if (stage === "PAID") return "await_guarded_paid_delivery";
+  if (stage === "NEGOTIATING") return "close_exact_scope_with_existing_first_cash_gate";
+  if (stage === "REPLIED") return "qualify_response_then_close";
+  if (stage === "SENT") return row.next_action || "follow_up_when_existing_cooldown_allows";
+  if (stage === "PROPOSAL_READY") return "existing_quality_and_governor_gate";
+  if (stage === "QUALIFIED") return "prepare_non_binding_proposal";
+  return "continue_verified_demand_discovery";
+}
+
+async function syncLifecycle(env) {
+  const rows = await loadRows(env), now = new Date().toISOString();
+  let advanced=0, paid=0, delivered=0;
+  for (const row of rows) {
+    row.reasons = safeJson(row.reasons_json, []);
+    const stage = deriveLifecycleStage(row), rank = STAGE_RANK[stage] || 10;
+    const intent = scoreBuyerIntent(row);
+    const probability = paymentProbability(intent,stage);
+    const catalogValue = OFFERS[row.offer_id || row.revenue_offer_id]?.priceUsd || 0;
+    const value = Math.max(0, Number(row.verified_amount_usd ?? row.amount_usd ?? catalogValue));
+    const ttc = TTC_HOURS[stage] || 168;
+    const score = firstCashScore({ estimatedValueUsd:value, probability, stage, winnerBoost:Number(row.winner_score||0)*0.15 });
+    const previous = await safeFirst(env,"SELECT stage_rank FROM lumen_revenue_loop_v5 WHERE opportunity_id=?",[row.opportunity_id]);
+    if (!previous || rank > Number(previous.stage_rank||0)) advanced++;
+    if (stage === "PAID") paid++; if (stage === "DELIVERED") delivered++;
+    const evidence = { proposalId:row.proposal_id||null, qualityGate:row.quality_gate_status||null, responseClass:row.response_class||null, receiptId:row.verified_receipt_id||null, deliveryStatus:row.delivery_status||null, heuristicProbability:true };
+    await env.DB.prepare("INSERT INTO lumen_revenue_loop_v5(opportunity_id,proposal_id,offer_id,stage,stage_rank,intent_score,payment_probability,estimated_value_usd,estimated_time_to_cash_hours,first_cash_score,next_action,next_action_at,evidence_json,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(opportunity_id) DO UPDATE SET proposal_id=excluded.proposal_id,offer_id=excluded.offer_id,stage=CASE WHEN excluded.stage_rank>=lumen_revenue_loop_v5.stage_rank THEN excluded.stage ELSE lumen_revenue_loop_v5.stage END,stage_rank=MAX(lumen_revenue_loop_v5.stage_rank,excluded.stage_rank),intent_score=excluded.intent_score,payment_probability=excluded.payment_probability,estimated_value_usd=excluded.estimated_value_usd,estimated_time_to_cash_hours=CASE WHEN excluded.stage_rank>=lumen_revenue_loop_v5.stage_rank THEN excluded.estimated_time_to_cash_hours ELSE lumen_revenue_loop_v5.estimated_time_to_cash_hours END,first_cash_score=excluded.first_cash_score,next_action=CASE WHEN excluded.stage_rank>=lumen_revenue_loop_v5.stage_rank THEN excluded.next_action ELSE lumen_revenue_loop_v5.next_action END,next_action_at=excluded.next_action_at,evidence_json=excluded.evidence_json,updated_at=excluded.updated_at")
+      .bind(row.opportunity_id,row.proposal_id||null,row.offer_id||row.revenue_offer_id||null,stage,rank,intent,probability,value,ttc,score,nextActionFor(stage,row),row.next_action_at||null,JSON.stringify(evidence),now).run();
+  }
+  const focus = await safeFirst(env,"SELECT opportunity_id,proposal_id,offer_id,stage,intent_score,payment_probability,estimated_value_usd,estimated_time_to_cash_hours,first_cash_score,next_action FROM lumen_revenue_loop_v5 WHERE stage NOT IN ('PAID','DELIVERED') ORDER BY first_cash_score DESC,intent_score DESC,updated_at DESC LIMIT 1");
+  return { tracked:rows.length, advanced, paid, delivered, focus:focus||null };
+}
+
+export async function getRevenueLoopV5Status(env) {
+  await ensureRevenueLoopV5Schema(env);
+  const stages = await safeAll(env,"SELECT stage,COUNT(*) count,ROUND(COALESCE(SUM(estimated_value_usd),0),2) estimated_value_usd FROM lumen_revenue_loop_v5 GROUP BY stage ORDER BY MIN(stage_rank)");
+  const memory = await safeAll(env,"SELECT * FROM lumen_revenue_memory_v5 ORDER BY winner_score DESC,verified_revenue_usd DESC LIMIT 10");
+  const focus = await safeFirst(env,"SELECT opportunity_id,proposal_id,offer_id,stage,intent_score,payment_probability,estimated_value_usd,estimated_time_to_cash_hours,first_cash_score,next_action FROM lumen_revenue_loop_v5 WHERE stage NOT IN ('PAID','DELIVERED') ORDER BY first_cash_score DESC,intent_score DESC LIMIT 1");
+  return { ok:true, version:REVENUE_LOOP_V5_POLICY.version, stages, focus:focus||null, revenueMemory:memory, guardrails:{ autonomousSpendUsd:0, changesPrices:false, bindingActionsHumanGated:true, verifiedSettlementRequired:true } };
+}
+
+export async function runRevenueLoopV5Cycle(env,{trigger="manual"}={}) {
+  await ensureRevenueLoopV5Schema(env);
+  const settlementSync = await syncX402SettlementsToRevenue(env);
+  const proposal = await prepareTopProposal(env);
+  // Revenue Loop v5 observes and prepares; it never widens sender authority inside Paid Boost.
+  const prepareOnlyEnv = { ...env, A2A_AUTONOMOUS_FOLLOWUP: "false", A2A_AUTONOMOUS_CONVERSION_CLOSE: "false" };
+  const followup = await processFollowupCycle(prepareOnlyEnv);
+  const closer = await runFirstCashCloser(prepareOnlyEnv,{ force:false });
+  const memory = await syncRevenueMemory(env);
+  const lifecycle = await syncLifecycle(env);
+  return { ok:[settlementSync,proposal,followup,closer].every(x=>x?.ok!==false), version:REVENUE_LOOP_V5_POLICY.version, trigger, settlementSync, proposal:{ ok:proposal?.ok, prepared:proposal?.prepared, reason:proposal?.reason }, followup:{ ok:followup?.ok, sent:Boolean(followup?.send?.sent), reason:followup?.send?.reason||null }, closer:{ ok:closer?.ok, sent:Boolean(closer?.sent), ready:Boolean(closer?.ready), reason:closer?.reason||null }, memory, lifecycle, guardrails:{ autonomousSpendUsd:0, createsNewSenderAuthority:false, changesPrices:false, bindingActionsHumanGated:true } };
+}
+
+function json(data,status=200){ return Response.json(data,{status,headers:{"cache-control":"no-store","x-content-type-options":"nosniff"}}); }
+export async function handleRevenueLoopV5(request,env){
+  const path=new URL(request.url).pathname;
+  if (!path.startsWith("/revenue-loop-v5/")) return null;
+  if (request.method==="GET" && path==="/revenue-loop-v5/policy") return json(REVENUE_LOOP_V5_POLICY);
+  if (!authorized(request,env)) return json({ok:false,error:"admin_token_required"},403);
+  if (request.method==="GET" && path==="/revenue-loop-v5/status") return json(await getRevenueLoopV5Status(env));
+  if (request.method==="POST" && path==="/revenue-loop-v5/run") return json(await runRevenueLoopV5Cycle(env,{trigger:"protected_endpoint"}),202);
+  return json({ok:false,error:"not_found"},404);
+}
