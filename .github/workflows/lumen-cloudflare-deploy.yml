@@ -121,7 +121,16 @@ jobs:
         run: |
           set -euo pipefail
           BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
-          curl -fsS --max-time 20 "$BASE/sovereign/policy" -o sovereign-policy.json
+          curl -fsS --max-time 20 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/lumen-zero-a2a/script-settings" -o sovereign-worker-settings.json
+          jq '{configuredRelease:[.result.bindings[]?|select(.name=="LUMEN_V4_RELEASE_ID")|{name,type,text}]}' sovereign-worker-settings.json
+          curl -fsS --max-time 20 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/lumen-zero-a2a/deployments" -o sovereign-worker-deployments.json
+          jq '{recentDeployments:((.result.deployments // .result)|.[0:2]|map({id,created_on,versions}))}' sovereign-worker-deployments.json
+          for propagation_attempt in $(seq 1 10); do
+            curl -fsS --max-time 20 -H 'cache-control: no-cache' "$BASE/sovereign/policy?release=$GITHUB_SHA&probe=$propagation_attempt" -o sovereign-policy.json
+            if jq -e --arg release "$GITHUB_SHA" '.releaseId==$release' sovereign-policy.json >/dev/null; then break; fi
+            sleep 2
+          done
+          jq '{version,releaseId}' sovereign-policy.json
           jq -e --arg release "$GITHUB_SHA" '.releaseId==$release' sovereign-policy.json >/dev/null
           jq -e '.version=="4.0-sovereign-revenue" and .autonomousSpendUsd==0 and .sendsMessages==false and .releasesDelivery==false' sovereign-policy.json >/dev/null
           protected_code=$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' "$BASE/sovereign/status")
@@ -131,7 +140,7 @@ jobs:
           run_id=$(jq -r '.runId' sovereign-start.json)
           cat sovereign-start.json
           for attempt in $(seq 1 30); do
-            curl -fsS --max-time 30 -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" "$BASE/sovereign/status" -o sovereign-status.json
+            curl -fsS --max-time 30 -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" "$BASE/sovereign/status?release=$GITHUB_SHA&probe=$attempt" -o sovereign-status.json
             if jq -e --arg id "$run_id" '.initialized==true and .state.runId==$id' sovereign-status.json >/dev/null; then
               jq -e '.state.autonomy.autonomousSpendUsd==0 and .state.autonomy.sendsMessages==false and .state.autonomy.releasesDelivery==false' sovereign-status.json >/dev/null
               jq '{phase:"after_deploy",version:.version,runId:.state.runId,cycleOk:.state.ok,elapsedWallMs:.state.elapsedWallMs,candidatesEvaluated:.state.metrics.current.candidatesEvaluatedThisCycle,allocatedInternalTasks:.state.metrics.current.allocatedInternalTasks,productDrafts:(.state.products.drafts|length),dealsObserved:(.state.deals.deals|length),nodesByKind:.state.graph.nodesByKind,missingCapabilities:.state.missingCapabilities,metrics:.state.metrics.current,comparison:.state.metrics.comparison}' sovereign-status.json > sovereign-measurements.json
