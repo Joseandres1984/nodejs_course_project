@@ -1,5 +1,22 @@
 import { clamp, number, V4_POLICY } from "./sovereign-store.js";
 
+const FIXED_CATALOG_VALUE_USD = Object.freeze({
+  "MP-SUPPLIER-SNAPSHOT": 1,
+  "MP-QUOTE-SANITY": 7,
+  "MP-TENDER-SCAN": 9,
+  "MP-SOURCING-5": 15,
+  "MP-BUYER-SIGNALS": 19,
+  "MP-EXPORT-PULSE": 25
+});
+
+export function candidateValueUsd(row = {}) {
+  const explicit = clamp(row.estimated_value_usd, 0, 10000);
+  if (explicit > 0) return { valueUsd: explicit, valueSource: "candidate_estimate" };
+  const catalog = clamp(FIXED_CATALOG_VALUE_USD[row.offer_id], 0, 10000);
+  if (catalog > 0) return { valueUsd: catalog, valueSource: "fixed_catalog_price" };
+  return { valueUsd: 0, valueSource: "unknown_zero" };
+}
+
 // Explicit estimates, never revenue evidence. Probability comes from observed
 // settlement/send cohorts with a conservative prior, discounted for weak fit.
 export function evaluateEconomics(row, cohort = {}) {
@@ -7,7 +24,7 @@ export function evaluateEconomics(row, cohort = {}) {
   const sent = Math.max(0, number(cohort.sent)), wins = clamp(cohort.verified_settlements, 0, sent);
   const empirical = (wins + 1) / (sent + 20);
   const probability = Math.min(0.8, empirical * (0.5 + evidence / 2));
-  const value = clamp(row.estimated_value_usd, 0, 10000);
+  const { valueUsd: value, valueSource } = candidateValueUsd(row);
   const costMinutes = { COLLECTION: 1, CLOSE: 2, INBOUND: 2, FOLLOW_UP: 1, NEW_BUSINESS: 3, EXPERIMENT: 4 }[row.lane] || 3;
   const cashHours = { COLLECTION: 1, CLOSE: 6, INBOUND: 12, FOLLOW_UP: 24, NEW_BUSINESS: 72, EXPERIMENT: 168 }[row.lane] || 72;
   const risk = 1 - evidence;
@@ -15,7 +32,7 @@ export function evaluateEconomics(row, cohort = {}) {
   const utility = expectedRevenueUsd * (0.5 + evidence / 2) / costMinutes / (1 + cashHours / 24) / (1 + risk);
   return { candidateId: row.id, sourceType: row.source_type, sourceId: row.source_id,
     lane: row.lane, offerId: row.offer_id || null, probability, probabilityModel: "beta_prior_1_19_times_evidence",
-    expectedRevenueUsd, projectedComputeMinutes: costMinutes, projectedCashHours: cashHours,
+    estimatedValueUsd: value, valueSource, expectedRevenueUsd, projectedComputeMinutes: costMinutes, projectedCashHours: cashHours,
     risk, evidence, utility, estimatesOnly: true, verifiedRevenueUsd: 0 };
 }
 
