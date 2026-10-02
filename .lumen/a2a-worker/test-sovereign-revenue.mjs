@@ -81,7 +81,7 @@ try {
 
   // Real SQLite legacy fixtures, with multiple source records on one host.
   sqlite.exec(`
-    CREATE TABLE lumen_opportunities (id TEXT PRIMARY KEY,name TEXT,description TEXT,endpoint TEXT,evidence TEXT,revenue_offer_id TEXT,created_at TEXT,updated_at TEXT);
+    CREATE TABLE lumen_opportunities (id TEXT PRIMARY KEY,name TEXT,description TEXT,endpoint TEXT,evidence TEXT,revenue_offer_id TEXT,discovered_at TEXT,updated_at TEXT);
     CREATE TABLE lumen_opportunity_assessments (opportunity_id TEXT PRIMARY KEY,commercially_actionable INTEGER,synthetic_or_test_only INTEGER,commercial_score INTEGER,evidence_strength TEXT);
     CREATE TABLE lumen_proposal_drafts (opportunity_id TEXT PRIMARY KEY,proposal_id TEXT,status TEXT,offer_id TEXT,amount_usd REAL,subject TEXT,message TEXT,quality_gate_status TEXT,created_at TEXT,updated_at TEXT);
     CREATE TABLE lumen_sales_pipeline (proposal_id TEXT PRIMARY KEY,stage TEXT,response_class TEXT,updated_at TEXT);

@@ -46,7 +46,7 @@ jobs:
           set -euo pipefail
           sed -i 's/^main = "opportunity-entry.js"$/main = "paid-boost-entry.js"/' wrangler.toml
           grep -q '^main = "paid-boost-entry.js"$' wrangler.toml
-          npx --yes wrangler@latest deploy --config wrangler.toml
+          npx --yes wrangler@latest deploy --config wrangler.toml --var "LUMEN_V4_RELEASE_ID:$GITHUB_SHA"
       - name: Restore protected opportunity admin secret
         working-directory: .lumen/a2a-worker
         env:
@@ -138,6 +138,7 @@ jobs:
             sleep 3
           done
           echo 'SOVEREIGN_V4_CYCLE_NOT_OBSERVED'
+          jq '{initialized,runs}' sovereign-status.json
           exit 1
       - name: Smoke test adaptive market hunter control plane
         run: |
