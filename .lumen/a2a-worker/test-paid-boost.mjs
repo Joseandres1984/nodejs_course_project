@@ -22,7 +22,6 @@ const DB = { prepare(sql) {
 const env = { DB, OPPORTUNITY_ADMIN_TOKEN: "test-admin" };
 await ensureBoostSchema(env);
 
-// Concurrent budget reservations are atomic, including failures and midnight.
 const reservations = await Promise.allSettled(Array.from({ length: 20 }, () => reserveAiBudget(env, 200)));
 assert.equal(reservations.filter(x => x.status === "fulfilled").length, 12);
 assert.equal(sqlite.prepare("SELECT reserved_neurons FROM lumen_paid_boost_ai_usage").get().reserved_neurons, 2400);
@@ -37,8 +36,6 @@ const failedAi = withBudgetedAi({ DB, AI: { async run() { throw new Error("provi
 await assert.rejects(() => failedAi.AI.run("@cf/google/gemma-4-26b-a4b-it", { messages: [], max_tokens: 100 }), /timeout/);
 assert.equal(sqlite.prepare("SELECT calls FROM lumen_paid_boost_ai_usage").get().calls, 1);
 
-// Successful callbacks are recovered without repeating writes; ambiguous and
-// failed mutating steps cannot be blindly retried after a process restart.
 let mutations = 0;
 assert.deepEqual(await checkpoint(env, "run1", "learn", async () => ({ ok: true, n: ++mutations })), { ok: true, n: 1 });
 await checkpoint(env, "run1", "learn", async () => { mutations++; });
@@ -50,7 +47,6 @@ await checkpoint(env, "run1", "fail", async () => { mutations++; });
 assert.equal(mutations, 1);
 assert.equal((await checkpoint(env, "run1", "after-fail", async () => ({ ok: true }))).ok, true);
 
-// Public policy is read-only; private state and manual runs fail closed.
 assert.equal((await handlePaidBoost(new Request("https://lumen.test/paid-boost/policy"), {})).status, 200);
 assert.equal((await handlePaidBoost(new Request("https://lumen.test/paid-boost/status"), env)).status, 403);
 assert.equal((await handlePaidBoost(new Request("https://lumen.test/paid-boost/deep/run", { method: "POST", headers: { "x-lumen-admin": "wrong" } }), env)).status, 403);
@@ -81,8 +77,6 @@ await instance.run({ instanceId: "opp1", payload: { proposalId: "P1" } }, {
   async sleep() { throw new Error("verified settlement must not sleep"); }
 });
 assert.deepEqual(steps, ["initialize", "observe-0", "finish"]);
-// Run the real orchestration with provider networking disabled. Missing legacy
-// schemas produce visible degraded steps, while later steps still checkpoint.
 const originalFetch = globalThis.fetch;
 globalThis.fetch = async () => { throw new Error("test_network_disabled"); };
 try {
@@ -92,8 +86,9 @@ try {
     return persisted.get(name);
   } };
   const result = await deep.run({ instanceId: "deep-test", payload: { scheduledTime: 3600000 } }, durableSteps);
-  assert.equal(result.steps, 16);
+  assert.equal(result.steps, 17);
   assert.ok(persisted.has("sovereign-revenue-v4"));
+  assert.ok(persisted.has("venture-hunter-v1"));
   assert.ok(persisted.has("revenue-loop-v5"));
   assert.ok(persisted.has("foundry-experiments"));
   assert.ok(persisted.has("growth-decision"));
@@ -107,4 +102,4 @@ try {
   assert.equal(canary.steps, 1);
   assert.deepEqual(canarySteps, ["initialize", "sovereign-revenue-v4", "finish"]);
 } finally { globalThis.fetch = originalFetch; }
-console.log("PAID_BOOST_TESTS_OK: atomic budgets, recovery, authorization, cadence, exact settlement evidence");
+console.log("PAID_BOOST_TESTS_OK: atomic budgets, recovery, authorization, cadence, venture discovery, exact settlement evidence");
