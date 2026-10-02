@@ -54,7 +54,7 @@ export async function sampleMetrics(env, allocation, data, now = Date.now()) {
   // bounded ranking window must not be reported as total economic revenue.
   const amounts = await optionalRows(env, "SELECT COALESCE(SUM(amount_usd),0) revenue,COUNT(*) settlements FROM lumen_x402_receipts WHERE status IN ('settled_verified','redeemed_queued') AND currency='USD' AND network='eip155:8453' AND lower(pay_to)='0x04285de6a083ceb28fb0c254a2ed0f5fdb2eed28' AND json_valid(request_metadata)=1 AND json_extract(request_metadata,'$.settlement.success')=1 AND length(json_extract(request_metadata,'$.settlement.transaction'))=66 AND substr(json_extract(request_metadata,'$.settlement.transaction'),1,2)='0x' AND substr(json_extract(request_metadata,'$.settlement.transaction'),3) NOT GLOB '*[^0-9a-fA-F]*' AND created_at>=? AND created_at<?", missing, [`${day}T00:00:00.000Z`, `${new Date(now+86400000).toISOString().slice(0,10)}T00:00:00.000Z`]);
   const usage = await optionalRows(env, "SELECT reserved_neurons,calls FROM lumen_paid_boost_ai_usage WHERE day=?", missing, [day]);
-  const latency = await optionalRows(env, "SELECT AVG((julianday(p.created_at)-julianday(o.created_at))*86400000) value FROM lumen_proposal_drafts p JOIN lumen_opportunities o ON o.id=p.opportunity_id WHERE p.created_at>=? AND p.created_at>=o.created_at", missing, [`${day}T00:00:00.000Z`]);
+  const latency = await optionalRows(env, "SELECT AVG((julianday(p.created_at)-julianday(o.discovered_at))*86400000) value FROM lumen_proposal_drafts p JOIN lumen_opportunities o ON o.id=p.opportunity_id WHERE p.created_at>=? AND p.created_at>=o.discovered_at", missing, [`${day}T00:00:00.000Z`]);
   const human = (await rows(env, "SELECT COUNT(*) value FROM lumen_v4_approvals WHERE decided_at>=?", [`${day}T00:00:00.000Z`]))[0];
   const current = { day, sampleTime: iso(), opportunitiesEvaluated: null, usefulExperiments: null,
     humanDecisions: number(human?.value), humanDecisionScope: "v4_only", proposalLatencyMs: latency[0]?.value ?? null,
@@ -143,7 +143,8 @@ export async function handleSovereign(request, env) {
   await ensureSovereignSchema(env);
   if (request.method === "GET" && path === "/sovereign/status") {
     const state = (await rows(env, "SELECT state_json,updated_at FROM lumen_v4_state WHERE id='GLOBAL'"))[0];
-    return json({ ok: true, version: V4_VERSION, initialized: Boolean(state), updatedAt: state?.updated_at,
+    const runs = await rows(env, "SELECT id,status,started_at,finished_at,json_extract(result_json,'$.error') error FROM lumen_v4_runs ORDER BY started_at DESC LIMIT 5");
+    return json({ ok: true, version: V4_VERSION, initialized: Boolean(state), updatedAt: state?.updated_at, runs,
       state: state ? object(state.state_json) : null, approvals: await rows(env, "SELECT id,proposal_id,kind,status,scope_hash,expires_at,packet_json FROM lumen_v4_approvals ORDER BY created_at DESC LIMIT 30") });
   }
   if (request.method === "GET" && path === "/sovereign/memory") return json({ ok: true, cohort: await offerCohort(env, url.searchParams.get("offerId")) });
@@ -154,7 +155,8 @@ export async function handleSovereign(request, env) {
   }
   if (request.method === "POST" && path === "/sovereign/verify") {
     if (!env.LUMEN_DEEP_WORKFLOW) return json({ ok: false, error: "workflow_binding_missing" }, 503);
-    const instanceId = `sovereign-verify-${Math.floor(Date.now()/3600000)}`;
+    const releaseId = clean(env.LUMEN_V4_RELEASE_ID || "v4-scope2", 40).replace(/[^a-zA-Z0-9_-]/g, "-");
+    const instanceId = `sovereign-verify-${releaseId}-${Math.floor(Date.now()/3600000)}`;
     await env.LUMEN_DEEP_WORKFLOW.createBatch([{ id: instanceId, params: { sovereignOnly: true, scheduledTime: Date.now() } }]);
     return json({ ok: true, instanceId, runId: `v4-${instanceId}`, hourlyDeduplication: true, sendsMessages: false }, 202);
   }
