@@ -199,7 +199,7 @@ export default {
         ? await pruneMarketHunterStrategies(env)
         : skipped("no_market_hunter_cycle_to_prune", focus.family);
 
-      const cognitive = hourlyCommercialSlot
+      const cognitive = hourlyCommercialSlot && !env.LUMEN_DEEP_WORKFLOW_MANAGED
         ? await runLiveCognitiveCycle(env, { trigger: "hourly_cloudflare_cron" })
         : skipped("hourly_cognitive_slot_not_due", focus.family);
 

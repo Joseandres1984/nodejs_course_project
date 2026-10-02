@@ -1,4 +1,5 @@
 import adaptiveCore from "./adaptive-core-entry.js";
+export { LumenDeepWorkflow, LumenOpportunityWorkflow } from "./paid-boost-workflows.js";
 import { handleViatorAffiliate } from "./viator-affiliate.js";
 import { handleViatorApi } from "./viator-api.js";
 import { handleViatorRevenue } from "./viator-revenue.js";
@@ -41,7 +42,7 @@ async function isolated(step) {
   }
 }
 
-async function refreshCommercialTruth(env) {
+export async function refreshCommercialTruth(env) {
   const x402 = await isolated(() => syncX402SettlementsToRevenue(env));
   const travelpayoutsFinance = await isolated(() => syncTravelpayoutsFinance(env));
   const referralCommissions = await isolated(() => syncReferralCommissionSettlements(env));
@@ -163,7 +164,7 @@ export default {
     const scheduledAt = new Date(controller?.scheduledTime || Date.now());
     const growthSlot = scheduledAt.getUTCMinutes() === 7;
 
-    ctx.waitUntil((async () => {
+    if (!env.LUMEN_DEEP_WORKFLOW_MANAGED) ctx.waitUntil((async () => {
       const metaPrepare = await isolated(() => runMetaControllerCycle(env, {
         trigger: "scheduled_pre_superautonomy",
         applyNudge: true

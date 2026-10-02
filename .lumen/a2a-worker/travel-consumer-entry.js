@@ -1,4 +1,5 @@
-import baseWorker from "./adaptive-entry.js";
+import baseWorker from "./paid-boost-entry.js";
+export { LumenDeepWorkflow, LumenOpportunityWorkflow } from "./paid-boost-workflows.js";
 import { handleTravelConsumerEngine, TRAVEL_CONSUMER_DESTINATIONS } from "./travel-consumer-engine.js";
 import { handleTravelDemandBridge, syncTravelDemandToOpportunities } from "./travel-demand-bridge.js";
 import { handleTravelProviderRegistry } from "./travel-provider-registry.js";

@@ -1,0 +1,28 @@
+name: LUMEN Paid Boost check
+on:
+  pull_request:
+    branches: [lumen-zero]
+    paths: ['.lumen/a2a-worker/**', '.github/workflows/lumen-cloudflare-deploy.yml', '.github/workflows/lumen-paid-boost-check.yml']
+  push:
+    branches: [lumen-zero]
+    paths: ['.lumen/a2a-worker/**', '.github/workflows/lumen-paid-boost-check.yml']
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify atomic budgets, recovery and settlement evidence
+        run: node .lumen/a2a-worker/test-paid-boost.mjs
+      - name: Existing discovery and learning regressions
+        run: |
+          node .lumen/a2a-worker/test-discovery.mjs
+          node .lumen/a2a-worker/test-lumen-mind-v2-static.mjs
+          node .lumen/a2a-worker/test-teacher-self-critic-static.mjs
+          node .lumen/a2a-worker/test-superautonomy-v3.mjs
+          node .lumen/a2a-worker/test-growth-engine-foundry-v2.mjs
+      - name: Bundle actual production entry and Workflow exports
+        working-directory: .lumen/a2a-worker
+        run: npx --yes wrangler@latest deploy paid-boost-entry.js --dry-run --config wrangler.toml
