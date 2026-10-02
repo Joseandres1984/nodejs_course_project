@@ -15,6 +15,7 @@ import { withBudgetedAi } from "./ai-router.js";
 import { ensureBoostSchema, checkpoint, recordRun, startOpportunityObservers, observeOpportunity } from "./paid-boost-runtime.js";
 import { runSovereignCycle } from "./sovereign-runtime.js";
 import { runRevenueLoopV5Cycle } from "./revenue-loop-v5.js";
+import { runVentureHunterV1 } from "./venture-hunter-v1.js";
 
 const MUTATING_STEP = { retries: { limit: 0, delay: "1 second" }, timeout: "3 minutes" };
 const READ_STEP = { retries: { limit: 2, delay: "10 seconds", backoff: "exponential" }, timeout: "1 minute" };
@@ -44,19 +45,18 @@ export class LumenDeepWorkflow extends WorkflowEntrypoint {
       ["foundry-experiments", () => runGrowthEngineFoundryV2Cycle(env, { trigger: "paid_boost_hourly_workflow" })],
       ["growth-decision", () => runAutonomousGrowthLoop(env, { trigger: "paid_boost_hourly_workflow", scheduledTime: event.payload.scheduledTime })],
       ["sovereign-revenue-v4", () => runSovereignCycle(env, { runId: `v4-${id}` })],
+      ["venture-hunter-v1", () => runVentureHunterV1(env, { mode: "prepare_only", topK: 12 })],
       ["revenue-loop-v5", () => runRevenueLoopV5Cycle(env, { trigger: "paid_boost_hourly_workflow" })],
       ["opportunity-observers", () => startOpportunityObservers(env)],
     ];
     const results = {};
     for (const [name, action] of tasks) {
-      // One isolated failure does not discard earlier persisted steps.
       results[name] = await step.do(name, MUTATING_STEP, () => checkpoint(env, id, name, action));
     }
     const failed = Object.entries(results).filter(([, value]) => value?.ok === false).map(([name]) => name);
     return step.do("finish", READ_STEP, async () => {
       const result = { ok: failed.length === 0, failed, steps: tasks.length, autonomousSpendUsd: 0 };
       await recordRun(env, id, "DEEP", failed.length ? "DEGRADED" : "COMPLETED", result);
-      // Bound history to roughly a month; never remove running claims.
       await env.DB.prepare("DELETE FROM lumen_paid_boost_steps WHERE updated_at<datetime('now','-35 days') AND status<>'RUNNING'").run();
       await env.DB.prepare("DELETE FROM lumen_paid_boost_runs WHERE updated_at<datetime('now','-35 days') AND status<>'RUNNING'").run();
       return result;
@@ -73,8 +73,6 @@ export class LumenOpportunityWorkflow extends WorkflowEntrypoint {
       await recordRun(env, id, "OPPORTUNITY", "RUNNING");
       return { proposalId };
     });
-    // Observe existing approvals and governor-controlled sends. Sleeping does
-    // not occupy CPU. Never replay an external message or accept binding terms.
     for (let check = 0; check < 84; check++) {
       const observation = await step.do(`observe-${check}`, READ_STEP, () => observeOpportunity(env, proposalId, id));
       if (observation.paymentVerified || observation.stage === "PROPOSAL_MISSING") {
