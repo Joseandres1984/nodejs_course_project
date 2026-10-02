@@ -1,4 +1,5 @@
-const VERSION = "1.7-sovereign-revenue-priority";
+const VERSION = "1.6-first-cash-microbuyer-revision";
+const PRIORITY_BRIDGE_VERSION = "4.1-sovereign-revenue-priority";
 
 export const OFFERS = {
   "MP-SUPPLIER-SNAPSHOT": { name: "Supplier Snapshot", priceUsd: 1, outcome: "a compact supplier identity and official-channel signal for one named company or domain" },
@@ -170,6 +171,7 @@ export async function prepareTopProposal(env) {
       changes_only_selection_priority: true
     },
     sovereign_v4: {
+      bridge_version: PRIORITY_BRIDGE_VERSION,
       priority_adjustment: Number(opportunity.sovereign_priority_adjustment || 0),
       run_id: opportunity.sovereign_run_id || null,
       source_candidate_id: opportunity.portfolio_candidate_id || null,
