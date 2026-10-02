@@ -1,0 +1,21 @@
+import assert from "node:assert/strict";
+import { scoreBuyerIntent, deriveLifecycleStage, paymentProbability, firstCashScore, REVENUE_LOOP_V5_POLICY } from "./revenue-loop-v5.js";
+
+assert.equal(REVENUE_LOOP_V5_POLICY.autonomousSpendUsd,0);
+assert.equal(REVENUE_LOOP_V5_POLICY.autonomousContract,false);
+assert.equal(REVENUE_LOOP_V5_POLICY.changesPrices,false);
+assert.equal(REVENUE_LOOP_V5_POLICY.createsNewSenderAuthority,false);
+assert.equal(deriveLifecycleStage({commercially_actionable:0}),"DISCOVERED");
+assert.equal(deriveLifecycleStage({commercially_actionable:1,synthetic_or_test_only:0}),"QUALIFIED");
+assert.equal(deriveLifecycleStage({proposal_id:"P1"}),"PROPOSAL_READY");
+assert.equal(deriveLifecycleStage({proposal_id:"P1",proposal_status:"SENT"}),"SENT");
+assert.equal(deriveLifecycleStage({proposal_id:"P1",response_text:"yes"}),"REPLIED");
+assert.equal(deriveLifecycleStage({proposal_id:"P1",response_class:"PURCHASE_INTENT"}),"NEGOTIATING");
+assert.equal(deriveLifecycleStage({verified_receipt_id:"R1",delivery_status:"ready_for_delivery"}),"PAID");
+assert.equal(deriveLifecycleStage({verified_receipt_id:"R1",delivery_status:"delivered"}),"DELIVERED");
+assert.ok(scoreBuyerIntent({commercial_score:90,evidence_strength:"strong",response_class:"PURCHASE_INTENT"}) <= 1);
+assert.ok(scoreBuyerIntent({commercial_score:90,evidence_strength:"strong",response_class:"PURCHASE_INTENT"}) > scoreBuyerIntent({commercial_score:30}));
+assert.equal(paymentProbability(1,"PAID"),1);
+assert.ok(paymentProbability(0.8,"NEGOTIATING") > paymentProbability(0.8,"SENT"));
+assert.ok(firstCashScore({estimatedValueUsd:25,probability:0.4,stage:"NEGOTIATING"}) > firstCashScore({estimatedValueUsd:25,probability:0.4,stage:"DISCOVERED"}));
+console.log("REVENUE_LOOP_V5_UNIT_OK");
