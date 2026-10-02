@@ -2,6 +2,7 @@ import adaptive from "./adaptive-entry.js";
 import { withBudgetedAi } from "./ai-router.js";
 import { DEEP_CRON, PAID_BOOST_POLICY, ensureBoostSchema, startDeepCycle } from "./paid-boost-runtime.js";
 import { handleSovereign } from "./sovereign-runtime.js";
+import { handleRevenueLoopV5 } from "./revenue-loop-v5.js";
 export { LumenDeepWorkflow, LumenOpportunityWorkflow } from "./paid-boost-workflows.js";
 
 export async function handlePaidBoost(request, env) {
@@ -29,6 +30,8 @@ export async function handlePaidBoost(request, env) {
 
 export default {
   async fetch(request, env, ctx) {
+    const v5Response = await handleRevenueLoopV5(request, env);
+    if (v5Response) return v5Response;
     const sovereignResponse = await handleSovereign(request, env);
     if (sovereignResponse) return sovereignResponse;
     const response = await handlePaidBoost(request, env);
