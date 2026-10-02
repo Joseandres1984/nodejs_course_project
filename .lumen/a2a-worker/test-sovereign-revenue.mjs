@@ -10,6 +10,7 @@ import { validatePlaybooks, prepareAutocoderCandidate, ACTIVE_PLAYBOOKS } from "
 import { runSovereignCycle, loadEconomicEvidence, handleSovereign, validateGoal } from "./sovereign-runtime.js";
 import { validateCandidate } from "../../.github/scripts/lumen-sovereign-apply-candidate.mjs";
 import { recomputePortfolioGovernor } from "./portfolio-governor.js";
+import { updateEconomicGraph } from "./sovereign-memory.js";
 
 const sqlite = new DatabaseSync(":memory:");
 const DB = { prepare(sql) {
@@ -51,6 +52,18 @@ assert.equal(verificationResponse.status, 202);
 assert.equal(verification.sendsMessages, false);
 assert.equal(verificationBatches[0][0].params.sovereignOnly, true);
 assert.equal(verification.runId, `v4-${verification.instanceId}`);
+const releaseEnv = { ...verificationEnv, LUMEN_V4_RELEASE_ID: "current-release" };
+assert.equal((await handleSovereign(req("/sovereign/verify?release=old-release", {}), releaseEnv)).status, 409);
+assert.equal(verificationBatches.length, 1, "a stale Worker must not start a canary for the wrong release");
+assert.equal((await (await handleSovereign(req("/sovereign/verify?release=current-release", {}), releaseEnv)).json()).releaseId, "current-release");
+
+// Production-sized graph refreshes use bounded batches and keep the same IDs.
+const graphBatches = [];
+await updateEconomicGraph({ DB: { prepare: DB.prepare, async batch(statements) {
+  graphBatches.push(statements.length); return DB.batch(statements);
+} } }, [], [], Array.from({ length: 35 }, (_, i) => ({ id: `BATCH-${i}`, endpoint: `https://buyer-${i}.test`, revenue_offer_id: "batch-offer" })));
+assert.deepEqual(graphBatches, [50, 50, 50]);
+assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM lumen_v4_nodes WHERE id LIKE 'opportunity:BATCH-%'").get().n, 30);
 
 // Estimates are conservative, finite, bounded and explicitly distinct from
 // realized income. Invalid/self-scored worlds cannot win an authority override.
