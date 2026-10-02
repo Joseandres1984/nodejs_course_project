@@ -13,6 +13,7 @@ import { syncViatorBookingConversions } from "./viator-conversion-sync.js";
 import { runTravelAcquisitionEngine } from "./travel-acquisition-engine.js";
 import { withBudgetedAi } from "./ai-router.js";
 import { ensureBoostSchema, checkpoint, recordRun, startOpportunityObservers, observeOpportunity } from "./paid-boost-runtime.js";
+import { runSovereignCycle } from "./sovereign-runtime.js";
 
 const MUTATING_STEP = { retries: { limit: 0, delay: "1 second" }, timeout: "3 minutes" };
 const READ_STEP = { retries: { limit: 2, delay: "10 seconds", backoff: "exponential" }, timeout: "1 minute" };
@@ -25,7 +26,9 @@ export class LumenDeepWorkflow extends WorkflowEntrypoint {
       await recordRun(env, id, "DEEP", "RUNNING");
       return { ok: true };
     });
-    const tasks = [
+    const tasks = event.payload?.sovereignOnly === true ? [
+      ["sovereign-revenue-v4", () => runSovereignCycle(env, { runId: `v4-${id}` })]
+    ] : [
       ["verified-commercial-truth", () => refreshCommercialTruth(env)],
       ["cognitive-reasoning", () => runLiveCognitiveCycle(env, { trigger: "paid_boost_hourly_workflow" })],
       ["meta-prepare", () => runMetaControllerCycle(env, { trigger: "paid_boost_pre_superautonomy", applyNudge: true })],
@@ -39,6 +42,7 @@ export class LumenDeepWorkflow extends WorkflowEntrypoint {
       ["growth-multiplier", () => runGrowthMultiplierV2Cycle(env, { trigger: "paid_boost_hourly_workflow" })],
       ["foundry-experiments", () => runGrowthEngineFoundryV2Cycle(env, { trigger: "paid_boost_hourly_workflow" })],
       ["growth-decision", () => runAutonomousGrowthLoop(env, { trigger: "paid_boost_hourly_workflow", scheduledTime: event.payload.scheduledTime })],
+      ["sovereign-revenue-v4", () => runSovereignCycle(env, { runId: `v4-${id}` })],
       ["opportunity-observers", () => startOpportunityObservers(env)],
     ];
     const results = {};

@@ -1,0 +1,5 @@
+{
+  "maxInternalDeals": 3,
+  "minimumProductHostSignals": 2,
+  "diagnosticLookbackHours": 24
+}

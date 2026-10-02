@@ -92,11 +92,18 @@ try {
     return persisted.get(name);
   } };
   const result = await deep.run({ instanceId: "deep-test", payload: { scheduledTime: 3600000 } }, durableSteps);
-  assert.equal(result.steps, 14);
+  assert.equal(result.steps, 15);
+  assert.ok(persisted.has("sovereign-revenue-v4"));
   assert.ok(persisted.has("foundry-experiments"));
   assert.ok(persisted.has("growth-decision"));
   const count = sqlite.prepare("SELECT COUNT(*) n FROM lumen_paid_boost_steps WHERE run_id='deep-test'").get().n;
   assert.deepEqual(await deep.run({ instanceId: "deep-test", payload: { scheduledTime: 3600000 } }, durableSteps), result);
   assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM lumen_paid_boost_steps WHERE run_id='deep-test'").get().n, count);
+  const canarySteps = [];
+  const canary = await deep.run({ instanceId: "verify-test", payload: { sovereignOnly: true } }, {
+    async do(name, config, action) { canarySteps.push(name); return action(); }
+  });
+  assert.equal(canary.steps, 1);
+  assert.deepEqual(canarySteps, ["initialize", "sovereign-revenue-v4", "finish"]);
 } finally { globalThis.fetch = originalFetch; }
 console.log("PAID_BOOST_TESTS_OK: atomic budgets, recovery, authorization, cadence, exact settlement evidence");

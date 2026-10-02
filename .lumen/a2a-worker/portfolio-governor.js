@@ -88,6 +88,14 @@ async function loadFeedbackAdjustments(env) {
   for (const row of proposalRows) map.set(`SALES_PIPELINE:${row.source_id}`, num(row.adjustment));
   const oppRows = await safeAll(env, "SELECT o.id source_id,COALESCE(f.priority_adjustment,0) adjustment FROM lumen_opportunities o LEFT JOIN lumen_offer_performance f ON f.offer_id=o.revenue_offer_id");
   for (const row of oppRows) map.set(`DISCOVERY:${row.source_id}`, num(row.adjustment));
+  // v4 can add at most eight priority points to the existing governor. It
+  // grants no send/payment authority and cannot override collection precedence.
+  // Uninitialized or stale v4 state leaves the previous allocation intact.
+  const v4 = await safeAll(env, "SELECT c.source_type,c.source_id,a.score FROM lumen_v4_allocations a JOIN lumen_opportunity_factory_candidates c ON c.id=a.candidate_id WHERE julianday(a.updated_at)>julianday('now','-2 hours')");
+  for (const row of v4) {
+    const key = `${row.source_type}:${row.source_id}`;
+    map.set(key, num(map.get(key)) + clamp(row.score, 0, 8));
+  }
   return map;
 }
 async function familyLearning(env) { const rows = await safeAll(env, "SELECT family,cycles_seen,selected_cycles,last_selected_at,last_score FROM lumen_portfolio_family_state"); return Object.fromEntries(rows.map(row => [clean(row.family, 50), row])); }

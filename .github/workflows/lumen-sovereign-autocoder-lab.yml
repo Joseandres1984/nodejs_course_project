@@ -1,0 +1,58 @@
+name: LUMEN Sovereign isolated Autocoder Lab
+# An explicit launch is required. Hourly v4 automatically prepares candidates;
+# this workflow materializes them in an isolated PR and never merges/deploys.
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+  pull-requests: write
+concurrency:
+  group: lumen-sovereign-autocoder-lab
+  cancel-in-progress: false
+jobs:
+  prepare-reviewed-patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: lumen-zero
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Read protected evidenced candidate
+        env:
+          OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$OPPORTUNITY_ADMIN_TOKEN"
+          curl -fsS --max-time 30 -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" 'https://lumen-zero-a2a.lumen-b2b.workers.dev/sovereign/autocoder/candidate' -o sovereign-lab-candidate.json
+          node .github/scripts/lumen-sovereign-apply-candidate.mjs sovereign-lab-candidate.json
+      - name: Validate isolated patch and adversarial constraints
+        run: |
+          node .lumen/a2a-worker/test-sovereign-revenue.mjs
+          node .lumen/a2a-worker/test-paid-boost.mjs
+      - name: Create isolated branch and review PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [ ! -f sovereign-lab-branch.txt ]; then exit 0; fi
+          branch=$(cat sovereign-lab-branch.txt)
+          if git diff --quiet -- .lumen/a2a-worker/sovereign-playbooks.json; then exit 0; fi
+          if git ls-remote --exit-code origin "refs/heads/$branch" >/dev/null 2>&1; then
+            echo 'CANDIDATE_BRANCH_ALREADY_EXISTS_NO_REPLAY'
+            exit 0
+          fi
+          git checkout -b "$branch"
+          git config user.name 'LUMEN Autocoder Lab'
+          git config user.email 'lumen-autocoder@users.noreply.github.com'
+          git add .lumen/a2a-worker/sovereign-playbooks.json
+          git commit -m 'Reduce v4 internal workload while incidents require review'
+          git push origin "$branch"
+          cat > sovereign-lab-pr.md <<'EOF'
+          Reduces the bounded internal deal workload while legacy Workflow incidents require review. Generated from persisted operational evidence; does not replay failed actions or add authority.
+
+          Validation: Sovereign v4 revenue/scope/red-team tests and Paid Boost regressions passed. Manual review and merge required; no automatic merge or deployment.
+          EOF
+          gh pr create --base lumen-zero --head "$branch" --draft --title 'LUMEN v4: reduce internal workload during incident review' --body-file sovereign-lab-pr.md
