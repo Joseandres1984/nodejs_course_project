@@ -137,7 +137,7 @@ const json = (body, status = 200) => Response.json(body, { status, headers: { "c
 export async function handleSovereign(request, env) {
   const url = new URL(request.url), path = url.pathname;
   if (!path.startsWith("/sovereign/")) return null;
-  if (request.method === "GET" && path === "/sovereign/policy") return json({ ...V4_POLICY, protocolMesh: PROTOCOL_MESH_POLICY });
+  if (request.method === "GET" && path === "/sovereign/policy") return json({ ...V4_POLICY, releaseId: env.LUMEN_V4_RELEASE_ID || "untracked", protocolMesh: PROTOCOL_MESH_POLICY });
   if (!env.OPPORTUNITY_ADMIN_TOKEN || request.headers.get("x-lumen-admin") !== env.OPPORTUNITY_ADMIN_TOKEN)
     return json({ ok: false, error: "admin_token_required" }, 403);
   await ensureSovereignSchema(env);

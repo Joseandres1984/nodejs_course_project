@@ -32,6 +32,7 @@ function req(path, body, headers = admin) { return new Request(`https://lumen.te
 // No admin credential, no operational information or mutations. Missing tokens
 // fail closed even when the caller supplies an empty matching string.
 assert.equal((await handleSovereign(req("/sovereign/policy", undefined, {}), {})).status, 200);
+assert.equal((await (await handleSovereign(req("/sovereign/policy", undefined, {}), { LUMEN_V4_RELEASE_ID: "release-test" })).json()).releaseId, "release-test");
 assert.equal((await handleSovereign(req("/sovereign/status", undefined, {}), env)).status, 403);
 assert.equal((await handleSovereign(req("/sovereign/goal", { targetMonthlyRevenueUsd: 1000 }, {}), env)).status, 403);
 assert.equal((await handleSovereign(req("/sovereign/status"), { DB })).status, 403);

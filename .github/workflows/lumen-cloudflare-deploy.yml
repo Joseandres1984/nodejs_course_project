@@ -37,16 +37,6 @@ jobs:
         run: node .lumen/a2a-worker/test-paid-boost.mjs
       - name: Verify Sovereign Revenue v4 before deploy
         run: node .lumen/a2a-worker/test-sovereign-revenue.mjs
-      - name: Deploy lumen-zero-a2a with Paid Boost entrypoint
-        working-directory: .lumen/a2a-worker
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          set -euo pipefail
-          sed -i 's/^main = "opportunity-entry.js"$/main = "paid-boost-entry.js"/' wrangler.toml
-          grep -q '^main = "paid-boost-entry.js"$' wrangler.toml
-          npx --yes wrangler@latest deploy --config wrangler.toml --var "LUMEN_V4_RELEASE_ID:$GITHUB_SHA"
       - name: Restore protected opportunity admin secret
         working-directory: .lumen/a2a-worker
         env:
@@ -68,6 +58,16 @@ jobs:
           sed -i 's/^main = "opportunity-entry.js"$/main = "paid-boost-entry.js"/' wrangler.toml
           if [ -n "$TIENDANUBE_APP_ID" ]; then printf '%s' "$TIENDANUBE_APP_ID" | npx --yes wrangler@latest secret put TIENDANUBE_APP_ID --config wrangler.toml; else echo 'TIENDANUBE_APP_ID_NOT_CONFIGURED'; fi
           if [ -n "$TIENDANUBE_CLIENT_SECRET" ]; then printf '%s' "$TIENDANUBE_CLIENT_SECRET" | npx --yes wrangler@latest secret put TIENDANUBE_CLIENT_SECRET --config wrangler.toml; else echo 'TIENDANUBE_CLIENT_SECRET_NOT_CONFIGURED'; fi
+      - name: Deploy lumen-zero-a2a with Paid Boost entrypoint
+        working-directory: .lumen/a2a-worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          sed -i 's/^main = "opportunity-entry.js"$/main = "paid-boost-entry.js"/' wrangler.toml
+          grep -q '^main = "paid-boost-entry.js"$' wrangler.toml
+          npx --yes wrangler@latest deploy --config wrangler.toml --var "LUMEN_V4_RELEASE_ID:$GITHUB_SHA"
       - name: Smoke test Paid Boost public policy
         run: |
           set -euo pipefail
@@ -115,17 +115,21 @@ jobs:
           echo 'PORTFOLIO_PUBLIC_SMOKE_OK'
       - name: Verify Sovereign v4 live artifacts and record measurements
         env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
         run: |
           set -euo pipefail
           BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
           curl -fsS --max-time 20 "$BASE/sovereign/policy" -o sovereign-policy.json
+          jq -e --arg release "$GITHUB_SHA" '.releaseId==$release' sovereign-policy.json >/dev/null
           jq -e '.version=="4.0-sovereign-revenue" and .autonomousSpendUsd==0 and .sendsMessages==false and .releasesDelivery==false' sovereign-policy.json >/dev/null
           protected_code=$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' "$BASE/sovereign/status")
           test "$protected_code" = '403'
           curl -fsS --max-time 30 -X POST -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" "$BASE/sovereign/verify" -o sovereign-start.json
           jq -e '.ok==true and .sendsMessages==false' sovereign-start.json >/dev/null
           run_id=$(jq -r '.runId' sovereign-start.json)
+          cat sovereign-start.json
           for attempt in $(seq 1 30); do
             curl -fsS --max-time 30 -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" "$BASE/sovereign/status" -o sovereign-status.json
             if jq -e --arg id "$run_id" '.initialized==true and .state.runId==$id' sovereign-status.json >/dev/null; then
@@ -139,6 +143,9 @@ jobs:
           done
           echo 'SOVEREIGN_V4_CYCLE_NOT_OBSERVED'
           jq '{initialized,runs}' sovereign-status.json
+          instance_id=$(jq -r '.instanceId' sovereign-start.json)
+          npx --yes wrangler@latest workflows instances describe lumen-deep-cycle "$instance_id" --config .lumen/a2a-worker/wrangler.toml --json --no-step-output > sovereign-instance.json
+          jq '{status,version_id,created_on,modified_on,error,steps:[.steps[]?|{name,status,error}]}' sovereign-instance.json
           exit 1
       - name: Smoke test adaptive market hunter control plane
         run: |
