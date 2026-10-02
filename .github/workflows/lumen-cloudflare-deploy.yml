@@ -135,8 +135,14 @@ jobs:
           jq -e '.version=="4.0-sovereign-revenue" and .autonomousSpendUsd==0 and .sendsMessages==false and .releasesDelivery==false' sovereign-policy.json >/dev/null
           protected_code=$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' "$BASE/sovereign/status")
           test "$protected_code" = '403'
-          curl -fsS --max-time 30 -X POST -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" "$BASE/sovereign/verify" -o sovereign-start.json
-          jq -e '.ok==true and .sendsMessages==false' sovereign-start.json >/dev/null
+          for start_attempt in $(seq 1 12); do
+            start_code=$(curl -sS --max-time 30 -X POST -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" "$BASE/sovereign/verify?release=$GITHUB_SHA&probe=$start_attempt" -o sovereign-start.json -w '%{http_code}')
+            if [ "$start_code" = '202' ]; then break; fi
+            test "$start_code" = '409'
+            sleep 5
+          done
+          test "$start_code" = '202'
+          jq -e --arg release "$GITHUB_SHA" '.ok==true and .sendsMessages==false and .releaseId==$release' sovereign-start.json >/dev/null
           run_id=$(jq -r '.runId' sovereign-start.json)
           cat sovereign-start.json
           for attempt in $(seq 1 30); do

@@ -84,7 +84,10 @@ export async function runSovereignCycle(env, { runId = `v4-${Math.floor(Date.now
     const previous = (await rows(env, "SELECT status,result_json FROM lumen_v4_runs WHERE id=?", [runId]))[0];
     return previous?.status === "COMPLETED" || previous?.status === "DEGRADED" ? object(previous.result_json) : { ok: false, reason: "ambiguous_v4_cycle_no_replay", runId };
   }
+  const progress = async phase => env.DB.prepare("UPDATE lumen_v4_runs SET result_json=? WHERE id=? AND status='RUNNING'")
+    .bind(JSON.stringify({ phase, elapsedWallMs: Date.now() - startedMs }), runId).run();
   try {
+    await progress("load_evidence");
     const data = await loadEconomicEvidence(env);
     const goalRow = (await rows(env, "SELECT goal_json FROM lumen_v4_goals WHERE id='GLOBAL'"))[0];
     const goal = goalRow ? object(goalRow.goal_json) : validateGoal({ targetMonthlyRevenueUsd: 1000 });
@@ -93,14 +96,19 @@ export async function runSovereignCycle(env, { runId = `v4-${Math.floor(Date.now
     // not survive when a candidate disappears or a cycle has no evidence.
     await env.DB.batch([env.DB.prepare("DELETE FROM lumen_v4_allocations"), ...allocation.allocations.map(a =>
       env.DB.prepare("INSERT INTO lumen_v4_allocations VALUES(?,?,?,?,?)").bind(a.candidateId, runId, iso(), Math.min(8, Math.log1p(a.utility)*4), JSON.stringify(a)))]);
+    await progress("economic_graph");
     const graph = await updateEconomicGraph(env, data.proposals, data.settlements, data.opportunities);
+    await progress("product_drafts");
     const radar = marketRadar(data.opportunities, data.settlements);
     const products = await createProductDrafts(env, radar);
+    await progress("deal_observation");
     const deals = await operateDeals(env, data, allocation.allocations);
     await env.DB.prepare("UPDATE lumen_v4_approvals SET status='EXPIRED' WHERE status IN ('PENDING','APPROVED') AND expires_at<=?").bind(iso()).run();
+    await progress("health");
     const health = await selfHeal(env, data.missingCapabilities);
     const autocoder = await prepareAutocoderCandidate(env, health);
     const ceo = planCeo(goal, data, allocation);
+    await progress("measurements");
     const metrics = await sampleMetrics(env, allocation, data);
     const result = { ok: data.missingCapabilities.length === 0, version: V4_VERSION, runId,
       elapsedWallMs: Date.now() - startedMs, elapsedIsCpuTime: false,
@@ -143,7 +151,7 @@ export async function handleSovereign(request, env) {
   await ensureSovereignSchema(env);
   if (request.method === "GET" && path === "/sovereign/status") {
     const state = (await rows(env, "SELECT state_json,updated_at FROM lumen_v4_state WHERE id='GLOBAL'"))[0];
-    const runs = await rows(env, "SELECT id,status,started_at,finished_at,json_extract(result_json,'$.error') error FROM lumen_v4_runs ORDER BY started_at DESC LIMIT 5");
+    const runs = await rows(env, "SELECT id,status,started_at,finished_at,json_extract(result_json,'$.error') error,json_extract(result_json,'$.phase') phase FROM lumen_v4_runs ORDER BY started_at DESC LIMIT 5");
     return json({ ok: true, version: V4_VERSION, initialized: Boolean(state), updatedAt: state?.updated_at, runs,
       state: state ? object(state.state_json) : null, approvals: await rows(env, "SELECT id,proposal_id,kind,status,scope_hash,expires_at,packet_json FROM lumen_v4_approvals ORDER BY created_at DESC LIMIT 30") });
   }
@@ -155,10 +163,13 @@ export async function handleSovereign(request, env) {
   }
   if (request.method === "POST" && path === "/sovereign/verify") {
     if (!env.LUMEN_DEEP_WORKFLOW) return json({ ok: false, error: "workflow_binding_missing" }, 503);
+    const expectedRelease = url.searchParams.get("release");
+    if (expectedRelease && expectedRelease !== env.LUMEN_V4_RELEASE_ID)
+      return json({ ok: false, error: "release_not_ready" }, 409);
     const releaseId = clean(env.LUMEN_V4_RELEASE_ID || "v4-scope2", 40).replace(/[^a-zA-Z0-9_-]/g, "-");
     const instanceId = `sovereign-verify-${releaseId}-${Math.floor(Date.now()/3600000)}`;
     await env.LUMEN_DEEP_WORKFLOW.createBatch([{ id: instanceId, params: { sovereignOnly: true, scheduledTime: Date.now() } }]);
-    return json({ ok: true, instanceId, runId: `v4-${instanceId}`, hourlyDeduplication: true, sendsMessages: false }, 202);
+    return json({ ok: true, releaseId: env.LUMEN_V4_RELEASE_ID || "untracked", instanceId, runId: `v4-${instanceId}`, hourlyDeduplication: true, sendsMessages: false }, 202);
   }
   if ((request.method === "POST" && ["/sovereign/goal", "/sovereign/protocol/prepare"].includes(path)) ||
       request.method === "POST" && /^\/sovereign\/approvals\/V4-AP-[a-f0-9]{64}\/decision$/.test(path)) {
