@@ -14,6 +14,7 @@ import { runTravelAcquisitionEngine } from "./travel-acquisition-engine.js";
 import { withBudgetedAi } from "./ai-router.js";
 import { ensureBoostSchema, checkpoint, recordRun, startOpportunityObservers, observeOpportunity } from "./paid-boost-runtime.js";
 import { runSovereignCycle } from "./sovereign-runtime.js";
+import { runRevenueLoopV5Cycle } from "./revenue-loop-v5.js";
 
 const MUTATING_STEP = { retries: { limit: 0, delay: "1 second" }, timeout: "3 minutes" };
 const READ_STEP = { retries: { limit: 2, delay: "10 seconds", backoff: "exponential" }, timeout: "1 minute" };
@@ -43,6 +44,7 @@ export class LumenDeepWorkflow extends WorkflowEntrypoint {
       ["foundry-experiments", () => runGrowthEngineFoundryV2Cycle(env, { trigger: "paid_boost_hourly_workflow" })],
       ["growth-decision", () => runAutonomousGrowthLoop(env, { trigger: "paid_boost_hourly_workflow", scheduledTime: event.payload.scheduledTime })],
       ["sovereign-revenue-v4", () => runSovereignCycle(env, { runId: `v4-${id}` })],
+      ["revenue-loop-v5", () => runRevenueLoopV5Cycle(env, { trigger: "paid_boost_hourly_workflow" })],
       ["opportunity-observers", () => startOpportunityObservers(env)],
     ];
     const results = {};
