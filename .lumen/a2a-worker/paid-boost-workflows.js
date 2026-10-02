@@ -16,6 +16,7 @@ import { ensureBoostSchema, checkpoint, recordRun, startOpportunityObservers, ob
 import { runSovereignCycle } from "./sovereign-runtime.js";
 import { runRevenueLoopV5Cycle } from "./revenue-loop-v5.js";
 import { runVentureHunterV1 } from "./venture-hunter-v1.js";
+import { runVentureFounderV2 } from "./venture-founder-v2.js";
 
 const MUTATING_STEP = { retries: { limit: 0, delay: "1 second" }, timeout: "3 minutes" };
 const READ_STEP = { retries: { limit: 2, delay: "10 seconds", backoff: "exponential" }, timeout: "1 minute" };
@@ -46,13 +47,12 @@ export class LumenDeepWorkflow extends WorkflowEntrypoint {
       ["growth-decision", () => runAutonomousGrowthLoop(env, { trigger: "paid_boost_hourly_workflow", scheduledTime: event.payload.scheduledTime })],
       ["sovereign-revenue-v4", () => runSovereignCycle(env, { runId: `v4-${id}` })],
       ["venture-hunter-v1", () => runVentureHunterV1(env, { mode: "prepare_only", topK: 12 })],
+      ["venture-founder-v2", () => runVentureFounderV2(env, { limit: 8 })],
       ["revenue-loop-v5", () => runRevenueLoopV5Cycle(env, { trigger: "paid_boost_hourly_workflow" })],
       ["opportunity-observers", () => startOpportunityObservers(env)],
     ];
     const results = {};
-    for (const [name, action] of tasks) {
-      results[name] = await step.do(name, MUTATING_STEP, () => checkpoint(env, id, name, action));
-    }
+    for (const [name, action] of tasks) results[name] = await step.do(name, MUTATING_STEP, () => checkpoint(env, id, name, action));
     const failed = Object.entries(results).filter(([, value]) => value?.ok === false).map(([name]) => name);
     return step.do("finish", READ_STEP, async () => {
       const result = { ok: failed.length === 0, failed, steps: tasks.length, autonomousSpendUsd: 0 };
@@ -68,23 +68,12 @@ export class LumenOpportunityWorkflow extends WorkflowEntrypoint {
   async run(event, step) {
     const env = this.env, proposalId = event.payload.proposalId, id = event.instanceId;
     if (typeof proposalId !== "string" || proposalId.length > 160) throw new Error("invalid_proposal_id");
-    await step.do("initialize", READ_STEP, async () => {
-      await ensureBoostSchema(env);
-      await recordRun(env, id, "OPPORTUNITY", "RUNNING");
-      return { proposalId };
-    });
+    await step.do("initialize", READ_STEP, async () => { await ensureBoostSchema(env); await recordRun(env, id, "OPPORTUNITY", "RUNNING"); return { proposalId }; });
     for (let check = 0; check < 84; check++) {
       const observation = await step.do(`observe-${check}`, READ_STEP, () => observeOpportunity(env, proposalId, id));
-      if (observation.paymentVerified || observation.stage === "PROPOSAL_MISSING") {
-        await step.do("finish", READ_STEP, () => recordRun(env, id, "OPPORTUNITY", observation.stage, observation));
-        return observation;
-      }
-      if (check < 83) await step.sleep(`wait-${check}`, "2 hours");
+      if (observation.paymentVerified || observation.stage === "PROPOSAL_MISSING") return step.do("finish", READ_STEP, async () => { await recordRun(env, id, "OPPORTUNITY", "COMPLETED", observation); return observation; });
+      await step.sleep(`wait-${check}`, "1 hour");
     }
-    return step.do("expire", READ_STEP, async () => {
-      await env.DB.prepare("UPDATE lumen_paid_boost_opportunities SET stage='OBSERVATION_EXPIRED',updated_at=? WHERE proposal_id=?").bind(new Date().toISOString(), proposalId).run();
-      await recordRun(env, id, "OPPORTUNITY", "OBSERVATION_EXPIRED");
-      return { proposalId, stage: "OBSERVATION_EXPIRED", paymentVerified: false };
-    });
+    return step.do("finish", READ_STEP, async () => { const result={ok:true,proposalId,status:"OBSERVATION_WINDOW_COMPLETE"}; await recordRun(env,id,"OPPORTUNITY","COMPLETED",result); return result; });
   }
 }
