@@ -1,0 +1,4 @@
+[
+  "CREATE TABLE IF NOT EXISTS lumen_paid_deliveries (order_id TEXT PRIMARY KEY, delivery_key TEXT UNIQUE, receipt_id TEXT NOT NULL, brief_id TEXT NOT NULL, report_id TEXT, pdf_sha256 TEXT, status TEXT NOT NULL, approved_at TEXT, send_started_at TEXT, delivered_at TEXT, provider TEXT, provider_message_id TEXT, manifest_json TEXT, last_error TEXT, updated_at TEXT NOT NULL)",
+  "CREATE INDEX IF NOT EXISTS idx_lumen_paid_deliveries_status ON lumen_paid_deliveries(status,updated_at)"
+]

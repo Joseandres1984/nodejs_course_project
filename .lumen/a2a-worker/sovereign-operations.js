@@ -13,7 +13,7 @@ export function validatePlaybooks(value) {
 export const ACTIVE_PLAYBOOKS = Object.freeze(validatePlaybooks(playbooks));
 
 export async function selfHeal(env, missing = []) {
-  // The only automatically applied repair is local idempotent schema creation.
+  // The only automatically applied repair is idempotent v4 and canonical delivery observation schema creation.
   // Failed/ambiguous sends, Workflow steps and delivery jobs are never replayed.
   await ensureSovereignSchema(env);
   const failures = await optionalRows(env, "SELECT run_id,step_name,status,updated_at FROM lumen_paid_boost_steps WHERE (status='FAILED' OR (status='RUNNING' AND julianday(updated_at)<julianday('now','-3 hours'))) AND julianday(updated_at)>julianday('now',?) ORDER BY updated_at DESC LIMIT 15", missing, [`-${ACTIVE_PLAYBOOKS.diagnosticLookbackHours} hours`]);
@@ -26,7 +26,7 @@ export async function selfHeal(env, missing = []) {
       .bind(id, iso(), JSON.stringify(details)).run();
   }
   // No incident is auto-closed merely because it falls outside a read window.
-  return { schemaReady: true, localRepair: "idempotent_v4_schema", reviewRequired: current.size,
+  return { schemaReady: true, localRepair: "idempotent_v4_and_delivery_observation_schema", reviewRequired: current.size,
     incidents: [...current], replaysExternalActions: false, autoDeployment: false };
 }
 

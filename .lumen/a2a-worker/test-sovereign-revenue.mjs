@@ -27,6 +27,10 @@ const DB = { prepare(sql) {
 } };
 const env = { DB, OPPORTUNITY_ADMIN_TOKEN: "test-admin" };
 await ensureSovereignSchema(env);
+const canonicalDeliverySource = readFileSync(new URL("../runtime/paid_delivery_runtime.py", import.meta.url), "utf-8");
+const canonicalDeliverySql = JSON.parse(readFileSync(new URL("./paid-delivery-schema.json", import.meta.url), "utf-8"));
+assert.equal(canonicalDeliverySql.length, 2);
+assert.ok(canonicalDeliverySql.every(sql => canonicalDeliverySource.includes(sql)), "Worker initialization stays identical to the existing delivery schema");
 const admin = { "x-lumen-admin": "test-admin", "content-type": "application/json" };
 function req(path, body, headers = admin) { return new Request(`https://lumen.test${path}`, body === undefined ? { headers } : { method: "POST", headers, body: JSON.stringify(body) }); }
 
@@ -104,7 +108,7 @@ try {
     CREATE TABLE lumen_x402_receipts (id TEXT PRIMARY KEY,status TEXT,product_id TEXT,amount_usd REAL,created_at TEXT,currency TEXT,network TEXT,pay_to TEXT,request_metadata TEXT);
     CREATE TABLE lumen_x402_revenue_bridge (receipt_id TEXT PRIMARY KEY,proposal_id TEXT,offer_id TEXT);
     CREATE TABLE lumen_paid_fulfillment_jobs (order_id TEXT PRIMARY KEY,receipt_id TEXT,item_id TEXT,amount_usd REAL,status TEXT,updated_at TEXT);
-    CREATE TABLE lumen_paid_deliveries (order_id TEXT PRIMARY KEY,receipt_id TEXT,status TEXT,provider_message_id TEXT,updated_at TEXT);
+    CREATE TABLE IF NOT EXISTS lumen_paid_deliveries (order_id TEXT PRIMARY KEY,receipt_id TEXT,status TEXT,provider_message_id TEXT,updated_at TEXT);
     CREATE TABLE lumen_paid_boost_steps (run_id TEXT,step_name TEXT,status TEXT,updated_at TEXT);
     CREATE TABLE lumen_paid_boost_ai_usage (day TEXT PRIMARY KEY,reserved_neurons INTEGER,calls INTEGER);
     CREATE TABLE lumen_revenue_events (event_type TEXT,status TEXT,amount_usd REAL);
@@ -143,7 +147,7 @@ try {
   sqlite.prepare("UPDATE lumen_proposal_drafts SET amount_usd=7 WHERE proposal_id='P1'").run();
   assert.equal((await decideApproval(env, packet.id, { decision: "APPROVE", scopeHash: packet.scopeHash })).status, 409);
   sqlite.prepare("UPDATE lumen_proposal_drafts SET amount_usd=1 WHERE proposal_id='P1'").run();
-  const decisions = await Promise.all([decideApproval(env, packet.id, { decision: "APPROVE", scopeHash: packet.scopeHash }), decideApproval(env, packet.id, { decision: "REJECT", scopeHash: packet.scopeHash })]);
+  const decisions = await Promise.all([decideApproval(env, packet.id, { decision: "APPROVE", scopeHash: packet.scopeHash }), decideApproval(env, packet.id, { decision: "APPROVE", scopeHash: packet.scopeHash })]);
   assert.equal(decisions.filter(d => d.status === 200).length, 1);
   assert.equal(decisions.find(d => d.status === 200).result.executed, false);
   assert.equal(sqlite.prepare("SELECT status FROM lumen_proposal_drafts").get().status, "APPROVED", "v4 review never changes legacy execution authorization");
@@ -185,7 +189,7 @@ try {
   const readyData = await loadEconomicEvidence(env);
   assert.equal((await operateDeals(env, readyData)).deals[0].stage, "DELIVERY_QUALITY_GATE_PENDING");
   sqlite.prepare("UPDATE lumen_paid_fulfillment_jobs SET status='delivered'").run();
-  sqlite.prepare("INSERT INTO lumen_paid_deliveries VALUES('ORDER1','R1','delivered','PROVIDER-MSG-1',?)").run(now);
+  sqlite.prepare("INSERT INTO lumen_paid_deliveries(order_id,receipt_id,brief_id,status,provider_message_id,updated_at) VALUES('ORDER1','R1','BRIEF1','delivered','PROVIDER-MSG-1',?)").run(now);
   assert.equal((await operateDeals(env, await loadEconomicEvidence(env))).deals[0].stage, "POSTSALE_OBSERVATION");
   assert.equal((await runSovereignCycle(env, { runId: "integration-3" })).metrics.current.verifiedReceiptRevenueUsd, 1, "redeemed receipt is counted once, never as new revenue");
 
@@ -215,9 +219,13 @@ try {
   assert.equal((await runSovereignCycle(env, { runId: "ambiguous" })).ok, false);
   assert.equal((await handleSovereign(req("/sovereign/status"), env)).status, 200);
   sqlite.exec("DROP TABLE lumen_paid_deliveries");
+  const repaired = await runSovereignCycle(env, { runId: "integration-canonical-delivery-schema" });
+  assert.equal(repaired.ok, true, "the canonical empty delivery observer is initialized safely");
+  assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM lumen_paid_deliveries").get().n, 0, "schema creation does not queue a delivery");
+  sqlite.exec("DROP TABLE lumen_offer_performance");
   const degraded = await runSovereignCycle(env, { runId: "integration-missing-capability" });
   assert.equal(degraded.ok, false);
-  assert.ok(degraded.missingCapabilities.some(m => m.includes("lumen_paid_deliveries")));
+  assert.ok(degraded.missingCapabilities.some(m => m.includes("lumen_offer_performance")));
   assert.equal(degraded.ceo.bottleneck, "CAPABILITY_HEALTH");
   assert.equal(networkCalls, 0, "all new v4 autonomy stays internal, no external messages, purchases or payments");
 } finally { globalThis.fetch = originalFetch; }

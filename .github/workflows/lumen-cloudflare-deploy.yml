@@ -113,25 +113,6 @@ jobs:
           grep -q '"autonomousSpend":false' governor-policy.json
           grep -q '"maxExternalMessagesPerCycle":1' governor-policy.json
           echo 'PORTFOLIO_PUBLIC_SMOKE_OK'
-      - name: Initialize canonical paid delivery observation schema
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          set -euo pipefail
-          # Read only the existing controller's static CREATE statements. Do
-          # not import or execute any report rendering or delivery operation.
-          python - <<'PY'
-          import ast
-          from pathlib import Path
-          module = ast.parse(Path('.lumen/runtime/paid_delivery_runtime.py').read_text())
-          schema = next(n for n in module.body if isinstance(n, ast.FunctionDef) and n.name == 'ensure_schema')
-          sql = [ast.literal_eval(value) for node in ast.walk(schema) if isinstance(node, ast.Dict)
-                 for key, value in zip(node.keys, node.values) if isinstance(key, ast.Constant) and key.value == 'sql']
-          assert len(sql) == 2 and all(s.startswith(('CREATE TABLE IF NOT EXISTS lumen_paid_deliveries ', 'CREATE INDEX IF NOT EXISTS idx_lumen_paid_deliveries_status ')) for s in sql)
-          Path('/tmp/lumen-paid-delivery-schema.sql').write_text(';\n'.join(sql) + ';\n')
-          PY
-          npx --yes wrangler@latest d1 execute lumen-zero --remote --config .lumen/a2a-worker/wrangler.toml --file /tmp/lumen-paid-delivery-schema.sql
       - name: Verify Sovereign v4 live artifacts and record measurements
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
