@@ -92,7 +92,8 @@ try {
     return persisted.get(name);
   } };
   const result = await deep.run({ instanceId: "deep-test", payload: { scheduledTime: 3600000 } }, durableSteps);
-  assert.equal(result.steps, 14);
+  assert.equal(result.steps, 15);
+  assert.ok(persisted.has("sovereign-revenue-v4"));
   assert.ok(persisted.has("foundry-experiments"));
   assert.ok(persisted.has("growth-decision"));
   const count = sqlite.prepare("SELECT COUNT(*) n FROM lumen_paid_boost_steps WHERE run_id='deep-test'").get().n;

@@ -1,6 +1,6 @@
 const VERSION = "1.6-first-cash-microbuyer-revision";
 
-const OFFERS = {
+export const OFFERS = {
   "MP-SUPPLIER-SNAPSHOT": { name: "Supplier Snapshot", priceUsd: 1, outcome: "a compact supplier identity and official-channel signal for one named company or domain" },
   "MP-QUOTE-SANITY": { name: "Quote Sanity Check", priceUsd: 7, outcome: "a quick sanity check of pricing and quotation structure" },
   "MP-TENDER-SCAN": { name: "Tender Quick Scan", priceUsd: 9, outcome: "a focused scan of tender fit, deadlines and commercial relevance" },

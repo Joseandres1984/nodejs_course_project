@@ -29,6 +29,8 @@ jobs:
           echo 'REQUIRED_SECRETS_PRESENT'
       - name: Verify Paid Boost before deploy
         run: node .lumen/a2a-worker/test-paid-boost.mjs
+      - name: Verify Sovereign Revenue v4 before deploy
+        run: node .lumen/a2a-worker/test-sovereign-revenue.mjs
       - name: Deploy lumen-zero-a2a with Paid Boost entrypoint
         working-directory: .lumen/a2a-worker
         env:
