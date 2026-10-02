@@ -1,0 +1,28 @@
+name: LUMEN Venture Hunter v1 validation
+
+on:
+  pull_request:
+    paths:
+      - '.lumen/a2a-worker/venture-hunter-v1.js'
+      - '.lumen/a2a-worker/venture-hunter-v1.test.mjs'
+      - '.lumen/a2a-worker/paid-boost-workflows.js'
+      - '.github/workflows/lumen-venture-hunter-v1.yml'
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/a2a-worker/venture-hunter-v1.js'
+      - '.lumen/a2a-worker/venture-hunter-v1.test.mjs'
+      - '.lumen/a2a-worker/paid-boost-workflows.js'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Syntax check
+        run: node --check .lumen/a2a-worker/venture-hunter-v1.js
+      - name: Venture Hunter tests
+        run: node .lumen/a2a-worker/venture-hunter-v1.test.mjs
