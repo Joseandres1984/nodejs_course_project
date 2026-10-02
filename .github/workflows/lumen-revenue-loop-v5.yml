@@ -1,0 +1,36 @@
+name: LUMEN Revenue Loop v5 validation
+
+on:
+  pull_request:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/a2a-worker/revenue-loop-v5.js'
+      - '.lumen/a2a-worker/test-revenue-loop-v5.mjs'
+      - '.lumen/a2a-worker/paid-boost-workflows.js'
+      - '.lumen/a2a-worker/paid-boost-entry.js'
+      - '.github/workflows/lumen-revenue-loop-v5.yml'
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/a2a-worker/revenue-loop-v5.js'
+      - '.lumen/a2a-worker/test-revenue-loop-v5.mjs'
+      - '.lumen/a2a-worker/paid-boost-workflows.js'
+      - '.lumen/a2a-worker/paid-boost-entry.js'
+      - '.github/workflows/lumen-revenue-loop-v5.yml'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Revenue Loop v5 unit and guardrail tests
+        run: |
+          node --check .lumen/a2a-worker/revenue-loop-v5.js
+          node --check .lumen/a2a-worker/paid-boost-entry.js
+          node .lumen/a2a-worker/test-revenue-loop-v5.mjs
+          grep -q 'A2A_AUTONOMOUS_FOLLOWUP: "false"' .lumen/a2a-worker/revenue-loop-v5.js
+          grep -q 'A2A_AUTONOMOUS_CONVERSION_CLOSE: "false"' .lumen/a2a-worker/revenue-loop-v5.js
+          grep -q 'autonomousSpendUsd: 0' .lumen/a2a-worker/revenue-loop-v5.js
