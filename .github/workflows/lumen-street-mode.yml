@@ -1,0 +1,128 @@
+name: LUMEN Street Mode
+
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch: {}
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/lumen-street-mode.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lumen-street-mode
+  cancel-in-progress: false
+
+jobs:
+  hunt-and-close:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      BASE: 'https://lumen-zero-a2a.lumen-b2b.workers.dev'
+      OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+
+    steps:
+      - name: Verify production and authority boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${OPPORTUNITY_ADMIN_TOKEN:-}"
+          curl --fail --show-error --silent --max-time 30 "$BASE/health" >/tmp/health.json
+          cat /tmp/health.json
+          echo
+          echo 'STREET_MODE_AUTHORITY=non-binding-commercial-outreach-only'
+          echo 'AUTONOMOUS_SPEND_USD=0'
+          echo 'AUTONOMOUS_CONTRACT=false'
+
+      - name: Run Street Mode commercial cycle
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          post() {
+            local endpoint="$1"
+            local body="/tmp/${endpoint//\//-}.json"
+            local code
+            code=$(curl --show-error --silent --max-time 90 -o "$body" -w '%{http_code}' \
+              -X POST "$BASE/$endpoint" \
+              -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+              -H 'accept: application/json' \
+              -H 'cache-control: no-cache')
+            echo "===== POST /$endpoint HTTP $code ====="
+            cat "$body"; echo
+            case "$code" in
+              200|201|202|204) ;;
+              *) echo "endpoint_failed:$endpoint:$code"; return 1 ;;
+            esac
+          }
+
+          post outreach/poll || true
+          post source-intelligence/cycle
+          post market-hunter/run
+          post commercial/reassess
+          post revenue-loop-v5/run
+
+          consumed=false
+          for endpoint in first-cash/run commercial-reply/run followup/run; do
+            body="/tmp/${endpoint//\//-}.json"
+            post "$endpoint"
+            if jq -e '(.sent == true) or (.externalAttempted == true) or (.attempted == true) or (.status == "SEND_FAILED") or (.send.sent == true) or (.send.externalAttempted == true) or (.send.status == "SEND_FAILED")' "$body" >/dev/null 2>&1; then
+              consumed=true
+              echo "HOT_LANE_SLOT_CONSUMED_BY=$endpoint"
+              break
+            fi
+          done
+
+          if [ "$consumed" != 'true' ]; then
+            for attempt in 1 2 3 4 5 6 7 8; do
+              echo "===== STREET PROSPECT ROTATION $attempt/8 ====="
+              post proposals/prepare-top
+              post quality/review-next
+              post outreach/probe-next
+              post outreach/send-next
+
+              send='/tmp/outreach-send-next.json'
+              if jq -e '(.sent == true) or (.externalAttempted == true) or (.status == "SEND_FAILED")' "$send" >/dev/null 2>&1; then
+                consumed=true
+                echo "FRESH_OUTREACH_SLOT_CONSUMED_ON_ATTEMPT=$attempt"
+                break
+              fi
+            done
+          fi
+
+          echo "STREET_MODE_EXTERNAL_SLOT_CONSUMED=$consumed"
+          post outreach/poll || true
+          post revenue-loop-v5/run
+
+      - name: Read closing evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          get() {
+            local endpoint="$1"
+            echo "===== GET /$endpoint ====="
+            curl --fail --show-error --silent --max-time 30 \
+              -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+              -H 'cache-control: no-cache' \
+              "$BASE/$endpoint" || \
+            curl --fail --show-error --silent --max-time 30 \
+              -H 'cache-control: no-cache' \
+              "$BASE/$endpoint"
+            echo
+          }
+
+          get revenue-loop-v5/status
+          get first-settlement/status
+          get outreach/stats
+          get outreach/next
+          get commercial/stats
+          get commercial/next
+          get first-cash/stats
+          get followup/stats
+          get portfolio-governor/state
+
+          echo 'LUMEN_STREET_MODE_CYCLE_OK'
