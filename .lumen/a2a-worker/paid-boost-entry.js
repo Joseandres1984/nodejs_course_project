@@ -4,15 +4,30 @@ import { DEEP_CRON, PAID_BOOST_POLICY, ensureBoostSchema, startDeepCycle } from 
 import { handleSovereign } from "./sovereign-runtime.js";
 import { handleRevenueLoopV5 } from "./revenue-loop-v5.js";
 import { FIRST_SETTLEMENT_MISSION_POLICY, getFirstSettlementMissionStatus } from "./first-settlement-mission-v1.js";
+import { RESPONSE_CLOSER_POLICY, getResponseCloserStatus } from "./response-closer-v1.js";
 export { LumenDeepWorkflow, LumenOpportunityWorkflow } from "./paid-boost-workflows.js";
+
+function adminAuthorized(request, env) {
+  const expected = env.OPPORTUNITY_ADMIN_TOKEN;
+  return Boolean(expected && request.headers.get("x-lumen-admin") === expected);
+}
+
+export async function handleResponseCloser(request, env) {
+  const url = new URL(request.url), path = url.pathname;
+  if (!path.startsWith("/response-closer/")) return null;
+  if (request.method === "GET" && path === "/response-closer/policy") return Response.json(RESPONSE_CLOSER_POLICY);
+  if (!adminAuthorized(request, env)) return Response.json({ ok:false, error:"admin_token_required" }, { status:403 });
+  if (request.method === "GET" && path === "/response-closer/status") {
+    return Response.json(await getResponseCloserStatus(env, url.searchParams.get("opportunity_id")), { headers:{ "cache-control":"no-store" } });
+  }
+  return Response.json({ ok:false, error:"not_found" }, { status:404 });
+}
 
 export async function handleFirstSettlementMission(request, env) {
   const path = new URL(request.url).pathname;
   if (!path.startsWith("/first-settlement/")) return null;
   if (request.method === "GET" && path === "/first-settlement/policy") return Response.json(FIRST_SETTLEMENT_MISSION_POLICY);
-  const expected = env.OPPORTUNITY_ADMIN_TOKEN;
-  if (!expected || request.headers.get("x-lumen-admin") !== expected)
-    return Response.json({ ok: false, error: "admin_token_required" }, { status: 403 });
+  if (!adminAuthorized(request, env)) return Response.json({ ok: false, error: "admin_token_required" }, { status: 403 });
   if (request.method === "GET" && path === "/first-settlement/status") {
     const status = await getFirstSettlementMissionStatus(env);
     return Response.json(status, { headers: { "cache-control": "no-store" } });
@@ -24,10 +39,7 @@ export async function handlePaidBoost(request, env) {
   const path = new URL(request.url).pathname;
   if (!path.startsWith("/paid-boost/")) return null;
   if (request.method === "GET" && path === "/paid-boost/policy") return Response.json(PAID_BOOST_POLICY);
-  // Everything that contains operational data or triggers work is protected.
-  const expected = env.OPPORTUNITY_ADMIN_TOKEN;
-  if (!expected || request.headers.get("x-lumen-admin") !== expected)
-    return Response.json({ ok: false, error: "admin_token_required" }, { status: 403 });
+  if (!adminAuthorized(request, env)) return Response.json({ ok: false, error: "admin_token_required" }, { status: 403 });
   if (request.method === "GET" && path === "/paid-boost/status") {
     await ensureBoostSchema(env);
     const runs = await env.DB.prepare("SELECT * FROM lumen_paid_boost_runs ORDER BY updated_at DESC LIMIT 15").all();
@@ -45,6 +57,8 @@ export async function handlePaidBoost(request, env) {
 
 export default {
   async fetch(request, env, ctx) {
+    const responseCloser = await handleResponseCloser(request, env);
+    if (responseCloser) return responseCloser;
     const firstSettlementResponse = await handleFirstSettlementMission(request, env);
     if (firstSettlementResponse) return firstSettlementResponse;
     const v5Response = await handleRevenueLoopV5(request, env);
@@ -55,12 +69,8 @@ export default {
     return response || adaptive.fetch(request, withBudgetedAi(env), ctx);
   },
   async scheduled(controller, env, ctx) {
-    if (!env.LUMEN_DEEP_WORKFLOW || !env.LUMEN_OPPORTUNITY_WORKFLOW)
-      throw new Error("paid_boost_workflow_bindings_required");
-    if (controller.cron === DEEP_CRON) {
-      ctx.waitUntil(startDeepCycle(env, controller.scheduledTime));
-      return;
-    }
+    if (!env.LUMEN_DEEP_WORKFLOW || !env.LUMEN_OPPORTUNITY_WORKFLOW) throw new Error("paid_boost_workflow_bindings_required");
+    if (controller.cron === DEEP_CRON) { ctx.waitUntil(startDeepCycle(env, controller.scheduledTime)); return; }
     return adaptive.scheduled(controller, { ...withBudgetedAi(env), LUMEN_DEEP_WORKFLOW_MANAGED: true }, ctx);
   }
 };
