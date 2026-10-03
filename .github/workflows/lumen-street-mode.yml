@@ -3,9 +3,10 @@ name: LUMEN Street Mode
 on:
   schedule:
     - cron: '17 * * * *'
-  workflow_dispatch:
+  workflow_dispatch: {}
   push:
-    branches: [main]
+    branches:
+      - main
     paths:
       - '.github/workflows/lumen-street-mode.yml'
 
@@ -59,18 +60,12 @@ jobs:
             esac
           }
 
-          # 1) Pull in any responses from prior A2A outreach before making a new decision.
           post outreach/poll || true
-
-          # 2) Go looking for fresh public demand and reassess the live commercial queue.
           post source-intelligence/cycle
           post market-hunter/run
           post commercial/reassess
-
-          # 3) Refresh the revenue lifecycle and first-settlement focus.
           post revenue-loop-v5/run
 
-          # 4) Spend the single external commercial slot on the shortest path to cash first.
           consumed=false
           for endpoint in first-cash/run commercial-reply/run followup/run; do
             body="/tmp/${endpoint//\//-}.json"
@@ -82,7 +77,6 @@ jobs:
             fi
           done
 
-          # 5) If no hot opportunity used the slot, create one fresh high-quality outbound attempt.
           if [ "$consumed" != 'true' ]; then
             for attempt in 1 2 3 4 5 6 7 8; do
               echo "===== STREET PROSPECT ROTATION $attempt/8 ====="
@@ -101,8 +95,6 @@ jobs:
           fi
 
           echo "STREET_MODE_EXTERNAL_SLOT_CONSUMED=$consumed"
-
-          # 6) Reconcile lifecycle after the action so the next cycle starts from fresh truth.
           post outreach/poll || true
           post revenue-loop-v5/run
 
