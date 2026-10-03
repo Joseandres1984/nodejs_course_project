@@ -1,0 +1,19 @@
+name: Response Closer v2 Check
+
+on:
+  pull_request:
+    paths:
+      - '.lumen/a2a-worker/response-closer-v1.js'
+      - '.lumen/a2a-worker/response-qualification.js'
+      - '.lumen/a2a-worker/response-closer-v2.test.js'
+      - '.github/workflows/response-closer-v2-check.yml'
+
+jobs:
+  response-closer-v2:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: node .lumen/a2a-worker/response-closer-v2.test.js
