@@ -1,0 +1,16 @@
+import assert from "node:assert/strict";
+import { classifyBuyerResponse, prepareClosePlan, RESPONSE_CLOSER_POLICY } from "./response-closer-v1.js";
+assert.equal(RESPONSE_CLOSER_POLICY.autonomousSpendUsd,0);
+assert.equal(RESPONSE_CLOSER_POLICY.sendsBindingMessages,false);
+assert.equal(RESPONSE_CLOSER_POLICY.bindingActionsHumanGated,true);
+assert.equal(classifyBuyerResponse("Please send price and payment link").responseClass,"PURCHASE_INTENT");
+assert.equal(classifyBuyerResponse("¿Qué incluye y cuál es el plazo de entrega?").responseClass,"SCOPE_QUESTION");
+assert.equal(classifyBuyerResponse("Nos interesa, envíen propuesta").responseClass,"COMMERCIAL_INTEREST");
+assert.equal(classifyBuyerResponse("No interesa, por favor remove me").responseClass,"DECLINED");
+assert.equal(classifyBuyerResponse("Automatic reply: out of office").responseClass,"AUTOMATION");
+const p=prepareClosePlan({opportunity_id:"OPP-1",proposal_id:"P-1",response_text:"I want to buy. Send invoice"});
+assert.equal(p.stageRecommendation,"NEGOTIATING");
+assert.equal(p.executeCheckout,false);
+assert.equal(p.sendMessage,false);
+assert.equal(p.humanGateRequired,true);
+console.log("Response Closer v1 tests passed");
