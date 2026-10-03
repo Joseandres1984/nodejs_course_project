@@ -3,7 +3,22 @@ import { withBudgetedAi } from "./ai-router.js";
 import { DEEP_CRON, PAID_BOOST_POLICY, ensureBoostSchema, startDeepCycle } from "./paid-boost-runtime.js";
 import { handleSovereign } from "./sovereign-runtime.js";
 import { handleRevenueLoopV5 } from "./revenue-loop-v5.js";
+import { FIRST_SETTLEMENT_MISSION_POLICY, getFirstSettlementMissionStatus } from "./first-settlement-mission-v1.js";
 export { LumenDeepWorkflow, LumenOpportunityWorkflow } from "./paid-boost-workflows.js";
+
+export async function handleFirstSettlementMission(request, env) {
+  const path = new URL(request.url).pathname;
+  if (!path.startsWith("/first-settlement/")) return null;
+  if (request.method === "GET" && path === "/first-settlement/policy") return Response.json(FIRST_SETTLEMENT_MISSION_POLICY);
+  const expected = env.OPPORTUNITY_ADMIN_TOKEN;
+  if (!expected || request.headers.get("x-lumen-admin") !== expected)
+    return Response.json({ ok: false, error: "admin_token_required" }, { status: 403 });
+  if (request.method === "GET" && path === "/first-settlement/status") {
+    const status = await getFirstSettlementMissionStatus(env);
+    return Response.json(status, { headers: { "cache-control": "no-store" } });
+  }
+  return Response.json({ ok: false, error: "not_found" }, { status: 404 });
+}
 
 export async function handlePaidBoost(request, env) {
   const path = new URL(request.url).pathname;
@@ -30,6 +45,8 @@ export async function handlePaidBoost(request, env) {
 
 export default {
   async fetch(request, env, ctx) {
+    const firstSettlementResponse = await handleFirstSettlementMission(request, env);
+    if (firstSettlementResponse) return firstSettlementResponse;
     const v5Response = await handleRevenueLoopV5(request, env);
     if (v5Response) return v5Response;
     const sovereignResponse = await handleSovereign(request, env);
