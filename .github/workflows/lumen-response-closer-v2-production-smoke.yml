@@ -1,0 +1,38 @@
+name: LUMEN Response Closer v2 production smoke
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/a2a-worker/response-closer-v1.js'
+      - '.lumen/a2a-worker/response-qualification.js'
+      - '.github/workflows/lumen-response-closer-v2-production-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  smoke-response-closer-v2:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify v2 commercial truth tests
+        run: node .lumen/a2a-worker/response-closer-v2.test.js
+      - name: Wait for production propagation
+        run: sleep 15
+      - name: Verify v2 policy, protection and real close plan
+        env:
+          OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          test -n "$OPPORTUNITY_ADMIN_TOKEN"
+          curl -fsS --retry 5 --retry-delay 3 --max-time 20 "$BASE/response-closer/policy" -o policy.json
+          jq -e '.version=="2.0-response-closer-shared-response" and .sharedResponseTruth==true and .technicalAckIsNotIntent==true and .echoIsNotIntent==true and .genericResponseIsNotIntent==true and .autonomousSpendUsd==0 and .sendsBindingMessages==false and .bindingActionsHumanGated==true and .revenueTruth=="verified_x402_settlement_only"' policy.json >/dev/null
+          protected_code=$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' "$BASE/response-closer/status")
+          test "$protected_code" = '403'
+          curl -fsS --retry 5 --retry-delay 3 --max-time 30 -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" -H 'cache-control: no-cache' "$BASE/response-closer/status" -o status.json
+          jq -e '.ok==true and (.status=="QUALIFIED_COMMERCIAL_RESPONSE" or .status=="NON_COMMERCIAL_RESPONSE" or .status=="NO_REAL_RESPONSE_TEXT" or .status=="NO_REPLIED_OPPORTUNITY")' status.json >/dev/null
+          jq '{status,source,plan:(if .plan then {responseSource:.plan.responseSource,responseClass:.plan.responseClass,qualifiedCommercialIntent:.plan.qualifiedCommercialIntent,checkoutEligible:.plan.checkoutEligible,reason:.plan.reason,nextAction:.plan.nextAction,stageRecommendation:.plan.stageRecommendation,prepareOnly:.plan.prepareOnly,executeCheckout:.plan.executeCheckout,sendMessage:.plan.sendMessage,humanGateRequired:.plan.humanGateRequired,successCriterion:.plan.successCriterion} else null end)}' status.json
+          echo 'RESPONSE_CLOSER_V2_PRODUCTION_SMOKE_OK'
