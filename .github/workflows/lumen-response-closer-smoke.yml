@@ -1,0 +1,45 @@
+name: LUMEN Response Closer production smoke
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/a2a-worker/response-closer-v1.js'
+      - '.lumen/a2a-worker/paid-boost-entry.js'
+      - '.github/workflows/lumen-response-closer-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  smoke-response-closer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify Response Closer unit guardrails
+        run: node .lumen/a2a-worker/test-response-closer-v1.mjs
+      - name: Wait for production propagation
+        run: sleep 15
+      - name: Verify public policy and protected status
+        env:
+          OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          test -n "$OPPORTUNITY_ADMIN_TOKEN"
+          curl -fsS --retry 5 --retry-delay 3 --max-time 20 "$BASE/response-closer/policy" -o response-closer-policy.json
+          jq -e '.version=="1.0-response-closer" and .autonomousSpendUsd==0 and .autonomousPurchase==false and .autonomousContract==false and .changesPrices==false and .sendsBindingMessages==false and .bindingActionsHumanGated==true and .revenueTruth=="verified_x402_settlement_only"' response-closer-policy.json >/dev/null
+          protected_code=$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' "$BASE/response-closer/status")
+          test "$protected_code" = '403'
+          echo 'RESPONSE_CLOSER_POLICY_AND_AUTH_OK'
+      - name: Read real production close plan
+        env:
+          OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          curl -fsS --retry 5 --retry-delay 3 --max-time 20 -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" "$BASE/response-closer/status" -o response-closer-status.json
+          jq -e '.ok==true and (.status=="READY_FOR_CLASSIFICATION" or .status=="NO_REPLIED_OPPORTUNITY")' response-closer-status.json >/dev/null
+          jq '{status,source,plan:{responseClass:.plan.responseClass,commercialQuality:.plan.commercialQuality,intentScore:.plan.intentScore,nextAction:.plan.nextAction,stageRecommendation:.plan.stageRecommendation,prepareOnly:.plan.prepareOnly,executeCheckout:.plan.executeCheckout,sendMessage:.plan.sendMessage,mutatePrice:.plan.mutatePrice,humanGateRequired:.plan.humanGateRequired,successCriterion:.plan.successCriterion}}' response-closer-status.json
+          echo 'RESPONSE_CLOSER_PRODUCTION_SMOKE_OK'
