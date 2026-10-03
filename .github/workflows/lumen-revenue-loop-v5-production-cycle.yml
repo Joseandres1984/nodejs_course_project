@@ -1,0 +1,71 @@
+name: LUMEN Revenue Loop v5 production cycle
+
+on:
+  workflow_dispatch:
+    inputs:
+      opportunity_id:
+        description: Opportunity to verify after the cycle
+        required: false
+        default: OPP-E81B5DEE1B42E6590DDE
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lumen-revenue-loop-v5-production-cycle
+  cancel-in-progress: false
+
+jobs:
+  run-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify local Revenue Loop integrity tests
+        run: node .lumen/a2a-worker/test-revenue-loop-v5.mjs
+      - name: Run protected production cycle
+        env:
+          OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$OPPORTUNITY_ADMIN_TOKEN"
+          BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          curl -fsS --max-time 60 -X POST \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'cache-control: no-cache' \
+            "$BASE/revenue-loop-v5/run" -o cycle.json
+          jq -e '.ok == true and .version == "5.1-reply-integrity-gate" and .guardrails.autonomousSpendUsd == 0 and .guardrails.bindingActionsHumanGated == true' cycle.json >/dev/null
+          jq '{ok,version,trigger,lifecycle,settlementSync,proposal,followup,closer,memory,guardrails}' cycle.json
+      - name: Verify production Revenue Loop status
+        env:
+          OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          curl -fsS --max-time 30 \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'cache-control: no-cache' \
+            "$BASE/revenue-loop-v5/status" -o status.json
+          jq -e '.ok == true and .version == "5.1-reply-integrity-gate" and .guardrails.replyEvidenceRequired == true and .guardrails.verifiedSettlementRequired == true' status.json >/dev/null
+          jq '{version,stages,focus,revenueMemory,guardrails}' status.json
+      - name: Verify target opportunity has no phantom REPLIED state
+        env:
+          OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+          OPPORTUNITY_ID: ${{ inputs.opportunity_id }}
+        run: |
+          set -euo pipefail
+          BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          test -n "$OPPORTUNITY_ID"
+          curl -fsS --max-time 30 \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'cache-control: no-cache' \
+            "$BASE/response-closer/status?opportunity_id=$OPPORTUNITY_ID" -o closer.json
+          jq '{status,source,plan}' closer.json
+          if jq -e '.status == "QUALIFIED_COMMERCIAL_RESPONSE"' closer.json >/dev/null; then
+            echo 'TARGET_HAS_VERIFIED_COMMERCIAL_RESPONSE'
+          elif jq -e '.status == "NO_REAL_RESPONSE_TEXT" or .status == "NON_COMMERCIAL_RESPONSE" or .status == "NO_REPLIED_OPPORTUNITY"' closer.json >/dev/null; then
+            echo 'TARGET_HAS_NO_QUALIFIED_COMMERCIAL_REPLY'
+          else
+            echo 'UNEXPECTED_RESPONSE_CLOSER_STATE'
+            exit 1
+          fi
+          echo 'REVENUE_LOOP_V5_PRODUCTION_CYCLE_OK'
