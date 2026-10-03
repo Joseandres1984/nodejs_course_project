@@ -1,0 +1,81 @@
+name: LUMEN First Settlement deploy smoke
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/a2a-worker/**'
+      - '.github/workflows/lumen-first-settlement-deploy-smoke.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: lumen-first-settlement-production
+  cancel-in-progress: false
+
+jobs:
+  deploy-and-verify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Verify required credentials
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$CF_TOKEN"
+          test -n "$CF_ACCOUNT"
+          test -n "$ADMIN_TOKEN"
+
+      - name: Verify First Settlement module before deploy
+        run: |
+          set -euo pipefail
+          node .lumen/a2a-worker/test-first-settlement-mission-v1.mjs
+          node .lumen/a2a-worker/test-paid-boost.mjs
+
+      - name: Deploy production worker
+        working-directory: .lumen/a2a-worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          sed -i 's/^main = "opportunity-entry.js"$/main = "paid-boost-entry.js"/' wrangler.toml
+          grep -q '^main = "paid-boost-entry.js"$' wrangler.toml
+          npx --yes wrangler@latest deploy --config wrangler.toml --var "LUMEN_V4_RELEASE_ID:$GITHUB_SHA"
+
+      - name: Verify public First Settlement policy
+        run: |
+          set -euo pipefail
+          BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          for attempt in $(seq 1 12); do
+            if curl -fsS --max-time 20 -H 'cache-control: no-cache' "$BASE/first-settlement/policy?release=$GITHUB_SHA&probe=$attempt" -o first-settlement-policy.json; then
+              if jq -e '.version=="1.0-first-settlement-mission" and .settlementTruth=="verified_x402_receipt_only" and .autonomousSpendUsd==0 and .autonomousPurchase==false and .autonomousContract==false and .changesPrices==false and .createsNewSenderAuthority==false and .bindingActionsHumanGated==true' first-settlement-policy.json >/dev/null; then
+                echo 'FIRST_SETTLEMENT_PUBLIC_POLICY_OK'
+                exit 0
+              fi
+            fi
+            sleep 3
+          done
+          cat first-settlement-policy.json || true
+          exit 1
+
+      - name: Verify protected status and live mission
+        env:
+          OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          unauth=$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' "$BASE/first-settlement/status")
+          test "$unauth" = '403'
+          curl -fsS --max-time 30 -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" -H 'cache-control: no-cache' "$BASE/first-settlement/status?release=$GITHUB_SHA" -o first-settlement-status.json
+          jq -e '.ok==true and .successCriterion=="verified_x402_settlement_greater_than_zero" and (.mission.status=="ACTIVE" or .mission.status=="NO_OPEN_MISSION")' first-settlement-status.json >/dev/null
+          jq '{ok,successCriterion,mission:{status:.mission.status,opportunity_id:.mission.focus.opportunity_id,stage:.mission.focus.stage,first_cash_score:.mission.focus.first_cash_score,blocker:.mission.diagnosis.blocker,action:.mission.diagnosis.action,stalled:.mission.diagnosis.stalled},stalledCount}' first-settlement-status.json
+          echo 'FIRST_SETTLEMENT_LIVE_STATUS_OK'
