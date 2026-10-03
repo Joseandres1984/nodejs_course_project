@@ -31,6 +31,6 @@ jobs:
           node --check .lumen/a2a-worker/revenue-loop-v5.js
           node --check .lumen/a2a-worker/paid-boost-entry.js
           node .lumen/a2a-worker/test-revenue-loop-v5.mjs
-          grep -q 'A2A_AUTONOMOUS_FOLLOWUP: "false"' .lumen/a2a-worker/revenue-loop-v5.js
-          grep -q 'A2A_AUTONOMOUS_CONVERSION_CLOSE: "false"' .lumen/a2a-worker/revenue-loop-v5.js
-          grep -q 'autonomousSpendUsd: 0' .lumen/a2a-worker/revenue-loop-v5.js
+          grep -Eq 'A2A_AUTONOMOUS_FOLLOWUP:[[:space:]]*"false"' .lumen/a2a-worker/revenue-loop-v5.js
+          grep -Eq 'A2A_AUTONOMOUS_CONVERSION_CLOSE:[[:space:]]*"false"' .lumen/a2a-worker/revenue-loop-v5.js
+          grep -Eq 'autonomousSpendUsd:[[:space:]]*0' .lumen/a2a-worker/revenue-loop-v5.js
