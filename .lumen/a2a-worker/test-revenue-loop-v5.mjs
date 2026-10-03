@@ -10,7 +10,8 @@ assert.equal(deriveLifecycleStage({commercially_actionable:1,synthetic_or_test_o
 assert.equal(deriveLifecycleStage({proposal_id:"P1"}),"PROPOSAL_READY");
 assert.equal(deriveLifecycleStage({proposal_id:"P1",proposal_status:"SENT"}),"SENT");
 assert.equal(deriveLifecycleStage({proposal_id:"P1",response_text:"yes"}),"REPLIED");
-assert.equal(deriveLifecycleStage({proposal_id:"P1",response_class:"PURCHASE_INTENT"}),"NEGOTIATING");
+assert.equal(deriveLifecycleStage({proposal_id:"P1",response_class:"PURCHASE_INTENT",response_text:"Ready to buy"}),"NEGOTIATING");
+assert.equal(deriveLifecycleStage({proposal_id:"P1",response_class:"PURCHASE_INTENT",response_text:""}),"PROPOSAL_READY");
 assert.equal(deriveLifecycleStage({verified_receipt_id:"R1",delivery_status:"ready_for_delivery"}),"PAID");
 assert.equal(deriveLifecycleStage({verified_receipt_id:"R1",delivery_status:"delivered"}),"DELIVERED");
 assert.ok(scoreBuyerIntent({commercial_score:90,evidence_strength:"strong",response_class:"PURCHASE_INTENT"}) <= 1);

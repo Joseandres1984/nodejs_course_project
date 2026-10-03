@@ -1,0 +1,16 @@
+name: Reply Integrity Gate production contract smoke
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/a2a-worker/revenue-loop-v5.js'
+      - '.lumen/a2a-worker/reply-integrity-gate-v1.test.js'
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: node .lumen/a2a-worker/reply-integrity-gate-v1.test.js
