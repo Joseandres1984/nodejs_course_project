@@ -1,0 +1,255 @@
+name: LUMEN Evolution Engine
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/lumen-evolution-engine.yml'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/lumen-evolution-engine.yml'
+  schedule:
+    # Twelve bounded evolution cycles per UTC day: one every two hours.
+    - cron: '47 */2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lumen-evolution-engine
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout LUMEN production source
+        uses: actions/checkout@v4
+        with:
+          ref: lumen-zero
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Validate evolution primitives
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check .lumen/a2a-worker/adaptive-entry.js
+          node --check .lumen/a2a-worker/autonomous-growth-loop-v11.js
+          node --check .lumen/a2a-worker/growth-multiplier-v2.js
+          node --check .lumen/a2a-worker/growth-engine-foundry-v2.js
+          node .lumen/a2a-worker/test-autonomous-growth-loop-v11.mjs
+          node .lumen/a2a-worker/test-growth-multiplier-v2.mjs
+          node .lumen/a2a-worker/test-growth-engine-foundry-v2.mjs
+
+      - name: Prove bounded evolution guardrails statically
+        shell: bash
+        run: |
+          set -euo pipefail
+          foundry=.lumen/a2a-worker/growth-engine-foundry-v2.js
+          multiplier=.lumen/a2a-worker/growth-multiplier-v2.js
+          growth=.lumen/a2a-worker/autonomous-growth-loop-v11.js
+          entry=.lumen/a2a-worker/adaptive-entry.js
+
+          grep -q 'autonomousSpendUsd:0' "$foundry"
+          grep -q 'createsExternalMessages:false' "$foundry"
+          grep -q 'executesGeneratedCode:false' "$foundry"
+          grep -q 'selfModifyingCode:false' "$foundry"
+          grep -q 'bindingActionsHumanGated:true' "$foundry"
+          grep -q 'verifiedRevenueOnly:true' "$foundry"
+          grep -q 'maxConcurrentExperiments:1' "$foundry"
+          grep -q 'autonomousSpendUsd:0' "$multiplier"
+          grep -q 'createsExternalMessages:false' "$multiplier"
+          grep -q 'selfModifyingCode:false' "$multiplier"
+          grep -q 'handleAutonomousGrowthLoop' "$entry"
+          grep -q 'handleGrowthMultiplierV2' "$entry"
+          grep -q 'handleGrowthEngineFoundryV2' "$entry"
+          grep -q 'codeSelfDeployment:false' "$growth"
+          echo 'LUMEN_EVOLUTION_STATIC_GUARDRAILS=green'
+
+      - name: Dry-run adaptive production bundle
+        working-directory: .lumen/a2a-worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp wrangler.toml wrangler.evolution-dry-run.toml
+          sed -i 's/^main = "opportunity-entry.js"$/main = "adaptive-entry.js"/' wrangler.evolution-dry-run.toml
+          grep -q '^main = "adaptive-entry.js"$' wrangler.evolution-dry-run.toml
+          npx --yes wrangler@4 deploy --dry-run --config wrangler.evolution-dry-run.toml
+
+  evolve-production:
+    needs: validate
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      BASE: 'https://lumen-zero-a2a.lumen-b2b.workers.dev'
+      OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.LUMEN_D1_ACCOUNT_ID }}
+      EVOLUTION_CYCLES_PER_DAY_TARGET: '12'
+    steps:
+      - name: Checkout LUMEN production source
+        uses: actions/checkout@v4
+        with:
+          ref: lumen-zero
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Production authority preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${OPPORTUNITY_ADMIN_TOKEN:-}"
+          test -n "${CLOUDFLARE_API_TOKEN:-}"
+          test -n "${CLOUDFLARE_ACCOUNT_ID:-}"
+          echo "EVOLUTION_TARGET_CYCLES_PER_DAY=$EVOLUTION_CYCLES_PER_DAY_TARGET"
+          echo 'EVOLUTION_AUTONOMOUS_SPEND_USD=0'
+          echo 'EVOLUTION_AUTONOMOUS_CONTRACT=false'
+          echo 'EVOLUTION_AUTONOMOUS_PURCHASE=false'
+          echo 'EVOLUTION_SELF_MODIFYING_CODE=false'
+
+      - name: Deploy adaptive evolution plane
+        id: deploy
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        working-directory: .lumen/a2a-worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp wrangler.toml wrangler.evolution-production.toml
+          sed -i 's/^main = "opportunity-entry.js"$/main = "adaptive-entry.js"/' wrangler.evolution-production.toml
+          grep -q '^main = "adaptive-entry.js"$' wrangler.evolution-production.toml
+          npx --yes wrangler@4 deploy --config wrangler.evolution-production.toml
+          echo 'deployed=true' >> "$GITHUB_OUTPUT"
+          echo 'LUMEN_EVOLUTION_DEPLOY=success'
+
+      - name: Verify live evolution plane and guardrails
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          get_retry() {
+            endpoint="$1"
+            output="$2"
+            for attempt in $(seq 1 15); do
+              code=$(curl --show-error --silent --max-time 30 -o "$output" -w '%{http_code}' \
+                -H 'cache-control: no-cache' "$BASE/$endpoint" || true)
+              if [ "$code" = '200' ]; then
+                return 0
+              fi
+              echo "VERIFY_RETRY endpoint=$endpoint attempt=$attempt http=$code"
+              sleep 4
+            done
+            cat "$output" 2>/dev/null || true
+            return 1
+          }
+
+          get_retry health /tmp/health.json
+          get_retry growth-multiplier/policy /tmp/multiplier-policy.json
+          get_retry growth-foundry/policy /tmp/foundry-policy.json
+          get_retry growth/policy /tmp/growth-policy.json
+
+          jq -e '.ok == true' /tmp/health.json >/dev/null
+          jq -e '
+            .ok == true and
+            .guardrails.autonomousSpendUsd == 0 and
+            .guardrails.autonomousPurchase == false and
+            .guardrails.autonomousContract == false and
+            .guardrails.createsExternalMessages == false and
+            .guardrails.bindingActionsHumanGated == true and
+            .guardrails.verifiedRevenueOnly == true and
+            .guardrails.selfModifyingCode == false
+          ' /tmp/multiplier-policy.json >/dev/null
+          jq -e '
+            .ok == true and
+            .guardrails.autonomousSpendUsd == 0 and
+            .guardrails.autonomousPurchase == false and
+            .guardrails.autonomousContract == false and
+            .guardrails.createsExternalMessages == false and
+            .guardrails.executesGeneratedCode == false and
+            .guardrails.selfModifyingCode == false and
+            .guardrails.maxConcurrentExperiments == 1 and
+            .guardrails.bindingActionsHumanGated == true and
+            .guardrails.verifiedRevenueOnly == true
+          ' /tmp/foundry-policy.json >/dev/null
+
+          echo 'LUMEN_EVOLUTION_LIVE_GUARDRAILS=green'
+
+      - name: Execute one measured evolution cycle
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          post() {
+            endpoint="$1"
+            output="$2"
+            code=$(curl --show-error --silent --max-time 90 -o "$output" -w '%{http_code}' \
+              -X POST "$BASE/$endpoint" \
+              -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+              -H 'accept: application/json' \
+              -H 'cache-control: no-cache')
+            echo "EVOLUTION_POST endpoint=$endpoint http=$code"
+            cat "$output"; echo
+            case "$code" in
+              200|201|202|204) ;;
+              *) return 1 ;;
+            esac
+            jq -e '.ok == true' "$output" >/dev/null
+          }
+
+          # Allocation learns first, Foundry runs one bounded experiment arm,
+          # then the commercial-truth growth loop selects the next safe priority.
+          post growth-multiplier/run /tmp/multiplier-run.json
+          post growth-foundry/run /tmp/foundry-run.json
+          post growth/run /tmp/growth-run.json
+
+          jq -e '
+            .guardrails.autonomousSpendUsd == 0 and
+            .guardrails.createsExternalMessages == false and
+            .guardrails.executesGeneratedCode == false and
+            .guardrails.selfModifyingCode == false and
+            .guardrails.bindingActionsHumanGated == true
+          ' /tmp/foundry-run.json >/dev/null
+
+          echo 'LUMEN_EVOLUTION_CYCLE=success'
+
+      - name: Read live evolution evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          get() {
+            endpoint="$1"
+            output="$2"
+            curl --fail --show-error --silent --max-time 30 \
+              -H 'cache-control: no-cache' "$BASE/$endpoint" > "$output"
+            echo "===== GET /$endpoint ====="
+            cat "$output"; echo
+          }
+
+          get growth-multiplier/status /tmp/multiplier-status.json
+          get growth-foundry/status /tmp/foundry-status.json
+          get growth/status /tmp/growth-status.json
+          get first-settlement/status /tmp/settlement-status.json
+
+          jq -e '.ok == true and .initialized == true and (.cycle | tonumber) >= 1' /tmp/foundry-status.json >/dev/null
+          jq -e '.guardrails.autonomousSpendUsd == 0 and .guardrails.bindingActionsHumanGated == true' /tmp/foundry-status.json >/dev/null
+          echo 'LUMEN_EVOLUTION_ENGINE=green'
+          echo "EVOLUTION_TARGET_CYCLES_PER_DAY=$EVOLUTION_CYCLES_PER_DAY_TARGET"
+
+      - name: Roll back adaptive plane if activation failed
+        if: failure() && steps.deploy.outcome == 'success'
+        working-directory: .lumen/a2a-worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'LUMEN_EVOLUTION_ROLLBACK=starting'
+          npx --yes wrangler@4 deploy --config wrangler.toml
+          echo 'LUMEN_EVOLUTION_ROLLBACK=completed'
