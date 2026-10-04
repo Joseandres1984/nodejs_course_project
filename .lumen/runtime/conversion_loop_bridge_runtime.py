@@ -7,16 +7,19 @@ from typing import Any, Dict, List
 from urllib.parse import urlencode
 
 import acquisition_campaigns as acq
+import commercial_owner_decision_runtime as commercial_decisions
 import conversion_loop_learning_runtime as learning
 import conversion_loop_runtime as loop
 import owner_decision_runtime as owner_decisions
 
-VERSION = "1.0-conversion-loop-campaign-bridge"
+VERSION = "1.1-conversion-loop-owner-decisions"
 BASE = (os.getenv("LUMEN_CONVERSION_BASE_URL") or loop.CONVERSION_BASE_URL).rstrip("/")
 
-# Consume authenticated owner decisions before the business cycle starts, then keep the exact
-# resolved proposal from being reopened by Continuous Learning. This does not widen production,
-# spending, contractual, connector, or authority permissions.
+# Consume authenticated owner decisions before the business cycle starts. Commercial close
+# commands are consumed first so the generic self-improvement bridge cannot classify them as
+# invalid. Both bridges remain fail-closed and do not widen payment, contract, connector, or
+# production-deployment authority.
+commercial_decisions.consume_commands()
 owner_decisions.consume_commands()
 owner_decisions.install_continuous_learning_guard()
 
@@ -114,5 +117,6 @@ print({"conversion_loop_bridge_runtime": {
     "supplier_offer": "buyer-signals",
     "partner_destination": "catalog",
     "primary_metric": "settled_revenue",
+    "commercial_owner_decisions": "active_simulated_close_only",
     "paid_media_spend": False,
 }}, flush=True)
