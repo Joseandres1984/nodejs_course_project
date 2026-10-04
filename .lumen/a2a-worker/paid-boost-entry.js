@@ -5,6 +5,7 @@ import { handleSovereign } from "./sovereign-runtime.js";
 import { handleRevenueLoopV5 } from "./revenue-loop-v5.js";
 import { FIRST_SETTLEMENT_MISSION_POLICY, getFirstSettlementMissionStatus } from "./first-settlement-mission-v1.js";
 import { RESPONSE_CLOSER_POLICY, getResponseCloserStatus } from "./response-closer-v1.js";
+import { handleFirstCashCloser } from "./first-cash-closer.js";
 export { LumenDeepWorkflow, LumenOpportunityWorkflow } from "./paid-boost-workflows.js";
 
 function adminAuthorized(request, env) {
@@ -61,6 +62,8 @@ export default {
     if (responseCloser) return responseCloser;
     const firstSettlementResponse = await handleFirstSettlementMission(request, env);
     if (firstSettlementResponse) return firstSettlementResponse;
+    const firstCashResponse = await handleFirstCashCloser(request, env);
+    if (firstCashResponse) return firstCashResponse;
     const v5Response = await handleRevenueLoopV5(request, env);
     if (v5Response) return v5Response;
     const sovereignResponse = await handleSovereign(request, env);
