@@ -1,0 +1,47 @@
+name: LUMEN ChatGPT MCP CI
+
+on:
+  push:
+    branches: [lumen-chatgpt-plugin-v1]
+    paths:
+      - '.lumen/a2a-worker/chatgpt-mcp.js'
+      - '.lumen/a2a-worker/chatgpt-mcp-entry.js'
+      - '.lumen/a2a-worker/wrangler.chatgpt.toml'
+      - '.github/scripts/lumen-chatgpt-mcp-smoke.mjs'
+      - '.github/workflows/lumen-chatgpt-mcp-ci.yml'
+  pull_request:
+    paths:
+      - '.lumen/a2a-worker/chatgpt-mcp.js'
+      - '.lumen/a2a-worker/chatgpt-mcp-entry.js'
+      - '.lumen/a2a-worker/wrangler.chatgpt.toml'
+      - '.github/scripts/lumen-chatgpt-mcp-smoke.mjs'
+
+jobs:
+  syntax-and-guardrails:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: JavaScript syntax
+        run: |
+          node --check .lumen/a2a-worker/chatgpt-mcp.js
+          node --check .lumen/a2a-worker/chatgpt-mcp-entry.js
+          node --check .github/scripts/lumen-chatgpt-mcp-smoke.mjs
+      - name: MCP initialize and tool discovery smoke
+        run: node .github/scripts/lumen-chatgpt-mcp-smoke.mjs
+      - name: Read-only deployment guardrails
+        run: |
+          set -euo pipefail
+          CFG=.lumen/a2a-worker/wrangler.chatgpt.toml
+          MCP=.lumen/a2a-worker/chatgpt-mcp.js
+          grep -q '^name = "lumen-chatgpt-mcp"$' "$CFG"
+          grep -q '^main = "chatgpt-mcp-entry.js"$' "$CFG"
+          ! grep -q '^\[triggers\]' "$CFG"
+          ! grep -q '^\[ai\]' "$CFG"
+          ! grep -q 'A2A_AUTONOMOUS_' "$CFG"
+          grep -q 'readOnlyHint: true' "$MCP"
+          grep -q 'triggersScans: false' "$MCP"
+          grep -q 'autonomousSpendUsd: 0' "$MCP"
+          echo 'READ_ONLY_MCP_GUARDRAILS_OK'
