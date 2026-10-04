@@ -1,5 +1,5 @@
 name = "lumen-zero-dashboard"
-main = "decision_center_worker.js"
+main = "unified_decision_center_worker.js"
 compatibility_date = "2026-09-20"
 workers_dev = true
 
