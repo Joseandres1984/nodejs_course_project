@@ -4,7 +4,8 @@ import { classifyCommercialResponse } from "./response-qualification.js";
 const VERSION = "1.1-shared-response-first-cash-closer";
 const SEND_TIMEOUT_MS = 15000;
 const FAST_LANE_VERSION = "1.0-first-settlement-fast-lane";
-const EVOLUTION_VERSION = "1.0-intramodule-first-cash-evolution";
+const EVOLUTION_VERSION = "1.1-conversion-rate-first-cash-evolution";
+const FAILED_RETRY_COOLDOWN_HOURS = 6;
 const FAST_LANE_PRIORITY = {
   "MP-QUOTE-SANITY": 100,
   "MP-SUPPLIER-SNAPSHOT": 90,
@@ -59,7 +60,8 @@ async function candidateRows(env) {
     JOIN lumen_opportunities o ON o.id=p.opportunity_id
     JOIN lumen_outreach_attempts x ON x.proposal_id=p.proposal_id
     LEFT JOIN lumen_first_cash_closer c ON c.proposal_id=p.proposal_id
-    WHERE p.quality_gate_status='PASS' AND c.proposal_id IS NULL AND x.agent_url IS NOT NULL
+    WHERE p.quality_gate_status='PASS' AND x.agent_url IS NOT NULL
+      AND (c.proposal_id IS NULL OR (c.status='SEND_FAILED' AND datetime(c.updated_at) <= datetime('now','-${FAILED_RETRY_COOLDOWN_HOURS} hours')))
       AND (x.response_text IS NOT NULL OR EXISTS(SELECT 1 FROM lumen_followups f2 WHERE f2.proposal_id=p.proposal_id AND f2.response_text IS NOT NULL AND TRIM(f2.response_text)<>''))
     ORDER BY x.updated_at DESC LIMIT 100`;
   try { const r = await env.DB.prepare(primary).all(); return r.results || []; } catch {}
@@ -70,7 +72,8 @@ async function candidateRows(env) {
     JOIN lumen_opportunities o ON o.id=p.opportunity_id
     JOIN lumen_outreach_attempts x ON x.proposal_id=p.proposal_id
     LEFT JOIN lumen_first_cash_closer c ON c.proposal_id=p.proposal_id
-    WHERE p.quality_gate_status='PASS' AND c.proposal_id IS NULL AND x.agent_url IS NOT NULL AND x.response_text IS NOT NULL
+    WHERE p.quality_gate_status='PASS' AND x.agent_url IS NOT NULL AND x.response_text IS NOT NULL
+      AND (c.proposal_id IS NULL OR (c.status='SEND_FAILED' AND datetime(c.updated_at) <= datetime('now','-${FAILED_RETRY_COOLDOWN_HOURS} hours')))
     ORDER BY x.updated_at DESC LIMIT 100`;
   try { const r = await env.DB.prepare(fallback).all(); return r.results || []; } catch { return []; }
 }
@@ -122,10 +125,10 @@ async function findEligibleCandidate(env) {
 }
 
 async function closerVariantStats(env) {
-  const empty = CLOSER_VARIANTS.map(v => ({ ...v, assignments: 0, responses: 0, settlements: 0, revenueUsd: 0, reward: 0, exploration: 0, score: 0 }));
+  const empty = CLOSER_VARIANTS.map(v => ({ ...v, assignments: 0, responses: 0, responseRate: 0, settlements: 0, settlementRate: 0, revenueUsd: 0, revenuePerAssignment: 0, reward: 0, exploration: 0, score: 0 }));
   try {
     const result = await env.DB.prepare(`SELECT a.strategy_id,
-      COUNT(DISTINCT a.proposal_id) AS assignments,
+      COUNT(DISTINCT CASE WHEN c.status IN ('SENT','SENT_TASK','RESPONDED') THEN a.proposal_id END) AS assignments,
       COUNT(DISTINCT CASE WHEN c.status='RESPONDED' THEN a.proposal_id END) AS responses,
       COUNT(DISTINCT b.receipt_id) AS settlements,
       COALESCE(SUM(b.amount_usd),0) AS revenue_usd
@@ -142,9 +145,26 @@ async function closerVariantStats(env) {
       const responses = Number(row.responses || 0);
       const settlements = Number(row.settlements || 0);
       const revenueUsd = Number(row.revenue_usd || 0);
+      const denominator = Math.max(1, assignments);
+      const responseRate = responses / denominator;
+      const settlementRate = settlements / denominator;
+      const revenuePerAssignment = revenueUsd / denominator;
       const reward = settlements * 10000 + revenueUsd * 100 + responses * 10;
       const exploration = 40 * Math.sqrt(Math.log(totalAssignments + 2) / (assignments + 1));
-      return { ...variant, assignments, responses, settlements, revenueUsd, reward, exploration, score: reward + exploration };
+      const score = settlementRate * 10000 + revenuePerAssignment * 100 + responseRate * 120 + exploration;
+      return {
+        ...variant,
+        assignments,
+        responses,
+        responseRate: Number(responseRate.toFixed(4)),
+        settlements,
+        settlementRate: Number(settlementRate.toFixed(4)),
+        revenueUsd: Number(revenueUsd.toFixed(2)),
+        revenuePerAssignment: Number(revenuePerAssignment.toFixed(2)),
+        reward,
+        exploration: Number(exploration.toFixed(3)),
+        score: Number(score.toFixed(3))
+      };
     });
   } catch {
     return empty;
@@ -165,7 +185,7 @@ async function selectCloserVariant(env, proposalId) {
     if (minimumAssignments < 2 && a.assignments !== b.assignments) return a.assignments - b.assignments;
     return b.score - a.score || a.assignments - b.assignments || a.id.localeCompare(b.id);
   })[0] || { id: "direct_checkout" };
-  return { variantId: selected.id, reason: selected.assignments < 2 ? "bounded_exploration" : "verified_outcome_exploitation", stats };
+  return { variantId: selected.id, reason: selected.assignments < 2 ? "bounded_exploration" : "conversion_rate_exploitation", stats };
 }
 
 function closerMessage(row, variantId = "direct_checkout") {
@@ -308,8 +328,12 @@ export async function runFirstCashCloser(env, { force = false } = {}) {
         version: EVOLUTION_VERSION,
         strategyId: evolution.variantId,
         selectionReason: evolution.reason,
+        strategyAssignments: Number(selectedStats?.assignments || 0),
+        strategyResponseRate: Number(selectedStats?.responseRate || 0),
         strategySettlements: Number(selectedStats?.settlements || 0),
+        strategySettlementRate: Number(selectedStats?.settlementRate || 0),
         strategyRevenueUsd: Number(selectedStats?.revenueUsd || 0),
+        strategyRevenuePerAssignment: Number(selectedStats?.revenuePerAssignment || 0),
         selfModifyingCode: false,
         priceMutation: false
       },
@@ -318,7 +342,7 @@ export async function runFirstCashCloser(env, { force = false } = {}) {
   } catch (error) {
     const err = clean(error?.message || error, 500);
     await record(env, candidate, { status: "SEND_FAILED", error: err });
-    return { ok: false, sent: false, version: VERSION, proposalId: candidate.proposal_id, status: "SEND_FAILED", error: err, evolution: { version: EVOLUTION_VERSION, strategyId: evolution.variantId } };
+    return { ok: false, sent: false, version: VERSION, proposalId: candidate.proposal_id, status: "SEND_FAILED", error: err, retryAfterHours: FAILED_RETRY_COOLDOWN_HOURS, evolution: { version: EVOLUTION_VERSION, strategyId: evolution.variantId } };
   } finally { timeout.clear(); }
 }
 
@@ -328,7 +352,7 @@ async function statsData(env) {
   try { row = await env.DB.prepare("SELECT COUNT(*) total,SUM(CASE WHEN status IN ('SENT','SENT_TASK','RESPONDED') THEN 1 ELSE 0 END) sent,SUM(CASE WHEN status='RESPONDED' THEN 1 ELSE 0 END) responded,SUM(CASE WHEN status='SEND_FAILED' THEN 1 ELSE 0 END) failed FROM lumen_first_cash_closer").first(); } catch {}
   const candidate = await findEligibleCandidate(env);
   const variants = await closerVariantStats(env);
-  const ranked = [...variants].sort((a,b) => b.settlements - a.settlements || b.revenueUsd - a.revenueUsd || b.responses - a.responses || b.score - a.score);
+  const ranked = [...variants].sort((a,b) => b.score - a.score || b.settlementRate - a.settlementRate || b.revenuePerAssignment - a.revenuePerAssignment || b.responseRate - a.responseRate);
   return {
     total: Number(row?.total || 0),
     sent: Number(row?.sent || 0),
@@ -339,7 +363,7 @@ async function statsData(env) {
     readyResponseClass: candidate?.responseClass || null,
     readyLearnedPriority: Number(candidate?.learnedPriority || 0),
     championStrategy: ranked[0]?.id || null,
-    strategyStats: ranked.map(({ id, assignments, responses, settlements, revenueUsd, score }) => ({ id, assignments, responses, settlements, revenueUsd, score })),
+    strategyStats: ranked.map(({ id, assignments, responses, responseRate, settlements, settlementRate, revenueUsd, revenuePerAssignment, score }) => ({ id, assignments, responses, responseRate, settlements, settlementRate, revenueUsd, revenuePerAssignment, score })),
     autonomousEnabled: boolVar(env?.A2A_AUTONOMOUS_OUTREACH, false) && boolVar(env?.A2A_AUTONOMOUS_CONVERSION_CLOSE, false)
   };
 }
@@ -363,14 +387,17 @@ export async function handleFirstCashCloser(request, env) {
       intramoduleEvolution: {
         enabled: true,
         boundedVariants: CLOSER_VARIANTS.map(v => v.id),
-        rewardOrder: ["verified_settlement", "verified_revenue", "qualified_response", "bounded_exploration"],
+        rewardOrder: ["verified_settlement_rate", "verified_revenue_per_successful_close", "close_response_rate", "bounded_exploration"],
         offerPriorityLearnsFromVerifiedSettlements: true,
         championChallenger: true,
+        conversionRateScoring: true,
+        countsOnlySuccessfulCloseSendsAsExposure: true,
         selfModifyingCode: false,
         mutatesPrice: false,
         mutatesAuthority: false
       },
       fastLane: { enabled: true, objective: "first_verified_settlement_then_repeat_verified_winners", priorityOrder: Object.keys(FAST_LANE_PRIORITY), learnedOutcomeBoost: true, maxExternalMessagesPerRun: 1 },
+      failedSendRetryCooldownHours: FAILED_RETRY_COOLDOWN_HOURS,
       maxExternalMessagesPerRun: 1,
       autonomousDiscounting: false,
       autonomousSpend: false,
