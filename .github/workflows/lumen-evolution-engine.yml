@@ -205,8 +205,6 @@ jobs:
             jq -e '.ok == true' "$output" >/dev/null
           }
 
-          # Allocation learns first, Foundry runs one bounded experiment arm,
-          # then the commercial-truth growth loop selects the next safe priority.
           post growth-multiplier/run /tmp/multiplier-run.json
           post growth-foundry/run /tmp/foundry-run.json
           post growth/run /tmp/growth-run.json
@@ -237,10 +235,16 @@ jobs:
           get growth-multiplier/status /tmp/multiplier-status.json
           get growth-foundry/status /tmp/foundry-status.json
           get growth/status /tmp/growth-status.json
-          get first-settlement/status /tmp/settlement-status.json
 
+          jq -e '.ok == true and .initialized == true and (.cycle | tonumber) >= 1' /tmp/multiplier-status.json >/dev/null
           jq -e '.ok == true and .initialized == true and (.cycle | tonumber) >= 1' /tmp/foundry-status.json >/dev/null
           jq -e '.guardrails.autonomousSpendUsd == 0 and .guardrails.bindingActionsHumanGated == true' /tmp/foundry-status.json >/dev/null
+          jq -e '.initialized == true and .guardrails.autonomousOutgoingSpend == false and .guardrails.bindingActionsHumanGated == true' /tmp/growth-status.json >/dev/null
+
+          verified_revenue=$(jq -r '.snapshot.B2B.verifiedRevenueUsd30d // 0' /tmp/multiplier-status.json)
+          verified_settlements=$(jq -r '.snapshot.B2B.verifiedSettlements30d // 0' /tmp/multiplier-status.json)
+          echo "LUMEN_EVOLUTION_VERIFIED_REVENUE_USD_30D=$verified_revenue"
+          echo "LUMEN_EVOLUTION_VERIFIED_SETTLEMENTS_30D=$verified_settlements"
           echo 'LUMEN_EVOLUTION_ENGINE=green'
           echo "EVOLUTION_TARGET_CYCLES_PER_DAY=$EVOLUTION_CYCLES_PER_DAY_TARGET"
 
@@ -251,5 +255,5 @@ jobs:
         run: |
           set -euo pipefail
           echo 'LUMEN_EVOLUTION_ROLLBACK=starting'
-          npx --yes wrangler@4 deploy --config wrangler.toml
+          npx --yes wrangler@4 rollback --name lumen-zero-a2a --message 'LUMEN Evolution Engine automatic rollback after failed activation'
           echo 'LUMEN_EVOLUTION_ROLLBACK=completed'
