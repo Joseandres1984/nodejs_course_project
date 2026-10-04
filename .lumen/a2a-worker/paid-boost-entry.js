@@ -6,7 +6,7 @@ import { handleRevenueLoopV5 } from "./revenue-loop-v5.js";
 import { FIRST_SETTLEMENT_MISSION_POLICY, getFirstSettlementMissionStatus } from "./first-settlement-mission-v1.js";
 import { RESPONSE_CLOSER_POLICY, getResponseCloserStatus } from "./response-closer-v1.js";
 import { handleFirstCashCloser } from "./first-cash-closer.js";
-import { runAutonomousSupplierLaunch } from "./supplier-market-launch.js";
+import { runSupplierMarketLaunchEvolution } from "./supplier-market-launch.js";
 export { LumenDeepWorkflow, LumenOpportunityWorkflow } from "./paid-boost-workflows.js";
 
 function adminAuthorized(request, env) {
@@ -47,7 +47,7 @@ export async function handlePaidBoost(request, env) {
     const runs = await env.DB.prepare("SELECT * FROM lumen_paid_boost_runs ORDER BY updated_at DESC LIMIT 15").all();
     const opportunities = await env.DB.prepare("SELECT stage,COUNT(*) count FROM lumen_paid_boost_opportunities GROUP BY stage").all();
     const ai = await env.DB.prepare("SELECT calls,reserved_neurons,updated_at FROM lumen_paid_boost_ai_usage WHERE day=?").bind(new Date().toISOString().slice(0,10)).first().catch(() => null);
-    return Response.json({ ok: true, version: PAID_BOOST_POLICY.version, workflowBindingsReady: Boolean(env.LUMEN_DEEP_WORKFLOW && env.LUMEN_OPPORTUNITY_WORKFLOW), runs: runs.results, opportunities: opportunities.results, ai }, { headers: { "cache-control": "no-store" } });
+    return Response.json({ ok: true, version: PAID_BOOST_POLICY.version, workflowBindingsReady: Boolean(env.LUMEN_DEEP_WORKFLOW && env.LUMEN_OPPORTUNITY_WORKFLOW), runs: runs.results, opportunities: opportunities.results, ai }, { headers: { "cache-control":"no-store" } });
   }
   if (request.method === "POST" && path === "/paid-boost/deep/run") {
     if (!env.LUMEN_DEEP_WORKFLOW) return Response.json({ ok: false, error: "workflow_binding_missing" }, { status: 503 });
@@ -76,7 +76,7 @@ export default {
     if (!env.LUMEN_DEEP_WORKFLOW || !env.LUMEN_OPPORTUNITY_WORKFLOW) throw new Error("paid_boost_workflow_bindings_required");
     if (controller.cron === DEEP_CRON) { ctx.waitUntil(startDeepCycle(env, controller.scheduledTime)); return; }
     const minute = new Date(Number(controller?.scheduledTime || Date.now())).getUTCMinutes();
-    if (minute === 7) ctx.waitUntil(runAutonomousSupplierLaunch(env));
+    if (minute === 7) ctx.waitUntil(runSupplierMarketLaunchEvolution(env));
     return adaptive.scheduled(controller, { ...withBudgetedAi(env), LUMEN_DEEP_WORKFLOW_MANAGED: true }, ctx);
   }
 };
