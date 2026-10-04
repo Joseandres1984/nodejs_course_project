@@ -1,4 +1,4 @@
-const VERSION = "1.7-intramodule-proposal-evolution";
+const VERSION = "1.6-first-cash-microbuyer-revision";
 const PRIORITY_BRIDGE_VERSION = "4.1-sovereign-revenue-priority";
 const EVOLUTION_VERSION = "1.0-intramodule-proposal-evolution";
 
