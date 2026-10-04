@@ -28,3 +28,15 @@ jobs:
         run: node .lumen/a2a-worker/test-revenue-loop-v5.mjs
       - name: Existing response qualification regression
         run: node --test .lumen/a2a-worker/response-qualification.test.js .lumen/a2a-worker/response-closer-v2.test.js
+      - name: Observe live intermediary inventory baseline
+        env:
+          OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          curl -fsS --max-time 20 -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" "$BASE/product-commerce/status" -o product-commerce.json
+          curl -fsS --max-time 20 -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" "$BASE/supplier-intake/status" -o supplier-intake.json
+          curl -fsS --max-time 20 -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" "$BASE/commerce-machine/status" -o commerce-machine.json
+          jq '{productCommerce:{version:.version,lastRun:.lastRun,counts:.counts,topCandidateCount:(.topCandidates|length)}}' product-commerce.json
+          jq '{supplierIntake:{version:.version,connected:.connected,storeId:.storeId,lastRun:.lastRun,counts:.counts,topCandidateCount:(.topCandidates|length)}}' supplier-intake.json
+          jq '{commerceMachine:{version:.version,lastRun:.lastRun,counts:.counts}}' commerce-machine.json
