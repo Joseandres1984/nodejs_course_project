@@ -1,9 +1,9 @@
 import { buildTrackedCheckoutUrl } from "./commercial-checkout-link.js";
 import { classifyCommercialResponse } from "./response-qualification.js";
 
-const VERSION = "1.2-intramodule-first-cash-evolution";
+const VERSION = "1.1-shared-response-first-cash-closer";
 const SEND_TIMEOUT_MS = 15000;
-const FAST_LANE_VERSION = "1.1-learning-first-settlement-fast-lane";
+const FAST_LANE_VERSION = "1.0-first-settlement-fast-lane";
 const EVOLUTION_VERSION = "1.0-intramodule-first-cash-evolution";
 const FAST_LANE_PRIORITY = {
   "MP-QUOTE-SANITY": 100,
