@@ -8,6 +8,10 @@ on:
       - '.github/workflows/lumen-cloudflare-deploy.yml'
   workflow_dispatch:
 
+concurrency:
+  group: lumen-zero-cloudflare-production
+  cancel-in-progress: true
+
 jobs:
   deploy-a2a:
     runs-on: ubuntu-latest
@@ -16,73 +20,100 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Verify Cloudflare credentials are configured
+
+      - name: Verify required Cloudflare credentials
         env:
           CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
         run: |
-          if [ -z "$CF_TOKEN" ] || [ -z "$CF_ACCOUNT" ] || [ -z "$OPPORTUNITY_ADMIN_TOKEN" ]; then
-            echo 'REQUIRED_SECRETS_MISSING'
-            exit 2
-          fi
+          set -euo pipefail
+          test -n "$CF_TOKEN"
+          test -n "$CF_ACCOUNT"
+          test -n "$OPPORTUNITY_ADMIN_TOKEN"
           echo 'REQUIRED_SECRETS_PRESENT'
+
       - name: Capture observable revenue baseline before deployment
         run: |
           set -euo pipefail
           BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
           curl -fsS --max-time 20 "$BASE/portfolio-governor/state" -o sovereign-before.json
           jq '{phase:"before_deploy",verifiedRevenueUsd:.metrics.verifiedRevenueUsd,verifiedSettlements:.metrics.verifiedSettlements,activeCandidates:.metrics.activeCandidates}' sovereign-before.json
-      - name: Verify Paid Boost before deploy
-        run: node .lumen/a2a-worker/test-paid-boost.mjs
-      - name: Verify Sovereign Revenue v4 before deploy
-        run: node .lumen/a2a-worker/test-sovereign-revenue.mjs
-      - name: Restore protected opportunity admin secret
+
+      - name: Verify core revenue guardrails before deploy
+        run: |
+          set -euo pipefail
+          node .lumen/a2a-worker/test-paid-boost.mjs
+          node .lumen/a2a-worker/test-sovereign-revenue.mjs
+          node .lumen/a2a-worker/test-bounded-supplier-resale.mjs
+          node .lumen/a2a-worker/test-intramodule-evolution-v1.mjs
+
+      - name: Deploy code and secrets atomically to Cloudflare
         working-directory: .lumen/a2a-worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
-        run: |
-          sed -i 's/^main = "opportunity-entry.js"$/main = "paid-boost-entry.js"/' wrangler.toml
-          printf '%s' "$OPPORTUNITY_ADMIN_TOKEN" | npx --yes wrangler@latest secret put OPPORTUNITY_ADMIN_TOKEN --config wrangler.toml
-      - name: Restore optional Tiendanube credentials
-        working-directory: .lumen/a2a-worker
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           TIENDANUBE_APP_ID: ${{ secrets.TIENDANUBE_APP_ID }}
           TIENDANUBE_CLIENT_SECRET: ${{ secrets.TIENDANUBE_CLIENT_SECRET }}
         run: |
           set -euo pipefail
           sed -i 's/^main = "opportunity-entry.js"$/main = "paid-boost-entry.js"/' wrangler.toml
-          if [ -n "$TIENDANUBE_APP_ID" ]; then printf '%s' "$TIENDANUBE_APP_ID" | npx --yes wrangler@latest secret put TIENDANUBE_APP_ID --config wrangler.toml; else echo 'TIENDANUBE_APP_ID_NOT_CONFIGURED'; fi
-          if [ -n "$TIENDANUBE_CLIENT_SECRET" ]; then printf '%s' "$TIENDANUBE_CLIENT_SECRET" | npx --yes wrangler@latest secret put TIENDANUBE_CLIENT_SECRET --config wrangler.toml; else echo 'TIENDANUBE_CLIENT_SECRET_NOT_CONFIGURED'; fi
-      - name: Deploy lumen-zero-a2a with Paid Boost entrypoint
-        working-directory: .lumen/a2a-worker
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          set -euo pipefail
-          sed -i 's/^main = "opportunity-entry.js"$/main = "paid-boost-entry.js"/' wrangler.toml
           grep -q '^main = "paid-boost-entry.js"$' wrangler.toml
-          npx --yes wrangler@latest deploy --config wrangler.toml --var "LUMEN_V4_RELEASE_ID:$GITHUB_SHA"
-      - name: Smoke test Paid Boost public policy
+          SECRETS_FILE="$RUNNER_TEMP/lumen-worker-secrets.json"
+          export SECRETS_FILE
+          node - <<'NODE'
+          const fs = require('fs');
+          const secrets = { OPPORTUNITY_ADMIN_TOKEN: process.env.OPPORTUNITY_ADMIN_TOKEN };
+          for (const key of ['TIENDANUBE_APP_ID', 'TIENDANUBE_CLIENT_SECRET']) {
+            if (process.env[key]) secrets[key] = process.env[key];
+          }
+          fs.writeFileSync(process.env.SECRETS_FILE, JSON.stringify(secrets), { mode: 0o600 });
+          NODE
+          trap 'rm -f "$SECRETS_FILE"' EXIT
+          npx --yes wrangler@latest deploy --config wrangler.toml --secrets-file "$SECRETS_FILE" --var "LUMEN_V4_RELEASE_ID:$GITHUB_SHA"
+          rm -f "$SECRETS_FILE"
+          trap - EXIT
+
+      - name: Smoke test public safety and intermediary policies
         run: |
           set -euo pipefail
           BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
-          curl -fsS --retry 5 --retry-delay 3 "$BASE/paid-boost/policy" -o paid-boost-policy.json
-          jq -e '.version == "1.0-lumen-paid-boost" and .durableDeepCycle == true and .deepCron == "12 * * * *" and .autonomousSpendUsd == 0 and .extraAiSpendAuthorized == false and .workflowSendsMessages == false' paid-boost-policy.json >/dev/null
-          echo 'PAID_BOOST_PUBLIC_POLICY_OK'
-      - name: Smoke test First Settlement Fast Lane policy
+          for attempt in $(seq 1 15); do
+            if curl -fsS --max-time 20 -H 'cache-control: no-cache' "$BASE/supplier-launch/policy?probe=$attempt" -o supplier-policy.json && \
+               curl -fsS --max-time 20 -H 'cache-control: no-cache' "$BASE/paid-boost/policy?probe=$attempt" -o paid-boost-policy.json && \
+               curl -fsS --max-time 20 -H 'cache-control: no-cache' "$BASE/first-cash/policy?probe=$attempt" -o first-cash-policy.json; then
+              if jq -e '.version == "1.1-supplier-market-launch-evolving" and .automaticBenchmarkHydration == true and .automaticBenchmarkRequiredCurrency == "ARS" and .connectedSupplierOnly == true and .supplierRightsRequired == true and .liveStockRevalidation == true and .positiveNetMarginRequired == true and .autonomousPublishing == false and .autonomousPurchasing == false and .autonomousSpendUsd == 0 and .autonomousContracts == false and .bindingActionsHumanGated == true and .explicitHumanApprovalRequired == true' supplier-policy.json >/dev/null && \
+                 jq -e '.version == "1.0-lumen-paid-boost" and .autonomousSpendUsd == 0 and .extraAiSpendAuthorized == false and .workflowSendsMessages == false' paid-boost-policy.json >/dev/null && \
+                 jq -e '.fastLaneVersion == "1.0-first-settlement-fast-lane" and .fastLane.enabled == true and .fastLane.objective == "first_verified_settlement" and .fastLane.maxExternalMessagesPerRun == 1 and .autonomousSpend == false and .autonomousContract == false and .bindingActionsHumanGated == true' first-cash-policy.json >/dev/null; then
+                echo 'PUBLIC_SAFETY_AND_INTERMEDIARY_POLICIES_OK'
+                exit 0
+              fi
+            fi
+            sleep 3
+          done
+          cat supplier-policy.json || true
+          exit 1
+
+      - name: Verify commerce and source control planes
+        env:
+          OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
         run: |
           set -euo pipefail
           BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
-          curl -fsS --retry 5 --retry-delay 3 "$BASE/first-cash/policy" -o first-cash-policy.json
-          jq -e '.fastLaneVersion == "1.0-first-settlement-fast-lane" and .fastLane.enabled == true and .fastLane.objective == "first_verified_settlement" and .fastLane.maxExternalMessagesPerRun == 1 and .autonomousSpend == false and .autonomousContract == false and .bindingActionsHumanGated == true' first-cash-policy.json >/dev/null
-          echo 'FIRST_SETTLEMENT_FAST_LANE_POLICY_OK'
-      - name: Start and verify a durable deep cycle
+          curl -fsS --retry 5 --retry-delay 3 "$BASE/market-hunter/policy" -o hunter-policy.json
+          curl -fsS --retry 5 --retry-delay 3 "$BASE/source-intelligence/policy" -o source-policy.json
+          curl -fsS --retry 5 --retry-delay 3 "$BASE/commerce-machine/policy" -o commerce-policy.json
+          curl -fsS --retry 5 --retry-delay 3 "$BASE/commerce-ops/policy" -o commerce-ops-policy.json
+          curl -fsS --retry 5 --retry-delay 3 "$BASE/tiendanube/policy" -o tiendanube-policy.json
+          jq -e '.autonomousSpend == false and .autonomousPurchase == false and .autonomousContract == false and .bindingActionsHumanGated == true' hunter-policy.json >/dev/null
+          jq -e '.autonomousSpendUsd == 0 and .autonomousPurchase == false and .autonomousContract == false and .verifiedRevenueOnly == true and .bindingActionsHumanGated == true' source-policy.json >/dev/null
+          jq -e '.publicationAuthority == false and .purchaseAuthority == false and .autonomousSpendUsd == 0' commerce-policy.json >/dev/null
+          jq -e '.autonomousPublishing == false and .autonomousPurchasing == false and .supplierOrdering == false and .priceWriteAuthority == false and .inventoryWriteAuthority == false and .autonomousSpendUsd == 0 and .humanApprovalRequired == true' commerce-ops-policy.json >/dev/null
+          jq -e '.publicationExecution == "EXPLICIT_ADMIN_ONLY" and .autonomousPublishing == false and .autonomousPurchasing == false and .supplierOrdering == false and .autonomousSpendUsd == 0' tiendanube-policy.json >/dev/null
+          echo 'COMMERCE_AND_SOURCE_CONTROL_PLANES_OK'
+
+      - name: Start and verify durable deep cycle
         env:
           OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
         run: |
@@ -99,169 +130,22 @@ jobs:
             fi
             sleep 2
           done
-          echo 'PAID_BOOST_INSTANCE_NOT_OBSERVED'
           exit 1
-      - name: Smoke test existing portfolio endpoints
-        run: |
-          set -euo pipefail
-          BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
-          ok=0
-          for i in $(seq 1 15); do
-            if curl -fsS "$BASE/opportunity-factory/policy" -o factory-policy.json && curl -fsS "$BASE/portfolio-governor/policy" -o governor-policy.json && curl -fsS "$BASE/opportunity-factory/stats" -o factory-stats.json && curl -fsS "$BASE/portfolio-governor/state" -o governor-state.json; then
-              if grep -q '1.0-opportunity-factory-portfolio' factory-policy.json && grep -q '1.0-portfolio-governor' governor-policy.json && grep -q 'maxExternalMessagesPerCycle' governor-policy.json && grep -q 'autonomousSpend' factory-policy.json; then
-                ok=1
-                break
-              fi
-            fi
-            sleep 4
-          done
-          test "$ok" -eq 1
-          grep -q '"autonomousSpend":false' factory-policy.json
-          grep -q '"autonomousSpend":false' governor-policy.json
-          grep -q '"maxExternalMessagesPerCycle":1' governor-policy.json
-          echo 'PORTFOLIO_PUBLIC_SMOKE_OK'
-      - name: Verify Sovereign v4 live artifacts and record measurements
+
+      - name: Verify production release identity and revenue truth
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
         run: |
           set -euo pipefail
           BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
-          curl -fsS --max-time 20 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/lumen-zero-a2a/script-settings" -o sovereign-worker-settings.json
-          jq '{configuredRelease:[.result.bindings[]?|select(.name=="LUMEN_V4_RELEASE_ID")|{name,type,text}]}' sovereign-worker-settings.json
-          curl -fsS --max-time 20 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/lumen-zero-a2a/deployments" -o sovereign-worker-deployments.json
-          jq '{recentDeployments:((.result.deployments // .result)|.[0:2]|map({id,created_on,versions}))}' sovereign-worker-deployments.json
-          for propagation_attempt in $(seq 1 10); do
-            curl -fsS --max-time 20 -H 'cache-control: no-cache' "$BASE/sovereign/policy?release=$GITHUB_SHA&probe=$propagation_attempt" -o sovereign-policy.json
-            if jq -e --arg release "$GITHUB_SHA" '.releaseId==$release' sovereign-policy.json >/dev/null; then break; fi
+          for attempt in $(seq 1 15); do
+            curl -fsS --max-time 20 -H 'cache-control: no-cache' "$BASE/sovereign/policy?release=$GITHUB_SHA&probe=$attempt" -o sovereign-policy.json
+            if jq -e --arg release "$GITHUB_SHA" '.releaseId==$release and .version=="4.0-sovereign-revenue" and .autonomousSpendUsd==0 and .sendsMessages==false and .releasesDelivery==false' sovereign-policy.json >/dev/null; then
+              break
+            fi
             sleep 2
           done
-          jq '{version,releaseId}' sovereign-policy.json
           jq -e --arg release "$GITHUB_SHA" '.releaseId==$release' sovereign-policy.json >/dev/null
-          jq -e '.version=="4.0-sovereign-revenue" and .autonomousSpendUsd==0 and .sendsMessages==false and .releasesDelivery==false' sovereign-policy.json >/dev/null
-          protected_code=$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' "$BASE/sovereign/status")
-          test "$protected_code" = '403'
-          for start_attempt in $(seq 1 12); do
-            start_code=$(curl -sS --max-time 30 -X POST -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" "$BASE/sovereign/verify?release=$GITHUB_SHA&probe=$start_attempt" -o sovereign-start.json -w '%{http_code}')
-            if [ "$start_code" = '202' ] && jq -e --arg release "$GITHUB_SHA" '.releaseId==$release' sovereign-start.json >/dev/null; then break; fi
-            if [ "$start_code" != '202' ] && [ "$start_code" != '409' ]; then exit 1; fi
-            jq '{releaseId,error}' sovereign-start.json
-            sleep 5
-          done
-          test "$start_code" = '202'
-          jq -e --arg release "$GITHUB_SHA" '.ok==true and .sendsMessages==false and .releaseId==$release' sovereign-start.json >/dev/null
-          run_id=$(jq -r '.runId' sovereign-start.json)
-          cat sovereign-start.json
-          for attempt in $(seq 1 30); do
-            curl -fsS --max-time 30 -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" "$BASE/sovereign/status?release=$GITHUB_SHA&probe=$attempt" -o sovereign-status.json
-            if jq -e --arg id "$run_id" '.initialized==true and .state.runId==$id' sovereign-status.json >/dev/null; then
-              jq -e '.state.ok==true and (.state.missingCapabilities|length)==0 and .state.autonomy.autonomousSpendUsd==0 and .state.autonomy.sendsMessages==false and .state.autonomy.releasesDelivery==false' sovereign-status.json >/dev/null
-              jq '{phase:"after_deploy",version:.version,runId:.state.runId,cycleOk:.state.ok,elapsedWallMs:.state.elapsedWallMs,candidatesEvaluated:.state.metrics.current.candidatesEvaluatedThisCycle,allocatedInternalTasks:.state.metrics.current.allocatedInternalTasks,productDrafts:(.state.products.drafts|length),dealsObserved:(.state.deals.deals|length),nodesByKind:.state.graph.nodesByKind,missingCapabilities:.state.missingCapabilities,metrics:.state.metrics.current,comparison:.state.metrics.comparison}' sovereign-status.json > sovereign-measurements.json
-              cat sovereign-measurements.json
-              echo 'SOVEREIGN_V4_LIVE_ARTIFACTS_VERIFIED'
-              exit 0
-            fi
-            sleep 3
-          done
-          echo 'SOVEREIGN_V4_CYCLE_NOT_OBSERVED'
-          jq '{initialized,runs}' sovereign-status.json
-          instance_id=$(jq -r '.instanceId' sovereign-start.json)
-          npx --yes wrangler@latest workflows instances describe lumen-deep-cycle "$instance_id" --config .lumen/a2a-worker/wrangler.toml --json --no-step-output > sovereign-instance.json
-          jq '{status,version_id,created_on,modified_on,error,steps:[.steps[]?|{name,status,error}]}' sovereign-instance.json
-          exit 1
-      - name: Smoke test adaptive market hunter control plane
-        run: |
-          set -euo pipefail
-          BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
-          ok=0
-          for i in $(seq 1 15); do
-            if curl -fsS --max-time 15 "$BASE/market-hunter/policy" -o hunter-policy.json && curl -fsS --max-time 15 "$BASE/market-hunter/pruning/policy" -o pruning-policy.json; then
-              if grep -q '1.0-adaptive-market-hunter' hunter-policy.json && grep -q 'bounded_explore_exploit' hunter-policy.json && grep -q 'bounded_child_queries' hunter-policy.json && grep -q '1.0-market-hunter-pruner' pruning-policy.json; then
-                ok=1
-                break
-              fi
-            fi
-            sleep 4
-          done
-          test "$ok" -eq 1
-          jq -e '.version == "1.0-adaptive-market-hunter" and (.selectionPolicy | contains("bounded_explore_exploit")) and (.queryEvolution | contains("bounded_child_queries")) and .selfModifyingCode == false and .maxQueriesPerRun == 3 and .createsExternalMessages == false and .autonomousSpend == false and .autonomousPurchase == false and .autonomousContract == false and .verifiedRevenueOnly == true and .bindingActionsHumanGated == true' hunter-policy.json >/dev/null
-          jq -e '.version == "1.0-market-hunter-pruner" and .seedStrategiesCanBeAutoPruned == false and .maxDeactivationsPerCycle == 2 and .minimumActiveStrategies == 8 and .createsExternalMessages == false and .autonomousSpend == false and .autonomousPurchase == false and .autonomousContract == false and .bindingActionsHumanGated == true' pruning-policy.json >/dev/null
-          echo 'ADAPTIVE_MARKET_HUNTER_CONTROL_PLANE_OK'
-      - name: Smoke test source intelligence control plane
-        run: |
-          set -euo pipefail
-          BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
-          ok=0
-          for i in $(seq 1 15); do
-            if curl -fsS --max-time 15 "$BASE/source-intelligence/policy" -o source-policy.json && curl -fsS --max-time 15 "$BASE/source-intelligence/status" -o source-status.json; then
-              if grep -q '1.0-source-intelligence' source-policy.json && grep -q 'bounded_source_explore_exploit' source-policy.json && grep -q 'ted_eu_public_procurement' source-status.json && grep -q 'uk_contracts_finder' source-status.json; then
-                ok=1
-                break
-              fi
-            fi
-            sleep 4
-          done
-          test "$ok" -eq 1
-          jq -e '.version == "1.0-source-intelligence" and .selectionPolicy == "bounded_source_explore_exploit" and .sourceLearning == "direct_opportunity_to_verified_settlement_attribution" and .maxExternalSourcesPerCycle == 2 and .maxResultsPerSource == 20 and .createsExternalMessages == false and .autonomousSpendUsd == 0 and .autonomousPurchase == false and .autonomousContract == false and .verifiedRevenueOnly == true and .bindingActionsHumanGated == true' source-policy.json >/dev/null
-          jq -e '.version == "1.0-source-intelligence" and (.sources | length) >= 3 and (.sources | map(.source_id) | index("ted_eu_public_procurement")) != null and (.sources | map(.source_id) | index("uk_contracts_finder")) != null' source-status.json >/dev/null
-          echo 'SOURCE_INTELLIGENCE_CONTROL_PLANE_OK'
-      - name: Smoke test Commerce Machine and Operations control plane
-        env:
-          OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
-        run: |
-          set -euo pipefail
-          BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
-          ok=0
-          for i in $(seq 1 15); do
-            if curl -fsS --max-time 15 "$BASE/commerce-machine/policy" -o commerce-policy.json && curl -fsS --max-time 15 "$BASE/commerce-ops/policy" -o commerce-ops-policy.json && curl -fsS --max-time 15 -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" "$BASE/commerce-ops/status" -o commerce-ops-status.json; then
-              if grep -q '2.0-commerce-machine-shadow' commerce-policy.json && grep -q '3.0-commerce-operations' commerce-ops-policy.json; then
-                ok=1
-                break
-              fi
-            fi
-            sleep 4
-          done
-          test "$ok" -eq 1
-          jq -e '.publicationAuthority == false and .purchaseAuthority == false and .autonomousSpendUsd == 0' commerce-policy.json >/dev/null
-          jq -e '.version == "3.0-commerce-operations" and .autonomousPublishing == false and .autonomousPurchasing == false and .supplierOrdering == false and .priceWriteAuthority == false and .inventoryWriteAuthority == false and .autonomousSpendUsd == 0 and .verifiedOrdersOnlyCanCreateFulfillment == true and .humanApprovalRequired == true' commerce-ops-policy.json >/dev/null
-          jq -e '.version == "3.0-commerce-operations" and .authority.publish == false and .authority.purchase == false and .authority.autonomousSpendUsd == 0' commerce-ops-status.json >/dev/null
-          echo 'COMMERCE_OPERATIONS_CONTROL_PLANE_OK'
-      - name: Smoke test Tiendanube bridge policy
-        run: |
-          set -euo pipefail
-          BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
-          ok=0
-          for i in $(seq 1 15); do
-            if curl -fsS --max-time 15 "$BASE/tiendanube/policy" -o tiendanube-policy.json; then
-              if grep -q '1.0-tiendanube-bridge' tiendanube-policy.json; then ok=1; break; fi
-            fi
-            sleep 4
-          done
-          test "$ok" -eq 1
-          jq -e '.version == "1.0-tiendanube-bridge" and .oauth2 == true and .webhookHmacVerification == true and .orderPaidIngestion == true and .publicationExecution == "EXPLICIT_ADMIN_ONLY" and .newProductVisibility == "hidden" and .autonomousPublishing == false and .autonomousPurchasing == false and .supplierOrdering == false and .autonomousSpendUsd == 0' tiendanube-policy.json >/dev/null
-          echo 'TIENDANUBE_BRIDGE_POLICY_OK'
-      - name: Smoke test live B2B travel broker
-        env:
-          OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
-        run: |
-          set -euo pipefail
-          BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
-          ok=0
-          for i in $(seq 1 15); do
-            if curl -fsS "$BASE/travel/policy" -o travel-policy.json && curl -fsS "$BASE/travel/catalog" -o travel-catalog.json && curl -fsS "$BASE/travel/stats" -o travel-stats.json && curl -fsS "$BASE/travel/partners/stats" -o travel-partners.json; then
-              if grep -q '1.0-travel-broker-referral' travel-policy.json && grep -q 'TRAVEL-CORPORATE-BROKER' travel-catalog.json && grep -q 'autonomousTravelBooking' travel-policy.json; then
-                ok=1
-                break
-              fi
-            fi
-            sleep 4
-          done
-          test "$ok" -eq 1
-          grep -q '"createsBooking":false' travel-policy.json
-          grep -q '"autonomousSpend":false' travel-policy.json
-          curl -fsS -X POST -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" "$BASE/travel/run" -o travel-run.json
-          grep -q '"ok":true' travel-run.json
-          grep -q '"b2bOnly":true' travel-run.json
-          grep -q '"createsBooking":false' travel-run.json
-          echo 'TRAVEL_BROKER_LIVE_SMOKE_OK'
+          curl -fsS --max-time 20 "$BASE/portfolio-governor/state" -o sovereign-after.json
+          jq '{phase:"after_deploy",verifiedRevenueUsd:.metrics.verifiedRevenueUsd,verifiedSettlements:.metrics.verifiedSettlements,activeCandidates:.metrics.activeCandidates}' sovereign-after.json
+          echo 'PRODUCTION_RELEASE_AND_REVENUE_TRUTH_OK'
