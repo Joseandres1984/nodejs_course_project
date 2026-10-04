@@ -4,6 +4,7 @@ on:
   pull_request:
     branches: [lumen-zero]
     paths:
+      - '.lumen/dashboard/decision_truth_sync_worker.js'
       - '.lumen/dashboard/unified_decision_center_worker.js'
       - '.lumen/dashboard/decision_center_worker.js'
       - '.lumen/dashboard/wrangler.toml'
@@ -14,6 +15,7 @@ on:
   push:
     branches: [lumen-zero]
     paths:
+      - '.lumen/dashboard/decision_truth_sync_worker.js'
       - '.lumen/dashboard/unified_decision_center_worker.js'
       - '.lumen/dashboard/decision_center_worker.js'
       - '.lumen/dashboard/wrangler.toml'
@@ -36,6 +38,7 @@ jobs:
           python-version: '3.12'
       - name: Syntax checks
         run: |
+          node --check .lumen/dashboard/decision_truth_sync_worker.js
           node --check .lumen/dashboard/unified_decision_center_worker.js
           node --check .lumen/dashboard/decision_center_worker.js
           python -m py_compile .lumen/runtime/commercial_owner_decision_runtime.py
@@ -44,7 +47,11 @@ jobs:
       - name: Verify immutable Decision Center guardrails
         run: |
           set -euo pipefail
-          grep -q '^main = "unified_decision_center_worker.js"$' .lumen/dashboard/wrangler.toml
+          grep -q '^main = "decision_truth_sync_worker.js"$' .lumen/dashboard/wrangler.toml
+          grep -q 'from "./unified_decision_center_worker.js"' .lumen/dashboard/decision_truth_sync_worker.js
+          grep -q 'lumen_owner_decision_commands' .lumen/dashboard/decision_truth_sync_worker.js
+          grep -q 'pending_closures = pendingApprovals.length' .lumen/dashboard/decision_truth_sync_worker.js
+          grep -q 'synchronized: true' .lumen/dashboard/decision_truth_sync_worker.js
           grep -q 'from "./decision_center_worker.js"' .lumen/dashboard/unified_decision_center_worker.js
           grep -q '/api/owner-decisions' .lumen/dashboard/unified_decision_center_worker.js
           grep -q 'COMMERCIAL_CLOSE_SIMULATED' .lumen/dashboard/unified_decision_center_worker.js
@@ -60,14 +67,14 @@ jobs:
           grep -q 'commercial_decisions.consume_commands()' .lumen/runtime/conversion_loop_bridge_runtime.py
           grep -q 'owner_decisions.consume_commands()' .lumen/runtime/conversion_loop_bridge_runtime.py
           grep -q 'owner_decisions.install_continuous_learning_guard()' .lumen/runtime/conversion_loop_bridge_runtime.py
-          echo 'LUMEN_UNIFIED_DECISION_CENTER_STATIC_GUARDRAILS_OK'
+          echo 'LUMEN_DECISION_SINGLE_TRUTH_STATIC_GUARDRAILS_OK'
 
   live-smoke:
     if: github.event_name == 'push'
     needs: validate
     runs-on: ubuntu-latest
     steps:
-      - name: Wait for dashboard deployment and verify unified Decision Center live
+      - name: Wait for dashboard deployment and verify one decision count live
         env:
           DASH_PASSWORD: ${{ secrets.LUMEN_DASHBOARD_PASSWORD }}
         run: |
@@ -78,14 +85,18 @@ jobs:
           for i in $(seq 1 30); do
             page="$(mktemp)"
             api="$(mktemp)"
+            data="$(mktemp)"
             page_code="$(curl -sS --max-time 20 -u "socio:${DASH_PASSWORD}" -o "$page" -w '%{http_code}' "$BASE/")"
             api_code="$(curl -sS --max-time 20 -u "socio:${DASH_PASSWORD}" -o "$api" -w '%{http_code}' "$BASE/api/owner-decisions")"
-            if [ "$page_code" = '200' ] && [ "$api_code" = '200' ] && grep -q 'Centro de Decisiones' "$page" && jq -e '.ok == true and .guardrails.approval_scope == "build_and_test_only_for_code_changes" and .guardrails.production_deploy == false and .guardrails.autonomous_spend_usd == 0 and .guardrails.commercial_approval_scope == "simulated_close_only" and .guardrails.financial_commitment_executed == false and .guardrails.actual_payment_executed == false and .guardrails.contract_execution == false' "$api" >/dev/null 2>&1; then
+            data_code="$(curl -sS --max-time 20 -u "socio:${DASH_PASSWORD}" -o "$data" -w '%{http_code}' "$BASE/api/data")"
+            commercial_pending="$(jq -r '.counts.commercial_pending // 0' "$api" 2>/dev/null || echo -1)"
+            sales_pending="$(jq -r '.money.pending_closures // -2' "$data" 2>/dev/null || echo -2)"
+            if [ "$page_code" = '200' ] && [ "$api_code" = '200' ] && [ "$data_code" = '200' ] && [ "$commercial_pending" = "$sales_pending" ] && grep -q 'Centro de Decisiones' "$page" && jq -e '.ok == true and .guardrails.approval_scope == "build_and_test_only_for_code_changes" and .guardrails.production_deploy == false and .guardrails.autonomous_spend_usd == 0 and .guardrails.commercial_approval_scope == "simulated_close_only" and .guardrails.financial_commitment_executed == false and .guardrails.actual_payment_executed == false and .guardrails.contract_execution == false' "$api" >/dev/null 2>&1 && jq -e '.decision_truth.synchronized == true and .decision_truth.pending_human_decisions == .money.pending_closures' "$data" >/dev/null 2>&1; then
               ok=1
               break
             fi
-            echo "WAITING_FOR_UNIFIED_DECISION_CENTER attempt=${i} page_http=${page_code} api_http=${api_code}"
+            echo "WAITING_FOR_DECISION_SINGLE_TRUTH attempt=${i} page_http=${page_code} decisions_http=${api_code} data_http=${data_code} center_pending=${commercial_pending} sales_pending=${sales_pending}"
             sleep 5
           done
           test "$ok" -eq 1
-          echo 'LUMEN_UNIFIED_DECISION_CENTER_LIVE_GREEN'
+          echo 'LUMEN_DECISION_SINGLE_TRUTH_LIVE_GREEN'
