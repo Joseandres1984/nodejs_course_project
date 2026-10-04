@@ -6,7 +6,10 @@ on:
     paths:
       - '.lumen/a2a-worker/proposal-engine.js'
       - '.lumen/a2a-worker/first-cash-closer.js'
+      - '.lumen/a2a-worker/supplier-market-launch.js'
+      - '.lumen/a2a-worker/paid-boost-entry.js'
       - '.lumen/a2a-worker/test-intramodule-evolution-v1.mjs'
+      - '.lumen/a2a-worker/test-bounded-supplier-resale.mjs'
       - '.github/workflows/lumen-intramodule-evolution-v1.yml'
   workflow_dispatch:
 
@@ -22,21 +25,19 @@ jobs:
         run: |
           node --check .lumen/a2a-worker/proposal-engine.js
           node --check .lumen/a2a-worker/first-cash-closer.js
+          node --check .lumen/a2a-worker/supplier-market-launch.js
+          node --check .lumen/a2a-worker/paid-boost-entry.js
       - name: Intramodule evolution guardrails
         run: node .lumen/a2a-worker/test-intramodule-evolution-v1.mjs
+      - name: Bounded supplier resale guardrails
+        run: node .lumen/a2a-worker/test-bounded-supplier-resale.mjs
+      - name: Existing supplier intake regression
+        run: node .lumen/a2a-worker/test-tiendanube-supplier-intake.mjs
+      - name: Existing commerce regression
+        run: |
+          node .lumen/a2a-worker/test-commerce-machine.mjs
+          node .lumen/a2a-worker/test-tiendanube-bridge.mjs
       - name: Existing revenue loop regression
         run: node .lumen/a2a-worker/test-revenue-loop-v5.mjs
       - name: Existing response qualification regression
         run: node --test .lumen/a2a-worker/response-qualification.test.js .lumen/a2a-worker/response-closer-v2.test.js
-      - name: Observe live intermediary inventory baseline
-        env:
-          OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
-        run: |
-          set -euo pipefail
-          BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
-          curl -fsS --max-time 20 -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" "$BASE/product-commerce/status" -o product-commerce.json
-          curl -fsS --max-time 20 -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" "$BASE/supplier-intake/status" -o supplier-intake.json
-          curl -fsS --max-time 20 -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" "$BASE/commerce-machine/status" -o commerce-machine.json
-          jq '{productCommerce:{version:.version,lastRun:.lastRun,counts:.counts,topCandidateCount:(.topCandidates|length)}}' product-commerce.json
-          jq '{supplierIntake:{version:.version,connected:.connected,storeId:.storeId,lastRun:.lastRun,counts:.counts,topCandidateCount:(.topCandidates|length)}}' supplier-intake.json
-          jq '{commerceMachine:{version:.version,lastRun:.lastRun,counts:.counts}}' commerce-machine.json
