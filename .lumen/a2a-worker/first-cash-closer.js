@@ -4,6 +4,8 @@ import { classifyCommercialResponse } from "./response-qualification.js";
 const VERSION = "1.1-shared-response-first-cash-closer";
 const SEND_TIMEOUT_MS = 15000;
 const FAST_LANE_VERSION = "1.0-first-settlement-fast-lane";
+const EVOLUTION_VERSION = "1.1-conversion-rate-first-cash-evolution";
+const FAILED_RETRY_COOLDOWN_HOURS = 6;
 const FAST_LANE_PRIORITY = {
   "MP-QUOTE-SANITY": 100,
   "MP-SUPPLIER-SNAPSHOT": 90,
@@ -12,6 +14,11 @@ const FAST_LANE_PRIORITY = {
   "MP-BUYER-SIGNALS": 50,
   "MP-EXPORT-PULSE": 40
 };
+const CLOSER_VARIANTS = [
+  { id: "direct_checkout", description: "Lead with fixed price and exact checkout." },
+  { id: "scope_reassurance", description: "Reassure scope and non-binding terms before checkout." },
+  { id: "intent_mirror", description: "Mirror the buyer's positive intent before giving the exact checkout." }
+];
 
 function json(data, status = 200) {
   return Response.json(data, { status, headers: { "cache-control": "no-store", "x-content-type-options": "nosniff", "access-control-allow-origin": "*" } });
@@ -38,7 +45,9 @@ async function ensureSchema(env) {
   if (!env?.DB) return false;
   await env.DB.batch([
     env.DB.prepare("CREATE TABLE IF NOT EXISTS lumen_first_cash_closer (proposal_id TEXT PRIMARY KEY,opportunity_id TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,status TEXT NOT NULL,response_class TEXT NOT NULL,checkout_url TEXT,task_id TEXT,context_id TEXT,response_text TEXT,error TEXT,engine_version TEXT NOT NULL)"),
-    env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_lumen_first_cash_closer_status ON lumen_first_cash_closer(status,updated_at)")
+    env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_lumen_first_cash_closer_status ON lumen_first_cash_closer(status,updated_at)"),
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS lumen_first_cash_strategy_assignments (proposal_id TEXT PRIMARY KEY,offer_id TEXT NOT NULL,strategy_id TEXT NOT NULL,response_class TEXT NOT NULL,created_at TEXT NOT NULL,engine_version TEXT NOT NULL)"),
+    env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_lumen_first_cash_strategy_assignments_strategy ON lumen_first_cash_strategy_assignments(strategy_id,created_at)")
   ]);
   return true;
 }
@@ -51,7 +60,8 @@ async function candidateRows(env) {
     JOIN lumen_opportunities o ON o.id=p.opportunity_id
     JOIN lumen_outreach_attempts x ON x.proposal_id=p.proposal_id
     LEFT JOIN lumen_first_cash_closer c ON c.proposal_id=p.proposal_id
-    WHERE p.quality_gate_status='PASS' AND c.proposal_id IS NULL AND x.agent_url IS NOT NULL
+    WHERE p.quality_gate_status='PASS' AND x.agent_url IS NOT NULL
+      AND (c.proposal_id IS NULL OR (c.status='SEND_FAILED' AND datetime(c.updated_at) <= datetime('now','-${FAILED_RETRY_COOLDOWN_HOURS} hours')))
       AND (x.response_text IS NOT NULL OR EXISTS(SELECT 1 FROM lumen_followups f2 WHERE f2.proposal_id=p.proposal_id AND f2.response_text IS NOT NULL AND TRIM(f2.response_text)<>''))
     ORDER BY x.updated_at DESC LIMIT 100`;
   try { const r = await env.DB.prepare(primary).all(); return r.results || []; } catch {}
@@ -62,13 +72,24 @@ async function candidateRows(env) {
     JOIN lumen_opportunities o ON o.id=p.opportunity_id
     JOIN lumen_outreach_attempts x ON x.proposal_id=p.proposal_id
     LEFT JOIN lumen_first_cash_closer c ON c.proposal_id=p.proposal_id
-    WHERE p.quality_gate_status='PASS' AND c.proposal_id IS NULL AND x.agent_url IS NOT NULL AND x.response_text IS NOT NULL
+    WHERE p.quality_gate_status='PASS' AND x.agent_url IS NOT NULL AND x.response_text IS NOT NULL
+      AND (c.proposal_id IS NULL OR (c.status='SEND_FAILED' AND datetime(c.updated_at) <= datetime('now','-${FAILED_RETRY_COOLDOWN_HOURS} hours')))
     ORDER BY x.updated_at DESC LIMIT 100`;
   try { const r = await env.DB.prepare(fallback).all(); return r.results || []; } catch { return []; }
 }
 
+async function offerOutcomeMap(env) {
+  const map = new Map();
+  try {
+    const result = await env.DB.prepare("SELECT offer_id,COUNT(DISTINCT receipt_id) AS settlements,COALESCE(SUM(amount_usd),0) AS revenue_usd FROM lumen_x402_revenue_bridge GROUP BY offer_id").all();
+    for (const row of result.results || []) map.set(clean(row.offer_id, 100), { settlements: Number(row.settlements || 0), revenueUsd: Number(row.revenue_usd || 0) });
+  } catch {}
+  return map;
+}
+
 async function findEligibleCandidate(env) {
   const rows = await candidateRows(env);
+  const outcomes = await offerOutcomeMap(env);
   const eligible = [];
   for (const row of rows) {
     const qualification = classifyCommercialResponse(row.response_text, row.message);
@@ -83,21 +104,112 @@ async function findEligibleCandidate(env) {
       creative: qualification.responseClass.toLowerCase()
     });
     if (!checkoutUrl || !isHttps(row.agent_url)) continue;
-    eligible.push({ ...row, responseClass: qualification.responseClass, qualificationReason: qualification.reason, checkoutUrl, fastLanePriority: FAST_LANE_PRIORITY[clean(row.offer_id, 100)] || 0 });
+    const offerId = clean(row.offer_id, 100);
+    const basePriority = FAST_LANE_PRIORITY[offerId] || 0;
+    const outcome = outcomes.get(offerId) || { settlements: 0, revenueUsd: 0 };
+    const verifiedOutcomeBoost = outcome.settlements * 1000 + outcome.revenueUsd * 20;
+    const intentBoost = qualification.responseClass === "PURCHASE_INTENT" ? 120 : 40;
+    eligible.push({
+      ...row,
+      responseClass: qualification.responseClass,
+      qualificationReason: qualification.reason,
+      checkoutUrl,
+      fastLanePriority: basePriority,
+      verifiedSettlements: outcome.settlements,
+      verifiedRevenueUsd: outcome.revenueUsd,
+      learnedPriority: basePriority + verifiedOutcomeBoost + intentBoost
+    });
   }
-  eligible.sort((a, b) => Number(b.fastLanePriority || 0) - Number(a.fastLanePriority || 0));
+  eligible.sort((a, b) => Number(b.learnedPriority || 0) - Number(a.learnedPriority || 0) || Number(b.fastLanePriority || 0) - Number(a.fastLanePriority || 0));
   return eligible[0] || null;
 }
 
-function closerMessage(row) {
+async function closerVariantStats(env) {
+  const empty = CLOSER_VARIANTS.map(v => ({ ...v, assignments: 0, responses: 0, responseRate: 0, settlements: 0, settlementRate: 0, revenueUsd: 0, revenuePerAssignment: 0, reward: 0, exploration: 0, score: 0 }));
+  try {
+    const result = await env.DB.prepare(`SELECT a.strategy_id,
+      COUNT(DISTINCT CASE WHEN c.status IN ('SENT','SENT_TASK','RESPONDED') THEN a.proposal_id END) AS assignments,
+      COUNT(DISTINCT CASE WHEN c.status='RESPONDED' THEN a.proposal_id END) AS responses,
+      COUNT(DISTINCT b.receipt_id) AS settlements,
+      COALESCE(SUM(b.amount_usd),0) AS revenue_usd
+      FROM lumen_first_cash_strategy_assignments a
+      LEFT JOIN lumen_first_cash_closer c ON c.proposal_id=a.proposal_id
+      LEFT JOIN lumen_x402_revenue_bridge b ON b.proposal_id=a.proposal_id
+      GROUP BY a.strategy_id`).all();
+    const rows = result.results || [];
+    const byId = new Map(rows.map(row => [clean(row.strategy_id, 80), row]));
+    const totalAssignments = rows.reduce((sum, row) => sum + Number(row.assignments || 0), 0);
+    return CLOSER_VARIANTS.map(variant => {
+      const row = byId.get(variant.id) || {};
+      const assignments = Number(row.assignments || 0);
+      const responses = Number(row.responses || 0);
+      const settlements = Number(row.settlements || 0);
+      const revenueUsd = Number(row.revenue_usd || 0);
+      const denominator = Math.max(1, assignments);
+      const responseRate = responses / denominator;
+      const settlementRate = settlements / denominator;
+      const revenuePerAssignment = revenueUsd / denominator;
+      const reward = settlements * 10000 + revenueUsd * 100 + responses * 10;
+      const exploration = 40 * Math.sqrt(Math.log(totalAssignments + 2) / (assignments + 1));
+      const score = settlementRate * 10000 + revenuePerAssignment * 100 + responseRate * 120 + exploration;
+      return {
+        ...variant,
+        assignments,
+        responses,
+        responseRate: Number(responseRate.toFixed(4)),
+        settlements,
+        settlementRate: Number(settlementRate.toFixed(4)),
+        revenueUsd: Number(revenueUsd.toFixed(2)),
+        revenuePerAssignment: Number(revenuePerAssignment.toFixed(2)),
+        reward,
+        exploration: Number(exploration.toFixed(3)),
+        score: Number(score.toFixed(3))
+      };
+    });
+  } catch {
+    return empty;
+  }
+}
+
+async function selectCloserVariant(env, proposalId) {
+  try {
+    const prior = await env.DB.prepare("SELECT strategy_id FROM lumen_first_cash_strategy_assignments WHERE proposal_id=? LIMIT 1").bind(proposalId).first();
+    if (prior?.strategy_id && CLOSER_VARIANTS.some(v => v.id === prior.strategy_id)) {
+      const stats = await closerVariantStats(env);
+      return { variantId: prior.strategy_id, reason: "stable_existing_assignment", stats };
+    }
+  } catch {}
+  const stats = await closerVariantStats(env);
+  const minimumAssignments = Math.min(...stats.map(s => s.assignments));
+  const selected = [...stats].sort((a,b) => {
+    if (minimumAssignments < 2 && a.assignments !== b.assignments) return a.assignments - b.assignments;
+    return b.score - a.score || a.assignments - b.assignments || a.id.localeCompare(b.id);
+  })[0] || { id: "direct_checkout" };
+  return { variantId: selected.id, reason: selected.assignments < 2 ? "bounded_exploration" : "conversion_rate_exploitation", stats };
+}
+
+function closerMessage(row, variantId = "direct_checkout") {
   const offer = clean(row.offer_name, 140) || "this LUMEN service";
   const amount = Number(row.amount_usd || 0);
+  const checkout = `Direct x402 checkout for this exact offer: ${row.checkoutUrl}`;
+  const price = `The exact price is USD ${amount.toFixed(2)} per request.`;
+  const disclosure = "No subscription, contract or additional commitment is created by this message. A purchase only occurs if the buyer signs the x402 payment authorization and settlement succeeds.";
+  const scope = "If you want the scope clarified before paying, reply with the requirement and LUMEN can confirm the deliverable.";
+  if (variantId === "scope_reassurance") {
+    return clean([`Thanks for the interest in ${offer}.`, scope, price, disclosure, checkout].join("\n\n"), 2400);
+  }
+  if (variantId === "intent_mirror") {
+    const mirrored = row.responseClass === "PURCHASE_INTENT"
+      ? `Your reply indicates purchase intent for ${offer}.`
+      : `Your reply indicates commercial interest in ${offer}.`;
+    return clean([mirrored, price, checkout, disclosure, scope].join("\n\n"), 2400);
+  }
   return clean([
     `Thanks for the interest in ${offer}.`,
-    `The exact price is USD ${amount.toFixed(2)} per request.`,
-    `Direct x402 checkout for this exact offer: ${row.checkoutUrl}`,
-    "No subscription, contract or additional commitment is created by this message. A purchase only occurs if the buyer signs the x402 payment authorization and settlement succeeds.",
-    "If you want the scope clarified before paying, reply with the requirement and LUMEN can confirm the deliverable."
+    price,
+    checkout,
+    disclosure,
+    scope
   ].join("\n\n"), 2400);
 }
 
@@ -113,7 +225,8 @@ function envelope(row, text) {
       offerId: row.offer_id,
       amountUsd: Number(row.amount_usd || 0),
       stage: "first_cash_close",
-      checkoutUrl: row.checkoutUrl
+      checkoutUrl: row.checkoutUrl,
+      intramoduleEvolution: { version: EVOLUTION_VERSION, strategyId: row.closerVariant || "direct_checkout" }
     }
   };
   if (clean(row.protocol_binding, 40).toUpperCase() === "HTTP+JSON") {
@@ -148,17 +261,36 @@ async function record(env, row, values) {
     .bind(row.proposal_id,row.opportunity_id,now,now,values.status,row.responseClass,row.checkoutUrl,values.taskId||null,values.contextId||null,values.responseText||null,values.error||null,VERSION).run();
 }
 
+async function assignCloserVariant(env, row, variantId) {
+  const now = new Date().toISOString();
+  await env.DB.prepare("INSERT INTO lumen_first_cash_strategy_assignments(proposal_id,offer_id,strategy_id,response_class,created_at,engine_version) VALUES(?,?,?,?,?,?) ON CONFLICT(proposal_id) DO UPDATE SET engine_version=excluded.engine_version")
+    .bind(row.proposal_id, clean(row.offer_id, 100), variantId, row.responseClass, now, EVOLUTION_VERSION).run();
+}
+
 export async function runFirstCashCloser(env, { force = false } = {}) {
   if (!(await ensureSchema(env))) return { ok: false, sent: false, error: "persistence_unavailable", version: VERSION };
   const candidate = await findEligibleCandidate(env);
   if (!candidate) return { ok: true, sent: false, reason: "no_verified_commercial_intent", version: VERSION };
 
+  const evolution = await selectCloserVariant(env, candidate.proposal_id);
+  candidate.closerVariant = evolution.variantId;
+  await assignCloserVariant(env, candidate, evolution.variantId);
+
   const enabled = boolVar(env?.A2A_AUTONOMOUS_OUTREACH, false) && boolVar(env?.A2A_AUTONOMOUS_CONVERSION_CLOSE, false);
   if (!force && !enabled) {
-    return { ok: true, sent: false, ready: true, proposalId: candidate.proposal_id, responseClass: candidate.responseClass, reason: "autonomous_conversion_close_disabled", version: VERSION };
+    return {
+      ok: true,
+      sent: false,
+      ready: true,
+      proposalId: candidate.proposal_id,
+      responseClass: candidate.responseClass,
+      reason: "autonomous_conversion_close_disabled",
+      version: VERSION,
+      evolution: { version: EVOLUTION_VERSION, strategyId: evolution.variantId, selectionReason: evolution.reason }
+    };
   }
 
-  const text = closerMessage(candidate);
+  const text = closerMessage(candidate, evolution.variantId);
   const req = envelope(candidate, text);
   const timeout = withTimeout(SEND_TIMEOUT_MS);
   let raw = "";
@@ -170,6 +302,7 @@ export async function runFirstCashCloser(env, { force = false } = {}) {
     const info = extractResponse(body, candidate.protocol_binding);
     const status = info.responseText ? "RESPONDED" : info.taskId ? "SENT_TASK" : "SENT";
     await record(env, candidate, { status, ...info });
+    const selectedStats = evolution.stats.find(s => s.id === evolution.variantId) || null;
     return {
       ok: true,
       sent: true,
@@ -183,13 +316,33 @@ export async function runFirstCashCloser(env, { force = false } = {}) {
       status,
       taskId: info.taskId,
       checkoutUrl: candidate.checkoutUrl,
-      fastLane: { version: FAST_LANE_VERSION, priority: candidate.fastLanePriority, objective: "first_verified_settlement" },
-      guardrails: { positiveIntentRequired: true, sharedResponseQualification: true, exactOfferCheckout: true, autonomousDiscounting: false, autonomousSpend: false, bindingActionsHumanGated: true }
+      fastLane: {
+        version: FAST_LANE_VERSION,
+        basePriority: candidate.fastLanePriority,
+        learnedPriority: candidate.learnedPriority,
+        verifiedSettlements: candidate.verifiedSettlements,
+        verifiedRevenueUsd: candidate.verifiedRevenueUsd,
+        objective: "first_verified_settlement_then_repeat_verified_winners"
+      },
+      evolution: {
+        version: EVOLUTION_VERSION,
+        strategyId: evolution.variantId,
+        selectionReason: evolution.reason,
+        strategyAssignments: Number(selectedStats?.assignments || 0),
+        strategyResponseRate: Number(selectedStats?.responseRate || 0),
+        strategySettlements: Number(selectedStats?.settlements || 0),
+        strategySettlementRate: Number(selectedStats?.settlementRate || 0),
+        strategyRevenueUsd: Number(selectedStats?.revenueUsd || 0),
+        strategyRevenuePerAssignment: Number(selectedStats?.revenuePerAssignment || 0),
+        selfModifyingCode: false,
+        priceMutation: false
+      },
+      guardrails: { positiveIntentRequired: true, sharedResponseQualification: true, exactOfferCheckout: true, autonomousDiscounting: false, autonomousSpend: false, autonomousContract: false, maxExternalMessagesPerRun: 1, bindingActionsHumanGated: true }
     };
   } catch (error) {
     const err = clean(error?.message || error, 500);
     await record(env, candidate, { status: "SEND_FAILED", error: err });
-    return { ok: false, sent: false, version: VERSION, proposalId: candidate.proposal_id, status: "SEND_FAILED", error: err };
+    return { ok: false, sent: false, version: VERSION, proposalId: candidate.proposal_id, status: "SEND_FAILED", error: err, retryAfterHours: FAILED_RETRY_COOLDOWN_HOURS, evolution: { version: EVOLUTION_VERSION, strategyId: evolution.variantId } };
   } finally { timeout.clear(); }
 }
 
@@ -198,6 +351,8 @@ async function statsData(env) {
   let row = null;
   try { row = await env.DB.prepare("SELECT COUNT(*) total,SUM(CASE WHEN status IN ('SENT','SENT_TASK','RESPONDED') THEN 1 ELSE 0 END) sent,SUM(CASE WHEN status='RESPONDED' THEN 1 ELSE 0 END) responded,SUM(CASE WHEN status='SEND_FAILED' THEN 1 ELSE 0 END) failed FROM lumen_first_cash_closer").first(); } catch {}
   const candidate = await findEligibleCandidate(env);
+  const variants = await closerVariantStats(env);
+  const ranked = [...variants].sort((a,b) => b.score - a.score || b.settlementRate - a.settlementRate || b.revenuePerAssignment - a.revenuePerAssignment || b.responseRate - a.responseRate);
   return {
     total: Number(row?.total || 0),
     sent: Number(row?.sent || 0),
@@ -206,6 +361,9 @@ async function statsData(env) {
     readyToClose: Boolean(candidate),
     readyProposalId: candidate?.proposal_id || null,
     readyResponseClass: candidate?.responseClass || null,
+    readyLearnedPriority: Number(candidate?.learnedPriority || 0),
+    championStrategy: ranked[0]?.id || null,
+    strategyStats: ranked.map(({ id, assignments, responses, responseRate, settlements, settlementRate, revenueUsd, revenuePerAssignment, score }) => ({ id, assignments, responses, responseRate, settlements, settlementRate, revenueUsd, revenuePerAssignment, score })),
     autonomousEnabled: boolVar(env?.A2A_AUTONOMOUS_OUTREACH, false) && boolVar(env?.A2A_AUTONOMOUS_CONVERSION_CLOSE, false)
   };
 }
@@ -213,7 +371,39 @@ async function statsData(env) {
 export async function handleFirstCashCloser(request, env) {
   const url = new URL(request.url);
   if (request.method === "GET" && url.pathname === "/first-cash/policy") {
-    return json({ version: VERSION, fastLaneVersion: FAST_LANE_VERSION, name: "LUMEN First Cash Closer", positiveIntentRequired: true, sharedResponseQualification: true, checkoutEligibleClasses:["PURCHASE_INTENT","COMMERCIAL_INTEREST"], technicalAckIsNotIntent: true, echoIsNotIntent:true, genericResponseIsNotIntent:true, exactOfferCheckout: true, trackedAttribution: true, fastLane: { enabled: true, objective: "first_verified_settlement", priorityOrder: Object.keys(FAST_LANE_PRIORITY), maxExternalMessagesPerRun: 1 }, maxExternalMessagesPerRun: 1, autonomousDiscounting: false, autonomousSpend: false, autonomousContract: false, bindingActionsHumanGated: true });
+    return json({
+      version: VERSION,
+      fastLaneVersion: FAST_LANE_VERSION,
+      evolutionVersion: EVOLUTION_VERSION,
+      name: "LUMEN First Cash Closer",
+      positiveIntentRequired: true,
+      sharedResponseQualification: true,
+      checkoutEligibleClasses:["PURCHASE_INTENT","COMMERCIAL_INTEREST"],
+      technicalAckIsNotIntent: true,
+      echoIsNotIntent:true,
+      genericResponseIsNotIntent:true,
+      exactOfferCheckout: true,
+      trackedAttribution: true,
+      intramoduleEvolution: {
+        enabled: true,
+        boundedVariants: CLOSER_VARIANTS.map(v => v.id),
+        rewardOrder: ["verified_settlement_rate", "verified_revenue_per_successful_close", "close_response_rate", "bounded_exploration"],
+        offerPriorityLearnsFromVerifiedSettlements: true,
+        championChallenger: true,
+        conversionRateScoring: true,
+        countsOnlySuccessfulCloseSendsAsExposure: true,
+        selfModifyingCode: false,
+        mutatesPrice: false,
+        mutatesAuthority: false
+      },
+      fastLane: { enabled: true, objective: "first_verified_settlement_then_repeat_verified_winners", priorityOrder: Object.keys(FAST_LANE_PRIORITY), learnedOutcomeBoost: true, maxExternalMessagesPerRun: 1 },
+      failedSendRetryCooldownHours: FAILED_RETRY_COOLDOWN_HOURS,
+      maxExternalMessagesPerRun: 1,
+      autonomousDiscounting: false,
+      autonomousSpend: false,
+      autonomousContract: false,
+      bindingActionsHumanGated: true
+    });
   }
   if (request.method === "GET" && url.pathname === "/first-cash/stats") return json({ version: VERSION, ...await statsData(env) });
   if (request.method === "POST" && url.pathname === "/first-cash/run") {

@@ -1,0 +1,43 @@
+name: LUMEN Intramodule Evolution v1
+
+on:
+  pull_request:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/a2a-worker/proposal-engine.js'
+      - '.lumen/a2a-worker/first-cash-closer.js'
+      - '.lumen/a2a-worker/supplier-market-launch.js'
+      - '.lumen/a2a-worker/paid-boost-entry.js'
+      - '.lumen/a2a-worker/test-intramodule-evolution-v1.mjs'
+      - '.lumen/a2a-worker/test-bounded-supplier-resale.mjs'
+      - '.github/workflows/lumen-intramodule-evolution-v1.yml'
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Syntax
+        run: |
+          node --check .lumen/a2a-worker/proposal-engine.js
+          node --check .lumen/a2a-worker/first-cash-closer.js
+          node --check .lumen/a2a-worker/supplier-market-launch.js
+          node --check .lumen/a2a-worker/paid-boost-entry.js
+      - name: Intramodule evolution guardrails
+        run: node .lumen/a2a-worker/test-intramodule-evolution-v1.mjs
+      - name: Bounded supplier resale guardrails
+        run: node .lumen/a2a-worker/test-bounded-supplier-resale.mjs
+      - name: Existing supplier intake regression
+        run: node .lumen/a2a-worker/test-tiendanube-supplier-intake.mjs
+      - name: Existing commerce regression
+        run: |
+          node .lumen/a2a-worker/test-commerce-machine.mjs
+          node .lumen/a2a-worker/test-tiendanube-bridge.mjs
+      - name: Existing revenue loop regression
+        run: node .lumen/a2a-worker/test-revenue-loop-v5.mjs
+      - name: Existing response qualification regression
+        run: node --test .lumen/a2a-worker/response-qualification.test.js .lumen/a2a-worker/response-closer-v2.test.js

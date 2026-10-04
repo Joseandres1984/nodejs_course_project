@@ -6,6 +6,7 @@ import { handleRevenueLoopV5 } from "./revenue-loop-v5.js";
 import { FIRST_SETTLEMENT_MISSION_POLICY, getFirstSettlementMissionStatus } from "./first-settlement-mission-v1.js";
 import { RESPONSE_CLOSER_POLICY, getResponseCloserStatus } from "./response-closer-v1.js";
 import { handleFirstCashCloser } from "./first-cash-closer.js";
+import { runAutonomousSupplierLaunch } from "./supplier-market-launch.js";
 export { LumenDeepWorkflow, LumenOpportunityWorkflow } from "./paid-boost-workflows.js";
 
 function adminAuthorized(request, env) {
@@ -74,6 +75,8 @@ export default {
   async scheduled(controller, env, ctx) {
     if (!env.LUMEN_DEEP_WORKFLOW || !env.LUMEN_OPPORTUNITY_WORKFLOW) throw new Error("paid_boost_workflow_bindings_required");
     if (controller.cron === DEEP_CRON) { ctx.waitUntil(startDeepCycle(env, controller.scheduledTime)); return; }
+    const minute = new Date(Number(controller?.scheduledTime || Date.now())).getUTCMinutes();
+    if (minute === 7) ctx.waitUntil(runAutonomousSupplierLaunch(env));
     return adaptive.scheduled(controller, { ...withBudgetedAi(env), LUMEN_DEEP_WORKFLOW_MANAGED: true }, ctx);
   }
 };
