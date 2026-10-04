@@ -85,7 +85,7 @@ jobs:
                curl -fsS --max-time 20 -H 'cache-control: no-cache' "$BASE/first-cash/policy?probe=$attempt" -o first-cash-policy.json; then
               if jq -e '.version == "1.1-supplier-market-launch-evolving" and .automaticBenchmarkHydration == true and .automaticBenchmarkRequiredCurrency == "ARS" and .connectedSupplierOnly == true and .supplierRightsRequired == true and .liveStockRevalidation == true and .positiveNetMarginRequired == true and .autonomousPublishing == false and .autonomousPurchasing == false and .autonomousSpendUsd == 0 and .autonomousContracts == false and .bindingActionsHumanGated == true and .explicitHumanApprovalRequired == true' supplier-policy.json >/dev/null && \
                  jq -e '.version == "1.0-lumen-paid-boost" and .autonomousSpendUsd == 0 and .extraAiSpendAuthorized == false and .workflowSendsMessages == false' paid-boost-policy.json >/dev/null && \
-                 jq -e '.fastLaneVersion == "1.0-first-settlement-fast-lane" and .fastLane.enabled == true and .fastLane.objective == "first_verified_settlement" and .fastLane.maxExternalMessagesPerRun == 1 and .autonomousSpend == false and .autonomousContract == false and .bindingActionsHumanGated == true' first-cash-policy.json >/dev/null; then
+                 jq -e '.fastLaneVersion == "1.0-first-settlement-fast-lane" and .fastLane.enabled == true and .fastLane.objective == "first_verified_settlement_then_repeat_verified_winners" and .fastLane.maxExternalMessagesPerRun == 1 and .autonomousSpend == false and .autonomousContract == false and .bindingActionsHumanGated == true' first-cash-policy.json >/dev/null; then
                 echo 'PUBLIC_SAFETY_AND_INTERMEDIARY_POLICIES_OK'
                 exit 0
               fi
@@ -93,6 +93,8 @@ jobs:
             sleep 3
           done
           cat supplier-policy.json || true
+          cat paid-boost-policy.json || true
+          cat first-cash-policy.json || true
           exit 1
 
       - name: Verify commerce and source control planes
