@@ -1,5 +1,5 @@
 name = "lumen-zero-a2a"
-main = "opportunity-entry.js"
+main = "runtime-entry.js"
 compatibility_date = "2026-09-21"
 workers_dev = true
 
