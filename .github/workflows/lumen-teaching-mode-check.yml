@@ -4,6 +4,7 @@ on:
   pull_request:
     branches: [lumen-zero]
     paths:
+      - '.lumen/dashboard/decision_truth_sync_worker.js'
       - '.lumen/dashboard/unified_decision_center_worker.js'
       - '.lumen/dashboard/decision_center_worker.js'
       - '.lumen/dashboard/teaching_mode_worker.js'
@@ -12,6 +13,7 @@ on:
   push:
     branches: [lumen-zero]
     paths:
+      - '.lumen/dashboard/decision_truth_sync_worker.js'
       - '.lumen/dashboard/unified_decision_center_worker.js'
       - '.lumen/dashboard/decision_center_worker.js'
       - '.lumen/dashboard/teaching_mode_worker.js'
@@ -29,17 +31,20 @@ jobs:
           node-version: '24'
       - name: Syntax check dashboard wrappers
         run: |
+          node --check .lumen/dashboard/decision_truth_sync_worker.js
           node --check .lumen/dashboard/unified_decision_center_worker.js
           node --check .lumen/dashboard/decision_center_worker.js
           node --check .lumen/dashboard/teaching_mode_worker.js
       - name: Verify wrapper chain and teaching security bridge
         run: |
           set -euo pipefail
-          grep -q '^main = "unified_decision_center_worker.js"$' .lumen/dashboard/wrangler.toml
+          grep -q '^main = "decision_truth_sync_worker.js"$' .lumen/dashboard/wrangler.toml
+          grep -q 'from "./unified_decision_center_worker.js"' .lumen/dashboard/decision_truth_sync_worker.js
           grep -q 'from "./decision_center_worker.js"' .lumen/dashboard/unified_decision_center_worker.js
           grep -q 'from "./teaching_mode_worker.js"' .lumen/dashboard/decision_center_worker.js
           grep -q '/api/owner-decisions' .lumen/dashboard/unified_decision_center_worker.js
           grep -q 'COMMERCIAL_CLOSE_SIMULATED' .lumen/dashboard/unified_decision_center_worker.js
+          grep -q 'pending_closures = pendingApprovals.length' .lumen/dashboard/decision_truth_sync_worker.js
           grep -q 'BUILD_TEST_ONLY' .lumen/dashboard/decision_center_worker.js
           grep -q 'production_deploy:false' .lumen/dashboard/decision_center_worker.js
           grep -q 'autonomous_spend_usd:0' .lumen/dashboard/decision_center_worker.js
@@ -53,4 +58,4 @@ jobs:
             echo 'ADMIN_TOKEN_MUST_NOT_BE_EXPOSED_TO_BROWSER'
             exit 1
           fi
-          echo 'LUMEN_UNIFIED_DECISION_CENTER_TEACHING_WRAPPER_CHAIN_OK'
+          echo 'LUMEN_DECISION_TRUTH_TEACHING_WRAPPER_CHAIN_OK'
