@@ -4,12 +4,14 @@ on:
   pull_request:
     branches: [lumen-zero]
     paths:
+      - '.lumen/dashboard/decision_center_worker.js'
       - '.lumen/dashboard/teaching_mode_worker.js'
       - '.lumen/dashboard/wrangler.toml'
       - '.github/workflows/lumen-teaching-mode-check.yml'
   push:
     branches: [lumen-zero]
     paths:
+      - '.lumen/dashboard/decision_center_worker.js'
       - '.lumen/dashboard/teaching_mode_worker.js'
       - '.lumen/dashboard/wrangler.toml'
       - '.github/workflows/lumen-teaching-mode-check.yml'
@@ -23,12 +25,19 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Syntax check teaching dashboard wrapper
-        run: node --check .lumen/dashboard/teaching_mode_worker.js
-      - name: Verify teaching mode entrypoint and security bridge
+      - name: Syntax check dashboard wrappers
+        run: |
+          node --check .lumen/dashboard/decision_center_worker.js
+          node --check .lumen/dashboard/teaching_mode_worker.js
+      - name: Verify wrapper chain and teaching security bridge
         run: |
           set -euo pipefail
-          grep -q '^main = "teaching_mode_worker.js"$' .lumen/dashboard/wrangler.toml
+          grep -q '^main = "decision_center_worker.js"$' .lumen/dashboard/wrangler.toml
+          grep -q 'from "./teaching_mode_worker.js"' .lumen/dashboard/decision_center_worker.js
+          grep -q '/api/owner-decisions' .lumen/dashboard/decision_center_worker.js
+          grep -q 'BUILD_TEST_ONLY' .lumen/dashboard/decision_center_worker.js
+          grep -q 'production_deploy:false' .lumen/dashboard/decision_center_worker.js
+          grep -q 'autonomous_spend_usd:0' .lumen/dashboard/decision_center_worker.js
           grep -q 'Modo enseñanza' .lumen/dashboard/teaching_mode_worker.js
           grep -q '/api/lumen-teacher-feedback' .lumen/dashboard/teaching_mode_worker.js
           grep -q '/api/lumen-self-critic-run' .lumen/dashboard/teaching_mode_worker.js
@@ -39,4 +48,4 @@ jobs:
             echo 'ADMIN_TOKEN_MUST_NOT_BE_EXPOSED_TO_BROWSER'
             exit 1
           fi
-          echo 'LUMEN_TEACHING_MODE_V1_OK'
+          echo 'LUMEN_DECISION_CENTER_TEACHING_WRAPPER_CHAIN_OK'
