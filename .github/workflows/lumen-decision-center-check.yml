@@ -1,0 +1,81 @@
+name: LUMEN Decision Center check
+
+on:
+  pull_request:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/dashboard/decision_center_worker.js'
+      - '.lumen/dashboard/wrangler.toml'
+      - '.lumen/runtime/owner_decision_runtime.py'
+      - '.lumen/runtime/conversion_loop_bridge_runtime.py'
+      - '.github/workflows/lumen-decision-center-check.yml'
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/dashboard/decision_center_worker.js'
+      - '.lumen/dashboard/wrangler.toml'
+      - '.lumen/runtime/owner_decision_runtime.py'
+      - '.lumen/runtime/conversion_loop_bridge_runtime.py'
+      - '.github/workflows/lumen-decision-center-check.yml'
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Syntax checks
+        run: |
+          node --check .lumen/dashboard/decision_center_worker.js
+          python -m py_compile .lumen/runtime/owner_decision_runtime.py
+          python -m py_compile .lumen/runtime/conversion_loop_bridge_runtime.py
+      - name: Verify immutable Decision Center guardrails
+        run: |
+          set -euo pipefail
+          grep -q '^main = "decision_center_worker.js"$' .lumen/dashboard/wrangler.toml
+          grep -q '/api/owner-decisions' .lumen/dashboard/decision_center_worker.js
+          grep -q 'BUILD_TEST_ONLY' .lumen/dashboard/decision_center_worker.js
+          grep -q 'production_deploy:false' .lumen/dashboard/decision_center_worker.js
+          grep -q 'autonomous_spend_usd:0' .lumen/dashboard/decision_center_worker.js
+          grep -q 'production_deploy_authorized.*False' .lumen/runtime/owner_decision_runtime.py
+          grep -q 'autonomous_spend_usd.*0' .lumen/runtime/owner_decision_runtime.py
+          grep -q 'purchase_authorized.*False' .lumen/runtime/owner_decision_runtime.py
+          grep -q 'contract_authorized.*False' .lumen/runtime/owner_decision_runtime.py
+          grep -q 'authority_change_authorized.*False' .lumen/runtime/owner_decision_runtime.py
+          grep -q 'owner_decisions.consume_commands()' .lumen/runtime/conversion_loop_bridge_runtime.py
+          grep -q 'owner_decisions.install_continuous_learning_guard()' .lumen/runtime/conversion_loop_bridge_runtime.py
+          echo 'LUMEN_DECISION_CENTER_STATIC_GUARDRAILS_OK'
+
+  live-smoke:
+    if: github.event_name == 'push'
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for dashboard deployment and verify Decision Center live
+        env:
+          DASH_PASSWORD: ${{ secrets.LUMEN_DASHBOARD_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "${DASH_PASSWORD:-}"
+          BASE='https://lumen-zero-dashboard.lumen-b2b.workers.dev'
+          ok=0
+          for i in $(seq 1 30); do
+            page="$(mktemp)"
+            api="$(mktemp)"
+            page_code="$(curl -sS --max-time 20 -u "socio:${DASH_PASSWORD}" -o "$page" -w '%{http_code}' "$BASE/")"
+            api_code="$(curl -sS --max-time 20 -u "socio:${DASH_PASSWORD}" -o "$api" -w '%{http_code}' "$BASE/api/owner-decisions")"
+            if [ "$page_code" = '200' ] && [ "$api_code" = '200' ] && grep -q 'Centro de Decisiones' "$page" && jq -e '.ok == true and .guardrails.approval_scope == "build_and_test_only_for_code_changes" and .guardrails.production_deploy == false and .guardrails.autonomous_spend_usd == 0 and .guardrails.binding_contracts == false and .guardrails.authority_change == false' "$api" >/dev/null 2>&1; then
+              ok=1
+              break
+            fi
+            echo "WAITING_FOR_DECISION_CENTER attempt=${i} page_http=${page_code} api_http=${api_code}"
+            sleep 5
+          done
+          test "$ok" -eq 1
+          echo 'LUMEN_DECISION_CENTER_LIVE_GREEN'
