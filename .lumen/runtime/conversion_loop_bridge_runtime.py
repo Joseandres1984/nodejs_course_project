@@ -9,9 +9,16 @@ from urllib.parse import urlencode
 import acquisition_campaigns as acq
 import conversion_loop_learning_runtime as learning
 import conversion_loop_runtime as loop
+import owner_decision_runtime as owner_decisions
 
 VERSION = "1.0-conversion-loop-campaign-bridge"
 BASE = (os.getenv("LUMEN_CONVERSION_BASE_URL") or loop.CONVERSION_BASE_URL).rstrip("/")
+
+# Consume authenticated owner decisions before the business cycle starts, then keep the exact
+# resolved proposal from being reopened by Continuous Learning. This does not widen production,
+# spending, contractual, connector, or authority permissions.
+owner_decisions.consume_commands()
+owner_decisions.install_continuous_learning_guard()
 
 _PRODUCT_BY_AUDIENCE = {
     "buyer": "sourcing-5",

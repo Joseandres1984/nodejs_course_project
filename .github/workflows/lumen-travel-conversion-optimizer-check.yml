@@ -7,6 +7,8 @@ on:
       - '.lumen/a2a-worker/viator-optimized-recommend.js'
       - '.lumen/a2a-worker/adaptive-entry.js'
       - '.lumen/dashboard/travel_conversion_panel_worker.js'
+      - '.lumen/dashboard/teaching_mode_worker.js'
+      - '.lumen/dashboard/decision_center_worker.js'
       - '.lumen/dashboard/wrangler.toml'
       - '.github/workflows/lumen-travel-conversion-optimizer-check.yml'
   workflow_dispatch:
@@ -28,6 +30,7 @@ jobs:
           node --check .lumen/a2a-worker/adaptive-entry.js
           node --check .lumen/dashboard/travel_conversion_panel_worker.js
           node --check .lumen/dashboard/teaching_mode_worker.js
+          node --check .lumen/dashboard/decision_center_worker.js
 
       - name: Verify conversion and safety invariants
         run: |
@@ -48,7 +51,8 @@ jobs:
           grep -q 'handleViatorOptimizedRecommend' .lumen/a2a-worker/adaptive-entry.js
           grep -q 'travelApiCvr7' .lumen/dashboard/travel_conversion_panel_worker.js
           grep -q 'commissionNotInferredFromBookings: true' .lumen/dashboard/travel_conversion_panel_worker.js
-          grep -q '^main = "teaching_mode_worker.js"$' .lumen/dashboard/wrangler.toml
+          grep -q '^main = "decision_center_worker.js"$' .lumen/dashboard/wrangler.toml
+          grep -q 'import app from "./teaching_mode_worker.js"' .lumen/dashboard/decision_center_worker.js
           grep -q 'import app from "./travel_conversion_panel_worker.js"' .lumen/dashboard/teaching_mode_worker.js
           echo 'TRAVEL_CONVERSION_OPTIMIZER_INVARIANTS_OK'
 
