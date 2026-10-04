@@ -1,5 +1,6 @@
-const VERSION = "1.6-first-cash-microbuyer-revision";
+const VERSION = "1.7-intramodule-proposal-evolution";
 const PRIORITY_BRIDGE_VERSION = "4.1-sovereign-revenue-priority";
+const EVOLUTION_VERSION = "1.0-intramodule-proposal-evolution";
 
 export const OFFERS = {
   "MP-SUPPLIER-SNAPSHOT": { name: "Supplier Snapshot", priceUsd: 1, outcome: "a compact supplier identity and official-channel signal for one named company or domain" },
@@ -9,6 +10,13 @@ export const OFFERS = {
   "MP-BUYER-SIGNALS": { name: "Buyer Signal Scan", priceUsd: 19, outcome: "an evidence-backed scan of buyer intent and demand signals" },
   "MP-EXPORT-PULSE": { name: "Export Market Pulse", priceUsd: 25, outcome: "a compact export-market demand and channel pulse" }
 };
+
+const PROPOSAL_VARIANTS = [
+  { id: "direct_outcome", description: "Lead with the concrete deliverable and fixed price." },
+  { id: "evidence_first", description: "Lead with the observed public evidence before the offer." },
+  { id: "scope_first", description: "Lead with a low-friction scope question before the commercial detail." },
+  { id: "low_friction", description: "Use the shortest path to a reply while preserving the full non-binding disclosure." }
+];
 
 function json(data, status = 200) {
   return Response.json(data, {
@@ -52,7 +60,9 @@ async function ensureSchema(env) {
   if (!env?.DB) return false;
   await env.DB.batch([
     env.DB.prepare("CREATE TABLE IF NOT EXISTS lumen_proposal_drafts (opportunity_id TEXT PRIMARY KEY, proposal_id TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, status TEXT NOT NULL, offer_id TEXT NOT NULL, offer_name TEXT NOT NULL, amount_usd REAL NOT NULL, subject TEXT NOT NULL, message TEXT NOT NULL, quality_gate_status TEXT NOT NULL, autonomous_send INTEGER NOT NULL DEFAULT 0, metadata_json TEXT)"),
-    env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_lumen_proposal_drafts_status ON lumen_proposal_drafts(status,updated_at)")
+    env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_lumen_proposal_drafts_status ON lumen_proposal_drafts(status,updated_at)"),
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS lumen_proposal_variant_assignments (proposal_id TEXT PRIMARY KEY, opportunity_id TEXT NOT NULL, offer_id TEXT NOT NULL, variant_id TEXT NOT NULL, created_at TEXT NOT NULL, engine_version TEXT NOT NULL)"),
+    env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_lumen_proposal_variant_assignments_variant ON lumen_proposal_variant_assignments(variant_id,created_at)")
   ]);
   return true;
 }
@@ -83,7 +93,97 @@ async function getBestProposalCandidate(env) {
   return { ...row, reasons: safeParse(row.reasons_json, []) };
 }
 
-function makeDraft(opportunity, env) {
+async function proposalVariantStats(env) {
+  const empty = PROPOSAL_VARIANTS.map(v => ({ ...v, assignments: 0, responses: 0, settlements: 0, revenueUsd: 0, reward: 0, exploration: 0, score: 0 }));
+  try {
+    const result = await env.DB.prepare(`SELECT a.variant_id,
+      COUNT(DISTINCT a.proposal_id) AS assignments,
+      COUNT(DISTINCT CASE WHEN c.status='RESPONDED' THEN a.proposal_id END) AS responses,
+      COUNT(DISTINCT b.receipt_id) AS settlements,
+      COALESCE(SUM(b.amount_usd),0) AS revenue_usd
+      FROM lumen_proposal_variant_assignments a
+      LEFT JOIN lumen_first_cash_closer c ON c.proposal_id=a.proposal_id
+      LEFT JOIN lumen_x402_revenue_bridge b ON b.proposal_id=a.proposal_id
+      GROUP BY a.variant_id`).all();
+    const byId = new Map((result.results || []).map(row => [clean(row.variant_id, 80), row]));
+    const totalAssignments = (result.results || []).reduce((sum, row) => sum + Number(row.assignments || 0), 0);
+    return PROPOSAL_VARIANTS.map(variant => {
+      const row = byId.get(variant.id) || {};
+      const assignments = Number(row.assignments || 0);
+      const responses = Number(row.responses || 0);
+      const settlements = Number(row.settlements || 0);
+      const revenueUsd = Number(row.revenue_usd || 0);
+      const reward = settlements * 10000 + revenueUsd * 100 + responses * 12;
+      const exploration = 45 * Math.sqrt(Math.log(totalAssignments + 2) / (assignments + 1));
+      return { ...variant, assignments, responses, settlements, revenueUsd, reward, exploration, score: reward + exploration };
+    });
+  } catch {
+    return empty;
+  }
+}
+
+async function selectProposalVariant(env, proposalId) {
+  if (proposalId) {
+    try {
+      const prior = await env.DB.prepare("SELECT variant_id FROM lumen_proposal_variant_assignments WHERE proposal_id=? LIMIT 1").bind(proposalId).first();
+      if (prior?.variant_id && PROPOSAL_VARIANTS.some(v => v.id === prior.variant_id)) {
+        const stats = await proposalVariantStats(env);
+        return { variantId: prior.variant_id, reason: "stable_existing_assignment", stats };
+      }
+    } catch {}
+  }
+  const stats = await proposalVariantStats(env);
+  const selected = [...stats].sort((a, b) => {
+    if (a.assignments !== b.assignments && Math.min(...stats.map(s => s.assignments)) < 2) return a.assignments - b.assignments;
+    return b.score - a.score || a.assignments - b.assignments || a.id.localeCompare(b.id);
+  })[0] || { id: "direct_outcome" };
+  return { variantId: selected.id, reason: selected.assignments < 2 ? "bounded_exploration" : "verified_outcome_exploitation", stats };
+}
+
+function buildProposalMessage({ variantId, target, offer, evidence, firstCashMode, microbuyerFit }) {
+  const disclosure = "This is a non-binding commercial introduction. No order, payment, contract or commitment is created by this message.";
+  const checkoutHint = firstCashMode && microbuyerFit
+    ? "If useful, reply with one company or domain you want checked. LUMEN can confirm the exact deliverable and provide the x402 checkout. If this is not relevant, no action is needed."
+    : "If useful, reply with the requirement or scope you want checked. LUMEN can then confirm the exact deliverable and provide the x402 checkout. If this is not relevant, no action is needed.";
+  const observed = evidence || (microbuyerFit
+    ? "the public signal combines machine-payment compatibility with an information-verification need."
+    : "the public signal appears related to an active B2B requirement.");
+  const price = firstCashMode && microbuyerFit
+    ? `FIRST CASH offer: ${offer.name} — ${offer.outcome} — USD ${offer.priceUsd.toFixed(2)} per request via x402 USDC on Base.`
+    : `We can provide ${offer.outcome} for USD ${offer.priceUsd}.`;
+
+  if (variantId === "evidence_first") {
+    return [`Hi ${target},`, `Observed context: ${observed}`, `That signal appears relevant to ${offer.name}.`, price, disclosure, checkoutHint].join("\n\n");
+  }
+  if (variantId === "scope_first") {
+    const question = microbuyerFit
+      ? "Would a one-company or one-domain verification be useful for your current workflow?"
+      : `Is ${offer.name} relevant to a requirement you are working on now?`;
+    return [`Hi ${target},`, question, `Observed context: ${observed}`, price, disclosure, checkoutHint].join("\n\n");
+  }
+  if (variantId === "low_friction") {
+    return [`Hi ${target},`, `${offer.name}: ${offer.outcome}.`, `Observed context: ${observed}`, price, checkoutHint, disclosure].join("\n\n");
+  }
+  return firstCashMode && microbuyerFit
+    ? [
+        `Hi ${target},`,
+        "LUMEN found a public signal that suggests your agent/API may use machine-to-machine payments together with research or verification workflows.",
+        `Observed context: ${observed}`,
+        price,
+        disclosure,
+        checkoutHint
+      ].join("\n\n")
+    : [
+        `Hi ${target},`,
+        `LUMEN found a public commercial signal that appears relevant to ${offer.name}.`,
+        `Observed context: ${observed}`,
+        price,
+        disclosure,
+        checkoutHint
+      ].join("\n\n");
+}
+
+function makeDraft(opportunity, env, variantId = "direct_outcome") {
   const reasons = Array.isArray(opportunity.reasons) ? opportunity.reasons : [];
   const firstCashMode = boolVar(env?.LUMEN_FIRST_CASH_MODE, false);
   const microbuyerFit = reasons.includes("microbuyer_fit");
@@ -91,25 +191,9 @@ function makeDraft(opportunity, env) {
   const offer = OFFERS[selectedOfferId] || OFFERS["MP-BUYER-SIGNALS"];
   const target = clean(opportunity.name || opportunity.remote_id, 180);
   const evidence = completeExcerpt(opportunity.description, 420);
-  const subject = clean(`${firstCashMode && microbuyerFit ? "USD 1 machine-service fit" : "Possible fit"}: ${offer.name} for ${target}`, 180);
-
-  const message = firstCashMode && microbuyerFit
-    ? [
-        `Hi ${target},`,
-        "LUMEN found a public signal that suggests your agent/API may use machine-to-machine payments together with research or verification workflows.",
-        evidence ? `Observed context: ${evidence}` : "Observed context: the public signal combines machine-payment compatibility with an information-verification need.",
-        `FIRST CASH offer: ${offer.name} — ${offer.outcome} — USD ${offer.priceUsd.toFixed(2)} per request via x402 USDC on Base.`,
-        "This is a non-binding commercial introduction. No order, payment, contract or commitment is created by this message.",
-        "If useful, reply with one company or domain you want checked. LUMEN can confirm the exact deliverable and provide the x402 checkout. If this is not relevant, no action is needed."
-      ].join("\n\n")
-    : [
-        `Hi ${target},`,
-        `LUMEN found a public commercial signal that appears relevant to ${offer.name}.`,
-        evidence ? `Observed context: ${evidence}` : "Observed context: the public signal appears related to an active B2B requirement.",
-        `We can provide ${offer.outcome} for USD ${offer.priceUsd}.`,
-        "This is a non-binding commercial introduction. No order, payment, contract or commitment is created by this message.",
-        "If useful, reply with the requirement or scope you want checked. LUMEN can then confirm the exact deliverable and provide the x402 checkout. If this is not relevant, no action is needed."
-      ].join("\n\n");
+  const subjectPrefix = variantId === "scope_first" ? "Quick scope check" : variantId === "evidence_first" ? "Observed fit" : (firstCashMode && microbuyerFit ? "USD 1 machine-service fit" : "Possible fit");
+  const subject = clean(`${subjectPrefix}: ${offer.name} for ${target}`, 180);
+  const message = buildProposalMessage({ variantId, target, offer, evidence, firstCashMode, microbuyerFit });
 
   return {
     offerId: selectedOfferId,
@@ -118,7 +202,8 @@ function makeDraft(opportunity, env) {
     subject,
     message: clean(message, 1800),
     firstCashMode,
-    microbuyerFit
+    microbuyerFit,
+    variantId
   };
 }
 
@@ -127,10 +212,12 @@ export async function prepareTopProposal(env) {
   const opportunity = await getBestProposalCandidate(env);
   if (!opportunity) return { ok: true, prepared: false, reason: "no_unprocessed_commercial_candidate", version: VERSION };
 
-  const draft = makeDraft(opportunity, env);
   const now = new Date().toISOString();
   const proposalId = opportunity.existing_proposal_id || `PROP-${crypto.randomUUID().replaceAll("-", "").slice(0, 12).toUpperCase()}`;
   const createdAt = opportunity.existing_created_at || now;
+  const evolution = await selectProposalVariant(env, proposalId);
+  const draft = makeDraft(opportunity, env, evolution.variantId);
+  const selectedStats = evolution.stats.find(s => s.id === draft.variantId) || null;
   const metadata = {
     commercial_score: opportunity.commercial_score,
     commercial_fit: opportunity.commercial_fit,
@@ -139,6 +226,18 @@ export async function prepareTopProposal(env) {
     endpoint: opportunity.endpoint || null,
     reasons: opportunity.reasons || [],
     source_status: opportunity.status || null,
+    intramodule_evolution: {
+      version: EVOLUTION_VERSION,
+      variant_id: draft.variantId,
+      selection_reason: evolution.reason,
+      verified_settlements: Number(selectedStats?.settlements || 0),
+      verified_revenue_usd: Number(selectedStats?.revenueUsd || 0),
+      responses: Number(selectedStats?.responses || 0),
+      assignments: Number(selectedStats?.assignments || 0),
+      self_modifying_code: false,
+      mutates_price: false,
+      reward_order: ["verified_settlement", "verified_revenue", "qualified_response", "bounded_exploration"]
+    },
     first_cash: {
       enabled: draft.firstCashMode,
       microbuyer_fit: draft.microbuyerFit,
@@ -183,6 +282,8 @@ export async function prepareTopProposal(env) {
 
   await env.DB.prepare("INSERT INTO lumen_proposal_drafts(opportunity_id,proposal_id,created_at,updated_at,status,offer_id,offer_name,amount_usd,subject,message,quality_gate_status,autonomous_send,metadata_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(opportunity_id) DO UPDATE SET updated_at=excluded.updated_at,status=excluded.status,offer_id=excluded.offer_id,offer_name=excluded.offer_name,amount_usd=excluded.amount_usd,subject=excluded.subject,message=excluded.message,quality_gate_status=excluded.quality_gate_status,autonomous_send=excluded.autonomous_send,metadata_json=excluded.metadata_json")
     .bind(opportunity.id, proposalId, createdAt, now, "DRAFT", draft.offerId, draft.offerName, draft.amountUsd, draft.subject, draft.message, "PENDING_QUALITY_GATE", 0, JSON.stringify(metadata)).run();
+  await env.DB.prepare("INSERT INTO lumen_proposal_variant_assignments(proposal_id,opportunity_id,offer_id,variant_id,created_at,engine_version) VALUES(?,?,?,?,?,?) ON CONFLICT(proposal_id) DO UPDATE SET offer_id=excluded.offer_id,engine_version=excluded.engine_version")
+    .bind(proposalId, opportunity.id, draft.offerId, draft.variantId, now, EVOLUTION_VERSION).run();
 
   return {
     ok: true,
@@ -203,6 +304,8 @@ export async function prepareTopProposal(env) {
       firstCashMode: draft.firstCashMode,
       microbuyerFit: draft.microbuyerFit,
       revisedFrom: opportunity.existing_quality_gate_status || null,
+      proposalVariant: draft.variantId,
+      evolutionSelectionReason: evolution.reason,
       profitPriorityAdjustment: Number(opportunity.profit_priority_adjustment || 0),
       profitEvidenceLevel: opportunity.profit_evidence_level || "COLD",
       directorPriorityAdjustment: Number(opportunity.director_priority_adjustment || 0),
@@ -211,6 +314,14 @@ export async function prepareTopProposal(env) {
       portfolioLane: opportunity.portfolio_lane || "NEW_BUSINESS",
       sovereignPriorityAdjustment: Number(opportunity.sovereign_priority_adjustment || 0),
       sovereignRunId: opportunity.sovereign_run_id || null
+    },
+    evolution: {
+      version: EVOLUTION_VERSION,
+      variant: draft.variantId,
+      selectionReason: evolution.reason,
+      variants: evolution.stats.map(({ id, assignments, responses, settlements, revenueUsd, score }) => ({ id, assignments, responses, settlements, revenueUsd, score })),
+      selfModifyingCode: false,
+      priceMutation: false
     },
     guardrails: {
       chargeCreated: false,
@@ -251,6 +362,22 @@ async function getNextProposal(env) {
   });
 }
 
+async function getEvolutionStats(env) {
+  await ensureSchema(env);
+  const variants = await proposalVariantStats(env);
+  const ranked = [...variants].sort((a,b) => b.settlements - a.settlements || b.revenueUsd - a.revenueUsd || b.responses - a.responses || b.score - a.score);
+  return {
+    version: EVOLUTION_VERSION,
+    objective: "verified_settlement_first_then_verified_revenue_then_qualified_response",
+    champion: ranked[0]?.id || null,
+    variants: ranked.map(({ id, description, assignments, responses, settlements, revenueUsd, score }) => ({ id, description, assignments, responses, settlements, revenueUsd, score })),
+    boundedExploration: true,
+    selfModifyingCode: false,
+    mutatesPrice: false,
+    mutatesAuthority: false
+  };
+}
+
 function authorized(request, env) {
   const configured = clean(env?.OPPORTUNITY_ADMIN_TOKEN, 500);
   const provided = clean(request.headers.get("x-lumen-admin"), 500);
@@ -260,6 +387,7 @@ function authorized(request, env) {
 export async function handleProposalEngine(request, env) {
   const url = new URL(request.url);
   if (request.method === "GET" && url.pathname === "/proposals/next") return getNextProposal(env);
+  if (request.method === "GET" && url.pathname === "/proposals/evolution") return json(await getEvolutionStats(env));
   if (request.method === "POST" && url.pathname === "/proposals/prepare-top") {
     if (!authorized(request, env)) return json({ ok: false, error: "admin_token_required" }, 403);
     return json(await prepareTopProposal(env), 202);
