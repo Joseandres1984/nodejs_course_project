@@ -1,6 +1,8 @@
+import { classifyCommercialResponse } from "./response-qualification.js";
+
 const VERSION = "1.6-first-cash-microbuyer-revision";
 const PRIORITY_BRIDGE_VERSION = "4.1-sovereign-revenue-priority";
-const EVOLUTION_VERSION = "1.0-intramodule-proposal-evolution";
+const EVOLUTION_VERSION = "1.1-conversion-rate-proposal-evolution";
 
 export const OFFERS = {
   "MP-SUPPLIER-SNAPSHOT": { name: "Supplier Snapshot", priceUsd: 1, outcome: "a compact supplier identity and official-channel signal for one named company or domain" },
@@ -17,6 +19,9 @@ const PROPOSAL_VARIANTS = [
   { id: "scope_first", description: "Lead with a low-friction scope question before the commercial detail." },
   { id: "low_friction", description: "Use the shortest path to a reply while preserving the full non-binding disclosure." }
 ];
+
+const OUTREACH_EXPOSURE_STATES = new Set(["SENT", "SENT_TASK", "RESPONDED", "WORKING", "TASK_TERMINAL"]);
+const QUALIFIED_RESPONSE_CLASSES = new Set(["COMMERCIAL_QUESTION", "COMMERCIAL_INTEREST", "PURCHASE_INTENT"]);
 
 function json(data, status = 200) {
   return Response.json(data, {
@@ -71,7 +76,7 @@ async function getBestProposalCandidate(env) {
   const firstCashMode = boolVar(env?.LUMEN_FIRST_CASH_MODE, false);
   const baseFields = "SELECT o.id,o.name,o.description,o.remote_id,o.endpoint,o.evidence,o.score AS discovery_score,o.fit AS discovery_fit,o.demand_signal,o.revenue_offer_id,o.status,a.assessed_at,a.commercial_score,a.commercial_fit,a.evidence_strength,a.commercially_actionable,a.synthetic_or_test_only,a.reasons_json,p.proposal_id AS existing_proposal_id,p.created_at AS existing_created_at,p.status AS existing_proposal_status,p.quality_gate_status AS existing_quality_gate_status";
   const oneTimeMicrobuyerRevision = firstCashMode
-    ? " OR (p.status='DRAFT' AND p.quality_gate_status='NEEDS_REVISION' AND a.reasons_json LIKE '%microbuyer_fit%' AND COALESCE(p.metadata_json,'') NOT LIKE '%1.6-first-cash-microbuyer-revision%')"
+    ? " OR (p.status='DRAFT' AND p.quality_gate_status='NEEDS_REVISION' AND a.reasons_json LIKE '%microbuyer_fit%' AND COALESCE(p.metadata_json,'') NOT LIKE '%\"one_time_revision\":true%')"
     : "";
   const where = ` WHERE a.commercially_actionable=1 AND a.synthetic_or_test_only=0 AND (p.opportunity_id IS NULL OR (p.status='DRAFT' AND p.quality_gate_status='PENDING_QUALITY_GATE')${oneTimeMicrobuyerRevision})`;
   const firstCashOrder = firstCashMode ? "CASE WHEN a.reasons_json LIKE '%microbuyer_fit%' THEN 0 ELSE 1 END," : "";
@@ -94,28 +99,58 @@ async function getBestProposalCandidate(env) {
 }
 
 async function proposalVariantStats(env) {
-  const empty = PROPOSAL_VARIANTS.map(v => ({ ...v, assignments: 0, responses: 0, settlements: 0, revenueUsd: 0, reward: 0, exploration: 0, score: 0 }));
+  const empty = PROPOSAL_VARIANTS.map(v => ({ ...v, assignments: 0, exposures: 0, responses: 0, responseRate: 0, settlements: 0, settlementRate: 0, revenueUsd: 0, revenuePerExposure: 0, reward: 0, exploration: 0, score: 0 }));
   try {
-    const result = await env.DB.prepare(`SELECT a.variant_id,
-      COUNT(DISTINCT a.proposal_id) AS assignments,
-      COUNT(DISTINCT CASE WHEN c.status='RESPONDED' THEN a.proposal_id END) AS responses,
-      COUNT(DISTINCT b.receipt_id) AS settlements,
-      COALESCE(SUM(b.amount_usd),0) AS revenue_usd
+    const result = await env.DB.prepare(`SELECT a.variant_id,a.proposal_id,p.message,x.status AS outreach_status,
+      COALESCE((SELECT f.response_text FROM lumen_followups f WHERE f.proposal_id=a.proposal_id AND f.response_text IS NOT NULL AND TRIM(f.response_text)<>'' ORDER BY COALESCE(f.sent_at,f.updated_at) DESC LIMIT 1),x.response_text) AS response_text,
+      COALESCE((SELECT COUNT(DISTINCT b.receipt_id) FROM lumen_x402_revenue_bridge b WHERE b.proposal_id=a.proposal_id),0) AS settlements,
+      COALESCE((SELECT SUM(b2.amount_usd) FROM lumen_x402_revenue_bridge b2 WHERE b2.proposal_id=a.proposal_id),0) AS revenue_usd
       FROM lumen_proposal_variant_assignments a
-      LEFT JOIN lumen_first_cash_closer c ON c.proposal_id=a.proposal_id
-      LEFT JOIN lumen_x402_revenue_bridge b ON b.proposal_id=a.proposal_id
-      GROUP BY a.variant_id`).all();
-    const byId = new Map((result.results || []).map(row => [clean(row.variant_id, 80), row]));
-    const totalAssignments = (result.results || []).reduce((sum, row) => sum + Number(row.assignments || 0), 0);
+      LEFT JOIN lumen_proposal_drafts p ON p.proposal_id=a.proposal_id
+      LEFT JOIN lumen_outreach_attempts x ON x.proposal_id=a.proposal_id
+      ORDER BY a.created_at DESC LIMIT 2000`).all();
+
+    const stats = new Map(PROPOSAL_VARIANTS.map(v => [v.id, { ...v, assignments: 0, exposures: 0, responses: 0, settlements: 0, revenueUsd: 0 }]));
+    for (const row of result.results || []) {
+      const id = clean(row.variant_id, 80);
+      if (!stats.has(id)) continue;
+      const item = stats.get(id);
+      item.assignments++;
+      const exposed = OUTREACH_EXPOSURE_STATES.has(clean(row.outreach_status, 40).toUpperCase());
+      if (exposed) item.exposures++;
+      if (exposed && clean(row.response_text, 8000)) {
+        const classification = classifyCommercialResponse(row.response_text, row.message || "");
+        if (QUALIFIED_RESPONSE_CLASSES.has(classification.responseClass)) item.responses++;
+      }
+      item.settlements += Math.max(0, Number(row.settlements || 0));
+      item.revenueUsd += Math.max(0, Number(row.revenue_usd || 0));
+    }
+
+    const totalAssignments = [...stats.values()].reduce((sum, s) => sum + s.assignments, 0);
+    const totalExposures = [...stats.values()].reduce((sum, s) => sum + s.exposures, 0);
     return PROPOSAL_VARIANTS.map(variant => {
-      const row = byId.get(variant.id) || {};
-      const assignments = Number(row.assignments || 0);
-      const responses = Number(row.responses || 0);
-      const settlements = Number(row.settlements || 0);
-      const revenueUsd = Number(row.revenue_usd || 0);
-      const reward = settlements * 10000 + revenueUsd * 100 + responses * 12;
-      const exploration = 45 * Math.sqrt(Math.log(totalAssignments + 2) / (assignments + 1));
-      return { ...variant, assignments, responses, settlements, revenueUsd, reward, exploration, score: reward + exploration };
+      const s = stats.get(variant.id) || { ...variant, assignments: 0, exposures: 0, responses: 0, settlements: 0, revenueUsd: 0 };
+      const denominator = Math.max(1, s.exposures);
+      const responseRate = s.responses / denominator;
+      const settlementRate = s.settlements / denominator;
+      const revenuePerExposure = s.revenueUsd / denominator;
+      const reward = s.settlements * 10000 + s.revenueUsd * 100 + s.responses * 12;
+      const exploration = 45 * Math.sqrt(Math.log(totalExposures + totalAssignments + 2) / (s.assignments + 1));
+      const score = settlementRate * 10000 + revenuePerExposure * 100 + responseRate * 120 + exploration;
+      return {
+        ...variant,
+        assignments: s.assignments,
+        exposures: s.exposures,
+        responses: s.responses,
+        responseRate: Number(responseRate.toFixed(4)),
+        settlements: s.settlements,
+        settlementRate: Number(settlementRate.toFixed(4)),
+        revenueUsd: Number(s.revenueUsd.toFixed(2)),
+        revenuePerExposure: Number(revenuePerExposure.toFixed(2)),
+        reward,
+        exploration: Number(exploration.toFixed(3)),
+        score: Number(score.toFixed(3))
+      };
     });
   } catch {
     return empty;
@@ -133,11 +168,12 @@ async function selectProposalVariant(env, proposalId) {
     } catch {}
   }
   const stats = await proposalVariantStats(env);
+  const minimumAssignments = Math.min(...stats.map(s => s.assignments));
   const selected = [...stats].sort((a, b) => {
-    if (a.assignments !== b.assignments && Math.min(...stats.map(s => s.assignments)) < 2) return a.assignments - b.assignments;
+    if (minimumAssignments < 2 && a.assignments !== b.assignments) return a.assignments - b.assignments;
     return b.score - a.score || a.assignments - b.assignments || a.id.localeCompare(b.id);
   })[0] || { id: "direct_outcome" };
-  return { variantId: selected.id, reason: selected.assignments < 2 ? "bounded_exploration" : "verified_outcome_exploitation", stats };
+  return { variantId: selected.id, reason: selected.assignments < 2 ? "bounded_exploration" : "conversion_rate_exploitation", stats };
 }
 
 function buildProposalMessage({ variantId, target, offer, evidence, firstCashMode, microbuyerFit }) {
@@ -232,11 +268,15 @@ export async function prepareTopProposal(env) {
       selection_reason: evolution.reason,
       verified_settlements: Number(selectedStats?.settlements || 0),
       verified_revenue_usd: Number(selectedStats?.revenueUsd || 0),
-      responses: Number(selectedStats?.responses || 0),
+      qualified_responses: Number(selectedStats?.responses || 0),
       assignments: Number(selectedStats?.assignments || 0),
+      exposures: Number(selectedStats?.exposures || 0),
+      settlement_rate: Number(selectedStats?.settlementRate || 0),
+      response_rate: Number(selectedStats?.responseRate || 0),
+      revenue_per_exposure: Number(selectedStats?.revenuePerExposure || 0),
       self_modifying_code: false,
       mutates_price: false,
-      reward_order: ["verified_settlement", "verified_revenue", "qualified_response", "bounded_exploration"]
+      reward_order: ["verified_settlement_rate", "verified_revenue_per_exposure", "qualified_response_rate", "bounded_exploration"]
     },
     first_cash: {
       enabled: draft.firstCashMode,
@@ -319,7 +359,7 @@ export async function prepareTopProposal(env) {
       version: EVOLUTION_VERSION,
       variant: draft.variantId,
       selectionReason: evolution.reason,
-      variants: evolution.stats.map(({ id, assignments, responses, settlements, revenueUsd, score }) => ({ id, assignments, responses, settlements, revenueUsd, score })),
+      variants: evolution.stats.map(({ id, assignments, exposures, responses, responseRate, settlements, settlementRate, revenueUsd, revenuePerExposure, score }) => ({ id, assignments, exposures, responses, responseRate, settlements, settlementRate, revenueUsd, revenuePerExposure, score })),
       selfModifyingCode: false,
       priceMutation: false
     },
@@ -365,13 +405,15 @@ async function getNextProposal(env) {
 async function getEvolutionStats(env) {
   await ensureSchema(env);
   const variants = await proposalVariantStats(env);
-  const ranked = [...variants].sort((a,b) => b.settlements - a.settlements || b.revenueUsd - a.revenueUsd || b.responses - a.responses || b.score - a.score);
+  const ranked = [...variants].sort((a,b) => b.score - a.score || b.settlementRate - a.settlementRate || b.revenuePerExposure - a.revenuePerExposure || b.responseRate - a.responseRate);
   return {
     version: EVOLUTION_VERSION,
-    objective: "verified_settlement_first_then_verified_revenue_then_qualified_response",
+    objective: "verified_settlement_rate_first_then_verified_revenue_per_exposure_then_qualified_response_rate",
     champion: ranked[0]?.id || null,
-    variants: ranked.map(({ id, description, assignments, responses, settlements, revenueUsd, score }) => ({ id, description, assignments, responses, settlements, revenueUsd, score })),
+    variants: ranked.map(({ id, description, assignments, exposures, responses, responseRate, settlements, settlementRate, revenueUsd, revenuePerExposure, score }) => ({ id, description, assignments, exposures, responses, responseRate, settlements, settlementRate, revenueUsd, revenuePerExposure, score })),
     boundedExploration: true,
+    countsOnlyActualOutreachAsExposure: true,
+    qualifiedResponseClassification: true,
     selfModifyingCode: false,
     mutatesPrice: false,
     mutatesAuthority: false
