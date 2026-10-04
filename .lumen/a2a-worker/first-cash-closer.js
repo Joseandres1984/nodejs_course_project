@@ -3,6 +3,15 @@ import { classifyCommercialResponse } from "./response-qualification.js";
 
 const VERSION = "1.1-shared-response-first-cash-closer";
 const SEND_TIMEOUT_MS = 15000;
+const FAST_LANE_VERSION = "1.0-first-settlement-fast-lane";
+const FAST_LANE_PRIORITY = {
+  "MP-QUOTE-SANITY": 100,
+  "MP-SUPPLIER-SNAPSHOT": 90,
+  "MP-TENDER-SCAN": 80,
+  "MP-SOURCING-5": 60,
+  "MP-BUYER-SIGNALS": 50,
+  "MP-EXPORT-PULSE": 40
+};
 
 function json(data, status = 200) {
   return Response.json(data, { status, headers: { "cache-control": "no-store", "x-content-type-options": "nosniff", "access-control-allow-origin": "*" } });
@@ -60,6 +69,7 @@ async function candidateRows(env) {
 
 async function findEligibleCandidate(env) {
   const rows = await candidateRows(env);
+  const eligible = [];
   for (const row of rows) {
     const qualification = classifyCommercialResponse(row.response_text, row.message);
     const closeEligible = ["PURCHASE_INTENT", "COMMERCIAL_INTEREST"].includes(qualification.responseClass);
@@ -73,9 +83,10 @@ async function findEligibleCandidate(env) {
       creative: qualification.responseClass.toLowerCase()
     });
     if (!checkoutUrl || !isHttps(row.agent_url)) continue;
-    return { ...row, responseClass: qualification.responseClass, qualificationReason: qualification.reason, checkoutUrl };
+    eligible.push({ ...row, responseClass: qualification.responseClass, qualificationReason: qualification.reason, checkoutUrl, fastLanePriority: FAST_LANE_PRIORITY[clean(row.offer_id, 100)] || 0 });
   }
-  return null;
+  eligible.sort((a, b) => Number(b.fastLanePriority || 0) - Number(a.fastLanePriority || 0));
+  return eligible[0] || null;
 }
 
 function closerMessage(row) {
@@ -172,6 +183,7 @@ export async function runFirstCashCloser(env, { force = false } = {}) {
       status,
       taskId: info.taskId,
       checkoutUrl: candidate.checkoutUrl,
+      fastLane: { version: FAST_LANE_VERSION, priority: candidate.fastLanePriority, objective: "first_verified_settlement" },
       guardrails: { positiveIntentRequired: true, sharedResponseQualification: true, exactOfferCheckout: true, autonomousDiscounting: false, autonomousSpend: false, bindingActionsHumanGated: true }
     };
   } catch (error) {
@@ -201,7 +213,7 @@ async function statsData(env) {
 export async function handleFirstCashCloser(request, env) {
   const url = new URL(request.url);
   if (request.method === "GET" && url.pathname === "/first-cash/policy") {
-    return json({ version: VERSION, name: "LUMEN First Cash Closer", positiveIntentRequired: true, sharedResponseQualification: true, checkoutEligibleClasses:["PURCHASE_INTENT","COMMERCIAL_INTEREST"], technicalAckIsNotIntent: true, echoIsNotIntent:true, genericResponseIsNotIntent:true, exactOfferCheckout: true, trackedAttribution: true, maxExternalMessagesPerRun: 1, autonomousDiscounting: false, autonomousSpend: false, autonomousContract: false, bindingActionsHumanGated: true });
+    return json({ version: VERSION, fastLaneVersion: FAST_LANE_VERSION, name: "LUMEN First Cash Closer", positiveIntentRequired: true, sharedResponseQualification: true, checkoutEligibleClasses:["PURCHASE_INTENT","COMMERCIAL_INTEREST"], technicalAckIsNotIntent: true, echoIsNotIntent:true, genericResponseIsNotIntent:true, exactOfferCheckout: true, trackedAttribution: true, fastLane: { enabled: true, objective: "first_verified_settlement", priorityOrder: Object.keys(FAST_LANE_PRIORITY), maxExternalMessagesPerRun: 1 }, maxExternalMessagesPerRun: 1, autonomousDiscounting: false, autonomousSpend: false, autonomousContract: false, bindingActionsHumanGated: true });
   }
   if (request.method === "GET" && url.pathname === "/first-cash/stats") return json({ version: VERSION, ...await statsData(env) });
   if (request.method === "POST" && url.pathname === "/first-cash/run") {
