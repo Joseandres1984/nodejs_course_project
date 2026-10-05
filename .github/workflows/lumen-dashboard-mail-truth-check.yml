@@ -1,0 +1,59 @@
+name: LUMEN Dashboard mail truth check
+
+on:
+  pull_request:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/dashboard/**'
+      - '.github/workflows/lumen-dashboard-mail-truth-check.yml'
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/dashboard/**'
+      - '.github/workflows/lumen-dashboard-mail-truth-check.yml'
+
+jobs:
+  static-truth-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify canonical mail truth UI wiring
+        run: |
+          set -euo pipefail
+          grep -q '^main = "decision_truth_sync_worker.js"$' .lumen/dashboard/wrangler.toml
+          grep -q 'data?.outbound?.mail_ready === true' .lumen/dashboard/decision_truth_sync_worker.js
+          grep -q 'PANEL · EMAIL NO DISPONIBLE' .lumen/dashboard/decision_truth_sync_worker.js
+          grep -q 'x-lumen-mail-ui-truth' .lumen/dashboard/decision_truth_sync_worker.js
+          grep -q 'id="lumenChannelTruthPatch"' .lumen/dashboard/decision_truth_sync_worker.js
+          echo 'DASHBOARD_MAIL_TRUTH_STATIC_OK'
+
+  live-truth-check:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    needs: static-truth-check
+    env:
+      DASH_URL: https://lumen-zero-dashboard.lumen-b2b.workers.dev
+      DASH_PASSWORD: ${{ secrets.LUMEN_DASHBOARD_PASSWORD }}
+    steps:
+      - name: Verify deployed mail truth patch and canonical data
+        run: |
+          set -euo pipefail
+          test -n "$DASH_PASSWORD"
+          deployed=0
+          for attempt in $(seq 1 30); do
+            curl -sS --max-time 20 -u "socio:$DASH_PASSWORD" -D /tmp/headers.txt -o /tmp/dashboard.html "$DASH_URL/" || true
+            if grep -qi '^x-lumen-mail-ui-truth: v1' /tmp/headers.txt; then
+              deployed=1
+              break
+            fi
+            echo "WAITING_FOR_MAIL_TRUTH_PATCH attempt=${attempt}"
+            sleep 5
+          done
+          test "$deployed" = '1'
+          grep -q 'id="lumenChannelTruthPatch"' /tmp/dashboard.html
+
+          curl -fsS --max-time 20 -u "socio:$DASH_PASSWORD" "$DASH_URL/api/data" -o /tmp/data.json
+          jq -e '.outbound.mail_ready | type == "boolean"' /tmp/data.json >/dev/null
+          jq -e '.services.gmail.status | type == "string"' /tmp/data.json >/dev/null
+          jq -e 'if .outbound.mail_ready then (.services.gmail.live == true) else true end' /tmp/data.json >/dev/null
+          echo "DASHBOARD_MAIL_TRUTH_LIVE_OK mail_ready=$(jq -r '.outbound.mail_ready' /tmp/data.json) gmail_status=$(jq -r '.services.gmail.status' /tmp/data.json)"
