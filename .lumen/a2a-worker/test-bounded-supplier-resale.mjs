@@ -48,10 +48,18 @@ assert.equal(economics.projectedMarginPct, 29);
 assert.ok(rankSupplierLaunchCandidate({ ok: true, launchable: true, economics, benchmark: { sampleCount: 5 } }) > 0);
 assert.equal(rankSupplierLaunchCandidate({ ok: true, launchable: false, economics, benchmark: { sampleCount: 5 } }), 0);
 
+// Supplier-market evolution still exists, but the unified economic Brain now
+// owns the hourly decision. Commerce runs only when that one global mission
+// selects a commerce-capable plan; this prevents the old independent loop.
 assert.match(entry, /runSupplierMarketLaunchEvolution/);
+assert.match(entry, /runUnifiedEconomicBrain/);
 assert.match(entry, /getUTCMinutes\(\)/);
 assert.match(entry, /minute === 7/);
-assert.match(entry, /ctx\.waitUntil\(runSupplierMarketLaunchEvolution\(env\)\)/);
+assert.match(entry, /ctx\.waitUntil\(\(async \(\) => \{/);
+assert.match(entry, /brain\?\.plan\?\.commerce === true/);
+assert.match(entry, /return runSupplierMarketLaunchEvolution\(env\)/);
+assert.match(entry, /unified_brain_selected_other_lane/);
+assert.doesNotMatch(entry, /ctx\.waitUntil\(runSupplierMarketLaunchEvolution\(env\)\)/);
 assert.doesNotMatch(entry, /runAutonomousSupplierLaunch/);
 
 console.log("SUPPLIER_INTERMEDIARY_EVOLUTION_GUARDRAILS_OK");
