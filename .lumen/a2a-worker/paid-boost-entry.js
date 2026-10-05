@@ -7,11 +7,26 @@ import { FIRST_SETTLEMENT_MISSION_POLICY, getFirstSettlementMissionStatus } from
 import { RESPONSE_CLOSER_POLICY, getResponseCloserStatus } from "./response-closer-v1.js";
 import { handleFirstCashCloser } from "./first-cash-closer.js";
 import { runSupplierMarketLaunchEvolution } from "./supplier-market-launch.js";
+import { UNIFIED_BRAIN_POLICY, getUnifiedBrainStatus, runUnifiedEconomicBrain } from "./unified-economic-brain-v1.js";
 export { LumenDeepWorkflow, LumenOpportunityWorkflow } from "./paid-boost-workflows.js";
 
 function adminAuthorized(request, env) {
   const expected = env.OPPORTUNITY_ADMIN_TOKEN;
   return Boolean(expected && request.headers.get("x-lumen-admin") === expected);
+}
+
+export async function handleUnifiedBrain(request, env) {
+  const url = new URL(request.url), path = url.pathname;
+  if (!path.startsWith("/brain/")) return null;
+  if (request.method === "GET" && path === "/brain/policy") return Response.json(UNIFIED_BRAIN_POLICY);
+  if (!adminAuthorized(request, env)) return Response.json({ ok:false, error:"admin_token_required" }, { status:403 });
+  if (request.method === "GET" && path === "/brain/status") {
+    return Response.json(await getUnifiedBrainStatus(env), { headers:{ "cache-control":"no-store" } });
+  }
+  if (request.method === "POST" && path === "/brain/run") {
+    return Response.json(await runUnifiedEconomicBrain(withBudgetedAi(env), { trigger:"owner_requested", scheduledTime:Date.now(), cycleKey:`manual-${Date.now()}` }), { headers:{ "cache-control":"no-store" } });
+  }
+  return Response.json({ ok:false, error:"not_found" }, { status:404 });
 }
 
 export async function handleResponseCloser(request, env) {
@@ -59,6 +74,8 @@ export async function handlePaidBoost(request, env) {
 
 export default {
   async fetch(request, env, ctx) {
+    const brain = await handleUnifiedBrain(request, env);
+    if (brain) return brain;
     const responseCloser = await handleResponseCloser(request, env);
     if (responseCloser) return responseCloser;
     const firstSettlementResponse = await handleFirstSettlementMission(request, env);
@@ -76,7 +93,13 @@ export default {
     if (!env.LUMEN_DEEP_WORKFLOW || !env.LUMEN_OPPORTUNITY_WORKFLOW) throw new Error("paid_boost_workflow_bindings_required");
     if (controller.cron === DEEP_CRON) { ctx.waitUntil(startDeepCycle(env, controller.scheduledTime)); return; }
     const minute = new Date(Number(controller?.scheduledTime || Date.now())).getUTCMinutes();
-    if (minute === 7) ctx.waitUntil(runSupplierMarketLaunchEvolution(env));
+    if (minute === 7) {
+      ctx.waitUntil((async () => {
+        const brain = await runUnifiedEconomicBrain(withBudgetedAi(env), { trigger:"hourly_commercial_slot", scheduledTime:controller.scheduledTime });
+        if (brain?.plan?.commerce === true) return runSupplierMarketLaunchEvolution(env);
+        return { ok:true, skipped:true, reason:"unified_brain_selected_other_lane", lane:brain?.mission?.executionLane || null };
+      })());
+    }
     return adaptive.scheduled(controller, { ...withBudgetedAi(env), LUMEN_DEEP_WORKFLOW_MANAGED: true }, ctx);
   }
 };
