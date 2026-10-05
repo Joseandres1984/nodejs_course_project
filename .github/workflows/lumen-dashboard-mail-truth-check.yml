@@ -20,10 +20,11 @@ jobs:
       - name: Verify canonical mail truth UI wiring
         run: |
           set -euo pipefail
-          grep -q '^main = "channel_truth_worker.js"$' .lumen/dashboard/wrangler.toml
-          grep -q 'data?.outbound?.mail_ready === true' .lumen/dashboard/channel_truth_worker.js
-          grep -q 'PANEL · EMAIL NO DISPONIBLE' .lumen/dashboard/channel_truth_worker.js
-          grep -q "headers.set('X-Lumen-Mail-UI-Truth', 'v1')" .lumen/dashboard/channel_truth_worker.js
+          grep -q '^main = "decision_truth_sync_worker.js"$' .lumen/dashboard/wrangler.toml
+          grep -q 'data?.outbound?.mail_ready === true' .lumen/dashboard/decision_truth_sync_worker.js
+          grep -q 'PANEL · EMAIL NO DISPONIBLE' .lumen/dashboard/decision_truth_sync_worker.js
+          grep -q 'x-lumen-mail-ui-truth' .lumen/dashboard/decision_truth_sync_worker.js
+          grep -q 'id="lumenChannelTruthPatch"' .lumen/dashboard/decision_truth_sync_worker.js
           echo 'DASHBOARD_MAIL_TRUTH_STATIC_OK'
 
   live-truth-check:
