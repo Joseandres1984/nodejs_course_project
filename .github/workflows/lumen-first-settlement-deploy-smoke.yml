@@ -34,10 +34,13 @@ jobs:
           test -n "$CF_ACCOUNT"
           test -n "$ADMIN_TOKEN"
 
-      - name: Verify First Settlement module before deploy
+      - name: Verify First Settlement and Unified Brain before deploy
         run: |
           set -euo pipefail
           node .lumen/a2a-worker/test-first-settlement-mission-v1.mjs
+          node .lumen/a2a-worker/test-unified-economic-brain-v1.mjs
+          node .lumen/a2a-worker/test-intramodule-evolution-v1.mjs
+          node .lumen/a2a-worker/test-bounded-supplier-resale.mjs
           node .lumen/a2a-worker/test-paid-boost.mjs
 
       - name: Deploy production worker
@@ -59,15 +62,37 @@ jobs:
             if curl -fsS --max-time 20 -H 'cache-control: no-cache' "$BASE/first-settlement/policy?release=$GITHUB_SHA&probe=$attempt" -o first-settlement-policy.json; then
               if jq -e '.version=="1.0-first-settlement-mission" and .settlementTruth=="verified_x402_receipt_only" and .autonomousSpendUsd==0 and .autonomousPurchase==false and .autonomousContract==false and .changesPrices==false and .createsNewSenderAuthority==false and .bindingActionsHumanGated==true' first-settlement-policy.json >/dev/null; then
                 echo 'FIRST_SETTLEMENT_PUBLIC_POLICY_OK'
-                exit 0
+                break
               fi
             fi
+            if [ "$attempt" = '12' ]; then cat first-settlement-policy.json || true; exit 1; fi
             sleep 3
           done
-          cat first-settlement-policy.json || true
-          exit 1
 
-      - name: Verify protected status and live mission
+      - name: Verify public Unified Brain policy
+        run: |
+          set -euo pipefail
+          BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          curl -fsS --max-time 20 -H 'cache-control: no-cache' "$BASE/brain/policy?release=$GITHUB_SHA" -o brain-policy.json
+          jq -e '.version=="1.0-unified-economic-brain" and .oneGlobalEconomicMission==true and .openEndedBusinessModels==true and .explorationRate==0.20 and .autonomousSpendUsd==0 and .autonomousPurchase==false and .autonomousContract==false and .bindingActionsHumanGated==true and .revenueTruth=="provider_verified_settlement_only"' brain-policy.json >/dev/null
+          echo 'UNIFIED_BRAIN_PUBLIC_POLICY_OK'
+
+      - name: Verify protected status, run one Brain cycle, and live mission
+        env:
+          OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          unauth=$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' "$BASE/brain/status")
+          test "$unauth" = '403'
+          curl -fsS --max-time 45 -X POST -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" -H 'cache-control: no-cache' "$BASE/brain/run?release=$GITHUB_SHA" -o brain-run.json
+          jq -e '.ok==true and .version=="1.0-unified-economic-brain" and .mission.id!=null and (.mission.executionLane|length)>0 and .plan.learning==true' brain-run.json >/dev/null
+          curl -fsS --max-time 30 -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" -H 'cache-control: no-cache' "$BASE/brain/status?release=$GITHUB_SHA" -o brain-status.json
+          jq -e '.ok==true and .version=="1.0-unified-economic-brain" and .currentMission.id!=null and .policy.oneGlobalEconomicMission==true' brain-status.json >/dev/null
+          jq '{ok,version,currentMission:{id:.currentMission.id,lane:.currentMission.executionLane,businessModel:.currentMission.businessModel,selectionMode:.currentMission.selectionMode,score:.currentMission.score,confidence:.currentMission.confidence},learningCount:(.learning|length)}' brain-status.json
+          echo 'UNIFIED_BRAIN_LIVE_STATUS_OK'
+
+      - name: Verify protected First Settlement status and live mission
         env:
           OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
         run: |
