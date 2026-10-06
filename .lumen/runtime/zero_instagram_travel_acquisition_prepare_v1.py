@@ -184,7 +184,23 @@ def main():
     job = build_job(destination, request_id)
     existing = next((r for r in lumen_app.STATE.get("distribution_operator_jobs", []) if isinstance(r, dict) and r.get("id") == job["id"]), None)
     if existing:
-        print({"travel_instagram_acquisition": {"status": "already_prepared", "job_id": job["id"], "destination": destination["name"], "approval_required": True}}, flush=True)
+        policy_approval = bridge.authorize_safe_travel_affiliate_job(existing)
+        projection = bridge.export_posts()
+        print({
+            "travel_instagram_acquisition": {
+                "status": "already_prepared_policy_reconciled",
+                "job_id": job["id"],
+                "destination": destination["name"],
+                "approval_required": True,
+                "policy_approved": bool(policy_approval.get("approved")),
+                "policy_approval_reason": policy_approval.get("reason"),
+                "policy_approval_version": policy_approval.get("version"),
+                "autonomous_publish": bool(policy_approval.get("approved")),
+                "paid_media": False,
+                "autonomous_spend_usd": 0,
+                "projection_status": projection.get("status"),
+            }
+        }, flush=True)
         return 0
     supersede_previous(lumen_app.STATE, job)
     path = render_asset(job)
