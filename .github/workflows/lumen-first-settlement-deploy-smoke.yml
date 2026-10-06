@@ -74,7 +74,7 @@ jobs:
           set -euo pipefail
           BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
           curl -fsS --max-time 20 -H 'cache-control: no-cache' "$BASE/brain/policy?release=$GITHUB_SHA" -o brain-policy.json
-          jq -e '.version=="1.0-unified-economic-brain" and .oneGlobalEconomicMission==true and .openEndedBusinessModels==true and .explorationRate==0.20 and .autonomousSpendUsd==0 and .autonomousPurchase==false and .autonomousContract==false and .bindingActionsHumanGated==true and .revenueTruth=="provider_verified_settlement_only"' brain-policy.json >/dev/null
+          jq -e '.version=="1.1-demand-conversion-learning" and .oneGlobalEconomicMission==true and .openEndedBusinessModels==true and .explorationRate==0.20 and .sentIsNotSuccess==true and .demandFirstWhenBuyerEvidenceZero==true and .persistentFunnelMemory==true and .strategyMemoryAffectsSelection==true and .autonomousSpendUsd==0 and .autonomousPurchase==false and .autonomousContract==false and .bindingActionsHumanGated==true and .revenueTruth=="provider_verified_settlement_only"' brain-policy.json >/dev/null
           echo 'UNIFIED_BRAIN_PUBLIC_POLICY_OK'
 
       - name: Verify protected status, run one Brain cycle, and live mission
@@ -86,9 +86,9 @@ jobs:
           unauth=$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' "$BASE/brain/status")
           test "$unauth" = '403'
           curl -fsS --max-time 45 -X POST -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" -H 'cache-control: no-cache' "$BASE/brain/run?release=$GITHUB_SHA" -o brain-run.json
-          jq -e '.ok==true and .version=="1.0-unified-economic-brain" and .mission.id!=null and (.mission.executionLane|length)>0 and .plan.learning==true' brain-run.json >/dev/null
+          jq -e '.ok==true and .version=="1.1-demand-conversion-learning" and .mission.id!=null and (.mission.executionLane|length)>0 and .plan.learning==true' brain-run.json >/dev/null
           curl -fsS --max-time 30 -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" -H 'cache-control: no-cache' "$BASE/brain/status?release=$GITHUB_SHA" -o brain-status.json
-          jq -e '.ok==true and .version=="1.0-unified-economic-brain" and .currentMission.id!=null and .policy.oneGlobalEconomicMission==true' brain-status.json >/dev/null
+          jq -e '.ok==true and .version=="1.1-demand-conversion-learning" and .currentMission.id!=null and .policy.oneGlobalEconomicMission==true' brain-status.json >/dev/null
           jq '{ok,version,currentMission:{id:.currentMission.id,lane:.currentMission.executionLane,businessModel:.currentMission.businessModel,selectionMode:.currentMission.selectionMode,score:.currentMission.score,confidence:.currentMission.confidence},learningCount:(.learning|length)}' brain-status.json
           echo 'UNIFIED_BRAIN_LIVE_STATUS_OK'
 
