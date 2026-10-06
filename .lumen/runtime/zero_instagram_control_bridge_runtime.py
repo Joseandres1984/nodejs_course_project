@@ -15,9 +15,13 @@ from typing import Any, Dict, List
 import app as lumen_app
 import d1_persistence_runtime as d1
 
-VERSION = "1.2-zero-instagram-control-bridge"
+VERSION = "1.3-zero-instagram-control-bridge-travel-monetization"
 APPROVAL_TTL_HOURS = 24
 MAX_COMMANDS = 25
+SAFE_TRAVEL_POLICY_VERSION = "1.0-owned-travel-affiliate-zero-spend"
+SAFE_TRAVEL_MIN_QA = 95
+SAFE_TRAVEL_DAILY_LIMIT = 1
+SAFE_TRAVEL_AUTHORITY = "user_authorized_owned_travel_affiliate_policy_20261006"
 
 # One-time recovery for the three exact posts José explicitly approved in the control console on
 # 2026-09-21, whose button commands did not reach the canonical D1 queue because the deployed
@@ -92,6 +96,145 @@ def _audit(status: str, job_id: str, authority: str) -> None:
     audit = lumen_app.STATE.setdefault("instagram_publish_audit", [])
     audit.append({"ts": _now(), "status": status, "job_id": job_id, "authority": authority, "source": "zero_control_worker"})
     lumen_app.STATE["instagram_publish_audit"] = audit[-500:]
+
+
+def _truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {"1", "true", "yes", "si", "sí", "on", "enabled", "required"}
+
+
+def _number(value: Any, fallback: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _safe_travel_eligibility(job: Dict[str, Any]) -> tuple[bool, List[str]]:
+    reasons: List[str] = []
+    jid = str(job.get("id") or "")
+    caption = str(job.get("caption") or job.get("copy") or "")
+    tracking_url = str(job.get("tracking_url") or "")
+
+    if not jid.startswith("IGTRAVEL-"):
+        reasons.append("not_igtravel")
+    if str(job.get("channel") or "").lower() != "instagram":
+        reasons.append("not_instagram")
+    if str(job.get("content_mode") or "") != "travel_affiliate_acquisition":
+        reasons.append("not_travel_affiliate_acquisition")
+    if not _truthy(job.get("affiliate_disclosure")) or "Transparencia:" not in caption:
+        reasons.append("affiliate_disclosure_missing")
+    if _truthy(job.get("paid_media")) or _truthy(job.get("requires_budget_approval")):
+        reasons.append("paid_or_budgeted_media")
+    if _truthy(job.get("booking_authority")) or _truthy(job.get("payment_authority")):
+        reasons.append("booking_or_payment_authority")
+    if _number(job.get("autonomous_spend_usd"), 0.0) != 0.0:
+        reasons.append("nonzero_autonomous_spend")
+    if _number(job.get("visual_qa_score"), 0.0) < SAFE_TRAVEL_MIN_QA:
+        reasons.append("visual_qa_below_threshold")
+    if not tracking_url.startswith("https://lumen-zero-public.lumen-b2b.workers.dev/travel/"):
+        reasons.append("tracking_url_not_owned_travel")
+    if str(job.get("status") or "").lower() in {"published", "verified_published", "rejected_by_human", "superseded_by_regeneration"}:
+        reasons.append("terminal_or_rejected_status")
+    return (not reasons, sorted(set(reasons)))
+
+
+def authorize_safe_travel_affiliate_job(job: Dict[str, Any]) -> Dict[str, Any]:
+    """Policy-approve one zero-spend owned Travel affiliate post per UTC day.
+
+    This does not authorize paid media, purchases, bookings, charges, contracts or arbitrary
+    Instagram content. Explicit human rejection always wins.
+    """
+    report: Dict[str, Any] = {
+        "version": SAFE_TRAVEL_POLICY_VERSION,
+        "approved": False,
+        "job_id": str(job.get("id") or ""),
+        "daily_limit": SAFE_TRAVEL_DAILY_LIMIT,
+        "min_visual_qa": SAFE_TRAVEL_MIN_QA,
+        "authority": SAFE_TRAVEL_AUTHORITY,
+        "scope": "owned_instagram_travel_affiliate_zero_spend_only",
+        "updated_at": _now(),
+    }
+    jid = report["job_id"]
+    if not jid:
+        report["reason"] = "job_id_required"
+        return report
+
+    eligible, reasons = _safe_travel_eligibility(job)
+    if not eligible:
+        report["reason"] = "ineligible"
+        report["reasons"] = reasons
+        return report
+
+    approvals = _approval_store()
+    existing = approvals.get(jid) or {}
+    existing_status = str(existing.get("status") or "").upper()
+    current = _fingerprint(job)
+
+    if existing_status == "REJECTED":
+        report["reason"] = "explicit_human_rejection_preserved"
+        return report
+    if existing_status in {"APPROVED", "APPROVED_WAITING_CONNECTOR", "APPROVED_RETRY", "PUBLISHED"} and str(existing.get("content_fingerprint") or "") == current:
+        report["approved"] = True
+        report["reason"] = "already_authorized"
+        report["status"] = existing_status
+        return report
+
+    receipts = {
+        str(row.get("distribution_job_id") or "")
+        for row in lumen_app.STATE.get("distribution_receipts", []) or []
+        if isinstance(row, dict) and (row.get("external_post_id") or row.get("external_url"))
+    }
+    if jid in receipts:
+        report["approved"] = True
+        report["reason"] = "already_published"
+        report["status"] = "PUBLISHED"
+        return report
+
+    today = _now_dt().date().isoformat()
+    approvals_today = {
+        str(row.get("job_id") or "")
+        for row in lumen_app.STATE.get("instagram_publish_audit", []) or []
+        if isinstance(row, dict)
+        and str(row.get("authority") or "") == SAFE_TRAVEL_AUTHORITY
+        and str(row.get("ts") or "").startswith(today)
+        and str(row.get("status") or "") == "APPROVED_SAFE_TRAVEL_AFFILIATE"
+    }
+    if jid not in approvals_today and len(approvals_today) >= SAFE_TRAVEL_DAILY_LIMIT:
+        report["reason"] = "daily_policy_cap_reached"
+        report["approved_today"] = len(approvals_today)
+        return report
+
+    now = _now_dt()
+    approvals[jid] = {
+        "job_id": jid,
+        "status": "APPROVED",
+        "approved_at": now.isoformat(),
+        "expires_at": (now + timedelta(hours=APPROVAL_TTL_HOURS)).isoformat(),
+        "approved_by": "lumen_safe_travel_policy",
+        "approval_mode": "safe_owned_travel_affiliate",
+        "policy_version": SAFE_TRAVEL_POLICY_VERSION,
+        "content_fingerprint": current,
+        "attempts": 0,
+        "last_error": None,
+        "authority": SAFE_TRAVEL_AUTHORITY,
+        "monetary_budget_usd": 0,
+        "binding_authority_changed": False,
+    }
+    job["status"] = "approved_safe_travel_affiliate"
+    job["travel_monetization_policy"] = SAFE_TRAVEL_POLICY_VERSION
+    job["policy_approved_at"] = now.isoformat()
+    _audit("APPROVED_SAFE_TRAVEL_AFFILIATE", jid, SAFE_TRAVEL_AUTHORITY)
+    if not lumen_app.save_state():
+        report["reason"] = "state_persistence_failed"
+        return report
+
+    report["approved"] = True
+    report["reason"] = "safe_zero_spend_owned_channel_policy"
+    report["status"] = "APPROVED"
+    report["future_scope"] = "eligible_owned_travel_affiliate_only"
+    return report
 
 
 def consume_commands() -> Dict[str, Any]:
