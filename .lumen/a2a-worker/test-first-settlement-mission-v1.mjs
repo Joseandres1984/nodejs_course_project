@@ -49,7 +49,7 @@ assert.equal(rotated.focus.opportunity_id,"ready","explicit move_on candidates m
 
 const sentVsReplied = chooseFirstSettlementMission([
   { opportunity_id:"sent-high", stage:"SENT", first_cash_score:.8, intent_score:.8, updated_at:"2026-10-03T11:30:00Z" },
-  { opportunity_id:"replied", stage:"REPLIED", first_cash_score:.15, intent_score:.6, updated_at:"2026-10-03T11:45:00Z" }
+  { opportunity_id:"replied", stage:"REPLIED", first_cash_score:.15, intent_score:.6, response_class:"COMMERCIAL_INTEREST", updated_at:"2026-10-03T11:45:00Z" }
 ], now);
 assert.equal(sentVsReplied.focus.opportunity_id,"replied","verified buyer response must outrank waiting SENT inventory");
 
