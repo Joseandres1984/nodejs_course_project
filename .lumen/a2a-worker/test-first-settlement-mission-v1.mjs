@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { diagnoseSettlementBlocker, chooseFirstSettlementMission, FIRST_SETTLEMENT_MISSION_POLICY } from "./first-settlement-mission-v1.js";
 
+assert.equal(FIRST_SETTLEMENT_MISSION_POLICY.version, "1.1-first-settlement-rotation");
 assert.equal(FIRST_SETTLEMENT_MISSION_POLICY.autonomousSpendUsd, 0);
 assert.equal(FIRST_SETTLEMENT_MISSION_POLICY.bindingActionsHumanGated, true);
 assert.equal(FIRST_SETTLEMENT_MISSION_POLICY.skipExplicitMoveOn, true);
