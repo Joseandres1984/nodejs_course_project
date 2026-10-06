@@ -193,13 +193,19 @@ def authorize_safe_travel_affiliate_job(job: Dict[str, Any]) -> Dict[str, Any]:
         return report
 
     today = _now_dt().date().isoformat()
-    approvals_today = {
+    policy_approved_ids = {
         str(row.get("job_id") or "")
         for row in lumen_app.STATE.get("instagram_publish_audit", []) or []
         if isinstance(row, dict)
         and str(row.get("authority") or "") == SAFE_TRAVEL_AUTHORITY
         and str(row.get("ts") or "").startswith(today)
         and str(row.get("status") or "") == "APPROVED_SAFE_TRAVEL_AFFILIATE"
+    }
+    approvals_today = {
+        approved_id
+        for approved_id in policy_approved_ids
+        if str((approvals.get(approved_id) or {}).get("status") or "").upper()
+        not in {"DUPLICATE_BLOCKED", "DUPLICATE_BLOCKED_REMOTE", "REJECTED", "EXPIRED", "CONTENT_CHANGED"}
     }
     if jid not in approvals_today and len(approvals_today) >= SAFE_TRAVEL_DAILY_LIMIT:
         report["reason"] = "daily_policy_cap_reached"
