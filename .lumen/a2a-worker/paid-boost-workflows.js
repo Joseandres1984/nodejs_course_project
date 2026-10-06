@@ -15,6 +15,7 @@ import { ensureBoostSchema, checkpoint, recordRun, startOpportunityObservers, ob
 import { runSovereignCycle } from "./sovereign-runtime.js";
 import { runRevenueLoopV5Cycle } from "./revenue-loop-v5.js";
 import { runFirstCashCloser } from "./first-cash-closer.js";
+import { runCommercialReplyEngine, pollCommercialReplyTasks } from "./commercial-reply-engine.js";
 import { runVentureHunterV1 } from "./venture-hunter-v1.js";
 import { runVentureFounderV2 } from "./venture-founder-v2.js";
 import { runVentureBuilderV1 } from "./venture-builder-v1.js";
@@ -27,6 +28,36 @@ const READ_STEP={retries:{limit:2,delay:"10 seconds",backoff:"exponential"},time
 
 async function runChecked(env,id,name,action){
   return checkpoint(env,id,name,action);
+}
+
+export async function runRevenueConversionRouter(env){
+  const poll=await pollCommercialReplyTasks(env);
+  if(poll?.ok===false) return {ok:false,route:"POLL_FAILED",externalSlotConsumed:false,poll,reply:null,close:null};
+
+  const reply=await runCommercialReplyEngine(env,{force:false});
+  const replyAttempted=reply?.sent===true || reply?.status==="SEND_FAILED";
+  if(replyAttempted){
+    return {
+      ok:reply?.ok!==false,
+      route:"COMMERCIAL_REPLY",
+      externalSlotConsumed:true,
+      sent:reply?.sent===true,
+      proposalId:reply?.proposalId||null,
+      poll,reply,close:null
+    };
+  }
+
+  const close=await runFirstCashCloser(env,{force:false});
+  const closeAttempted=close?.sent===true || close?.status==="SEND_FAILED";
+  return {
+    ok:close?.ok!==false,
+    route:closeAttempted?"FIRST_CASH_CLOSE":"NONE",
+    externalSlotConsumed:closeAttempted,
+    sent:close?.sent===true,
+    proposalId:close?.proposalId||reply?.proposalId||null,
+    reason:close?.reason||reply?.reason||null,
+    poll,reply,close
+  };
 }
 
 export class LumenDeepWorkflow extends WorkflowEntrypoint {
@@ -75,7 +106,7 @@ export class LumenDeepWorkflow extends WorkflowEntrypoint {
     if(plan.revenue){
       tasks.push(["sovereign-revenue-v4",()=>runSovereignCycle(env,{runId:`v4-${id}`})]);
       tasks.push(["revenue-loop-v5",()=>runRevenueLoopV5Cycle(env,{trigger:"unified_brain_revenue"})]);
-      tasks.push(["first-cash-close",()=>runFirstCashCloser(env,{force:false})]);
+      tasks.push(["conversion-close-router",()=>runRevenueConversionRouter(env)]);
       tasks.push(["opportunity-observers",()=>startOpportunityObservers(env)]);
     }
 
