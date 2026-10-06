@@ -1,4 +1,5 @@
 name: LUMEN First Cash Kick
+# revenue kick: 2026-10-06 live negotiating opportunity
 
 on:
   workflow_dispatch:
