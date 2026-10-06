@@ -1,7 +1,7 @@
 import { classifyCommercialResponse } from "./response-qualification.js";
 import { getFirstSettlementMissionStatus } from "./first-settlement-mission-v1.js";
 
-const VERSION = "1.2-bounded-commercial-dialogue";
+const VERSION = "1.3-first-settlement-priority";
 const MAX_REPLIES_PER_PROPOSAL = 3;
 const SEND_TIMEOUT_MS = 15000;
 
