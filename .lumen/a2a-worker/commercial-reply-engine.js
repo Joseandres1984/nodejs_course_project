@@ -1,6 +1,7 @@
 import { classifyCommercialResponse } from "./response-qualification.js";
+import { getFirstSettlementMissionStatus } from "./first-settlement-mission-v1.js";
 
-const VERSION = "1.2-bounded-commercial-dialogue";
+const VERSION = "1.3-first-settlement-priority";
 const MAX_REPLIES_PER_PROPOSAL = 3;
 const SEND_TIMEOUT_MS = 15000;
 
@@ -87,11 +88,22 @@ function replyFor(row){
 }
 
 async function findCandidate(env){
-  for(const row of await candidateRows(env)){
+  const rows=await candidateRows(env);
+  let firstSettlementOpportunityId=null;
+  try{
+    const status=await getFirstSettlementMissionStatus(env);
+    firstSettlementOpportunityId=clean(status?.mission?.focus?.opportunity_id,120)||null;
+  }catch{}
+  rows.sort((a,b)=>{
+    const ap=firstSettlementOpportunityId&&a.opportunity_id===firstSettlementOpportunityId?1:0;
+    const bp=firstSettlementOpportunityId&&b.opportunity_id===firstSettlementOpportunityId?1:0;
+    return bp-ap;
+  });
+  for(const row of rows){
     const c=classifyCommercialResponse(row.response_text,row.message);
     if(c.responseClass!=="COMMERCIAL_QUESTION")continue;
     if(!isHttps(row.agent_url))continue;
-    return{...row,classification:c,replyText:replyFor(row)};
+    return{...row,classification:c,replyText:replyFor(row),firstSettlementPriority:firstSettlementOpportunityId===row.opportunity_id};
   }
   return null;
 }
@@ -145,7 +157,7 @@ export async function runCommercialReplyEngine(env,{force=false}={}){
     const info=extractResponse(body,candidate.protocol_binding);const status=info.responseText?"RESPONDED":info.taskId?"SENT_TASK":"SENT";
     await record(env,candidate,{status,...info});
     const followOnClassification=info.responseText?await promoteConversationResponse(env,candidate.proposal_id,info.responseText,candidate.replyText):null;
-    return{ok:true,sent:true,version:VERSION,proposalId:candidate.proposal_id,opportunityId:candidate.opportunity_id,offerId:candidate.offer_id,status,taskId:info.taskId,questionType:questionType(candidate.response_text),followOnClassification:followOnClassification?.responseClass||null,replyCount:Math.min(MAX_REPLIES_PER_PROPOSAL,Number(candidate.reply_count||0)+1),guardrails:{commercialQuestionOnly:true,maxRepliesPerProposal:MAX_REPLIES_PER_PROPOSAL,oneExternalReplyPerRun:true,knownOfferFactsOnly:true,unknownEtaNotInvented:true,autonomousDiscounting:false,autonomousSpend:false,autonomousContract:false,bindingActionsHumanGated:true}};
+    return{ok:true,sent:true,version:VERSION,proposalId:candidate.proposal_id,opportunityId:candidate.opportunity_id,offerId:candidate.offer_id,status,taskId:info.taskId,questionType:questionType(candidate.response_text),followOnClassification:followOnClassification?.responseClass||null,replyCount:Math.min(MAX_REPLIES_PER_PROPOSAL,Number(candidate.reply_count||0)+1),firstSettlementPriority:candidate.firstSettlementPriority===true,guardrails:{commercialQuestionOnly:true,maxRepliesPerProposal:MAX_REPLIES_PER_PROPOSAL,oneExternalReplyPerRun:true,knownOfferFactsOnly:true,unknownEtaNotInvented:true,autonomousDiscounting:false,autonomousSpend:false,autonomousContract:false,bindingActionsHumanGated:true}};
   }catch(error){const err=clean(error?.message||error,500);await record(env,candidate,{status:"SEND_FAILED",error:err});return{ok:false,sent:false,version:VERSION,proposalId:candidate.proposal_id,status:"SEND_FAILED",error:err};}
   finally{timeout.clear();}
 }
@@ -181,7 +193,7 @@ async function statsData(env){
   await ensureSchema(env);let row=null;try{row=await env.DB.prepare("SELECT COUNT(*) total,SUM(CASE WHEN status IN ('SENT','SENT_TASK','WORKING','RESPONDED') THEN 1 ELSE 0 END) sent,SUM(CASE WHEN status='RESPONDED' THEN 1 ELSE 0 END) responded,SUM(CASE WHEN status='SEND_FAILED' THEN 1 ELSE 0 END) failed,SUM(CASE WHEN status IN ('SENT_TASK','WORKING') THEN 1 ELSE 0 END) async_pending FROM lumen_commercial_replies").first();}catch{}
   const candidate=await findCandidate(env);
   let turns=0;try{const t=await env.DB.prepare("SELECT COALESCE(SUM(reply_count),0) n FROM lumen_commercial_replies").first();turns=Number(t?.n||0);}catch{}
-  return{total:Number(row?.total||0),sent:Number(row?.sent||0),responded:Number(row?.responded||0),failed:Number(row?.failed||0),asyncPending:Number(row?.async_pending||0),replyTurns:turns,maxRepliesPerProposal:MAX_REPLIES_PER_PROPOSAL,readyToReply:Boolean(candidate),readyProposalId:candidate?.proposal_id||null,readyReplyCount:Number(candidate?.reply_count||0),autonomousEnabled:boolVar(env?.A2A_AUTONOMOUS_OUTREACH,false)&&boolVar(env?.A2A_AUTONOMOUS_COMMERCIAL_REPLY,false)};
+  return{total:Number(row?.total||0),sent:Number(row?.sent||0),responded:Number(row?.responded||0),failed:Number(row?.failed||0),asyncPending:Number(row?.async_pending||0),replyTurns:turns,maxRepliesPerProposal:MAX_REPLIES_PER_PROPOSAL,readyToReply:Boolean(candidate),readyProposalId:candidate?.proposal_id||null,readyOpportunityId:candidate?.opportunity_id||null,readyFirstSettlementPriority:candidate?.firstSettlementPriority===true,readyReplyCount:Number(candidate?.reply_count||0),autonomousEnabled:boolVar(env?.A2A_AUTONOMOUS_OUTREACH,false)&&boolVar(env?.A2A_AUTONOMOUS_COMMERCIAL_REPLY,false)};
 }
 
 export async function handleCommercialReplyEngine(request,env){
