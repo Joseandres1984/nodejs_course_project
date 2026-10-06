@@ -13,10 +13,6 @@ assert.equal(UNIFIED_BRAIN_POLICY.sentIsNotSuccess,true);
 assert.equal(UNIFIED_BRAIN_POLICY.demandFirstWhenBuyerEvidenceZero,true);
 assert.equal(UNIFIED_BRAIN_POLICY.persistentFunnelMemory,true);
 assert.equal(UNIFIED_BRAIN_POLICY.strategyMemoryAffectsSelection,true);
-assert.equal(UNIFIED_BRAIN_POLICY.sentIsNotSuccess,true);
-assert.equal(UNIFIED_BRAIN_POLICY.demandFirstWhenBuyerEvidenceZero,true);
-assert.equal(UNIFIED_BRAIN_POLICY.persistentFunnelMemory,true);
-assert.equal(UNIFIED_BRAIN_POLICY.strategyMemoryAffectsSelection,true);
 
 const fast=normalizeEconomicHypothesis({
   id:"fast", business_model:"novel zero-capital B2B information exchange", hypothesis:"Sell a verified information outcome to observed demand", execution_lane:"VENTURE",
@@ -38,6 +34,7 @@ const shinySupply=normalizeEconomicHypothesis({
   id:"shiny-supply",business_model:"new supplier catalog expansion",hypothesis:"Expand a catalog without current buyer evidence",target:"generic supplier market",execution_lane:"COMMERCE",
   probability_of_sale:.55,time_to_cash_hours:24,evidence_strength:.7,confidence:.75,novelty:.8,risk:.1,reversibility:.95
 });
+
 assert.equal(isDemandFocusedHypothesis(demand),true);
 assert.equal(detectEconomicBottleneck({}),"DEMAND");
 assert.equal(detectEconomicBottleneck({qualifiedCommercialCandidates:3}),"PROPOSAL");
@@ -85,37 +82,6 @@ const revenuePlan=specialistPlanForMission({executionLane:"REVENUE"});
 assert.equal(revenuePlan.revenue,true);
 assert.equal(revenuePlan.venture,false);
 assert.equal(revenuePlan.commerce,false);
-
-const discoveryPlan=specialistPlanForMission({executionLane:"DISCOVERY"});
-assert.equal(discoveryPlan.revenue,true);
-assert.equal(discoveryPlan.growthDiscovery,true);
-
-assert.equal(detectEconomicBottleneck({}),"DEMAND");
-assert.equal(detectEconomicBottleneck({qualifiedCommercialCandidates:2}),"PROPOSAL");
-assert.equal(detectEconomicBottleneck({proposals:2}),"OUTBOUND");
-assert.equal(detectEconomicBottleneck({sent:2}),"DELIVERY_OR_RESPONSE");
-assert.equal(detectEconomicBottleneck({verifiedResponses:1}),"CLOSE");
-assert.equal(detectEconomicBottleneck({verifiedSettlements:1}),"REPEAT_WINNER");
-
-const demandHypothesis=normalizeEconomicHypothesis({
-  id:"demand-first",business_model:"verified buyer demand acquisition",hypothesis:"Find current RFQ and buyer demand",execution_lane:"DISCOVERY",
-  probability_of_sale:.35,time_to_cash_hours:36,evidence_strength:.8,confidence:.8,novelty:.4,risk:.1,reversibility:.99
-});
-const supplyHypothesis=normalizeEconomicHypothesis({
-  id:"supply-first",business_model:"generic catalog expansion",hypothesis:"Publish more generic supply",execution_lane:"COMMERCE",
-  probability_of_sale:.8,time_to_cash_hours:12,evidence_strength:.9,confidence:.9,novelty:.7,risk:.1,reversibility:.99
-});
-assert.equal(isDemandFocusedHypothesis(demandHypothesis),true);
-assert.equal(chooseEconomicMission([supplyHypothesis,demandHypothesis],"1",{bottleneck:"DEMAND"}).id,"demand-first");
-
-const learnedBoost=learningAdjustment(demandHypothesis,{attempts:4,reward:80},{bottleneck:"DEMAND"});
-const stagnantPenalty=learningAdjustment(supplyHypothesis,{attempts:4,reward:-8},{bottleneck:"DEMAND"});
-assert.ok(learnedBoost>0);
-assert.ok(stagnantPenalty<0);
-assert.ok(
-  scoreEconomicHypothesis(demandHypothesis,{bottleneck:"DEMAND",memory:{attempts:4,reward:80}})
-  > scoreEconomicHypothesis(demandHypothesis,{bottleneck:"DEMAND",memory:{attempts:4,reward:-8}})
-);
 
 const discoveryPlan=specialistPlanForMission({executionLane:"DISCOVERY"});
 assert.equal(discoveryPlan.revenue,true);
