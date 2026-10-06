@@ -112,19 +112,25 @@ assert.equal(fallbackFlight.fallbackFromProviderId, "aviasales-data-v2");
 assert.ok(fallback.fallbacks.length >= 1);
 
 const emptyAffiliates = listTravelAffiliateOffers({});
-assert.equal(emptyAffiliates.length, 3);
-assert.ok(emptyAffiliates.every(offer => offer.enabled === false));
+assert.equal(emptyAffiliates.length, 5);
+assert.equal(emptyAffiliates.filter(offer => offer.enabled).length, 3);
+assert.ok(emptyAffiliates.find(offer => offer.id === "intui-transfer")?.enabled);
+assert.ok(emptyAffiliates.find(offer => offer.id === "airalo-esim")?.enabled);
+assert.ok(emptyAffiliates.find(offer => offer.id === "qeeq-car-rental")?.enabled);
+assert.equal(emptyAffiliates.find(offer => offer.id === "safetywing-insurance")?.enabled, false);
+assert.equal(emptyAffiliates.find(offer => offer.id === "discovercars-rental")?.enabled, false);
 const affiliateEnv = {
   AIRALO_AFFILIATE_URL: "https://example.com/airalo-track",
   SAFETYWING_AMBASSADOR_URL: "https://example.com/safetywing-track",
   DISCOVERCARS_AFFILIATE_URL: "https://example.com/discovercars-track"
 };
 const configuredAffiliates = listTravelAffiliateOffers(affiliateEnv);
+assert.equal(configuredAffiliates.length, 5);
 assert.ok(configuredAffiliates.every(offer => offer.enabled === true));
 const affiliatePolicyResponse = await handleTravelAffiliateRegistry(new Request("https://example.test/travel/affiliates/policy"), affiliateEnv);
 assert.equal(affiliatePolicyResponse.status, 200);
 const affiliatePolicy = await affiliatePolicyResponse.json();
-assert.equal(affiliatePolicy.enabledOffers, 3);
+assert.equal(affiliatePolicy.enabledOffers, 5);
 assert.equal(affiliatePolicy.noSyntheticAffiliateIds, true);
 assert.equal(affiliatePolicy.noBookingAuthority, true);
 assert.equal(affiliatePolicy.createsCharge, false);
