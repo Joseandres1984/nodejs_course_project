@@ -20,7 +20,7 @@ from typing import Any, Dict, Iterable, List
 
 import acquisition_campaigns as acquisition
 
-VERSION = "1.0-microservice-factory"
+VERSION = "1.1-microincome-event-factory"
 FACTORY_ID = "MSF-V1"
 MAX_CANDIDATES = 6
 MAX_HISTORY = 120
@@ -48,6 +48,14 @@ LIVE_MICROPRODUCTS = (
     "MP-BUYER-SIGNALS",
     "MP-EXPORT-PULSE",
 )
+
+SCALE_PROFILE: Dict[str, Dict[str, Any]] = {
+    "CAND-REPORT-QA": {"event": "report_checked", "unit_revenue_target_usd": 3.0, "repeatability": 0.88, "distribution_leverage": 0.82, "marginal_cost_efficiency": 0.94},
+    "CAND-SPEC-GAP-CHECK": {"event": "spec_checked", "unit_revenue_target_usd": 2.0, "repeatability": 0.92, "distribution_leverage": 0.88, "marginal_cost_efficiency": 0.95},
+    "CAND-SUPPLIER-DOC-FLAGS": {"event": "supplier_document_checked", "unit_revenue_target_usd": 2.0, "repeatability": 0.90, "distribution_leverage": 0.86, "marginal_cost_efficiency": 0.94},
+    "CAND-PRICE-REFERENCE-PACK": {"event": "price_reference_pack", "unit_revenue_target_usd": 4.0, "repeatability": 0.84, "distribution_leverage": 0.80, "marginal_cost_efficiency": 0.90},
+}
+TARGET_SCALE_EVENTS = 10_000
 
 CAPABILITY_PROBES: Dict[str, tuple[str, ...]] = {
     "document_extract": ("document_intelligence",),
@@ -268,11 +276,19 @@ def _candidate(candidate: Dict[str, Any], capabilities: Dict[str, bool], market_
     readiness = round(100.0 * (len(RELEASE_GATES) - len(missing)) / len(RELEASE_GATES), 1)
     hits = _demand_hits(candidate, market_text)
     demand_score = min(100.0, hits * 14.0)
+    scale = SCALE_PROFILE.get(candidate["id"], {"event": "paid_event", "unit_revenue_target_usd": 1.0, "repeatability": 0.60, "distribution_leverage": 0.55, "marginal_cost_efficiency": 0.80})
+    evidence_factor = min(1.0, 0.25 + demand_score / 100.0 * 0.75)
+    scale_potential = (
+        _f(scale.get("repeatability")) * 0.34
+        + _f(scale.get("distribution_leverage")) * 0.32
+        + _f(scale.get("marginal_cost_efficiency")) * 0.34
+    ) * evidence_factor
     opportunity = min(
         100.0,
-        _f(candidate.get("base_opportunity_score"), 50.0) * 0.62
-        + readiness * 0.28
-        + demand_score * 0.10,
+        _f(candidate.get("base_opportunity_score"), 50.0) * 0.54
+        + readiness * 0.24
+        + demand_score * 0.10
+        + scale_potential * 100.0 * 0.12,
     )
     status = _status(gates)
     publishable = status == "PUBLISH_READY"
@@ -293,6 +309,15 @@ def _candidate(candidate: Dict[str, Any], capabilities: Dict[str, bool], market_
         "readiness_pct": readiness,
         "demand_hits": hits,
         "demand_score": demand_score,
+        "monetizable_event": scale.get("event"),
+        "unit_revenue_target_usd": _f(scale.get("unit_revenue_target_usd"), 1.0),
+        "repeatability": _f(scale.get("repeatability")),
+        "distribution_leverage": _f(scale.get("distribution_leverage")),
+        "marginal_cost_efficiency": _f(scale.get("marginal_cost_efficiency")),
+        "scale_potential": round(scale_potential, 4),
+        "target_scale_events": TARGET_SCALE_EVENTS,
+        "target_scale_revenue_usd": round(_f(scale.get("unit_revenue_target_usd"), 1.0) * TARGET_SCALE_EVENTS, 2),
+        "scale_truth": "target_scenario_not_realized_revenue",
         "opportunity_score": round(opportunity, 1),
         "status": status,
         "publishable": publishable,
@@ -357,7 +382,13 @@ def microservice_factory_tick(state: Dict[str, Any]) -> Dict[str, Any]:
         "updated_at": utcnow(),
         "status": "active",
         "mode": "capability_to_guarded_microproduct_pipeline",
-        "objective": "discover -> define -> build -> test -> publish only when every product-specific release gate is proven",
+        "objective": "discover -> define -> build -> test -> publish -> measure repeatable monetizable events -> scale only verified winners",
+        "scale_objective": {
+            "target_events": TARGET_SCALE_EVENTS,
+            "metric": "verified_revenue_per_monetizable_event",
+            "projection_is_not_revenue": True,
+            "repeat_only_verified_winners": True,
+        },
         "live_microproducts_preserved": list(LIVE_MICROPRODUCTS),
         "live_microproducts_count": len(LIVE_MICROPRODUCTS),
         "candidate_count": len(candidates),
@@ -391,6 +422,8 @@ def microservice_factory_tick(state: Dict[str, Any]) -> Dict[str, Any]:
         "top_candidate_status": report["top_candidate_status"],
         "publish_ready_count": report["publish_ready_count"],
         "candidate_count": report["candidate_count"],
+        "top_candidate_scale_potential": (top or {}).get("scale_potential"),
+        "top_candidate_target_scale_revenue_usd": (top or {}).get("target_scale_revenue_usd"),
     })
     state["microservice_factory_history"] = history[-MAX_HISTORY:]
     return report
