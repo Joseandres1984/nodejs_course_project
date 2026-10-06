@@ -86,3 +86,36 @@ jobs:
           curl --fail --silent "$BASE_URL/first-cash/policy" > /tmp/cash.json
           jq -e '.qualifiedCommercialClasses == ["COMMERCIAL_QUESTION","COMMERCIAL_INTEREST","PURCHASE_INTENT"] and .rawResponseIsNotCommercialIntent == true and .autonomousSpend == false' /tmp/qualification.json >/dev/null
           jq -e '.technicalAckIsNotIntent == true and .echoIsNotIntent == true and .genericResponseIsNotIntent == true and .autonomousSpend == false and .autonomousContract == false' /tmp/cash.json >/dev/null
+
+      - name: One-time bounded commercial nudge
+        if: contains(github.event.head_commit.message, '[commercial-nudge]')
+        run: |
+          set -euo pipefail
+          curl --fail --silent --max-time 45 \
+            -X POST "$BASE_URL/commercial-reply/run" \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'content-type: application/json' \
+            -d '{}' > /tmp/nudge.json
+          cat /tmp/nudge.json
+          echo
+          jq -e '
+            .version == "1.2-bounded-commercial-dialogue" and
+            .ok == true and
+            (.sent == true or .reason == "no_commercial_question_waiting")
+          ' /tmp/nudge.json >/dev/null
+
+          curl --fail --silent --max-time 30 \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            "$BASE_URL/first-settlement/status" > /tmp/first-settlement-after-nudge.json
+          jq '{
+            ok,
+            successCriterion,
+            mission:{
+              status:.mission.status,
+              opportunity_id:.mission.focus.opportunity_id,
+              stage:.mission.focus.stage,
+              response_class:.mission.focus.response_class,
+              blocker:.mission.diagnosis.blocker,
+              action:.mission.diagnosis.action
+            }
+          }' /tmp/first-settlement-after-nudge.json
