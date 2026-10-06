@@ -1,0 +1,127 @@
+name: LUMEN Travel Live Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/lumen-travel-live-deploy.yml'
+  workflow_run:
+    workflows: ["LUMEN Cloudflare deploy"]
+    types: [completed]
+  workflow_dispatch:
+
+jobs:
+  deploy-travel:
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'lumen-zero')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout current production branch
+        uses: actions/checkout@v4
+        with:
+          ref: lumen-zero
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Validate Travel v1 before deploy
+        run: |
+          set -euo pipefail
+          node --experimental-default-type=module --check .lumen/a2a-worker/travel-consumer-entry.js
+          node --experimental-default-type=module --check .lumen/a2a-worker/travel-consumer-engine.js
+          node --experimental-default-type=module --check .lumen/a2a-worker/travel-provider-registry.js
+          node --experimental-default-type=module --check .lumen/a2a-worker/travel-provider-backed-discovery.js
+          node --experimental-default-type=module --check .lumen/a2a-worker/travel-external-providers.js
+          node --experimental-default-type=module .github/scripts/lumen-travel-v1-test.mjs
+          node --experimental-default-type=module .github/scripts/lumen-travel-provider-backed-test.mjs
+          node --experimental-default-type=module .github/scripts/lumen-travel-external-providers-test.mjs
+          grep -q 'import baseWorker from "./adaptive-entry.js"' .lumen/a2a-worker/travel-consumer-entry.js
+          grep -q 'autonomousSpend: false' .lumen/a2a-worker/travel-provider-registry.js
+          grep -q 'createsBooking: false' .lumen/a2a-worker/travel-provider-registry.js
+          grep -q 'createsCharge: false' .lumen/a2a-worker/travel-provider-registry.js
+          echo TRAVEL_PREDEPLOY_VALIDATION_OK
+
+      - name: Verify Cloudflare credentials
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$CF_TOKEN"
+          test -n "$CF_ACCOUNT"
+          test -n "$OPPORTUNITY_ADMIN_TOKEN"
+          echo CLOUDFLARE_CREDENTIALS_OK
+
+      - name: Deploy Travel wrapper over current adaptive runtime
+        working-directory: .lumen/a2a-worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          sed -i 's/^main = "opportunity-entry.js"$/main = "travel-consumer-entry.js"/' wrangler.toml
+          grep -q '^main = "travel-consumer-entry.js"$' wrangler.toml
+          npx --yes wrangler@latest deploy --config wrangler.toml
+
+      - name: Restore protected admin secret
+        working-directory: .lumen/a2a-worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          sed -i 's/^main = "opportunity-entry.js"$/main = "travel-consumer-entry.js"/' wrangler.toml
+          printf '%s' "$OPPORTUNITY_ADMIN_TOKEN" | npx --yes wrangler@latest secret put OPPORTUNITY_ADMIN_TOKEN --config wrangler.toml
+
+      - name: Restore optional live travel provider secrets
+        working-directory: .lumen/a2a-worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          VIATOR_API_KEY: ${{ secrets.VIATOR_API_KEY }}
+          TRAVELPAYOUTS_API_TOKEN: ${{ secrets.TRAVELPAYOUTS_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          sed -i 's/^main = "opportunity-entry.js"$/main = "travel-consumer-entry.js"/' wrangler.toml
+          if [ -n "$VIATOR_API_KEY" ]; then
+            printf '%s' "$VIATOR_API_KEY" | npx --yes wrangler@latest secret put VIATOR_API_KEY --config wrangler.toml
+            echo VIATOR_API_KEY_RESTORED
+          else
+            echo VIATOR_API_KEY_NOT_IN_GITHUB_SECRETS_EXISTING_WORKER_SECRET_PRESERVED
+          fi
+          if [ -n "$TRAVELPAYOUTS_API_TOKEN" ]; then
+            printf '%s' "$TRAVELPAYOUTS_API_TOKEN" | npx --yes wrangler@latest secret put TRAVELPAYOUTS_API_TOKEN --config wrangler.toml
+            echo TRAVELPAYOUTS_API_TOKEN_RESTORED
+          else
+            echo TRAVELPAYOUTS_API_TOKEN_OPTIONAL_NOT_CONFIGURED
+          fi
+
+      - name: Smoke test adaptive core and Travel live
+        run: |
+          set -euo pipefail
+          BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          ok=0
+          for i in $(seq 1 15); do
+            if curl -fsS --max-time 20 "$BASE/opportunity-factory/policy" -o core.json \
+              && curl -fsS --max-time 20 "$BASE/travel/discovery/policy" -o travel-policy.json \
+              && curl -fsS --max-time 20 "$BASE/travel/providers/policy" -o providers-policy.json; then
+              ok=1
+              break
+            fi
+            sleep 4
+          done
+          test "$ok" -eq 1
+          grep -q 'autonomousSpend' core.json
+          grep -q 'LUMEN Travel Discovery' travel-policy.json
+          grep -q '"autonomousSpend":false' travel-policy.json
+          grep -q '"createsBooking":false' providers-policy.json
+          grep -q '"createsCharge":false' providers-policy.json
+          curl -fsS --max-time 30 -X POST "$BASE/travel/discovery/search" \
+            -H 'content-type: application/json' \
+            --data '{"originCode":"BUE","maxBudgetUSD":2500,"durationDays":7,"targetMonth":2,"travelersCount":1,"preferences":["PLAYA","GASTRONOMIA"]}' \
+            -o travel-search.json
+          grep -q '"ok":true' travel-search.json
+          echo LUMEN_TRAVEL_LIVE_SMOKE_OK
