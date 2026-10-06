@@ -26,6 +26,10 @@ class MicroserviceFactoryTests(unittest.TestCase):
         self.assertIn("x402_checkout", top["missing_gates"])
         self.assertIn("fulfillment_adapter", top["missing_gates"])
         self.assertIn("e2e_tests", top["missing_gates"])
+        self.assertEqual(top["target_scale_events"], 10000)
+        self.assertEqual(top["scale_truth"], "target_scenario_not_realized_revenue")
+        self.assertGreater(top["scale_potential"], 0)
+        self.assertGreater(top["target_scale_revenue_usd"], 0)
 
     def test_candidate_ids_cannot_be_confused_with_live_product_ids(self) -> None:
         self.assertTrue(all(row["id"].startswith("CAND-") for row in factory.CANDIDATE_LIBRARY))
@@ -73,6 +77,10 @@ class MicroserviceFactoryTests(unittest.TestCase):
         self.assertFalse(governance["autonomous_deploy"])
         self.assertEqual(report["live_microproducts_count"], 6)
         self.assertEqual(report["publish_ready_count"], 0)
+        self.assertEqual(report["version"], "1.1-microincome-event-factory")
+        self.assertEqual(report["scale_objective"]["target_events"], 10000)
+        self.assertTrue(report["scale_objective"]["projection_is_not_revenue"])
+        self.assertTrue(report["scale_objective"]["repeat_only_verified_winners"])
 
 
 if __name__ == "__main__":
