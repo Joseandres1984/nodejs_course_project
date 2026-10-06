@@ -22,6 +22,10 @@ assert.equal(UNIFIED_BRAIN_POLICY.sentIsNotSuccess,true);
 assert.equal(UNIFIED_BRAIN_POLICY.demandFirstWhenBuyerEvidenceZero,true);
 assert.equal(UNIFIED_BRAIN_POLICY.persistentFunnelMemory,true);
 assert.equal(UNIFIED_BRAIN_POLICY.strategyMemoryAffectsSelection,true);
+assert.equal(UNIFIED_BRAIN_POLICY.monetizationFrontier,true);
+assert.equal(UNIFIED_BRAIN_POLICY.distinctBusinessModelExploration,true);
+assert.equal(UNIFIED_BRAIN_POLICY.frontierExplorationEscapesCurrentBottleneck,true);
+assert.equal(UNIFIED_BRAIN_POLICY.maxAiHypotheses,5);
 
 const fast=normalizeEconomicHypothesis({
   id:"fast",business_model:"novel zero-capital B2B information exchange",hypothesis:"Sell a verified information outcome to observed demand",execution_lane:"VENTURE",
@@ -81,6 +85,10 @@ const novel=normalizeEconomicHypothesis({
   id:"novel",business_model:"new pattern",hypothesis:"Test a new reversible zero-capital path",execution_lane:"EXPLORE",
   probability_of_sale:.12,time_to_cash_hours:96,evidence_strength:.25,confidence:.4,novelty:1,risk:.25,reversibility:.98
 });
+const frontier=normalizeEconomicHypothesis({
+  id:"frontier",business_model:"x402 pay-per-use agent utility",hypothesis:"Expose a new paid agent-native API capability",target:"machine customers",execution_lane:"VENTURE",
+  probability_of_sale:.18,time_to_cash_hours:72,evidence_strength:.35,confidence:.45,novelty:.99,risk:.15,reversibility:.99
+});
 let explorationKey=null;
 for(let i=0;i<100;i++){
   const key=String(i);
@@ -88,6 +96,9 @@ for(let i=0;i<100;i++){
 }
 assert.ok(explorationKey!==null,"bounded exploration slot must exist");
 assert.equal(chooseEconomicMission([fast,novel],explorationKey).id,"novel");
+const frontierDuringDemandGap=chooseEconomicMission([demand,frontier],explorationKey,{bottleneck:"DEMAND"});
+assert.equal(frontierDuringDemandGap.selectionMode,"EXPLORE");
+assert.equal(frontierDuringDemandGap.id,"frontier","bounded exploration must be able to leave the current bottleneck and search new monetization models");
 
 const revenuePlan=specialistPlanForMission({executionLane:"REVENUE"});
 assert.equal(revenuePlan.revenue,true);
