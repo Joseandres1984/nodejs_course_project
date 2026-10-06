@@ -5,7 +5,7 @@ import { estimateAiReservation, reserveAiBudget, withBudgetedAi } from "./ai-rou
 import { ensureBoostSchema, checkpoint, observedOpportunityStage, observeOpportunity, startDeepCycle } from "./paid-boost-runtime.js";
 registerHooks({ resolve(name, context, next) { if (name === "cloudflare:workers") return { url: "data:text/javascript,export class WorkflowEntrypoint { constructor(ctx, env) { this.env = env; } }", shortCircuit: true }; return next(name, context); } });
 const { handlePaidBoost, handleUnifiedBrain, default: entry } = await import("./paid-boost-entry.js");
-const { LumenOpportunityWorkflow, LumenDeepWorkflow, runRevenueConversionRouter } = await import("./paid-boost-workflows.js");
+const { LumenOpportunityWorkflow, LumenDeepWorkflow, runRevenueConversionRouter, shouldRunPostRevenueRouter } = await import("./paid-boost-workflows.js");
 
 const sqlite=new DatabaseSync(":memory:");
 const DB={prepare(sql){let stmt=null,args=[];return{bind(...v){args=v;return this;},async run(){stmt ||= sqlite.prepare(sql);const r=stmt.run(...args);return{meta:{changes:Number(r.changes)}};},async first(){stmt ||= sqlite.prepare(sql);return stmt.get(...args)||null;},async all(){stmt ||= sqlite.prepare(sql);return{results:stmt.all(...args)}}};},async batch(statements){const results=[];for(const statement of statements)results.push(await statement.run());return results;}};
@@ -82,6 +82,9 @@ assert.deepEqual(steps,["initialize","observe-0","finish"]);
     assert.equal(routed.proposalId,"P-Q");
     assert.equal(externalCalls,1,"one commercial question must consume the only external conversion slot");
     assert.equal(routed.close,null,"first cash closer must not run after a commercial reply consumed the slot");
+    assert.equal(shouldRunPostRevenueRouter(routed),false,"a consumed priority slot must block any later close attempt in the same deep cycle");
+    assert.equal(shouldRunPostRevenueRouter({ok:true,externalSlotConsumed:false}),true);
+    assert.equal(shouldRunPostRevenueRouter({ok:false,externalSlotConsumed:false}),false);
     const promoted=sqlite2.prepare("SELECT status FROM lumen_proposal_drafts WHERE proposal_id='P-Q'").get();
     assert.equal(promoted.status,"RESPONDED");
   }finally{globalThis.fetch=savedFetch;}
@@ -94,6 +97,9 @@ try{
   const durableSteps={async do(n,c,a){if(!persisted.has(n))persisted.set(n,await a());return persisted.get(n);}};
   const result=await deep.run({instanceId:"deep-test",payload:{scheduledTime:3600000}},durableSteps);
   assert.ok(persisted.has("verified-commercial-truth"));
+  assert.ok(persisted.has("conversion-close-priority"),"cash conversion must run before exploration/discovery");
+  assert.equal(persisted.get("conversion-close-priority")?.externalSlotConsumed,false);
+  assert.equal(persisted.get("conversion-close-priority")?.route,"NONE");
   assert.ok(persisted.has("venture-hunter-v1"));
   assert.ok(persisted.has("viator-conversions-observe"));
   assert.ok(persisted.has("unified-economic-brain-v1"));
@@ -102,6 +108,8 @@ try{
   assert.equal(result.specialistPlan.revenue,true);
   assert.equal(result.specialistPlan.venture,false);
   assert.equal(result.specialistPlan.commerce,false);
+  assert.equal(result.cashBeforeExplore?.enabled,true);
+  assert.equal(result.cashBeforeExplore?.externalSlotConsumed,false);
   for(const name of ["sovereign-revenue-v4","revenue-loop-v5","conversion-close-router","opportunity-observers"]) assert.ok(persisted.has(name),`${name} must run for REVENUE mission`);
   assert.equal(persisted.get("conversion-close-router")?.externalSlotConsumed,false,"conversion router must stay silent when there is no qualified commercial response");
   assert.equal(persisted.get("conversion-close-router")?.route,"NONE");
