@@ -4,6 +4,8 @@ import copy
 import unittest
 
 import zero_instagram_control_bridge_runtime as bridge
+import zero_instagram_travel_acquisition_prepare_v1 as acquisition
+import instagram_content_dedupe_runtime as dedupe
 
 
 def safe_job(job_id="IGTRAVEL-TEST-A"):
@@ -89,6 +91,23 @@ class TravelMonetizationPolicyTests(unittest.TestCase):
         result = bridge.authorize_safe_travel_affiliate_job(second)
         self.assertFalse(result["approved"])
         self.assertEqual(result["reason"], "daily_policy_cap_reached")
+
+
+    def test_duplicate_block_releases_daily_slot_for_recovery(self):
+        first = safe_job("IGTRAVEL-DUPLICATE")
+        second = safe_job("IGTRAVEL-RECOVERY")
+        self.assertTrue(bridge.authorize_safe_travel_affiliate_job(first)["approved"])
+        bridge.lumen_app.STATE["instagram_publish_approvals"][first["id"]]["status"] = "DUPLICATE_BLOCKED_REMOTE"
+        self.assertTrue(bridge.authorize_safe_travel_affiliate_job(second)["approved"])
+
+    def test_creative_recovery_variants_are_materially_distinct(self):
+        destination = {"name": "São Paulo", "code": "GRU"}
+        jobs = [acquisition.build_job(destination, "test", creative_variant=i) for i in range(3)]
+        for left in range(len(jobs)):
+            for right in range(left + 1, len(jobs)):
+                similarity = dedupe.text_similarity(jobs[left]["caption"], jobs[right]["caption"])
+                self.assertLess(similarity, dedupe.CAPTION_SIMILARITY_LIMIT)
+        self.assertEqual(len({job["id"] for job in jobs}), 3)
 
 
 if __name__ == "__main__":
