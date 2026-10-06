@@ -31,7 +31,7 @@ export const UNIFIED_BRAIN_POLICY = Object.freeze({
 });
 
 const EXECUTION_LANES = new Set(["REVENUE","VENTURE","COMMERCE","TRAVEL","DISCOVERY","EXPLORE","HOLD"]);
-const FORBIDDEN = /\b(pay|payment|spend|wire|transfer|withdraw|purchase|buy\s+with|sign\s+contract|accept\s+contract|debt|loan|private\s+key|seed\s+phrase|pagar|transferir|comprar\s+con|firmar\s+contrato|aceptar\s+contrato|deuda|pr[eé]stamo)\b/i;
+const FORBIDDEN = /\b(spend|wire|withdraw|sign\s+contract|accept\s+contract|debt|loan|private\s+key|seed\s+phrase|pagar|transferir|comprar\s+con|firmar\s+contrato|aceptar\s+contrato|deuda|pr[eé]stamo)\b|\b(?:pay|send|make|execute|initiate)\s+(?:a\s+)?(?:payment|supplier|vendor|fee|invoice|crypto|usdc)\b|\b(?:purchase|buy)\s+(?:inventory|stock|service|subscription|tool|data|api\s+access|with)\b/i;
 const now = () => new Date().toISOString();
 const clean = (v, n=600) => String(v ?? "").replace(/[\u0000-\u001f\u007f]/g," ").replace(/\s+/g," ").trim().slice(0,n);
 const num = (v, d=0) => Number.isFinite(Number(v)) ? Number(v) : d;
