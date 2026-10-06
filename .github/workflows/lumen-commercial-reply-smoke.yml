@@ -4,6 +4,8 @@ on:
   push:
     branches: [lumen-zero]
     paths:
+      - '.lumen/a2a-worker/commercial-reply-engine.js'
+      - '.lumen/a2a-worker/response-qualification.js'
       - '.github/workflows/lumen-commercial-reply-smoke.yml'
   workflow_dispatch:
 
@@ -17,14 +19,14 @@ jobs:
       - name: Verify protected token
         run: test -n "${OPPORTUNITY_ADMIN_TOKEN:-}"
 
-      - name: Wait for Commercial Reply Engine v1.1
+      - name: Wait for Commercial Reply Engine v1.2
         run: |
           set -euo pipefail
           for i in $(seq 1 45); do
             policy=$(curl --show-error --silent --max-time 10 "$BASE_URL/commercial-reply/policy" || true)
             cash=$(curl --show-error --silent --max-time 10 "$BASE_URL/first-cash/policy" || true)
             qualification=$(curl --show-error --silent --max-time 10 "$BASE_URL/response-qualification/policy" || true)
-            if echo "$policy" | grep -q '1.1-commercial-reply-engine' && echo "$cash" | grep -q 'shared-response' && echo "$qualification" | grep -q '1.0-commercial-response-qualification'; then
+            if echo "$policy" | grep -q '1.2-bounded-commercial-dialogue' && echo "$cash" | grep -q 'shared-response' && echo "$qualification" | grep -q '1.0-commercial-response-qualification'; then
               echo "$policy"
               echo "$cash"
               echo "$qualification"
@@ -41,14 +43,16 @@ jobs:
           cat /tmp/policy.json
           echo
           jq -e '
-            .version == "1.1-commercial-reply-engine" and
+            .version == "1.2-bounded-commercial-dialogue" and
             .handles == ["COMMERCIAL_QUESTION"] and
             .purchaseIntentHandledBy == "First Cash Closer" and
             .knownOfferFactsOnly == true and
             .unknownEtaNotInvented == true and
             .asyncConversationPolling == true and
             .maxExternalMessagesPerRun == 1 and
-            .oneReplyPerProposal == true and
+            .maxRepliesPerProposal == 3 and
+            .oneExternalReplyPerRun == true and
+            .followOnMustReclassifyAsCommercialQuestion == true and
             .autonomousDiscounting == false and
             .autonomousSpend == false and
             .autonomousContract == false and
@@ -61,7 +65,7 @@ jobs:
           curl --fail --silent "$BASE_URL/commercial-reply/stats" > /tmp/stats.json
           cat /tmp/stats.json
           echo
-          jq -e '.version == "1.1-commercial-reply-engine" and .autonomousEnabled == true and (.total >= 0) and (.asyncPending >= 0)' /tmp/stats.json >/dev/null
+          jq -e '.version == "1.2-bounded-commercial-dialogue" and .autonomousEnabled == true and .maxRepliesPerProposal == 3 and (.replyTurns >= 0) and (.total >= 0) and (.asyncPending >= 0)' /tmp/stats.json >/dev/null
 
       - name: Poll async replies safely
         run: |
@@ -73,7 +77,7 @@ jobs:
             -d '{}' > /tmp/poll.json
           cat /tmp/poll.json
           echo
-          jq -e '.ok == true and .version == "1.1-commercial-reply-engine" and (.polled >= 0)' /tmp/poll.json >/dev/null
+          jq -e '.ok == true and .version == "1.2-bounded-commercial-dialogue" and (.polled >= 0)' /tmp/poll.json >/dev/null
 
       - name: Verify shared response semantics remain live
         run: |
