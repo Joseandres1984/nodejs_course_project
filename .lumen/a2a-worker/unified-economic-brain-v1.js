@@ -259,7 +259,7 @@ function deterministicHypotheses(obs) {
     id:"funnel-close-gap",business_model:"buyer-response-to-cash",hypothesis:"Prioritize the strongest verified buyer response and reduce it to the shortest truthful path to checkout and settlement.",target:"existing responding buyer",execution_lane:"REVENUE",source_ref:"funnel-close-gap",
     probability_of_sale:.68,time_to_cash_hours:12,evidence_strength:.98,confidence:.92,novelty:.12,risk:.08,reversibility:.98,
     rationale_summary:"The funnel already contains downstream buyer evidence, so closing dominates additional discovery.",
-    next_step:"Resolve the buyer's exact scope or question and present the existing payment path without changing price or binding terms."
+    next_step:"Resolve the buyer's exact scope or question and present the existing checkout path without changing price or binding terms."
   }));
   if (bottleneck==="REPEAT_WINNER") out.push(normalizeEconomicHypothesis({
     id:"funnel-repeat-winner",business_model:"replicate verified economic winner",hypothesis:"Use settlement and conversion memory to replicate the highest-performing proven offer against similar current demand.",target:"similar verified buyer demand",execution_lane:"REVENUE",source_ref:"funnel-repeat-winner",
