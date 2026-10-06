@@ -36,6 +36,22 @@ jobs:
           jq -e '.version=="1.2-bounded-commercial-dialogue" and .maxExternalMessagesPerRun==1 and .maxRepliesPerProposal==3 and .oneExternalReplyPerRun==true and .followOnMustReclassifyAsCommercialQuestion==true and .autonomousSpend==false and .autonomousContract==false' /tmp/commercial-reply-policy.json >/dev/null
           echo 'BOUNDED_COMMERCIAL_DIALOGUE_LIVE'
 
+      - name: Refresh commercial portfolio truth
+        env:
+          OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          base='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          curl --fail --show-error --silent --max-time 60 -X POST "$base/opportunity-factory/run" -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" -H 'accept: application/json' -o /tmp/factory-refresh.json
+          curl --fail --show-error --silent --max-time 60 -X POST "$base/portfolio-governor/recompute" -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" -H 'accept: application/json' -o /tmp/governor-refresh.json
+          echo '===== refreshed opportunity factory ====='
+          cat /tmp/factory-refresh.json; echo
+          echo '===== refreshed portfolio governor ====='
+          cat /tmp/governor-refresh.json; echo
+          jq -e '.ok == true' /tmp/factory-refresh.json >/dev/null
+          jq -e '.ok == true and .guardrails.maxExternalMessagesPerCycle == 1 and .guardrails.autonomousSpend == false' /tmp/governor-refresh.json >/dev/null
+          echo 'COMMERCIAL_PORTFOLIO_TRUTH_REFRESHED'
+
       - name: Reply to one qualified commercial question
         id: reply
         env:
