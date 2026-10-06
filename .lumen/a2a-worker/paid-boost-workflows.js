@@ -30,6 +30,10 @@ async function runChecked(env,id,name,action){
   return checkpoint(env,id,name,action);
 }
 
+export function shouldRunPostRevenueRouter(priorityConversion={}){
+  return priorityConversion?.ok!==false && priorityConversion?.externalSlotConsumed!==true;
+}
+
 export async function runRevenueConversionRouter(env){
   const poll=await pollCommercialReplyTasks(env);
   if(poll?.ok===false) return {ok:false,route:"POLL_FAILED",externalSlotConsumed:false,poll,reply:null,close:null};
@@ -114,7 +118,7 @@ export class LumenDeepWorkflow extends WorkflowEntrypoint {
     if(plan.revenue){
       tasks.push(["sovereign-revenue-v4",()=>runSovereignCycle(env,{runId:`v4-${id}`})]);
       tasks.push(["revenue-loop-v5",()=>runRevenueLoopV5Cycle(env,{trigger:"unified_brain_revenue"})]);
-      if(priorityConversion?.ok!==false && priorityConversion?.externalSlotConsumed!==true){
+      if(shouldRunPostRevenueRouter(priorityConversion)){
         tasks.push(["conversion-close-router",()=>runRevenueConversionRouter(env)]);
       }
       tasks.push(["opportunity-observers",()=>startOpportunityObservers(env)]);
