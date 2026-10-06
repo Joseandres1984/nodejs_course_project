@@ -24,6 +24,10 @@ export const UNIFIED_BRAIN_POLICY = Object.freeze({
   clickIsWeakSignalNotRevenue: true,
   confirmedBookingIsConversionNotCash: true,
   verifiedAffiliatePayoutIsRevenue: true,
+  microincomeScaleEngine: true,
+  scaleRequiresEvidence: true,
+  projectedScaleIsNotRevenue: true,
+  targetScaleEvents: 10000,
   maxAiHypotheses: MAX_AI_HYPOTHESES,
   oneGlobalEconomicMission: true,
   autonomousSpendUsd: 0,
@@ -90,13 +94,24 @@ export function scoreEconomicHypothesis(h={}, context={}) {
   const novelty = clamp(h.novelty,0,1);
   const risk = clamp(h.risk,0,1);
   const reversibility = clamp(h.reversibility,0,1);
+  const scalePotential = clamp(h.scalePotential,0,1);
   const hours = Math.max(1, num(h.timeToCashHours,168));
   const capital = Math.max(0, num(h.capitalRequiredUsd,0));
   const profit = Math.max(0, num(h.expectedProfitUsd,0));
   if (capital > 0 || reversibility < 0.35) return 0;
   const moneySignal = profit > 0 ? Math.min(1, Math.log10(1 + profit) / 3) : 0.28;
   const speed = 1 / (1 + Math.log10(1 + hours));
-  const base = moneySignal*0.20 + probability*0.22 + evidence*0.18 + confidence*0.12 + speed*0.12 + reversibility*0.08 + novelty*0.08 - risk*0.16;
+  const evidenceBackedScale = scalePotential * evidence;
+  const base =
+    moneySignal*0.18 +
+    probability*0.21 +
+    evidence*0.18 +
+    confidence*0.11 +
+    speed*0.11 +
+    reversibility*0.08 +
+    novelty*0.05 +
+    evidenceBackedScale*0.08 -
+    risk*0.16;
   const learned = learningAdjustment(h, context.memory || {}, context);
   return Number(clamp(base + learned).toFixed(4));
 }
@@ -122,6 +137,14 @@ export function normalizeEconomicHypothesis(raw={}, fallback={}) {
     evidenceStrength: clamp(raw.evidence_strength ?? fallback.evidenceStrength ?? 0.4),
     confidence: clamp(raw.confidence ?? fallback.confidence ?? 0.45),
     novelty: clamp(raw.novelty ?? fallback.novelty ?? 0.5),
+    monetizableEvent: clean(raw.monetizable_event || fallback.monetizableEvent || "",100),
+    unitRevenueTargetUsd: Math.max(0,num(raw.unit_revenue_target_usd ?? fallback.unitRevenueTargetUsd,0)),
+    scalePotential: clamp(raw.scale_potential ?? fallback.scalePotential ?? 0),
+    repeatability: clamp(raw.repeatability ?? fallback.repeatability ?? 0),
+    distributionLeverage: clamp(raw.distribution_leverage ?? fallback.distributionLeverage ?? 0),
+    marginalCostEfficiency: clamp(raw.marginal_cost_efficiency ?? fallback.marginalCostEfficiency ?? 0),
+    targetScaleEvents: Math.max(0,Math.min(10000,Math.round(num(raw.target_scale_events ?? fallback.targetScaleEvents,0)))),
+    projectedScaleRevenueUsd: Math.max(0,num(raw.projected_scale_revenue_usd ?? fallback.projectedScaleRevenueUsd,0)),
     rationaleSummary: clean(raw.rationale_summary || fallback.rationaleSummary || "Bounded hypothesis derived from current economic evidence.",360),
     nextStep: clean(raw.next_step || fallback.nextStep || "Run the smallest reversible validation using an existing LUMEN capability.",360),
     safetyOverride: unsafe ? "requires_human_authority_or_nonzero_capital" : null
@@ -150,7 +173,7 @@ export function chooseEconomicMission(hypotheses=[], cycleKey="", context={}) {
   const selectionPool=explore ? safe : exploitPool;
   const ranked=[...selectionPool].sort((x,y) =>
     explore
-      ? (y.novelty-x.novelty || y.score-x.score || y.evidenceStrength-x.evidenceStrength)
+      ? ((y.novelty + y.scalePotential*y.evidenceStrength) - (x.novelty + x.scalePotential*x.evidenceStrength) || y.score-x.score || y.evidenceStrength-x.evidenceStrength)
       : (y.score-x.score || y.evidenceStrength-x.evidenceStrength)
   );
   return { ...ranked[0], selectionMode: explore ? "EXPLORE" : "EXPLOIT" };
@@ -279,7 +302,15 @@ async function collectObservation(env) {
         status:x.status,
         evidence,
         monetizationFamily:clean(evidence.monetizationFamily||"",100),
-        revenueModel:clean(evidence.revenueModel||"",120)
+        revenueModel:clean(evidence.revenueModel||"",120),
+        monetizableEvent:clean(evidence.monetizableEvent||"",100),
+        unitRevenueTargetUsd:num(evidence.unitRevenueTargetUsd,0),
+        scalePotential:clamp(evidence.scalePotential||0),
+        repeatability:clamp(evidence.repeatability||0),
+        distributionLeverage:clamp(evidence.distributionLeverage||0),
+        marginalCostEfficiency:clamp(evidence.marginalCostEfficiency||0),
+        targetScaleEvents:10000,
+        projectedScaleRevenueUsd:Math.max(0,num(evidence.tenThousandEventRevenueTargetUsd,0))
       };
     }),
     proposals: proposals.map(x=>({id:x.proposal_id,status:x.status,quality:x.quality_gate_status,createdAt:x.created_at})),
@@ -344,10 +375,38 @@ function deterministicHypotheses(obs) {
     evidence_strength:Math.min(1,.55 + (travel.readyIntents>0?.08:0) + (travel.clicks30d>0?.12:0) + (travel.confirmations30d>0?.20:0)),
     confidence:Math.min(.92,.62 + (travel.clicks30d>0?.10:0) + (travel.confirmations30d>0?.18:0)),
     novelty:.38,risk:.05,reversibility:.99,
+    monetizable_event:"attributed_travel_conversion",
+    unit_revenue_target_usd:5,
+    scale_potential:Math.min(.95,.62 + Math.min(.18,num(travel.clicks30d)*.01) + Math.min(.15,num(travel.confirmations30d)*.05)),
+    repeatability:.92,distribution_leverage:.96,marginal_cost_efficiency:.98,target_scale_events:10000,projected_scale_revenue_usd:50000,
     rationale_summary:"Travel monetization has configured payout rails and measurable buyer-side signals; clicks and bookings are conversion evidence, while only verified affiliate payout counts as revenue.",
     next_step:travel.confirmations30d>0?"Prefer the highest-converting attributed Travel campaign and preserve controlled exploration.":travel.clicks30d>0?"Prioritize the highest-click attributable Travel offer and improve conversion without paid spend.":"Use existing ready Travel intents to create an attributable organic acquisition test through owned channels."
   }));
-  for (const x of obs.ventureIdeas || []) out.push(normalizeEconomicHypothesis({id:`venture-${x.id}`,business_model:`${x.product}${x.revenueModel?` via ${x.revenueModel}`:""}`,hypothesis:`Validate and package ${x.product} against the observed demand evidence using ${x.revenueModel||"the strongest compatible revenue mechanism"}, then expose the smallest sellable version through existing LUMEN channels.`,target:x.title,execution_lane:"VENTURE",source_ref:x.id,probability_of_sale:Math.min(.75,.2+num(x.score)*.55),time_to_cash_hours:72,evidence_strength:Math.min(1,num(x.score)),confidence:Math.min(.85,.3+num(x.score)*.55),novelty:x.monetizationFamily==="agent_native_api"?.9:.78,risk:.28,reversibility:.95,rationale_summary:`Venture Hunter found an evidence-backed ${x.monetizationFamily||"new"} monetization path outside the current fixed offer set.`,next_step:"Use Founder/Builder/Launcher to prepare a zero-capital reversible market test."}));
+  for (const x of obs.ventureIdeas || []) out.push(normalizeEconomicHypothesis({
+    id:`venture-${x.id}`,
+    business_model:`${x.product}${x.revenueModel?` via ${x.revenueModel}`:""}`,
+    hypothesis:`Validate and package ${x.product} against observed demand using ${x.revenueModel||"the strongest compatible revenue mechanism"}; if conversion evidence appears, measure repeatable monetizable events before scaling.`,
+    target:x.title,
+    execution_lane:"VENTURE",
+    source_ref:x.id,
+    probability_of_sale:Math.min(.75,.2+num(x.score)*.55),
+    time_to_cash_hours:72,
+    evidence_strength:Math.min(1,num(x.score)),
+    confidence:Math.min(.85,.3+num(x.score)*.55),
+    novelty:x.monetizationFamily==="agent_native_api"?.9:.78,
+    risk:.28,
+    reversibility:.95,
+    monetizable_event:x.monetizableEvent,
+    unit_revenue_target_usd:x.unitRevenueTargetUsd,
+    scale_potential:x.scalePotential,
+    repeatability:x.repeatability,
+    distribution_leverage:x.distributionLeverage,
+    marginal_cost_efficiency:x.marginalCostEfficiency,
+    target_scale_events:x.targetScaleEvents,
+    projected_scale_revenue_usd:x.projectedScaleRevenueUsd,
+    rationale_summary:`Venture Hunter found an evidence-backed ${x.monetizationFamily||"new"} path; scale remains a target scenario until verified paid events occur.`,
+    next_step:"Use Founder/Builder/Launcher to prepare a zero-capital reversible test, then measure paid-event conversion before replication."
+  }));
   for (const x of obs.supplierQueue || []) if ((!Array.isArray(x.blockers)||x.blockers.length===0) && x.profit>0) out.push(normalizeEconomicHypothesis({id:`commerce-${x.sku}`,business_model:"connected-supplier intermediary resale",hypothesis:`Expose supplier item ${x.title||x.sku} using live stock/cost/price validation without purchasing inventory.`,target:x.title||x.sku,execution_lane:"COMMERCE",source_ref:x.sku,expected_profit_usd:0,probability_of_sale:.3,time_to_cash_hours:48,evidence_strength:Math.min(1,.45+x.rank/200),confidence:.62,novelty:.35,risk:.22,reversibility:.92,rationale_summary:"A connected supplier candidate has positive projected economics and no stored blockers.",next_step:"Revalidate live supplier economics and publish only if existing bounded launch policy passes."}));
   const hot=(obs.proposals||[]).find(x=>x.status==="RESPONDED") || (obs.proposals||[]).find(x=>x.status==="SENT"||x.status==="APPROVED");
   if (hot) out.push(normalizeEconomicHypothesis({id:`revenue-${hot.id}`,business_model:"close existing qualified demand",hypothesis:`Convert existing proposal ${hot.id} toward a verified settlement before expanding low-signal activity.`,target:hot.id,execution_lane:"REVENUE",source_ref:hot.id,probability_of_sale:hot.status==="RESPONDED"?.62:.36,time_to_cash_hours:24,evidence_strength:hot.status==="RESPONDED"?.85:.65,confidence:.78,novelty:.15,risk:.12,reversibility:.96,rationale_summary:"Existing downstream commercial inventory is closer to verified revenue than cold discovery.",next_step:"Run Revenue Loop/Response Closer in non-binding mode and preserve human gates."}));
@@ -360,7 +419,7 @@ function parseJson(text){ const s=String(text||"").replace(/^```(?:json)?\s*/i,"
 
 async function aiHypotheses(env, obs) {
   if (!env?.AI?.run) return [];
-  const prompt = `You are LUMEN's single economic strategy brain. Current commercial funnel bottleneck: ${obs?.funnel?.bottleneck || "UNKNOWN"}. Generate up to ${MAX_AI_HYPOTHESES} concrete monetization hypotheses from the supplied evidence and currently available capabilities. Attack the current bottleneck first unless stronger downstream evidence already exists. Sending or preparing a message alone is NOT economic progress: prefer verified demand, verified delivery, buyer response, quote/order intent and verified settlement. When evidence permits, produce materially different monetization mechanisms rather than near-duplicates: pay-per-use/API, subscription, fixed-fee service, success fee/brokerage, referral/affiliate, paid data/intelligence, digital product, automation/SaaS, or a genuinely new zero-capital model. BUSINESS MODEL IS OPEN ENDED: do not limit yourself to the existing catalog or named archetypes. You may combine demand, information, brokerage, commerce, APIs, x402, services, referrals or genuinely new patterns when evidence supports them. Do not invent evidence, buyers, settlements, prices or capabilities. Every autonomous test must require zero outgoing capital, be reversible, non-binding and legal. Never propose purchases, payments, debt, contracts, secret access or price mutation. execution_lane is only the existing specialist tool family that can validate the hypothesis: REVENUE|VENTURE|COMMERCE|TRAVEL|DISCOVERY|EXPLORE|HOLD. Return ONLY JSON {"hypotheses":[{business_model,hypothesis,target,execution_lane,source_ref,expected_profit_usd,probability_of_sale,time_to_cash_hours,capital_required_usd,risk,reversibility,evidence_strength,confidence,novelty,rationale_summary,next_step}]}. Do not output chain-of-thought; rationale_summary must be one evidence-based sentence.`;
+  const prompt = `You are LUMEN's single economic strategy brain. Current commercial funnel bottleneck: ${obs?.funnel?.bottleneck || "UNKNOWN"}. Generate up to ${MAX_AI_HYPOTHESES} concrete monetization hypotheses from the supplied evidence and currently available capabilities. Attack the current bottleneck first unless stronger downstream evidence already exists. Sending or preparing a message alone is NOT economic progress: prefer verified demand, verified delivery, buyer response, quote/order intent and verified settlement. When evidence permits, produce materially different monetization mechanisms rather than near-duplicates: pay-per-use/API, subscription, fixed-fee service, success fee/brokerage, referral/affiliate, paid data/intelligence, digital product, automation/SaaS, or a genuinely new zero-capital model. Prefer models where one paid event can be repeated cheaply and distributed automatically, but NEVER treat a 10,000-event scenario or unit revenue target as realized revenue. Scale potential must be justified by current evidence. BUSINESS MODEL IS OPEN ENDED: do not limit yourself to the existing catalog or named archetypes. You may combine demand, information, brokerage, commerce, APIs, x402, services, referrals or genuinely new patterns when evidence supports them. Do not invent evidence, buyers, settlements, prices or capabilities. Every autonomous test must require zero outgoing capital, be reversible, non-binding and legal. Never propose purchases, payments, debt, contracts, secret access or price mutation. execution_lane is only the existing specialist tool family that can validate the hypothesis: REVENUE|VENTURE|COMMERCE|TRAVEL|DISCOVERY|EXPLORE|HOLD. Return ONLY JSON {"hypotheses":[{business_model,hypothesis,target,execution_lane,source_ref,expected_profit_usd,probability_of_sale,time_to_cash_hours,capital_required_usd,risk,reversibility,evidence_strength,confidence,novelty,monetizable_event,unit_revenue_target_usd,scale_potential,repeatability,distribution_leverage,marginal_cost_efficiency,target_scale_events,projected_scale_revenue_usd,rationale_summary,next_step}]}. Do not output chain-of-thought; rationale_summary must be one evidence-based sentence.`;
   try {
     const r=await env.AI.run(MODEL,{messages:[{role:"system",content:prompt},{role:"user",content:JSON.stringify(obs).slice(0,18000)}],temperature:.35,max_completion_tokens:580,chat_template_kwargs:{enable_thinking:false}});
     const data=parseJson(extractText(r));
@@ -370,13 +429,13 @@ async function aiHypotheses(env, obs) {
 
 async function persistHypotheses(env, cycleKey, hypotheses) {
   for (const h of hypotheses) await env.DB.prepare("INSERT OR REPLACE INTO lumen_brain_hypotheses(id,cycle_key,created_at,execution_lane,business_model,hypothesis,source_ref,score,novelty,evidence_json,engine_version) VALUES(?,?,?,?,?,?,?,?,?,?,?)")
-    .bind(h.id,cycleKey,now(),h.executionLane,h.businessModel,h.hypothesis,h.sourceRef,h.score,h.novelty,JSON.stringify({confidence:h.confidence,evidenceStrength:h.evidenceStrength,risk:h.risk,reversibility:h.reversibility,nextStep:h.nextStep}),VERSION).run();
+    .bind(h.id,cycleKey,now(),h.executionLane,h.businessModel,h.hypothesis,h.sourceRef,h.score,h.novelty,JSON.stringify({confidence:h.confidence,evidenceStrength:h.evidenceStrength,risk:h.risk,reversibility:h.reversibility,nextStep:h.nextStep,monetizableEvent:h.monetizableEvent,unitRevenueTargetUsd:h.unitRevenueTargetUsd,scalePotential:h.scalePotential,repeatability:h.repeatability,distributionLeverage:h.distributionLeverage,marginalCostEfficiency:h.marginalCostEfficiency,targetScaleEvents:h.targetScaleEvents,projectedScaleRevenueUsd:h.projectedScaleRevenueUsd,scaleTruth:"projection_not_revenue"}),VERSION).run();
 }
 
 async function persistMission(env, cycleKey, mission, observation) {
   const id=`brain-${cycleKey}`.replace(/[^a-zA-Z0-9_-]/g,"-");
   await env.DB.prepare("INSERT OR REPLACE INTO lumen_brain_missions(id,cycle_key,created_at,updated_at,status,selection_mode,execution_lane,business_model,hypothesis,target,source_ref,score,confidence,expected_profit_usd,probability_sale,time_to_cash_hours,evidence_strength,novelty,risk,reversibility,rationale_summary,next_step,evidence_json,engine_version) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
-    .bind(id,cycleKey,now(),now(),"ACTIVE",mission.selectionMode||"EXPLOIT",mission.executionLane,mission.businessModel,mission.hypothesis,mission.target,mission.sourceRef,mission.score,mission.confidence,mission.expectedProfitUsd,mission.probabilityOfSale,mission.timeToCashHours,mission.evidenceStrength,mission.novelty,mission.risk,mission.reversibility,mission.rationaleSummary,mission.nextStep,JSON.stringify({verifiedSettlementCount:observation.verifiedSettlementCount,proposalCount:observation.proposals.length,ventureIdeaCount:observation.ventureIdeas.length,supplierCandidateCount:observation.supplierQueue.length,funnel:observation.funnel,travelMonetization:observation.travelMonetization,strategyKey:strategyKey(mission)}),VERSION).run();
+    .bind(id,cycleKey,now(),now(),"ACTIVE",mission.selectionMode||"EXPLOIT",mission.executionLane,mission.businessModel,mission.hypothesis,mission.target,mission.sourceRef,mission.score,mission.confidence,mission.expectedProfitUsd,mission.probabilityOfSale,mission.timeToCashHours,mission.evidenceStrength,mission.novelty,mission.risk,mission.reversibility,mission.rationaleSummary,mission.nextStep,JSON.stringify({verifiedSettlementCount:observation.verifiedSettlementCount,proposalCount:observation.proposals.length,ventureIdeaCount:observation.ventureIdeas.length,supplierCandidateCount:observation.supplierQueue.length,funnel:observation.funnel,travelMonetization:observation.travelMonetization,scale:{monetizableEvent:mission.monetizableEvent,unitRevenueTargetUsd:mission.unitRevenueTargetUsd,scalePotential:mission.scalePotential,targetScaleEvents:mission.targetScaleEvents,projectedScaleRevenueUsd:mission.projectedScaleRevenueUsd,truth:"projection_not_revenue"},strategyKey:strategyKey(mission)}),VERSION).run();
   await env.DB.prepare("INSERT INTO lumen_brain_learning(strategy_key,attempts,updated_at) VALUES(?,1,?) ON CONFLICT(strategy_key) DO UPDATE SET attempts=attempts+1,updated_at=excluded.updated_at").bind(strategyKey(mission),now()).run();
   return id;
 }

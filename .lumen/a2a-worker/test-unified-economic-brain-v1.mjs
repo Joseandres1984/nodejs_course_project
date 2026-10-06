@@ -31,6 +31,14 @@ assert.equal(UNIFIED_BRAIN_POLICY.travelAffiliateEconomicLearning,true);
 assert.equal(UNIFIED_BRAIN_POLICY.clickIsWeakSignalNotRevenue,true);
 assert.equal(UNIFIED_BRAIN_POLICY.confirmedBookingIsConversionNotCash,true);
 assert.equal(UNIFIED_BRAIN_POLICY.verifiedAffiliatePayoutIsRevenue,true);
+assert.equal(UNIFIED_BRAIN_POLICY.microincomeScaleEngine,true);
+assert.equal(UNIFIED_BRAIN_POLICY.scaleRequiresEvidence,true);
+assert.equal(UNIFIED_BRAIN_POLICY.projectedScaleIsNotRevenue,true);
+assert.equal(UNIFIED_BRAIN_POLICY.targetScaleEvents,10000);
+assert.equal(UNIFIED_BRAIN_POLICY.microincomeScaleEngine,true);
+assert.equal(UNIFIED_BRAIN_POLICY.scaleRequiresEvidence,true);
+assert.equal(UNIFIED_BRAIN_POLICY.projectedScaleIsNotRevenue,true);
+assert.equal(UNIFIED_BRAIN_POLICY.targetScaleEvents,10000);
 
 const fast=normalizeEconomicHypothesis({
   id:"fast",business_model:"novel zero-capital B2B information exchange",hypothesis:"Sell a verified information outcome to observed demand",execution_lane:"VENTURE",
@@ -87,6 +95,67 @@ const sellerMonetization=normalizeEconomicHypothesis({
 });
 assert.notEqual(sellerMonetization.executionLane,"HOLD","seller-side pay-per-use language must not be mistaken for autonomous spend");
 
+const scalableEvidence=normalizeEconomicHypothesis({
+  id:"scalable-evidence",
+  business_model:"x402 paid API",
+  hypothesis:"Sell a repeatable API result to observed machine demand",
+  execution_lane:"VENTURE",
+  probability_of_sale:.35,
+  time_to_cash_hours:24,
+  evidence_strength:.85,
+  confidence:.75,
+  novelty:.7,
+  risk:.08,
+  reversibility:.99,
+  monetizable_event:"api_call",
+  unit_revenue_target_usd:1,
+  scale_potential:.98,
+  repeatability:1,
+  distribution_leverage:1,
+  marginal_cost_efficiency:.98,
+  target_scale_events:10000,
+  projected_scale_revenue_usd:10000
+});
+const scalableWeak=normalizeEconomicHypothesis({
+  id:"scalable-weak",
+  business_model:"hypothetical viral API",
+  hypothesis:"Maybe sell a repeatable API someday",
+  execution_lane:"VENTURE",
+  probability_of_sale:.35,
+  time_to_cash_hours:24,
+  evidence_strength:.10,
+  confidence:.40,
+  novelty:.9,
+  risk:.08,
+  reversibility:.99,
+  monetizable_event:"api_call",
+  unit_revenue_target_usd:1,
+  scale_potential:.98,
+  repeatability:1,
+  distribution_leverage:1,
+  marginal_cost_efficiency:.98,
+  target_scale_events:10000,
+  projected_scale_revenue_usd:10000
+});
+assert.equal(scalableEvidence.targetScaleEvents,10000);
+assert.equal(scalableEvidence.projectedScaleRevenueUsd,10000);
+assert.ok(scoreEconomicHypothesis(scalableEvidence)>scoreEconomicHypothesis(scalableWeak),"scale must be discounted when evidence is weak");
+
+const scaleWeak=normalizeEconomicHypothesis({
+  id:"scale-weak",business_model:"x402 utility",hypothesis:"Potentially repeatable API",execution_lane:"VENTURE",
+  probability_of_sale:.25,time_to_cash_hours:48,evidence_strength:.1,confidence:.3,novelty:.7,risk:.1,reversibility:.99,
+  monetizable_event:"api_call",unit_revenue_target_usd:1,scale_potential:1,repeatability:1,distribution_leverage:1,marginal_cost_efficiency:.98,target_scale_events:10000,projected_scale_revenue_usd:10000
+});
+const scaleStrong=normalizeEconomicHypothesis({
+  id:"scale-strong",business_model:"x402 utility",hypothesis:"Observed repeatable API demand",execution_lane:"VENTURE",
+  probability_of_sale:.25,time_to_cash_hours:48,evidence_strength:.9,confidence:.7,novelty:.7,risk:.1,reversibility:.99,
+  monetizable_event:"api_call",unit_revenue_target_usd:1,scale_potential:1,repeatability:1,distribution_leverage:1,marginal_cost_efficiency:.98,target_scale_events:10000,projected_scale_revenue_usd:10000
+});
+assert.equal(scaleStrong.targetScaleEvents,10000);
+assert.equal(scaleStrong.projectedScaleRevenueUsd,10000);
+assert.equal(scaleStrong.monetizableEvent,"api_call");
+assert.ok(scoreEconomicHypothesis(scaleStrong)>scoreEconomicHypothesis(scaleWeak),"scale may help only when evidence exists");
+
 const outgoingPayment=normalizeEconomicHypothesis({
   id:"outgoing-payment",business_model:"service",hypothesis:"Pay vendor fee automatically",execution_lane:"COMMERCE",capital_required_usd:0
 });
@@ -102,7 +171,8 @@ const novel=normalizeEconomicHypothesis({
 });
 const frontier=normalizeEconomicHypothesis({
   id:"frontier",business_model:"x402 pay-per-use agent utility",hypothesis:"Expose a new paid agent-native API capability",target:"machine customers",execution_lane:"VENTURE",
-  probability_of_sale:.18,time_to_cash_hours:72,evidence_strength:.35,confidence:.45,novelty:.99,risk:.15,reversibility:.99
+  probability_of_sale:.18,time_to_cash_hours:72,evidence_strength:.35,confidence:.45,novelty:.99,risk:.15,reversibility:.99,
+  monetizable_event:"agent_task_or_tool_call",unit_revenue_target_usd:1,scale_potential:.98,repeatability:1,distribution_leverage:1,marginal_cost_efficiency:.98,target_scale_events:10000,projected_scale_revenue_usd:10000
 });
 let explorationKey=null;
 for(let i=0;i<100;i++){
