@@ -6,6 +6,8 @@ on:
       - '.lumen/a2a-worker/response-closer-v1.js'
       - '.lumen/a2a-worker/response-qualification.js'
       - '.lumen/a2a-worker/response-closer-v2.test.js'
+      - '.lumen/a2a-worker/commercial-reply-engine.js'
+      - '.lumen/a2a-worker/test-commercial-reply-priority.mjs'
       - '.github/workflows/response-closer-v2-check.yml'
 
 jobs:
@@ -17,3 +19,4 @@ jobs:
         with:
           node-version: '20'
       - run: node .lumen/a2a-worker/response-closer-v2.test.js
+      - run: node .lumen/a2a-worker/test-commercial-reply-priority.mjs
