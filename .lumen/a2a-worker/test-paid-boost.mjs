@@ -64,7 +64,7 @@ try{
   assert.ok(persisted.has("verified-commercial-truth"));
   assert.ok(persisted.has("venture-hunter-v1"));
   assert.ok(persisted.has("unified-economic-brain-v1"));
-  assert.equal(result.brain.version,"1.0-unified-economic-brain");
+  assert.equal(result.brain.version,"1.1-demand-conversion-learning");
   assert.equal(result.brain.lane,"REVENUE");
   assert.equal(result.specialistPlan.revenue,true);
   assert.equal(result.specialistPlan.venture,false);
