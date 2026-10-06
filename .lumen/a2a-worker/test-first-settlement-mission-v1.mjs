@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { diagnoseSettlementBlocker, chooseFirstSettlementMission, FIRST_SETTLEMENT_MISSION_POLICY } from "./first-settlement-mission-v1.js";
 
-assert.equal(FIRST_SETTLEMENT_MISSION_POLICY.version, "1.1-first-settlement-rotation");
+assert.equal(FIRST_SETTLEMENT_MISSION_POLICY.version, "1.2-first-settlement-commercial-truth");
 assert.equal(FIRST_SETTLEMENT_MISSION_POLICY.autonomousSpendUsd, 0);
 assert.equal(FIRST_SETTLEMENT_MISSION_POLICY.bindingActionsHumanGated, true);
 assert.equal(FIRST_SETTLEMENT_MISSION_POLICY.skipExplicitMoveOn, true);
@@ -23,9 +23,18 @@ const sent = diagnoseSettlementBlocker({ stage:"SENT", updated_at:"2026-09-29T00
 assert.equal(sent.blocker, "WAITING_BUYER_RESPONSE");
 assert.equal(sent.stalled, true);
 
-const negotiating = diagnoseSettlementBlocker({ stage:"NEGOTIATING", updated_at:"2026-10-03T10:00:00Z" }, now);
-assert.equal(negotiating.blocker, "CHECKOUT_OR_SETTLEMENT_PENDING");
-assert.equal(negotiating.stalled, false);
+const negotiatingUnknown = diagnoseSettlementBlocker({ stage:"NEGOTIATING", updated_at:"2026-10-03T10:00:00Z" }, now);
+assert.equal(negotiatingUnknown.blocker, "NEGOTIATING_WITHOUT_VERIFIED_COMMERCIAL_INTENT");
+assert.equal(negotiatingUnknown.action, "reclassify_response_before_checkout");
+assert.equal(negotiatingUnknown.stalled, false);
+
+const negotiatingQuestion = diagnoseSettlementBlocker({ stage:"NEGOTIATING", response_class:"COMMERCIAL_QUESTION", updated_at:"2026-10-03T10:00:00Z" }, now);
+assert.equal(negotiatingQuestion.blocker, "COMMERCIAL_QUESTION_OPEN");
+assert.equal(negotiatingQuestion.action, "answer_commercial_question_before_checkout");
+
+const negotiatingPurchase = diagnoseSettlementBlocker({ stage:"NEGOTIATING", response_class:"PURCHASE_INTENT", updated_at:"2026-10-03T10:00:00Z" }, now);
+assert.equal(negotiatingPurchase.blocker, "CHECKOUT_OR_SETTLEMENT_PENDING");
+assert.equal(negotiatingPurchase.action, "prepare_existing_checkout_or_close_gate");
 
 const paid = diagnoseSettlementBlocker({ stage:"PAID", verified_receipt_id:"r" }, now);
 assert.equal(paid.action, "settlement_verified");
@@ -40,8 +49,14 @@ assert.equal(rotated.focus.opportunity_id,"ready","explicit move_on candidates m
 
 const sentVsReplied = chooseFirstSettlementMission([
   { opportunity_id:"sent-high", stage:"SENT", first_cash_score:.8, intent_score:.8, updated_at:"2026-10-03T11:30:00Z" },
-  { opportunity_id:"replied", stage:"REPLIED", first_cash_score:.15, intent_score:.6, updated_at:"2026-10-03T11:45:00Z" }
+  { opportunity_id:"replied", stage:"REPLIED", first_cash_score:.15, intent_score:.6, response_class:"COMMERCIAL_INTEREST", updated_at:"2026-10-03T11:45:00Z" }
 ], now);
 assert.equal(sentVsReplied.focus.opportunity_id,"replied","verified buyer response must outrank waiting SENT inventory");
+
+const verifiedCloseBeatsPhantomNegotiating = chooseFirstSettlementMission([
+  { opportunity_id:"phantom", stage:"NEGOTIATING", first_cash_score:5, intent_score:.9, response_class:"GENERIC_RESPONSE", updated_at:"2026-10-03T11:50:00Z" },
+  { opportunity_id:"buyer", stage:"NEGOTIATING", first_cash_score:.2, intent_score:.6, response_class:"COMMERCIAL_INTEREST", updated_at:"2026-10-03T11:45:00Z" }
+], now);
+assert.equal(verifiedCloseBeatsPhantomNegotiating.focus.opportunity_id,"buyer","verified commercial intent must outrank phantom NEGOTIATING state");
 
 console.log("First Settlement Mission v1 tests passed");

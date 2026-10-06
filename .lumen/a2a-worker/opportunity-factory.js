@@ -1,4 +1,6 @@
-const VERSION = "1.0-opportunity-factory-portfolio";
+import { classifyCommercialResponse } from "./response-qualification.js";
+
+const VERSION = "1.1-commercial-truth-opportunity-factory";
 
 const LANE_ORDER = ["COLLECTION", "CLOSE", "INBOUND", "FOLLOW_UP", "NEW_BUSINESS", "EXPERIMENT"];
 const EXTERNAL_ACTIONS = new Set(["COMMISSION_AUTOPILOT", "FIRST_CASH", "COMMERCIAL_REPLY", "FOLLOWUP", "NEW_OUTREACH"]);
@@ -79,15 +81,55 @@ function commissionCandidate(row) {
   return null;
 }
 
-function pipelineCandidate(row) {
+export function pipelineCandidate(row) {
   const stage = clean(row.stage, 80).toUpperCase();
   const responseClass = clean(row.response_class, 80).toUpperCase();
-  if (stage === "NEGOTIATING") {
-    if (responseClass === "COMMERCIAL_QUESTION") return { lane: "INBOUND", probability: 0.58, urgency: 0.9, evidenceScore: 86, actionKind: "COMMERCIAL_REPLY", rationale: "qualified_commercial_question_requires_response" };
-    return { lane: "CLOSE", probability: responseClass === "PURCHASE_INTENT" ? 0.82 : 0.68, urgency: 0.95, evidenceScore: 90, actionKind: "FIRST_CASH", rationale: `qualified_${responseClass || "commercial_interest"}_ready_for_close` };
+  const due = overdue(row.next_action_at);
+
+  if (["DECLINED","NOT_RELEVANT"].includes(responseClass)) return null;
+
+  if (stage === "NEGOTIATING" || stage === "RESPONDED") {
+    if (responseClass === "PURCHASE_INTENT" || responseClass === "COMMERCIAL_INTEREST") {
+      return {
+        lane: "CLOSE",
+        probability: responseClass === "PURCHASE_INTENT" ? 0.82 : 0.68,
+        urgency: 0.95,
+        evidenceScore: 90,
+        actionKind: "FIRST_CASH",
+        rationale: `verified_${responseClass.toLowerCase()}_ready_for_close`
+      };
+    }
+    if (responseClass === "COMMERCIAL_QUESTION") {
+      return {
+        lane: "INBOUND",
+        probability: 0.58,
+        urgency: 0.9,
+        evidenceScore: 86,
+        actionKind: "COMMERCIAL_REPLY",
+        rationale: "qualified_commercial_question_requires_response"
+      };
+    }
+    if (["TECHNICAL_ACK","ECHO","GENERIC_RESPONSE"].includes(responseClass)) {
+      return {
+        lane: "FOLLOW_UP",
+        probability: responseClass === "GENERIC_RESPONSE" ? 0.18 : 0.10,
+        urgency: due ? 0.82 : 0.30,
+        evidenceScore: responseClass === "GENERIC_RESPONSE" ? 48 : 38,
+        actionKind: due ? "FOLLOWUP" : "POLL_ONLY",
+        rationale: `${responseClass.toLowerCase()}_is_not_commercial_intent_${due ? "bounded_followup_due" : "wait_or_move_on"}`
+      };
+    }
+    return {
+      lane: "INBOUND",
+      probability: 0.16,
+      urgency: 0.35,
+      evidenceScore: 40,
+      actionKind: "POLL_ONLY",
+      rationale: "responded_or_negotiating_without_verified_response_class_not_external_actionable"
+    };
   }
-  if (stage === "RESPONDED") return { lane: "INBOUND", probability: 0.45, urgency: 0.88, evidenceScore: 72, actionKind: "COMMERCIAL_REPLY", rationale: "response_received_requires_qualification_or_commercial_reply" };
-  if (stage === "WAITING") return { lane: "FOLLOW_UP", probability: 0.24, urgency: overdue(row.next_action_at) ? 1 : 0.45, evidenceScore: 55, actionKind: "FOLLOWUP", rationale: overdue(row.next_action_at) ? "followup_due_now" : "followup_scheduled" };
+
+  if (stage === "WAITING") return { lane: "FOLLOW_UP", probability: 0.24, urgency: due ? 1 : 0.45, evidenceScore: 55, actionKind: "FOLLOWUP", rationale: due ? "followup_due_now" : "followup_scheduled" };
   if (stage === "APPROVED" || stage === "PROPOSAL") return { lane: "NEW_BUSINESS", probability: 0.2, urgency: 0.5, evidenceScore: 58, actionKind: "NEW_OUTREACH", rationale: "approved_or_prepared_commercial_offer_waiting_for_initial_outreach" };
   if (stage === "WAITING_TASK") return { lane: "INBOUND", probability: 0.3, urgency: 0.6, evidenceScore: 60, actionKind: "POLL_ONLY", rationale: "remote_a2a_task_still_running" };
   return null;
@@ -107,9 +149,39 @@ export async function runOpportunityFactory(env) {
   }
 
   const pipeline = await safeAll(env, "SELECT proposal_id,opportunity_id,target,offer_name,amount_usd,stage,response_class,next_action,next_action_at,last_contact_at,updated_at FROM lumen_sales_pipeline WHERE stage NOT IN ('LOST','NO_RESPONSE','BLOCKED') ORDER BY updated_at DESC LIMIT 300");
-  for (const row of pipeline) {
+  const [proposalRows, commercialReplyRows, followupRows, outreachRows] = await Promise.all([
+    safeAll(env, "SELECT proposal_id,message FROM lumen_proposal_drafts LIMIT 500"),
+    safeAll(env, "SELECT proposal_id,response_text,updated_at FROM lumen_commercial_replies WHERE response_text IS NOT NULL AND TRIM(response_text)<>'' ORDER BY updated_at DESC LIMIT 500"),
+    safeAll(env, "SELECT proposal_id,response_text,COALESCE(sent_at,updated_at) updated_at FROM lumen_followups WHERE response_text IS NOT NULL AND TRIM(response_text)<>'' ORDER BY COALESCE(sent_at,updated_at) DESC LIMIT 500"),
+    safeAll(env, "SELECT proposal_id,response_text,updated_at FROM lumen_outreach_attempts WHERE response_text IS NOT NULL AND TRIM(response_text)<>'' ORDER BY updated_at DESC LIMIT 500")
+  ]);
+  const proposalMessage = new Map(proposalRows.map(row => [clean(row.proposal_id,180), clean(row.message,8000)]));
+  const latestResponse = new Map();
+  for (const rows of [commercialReplyRows, followupRows, outreachRows]) {
+    for (const row of rows) {
+      const id=clean(row.proposal_id,180);
+      if (id && !latestResponse.has(id)) latestResponse.set(id, clean(row.response_text,8000));
+    }
+  }
+
+  for (const rawRow of pipeline) {
+    const row={...rawRow};
+    const responseText=latestResponse.get(clean(row.proposal_id,180)) || "";
+    if (responseText) {
+      const inferred=classifyCommercialResponse(responseText, proposalMessage.get(clean(row.proposal_id,180)) || "");
+      row.response_class=inferred.responseClass;
+    }
     const mapped = pipelineCandidate(row); if (!mapped) continue;
-    created.push(await upsertCandidate(env, { sourceType: "SALES_PIPELINE", sourceId: row.proposal_id, stage: row.stage, title: clean(`${row.offer_name || "LUMEN offer"} — ${row.target || row.opportunity_id}`, 260), valueUsd: Math.max(0, num(row.amount_usd)), signalScore: row.response_class ? 82 : 55, actionRef: row.proposal_id, ...mapped }));
+    created.push(await upsertCandidate(env, {
+      sourceType: "SALES_PIPELINE",
+      sourceId: row.proposal_id,
+      stage: row.stage,
+      title: clean(`${row.offer_name || "LUMEN offer"} — ${row.target || row.opportunity_id}`, 260),
+      valueUsd: Math.max(0, num(row.amount_usd)),
+      signalScore: ["PURCHASE_INTENT","COMMERCIAL_INTEREST","COMMERCIAL_QUESTION"].includes(clean(row.response_class,80).toUpperCase()) ? 82 : row.response_class ? 42 : 30,
+      actionRef: row.proposal_id,
+      ...mapped
+    }));
   }
 
   const opportunities = await safeAll(env, "SELECT o.id,o.name,o.score,o.fit,o.demand_signal,o.revenue_offer_id,o.status,o.updated_at FROM lumen_opportunities o LEFT JOIN lumen_proposal_drafts p ON p.opportunity_id=o.id WHERE p.opportunity_id IS NULL AND o.status IN ('qualified','watching','new') AND o.score>=35 ORDER BY o.score DESC,o.updated_at DESC LIMIT 300");
