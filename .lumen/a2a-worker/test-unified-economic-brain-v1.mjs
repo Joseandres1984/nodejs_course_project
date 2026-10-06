@@ -77,6 +77,16 @@ const binding=normalizeEconomicHypothesis({
 });
 assert.equal(binding.executionLane,"HOLD");
 
+const sellerMonetization=normalizeEconomicHypothesis({
+  id:"seller-monetization",business_model:"x402 pay-per-use API",hypothesis:"Buyer pays per successful API call",next_step:"Expose a paid endpoint through the existing payment rail",execution_lane:"VENTURE",capital_required_usd:0
+});
+assert.notEqual(sellerMonetization.executionLane,"HOLD","seller-side pay-per-use language must not be mistaken for autonomous spend");
+
+const outgoingPayment=normalizeEconomicHypothesis({
+  id:"outgoing-payment",business_model:"service",hypothesis:"Pay vendor fee automatically",execution_lane:"COMMERCE",capital_required_usd:0
+});
+assert.equal(outgoingPayment.executionLane,"HOLD","autonomous outgoing payment language must remain blocked");
+
 const exploit=chooseEconomicMission([fast,slow],"1");
 assert.equal(exploit.id,"fast");
 assert.equal(exploit.selectionMode,"EXPLOIT");
