@@ -1,5 +1,5 @@
 const NOW = () => new Date().toISOString();
-const VERSION = "1.1-monetization-frontier";
+const VERSION = "1.2-microincome-scale-frontier";
 const MAX_ARCHETYPES_PER_SIGNAL = 3;
 
 const ARCHETYPES = [
@@ -33,6 +33,35 @@ const CUSTOM_ARCHETYPE = {
   revenue:"fixed_fee_or_pay_per_use",
   margin:0.85, recurring:false, novelty:0.9
 };
+
+const SCALE_PROFILES = {
+  monitoring:{ event:"alert_or_check", unitRevenueTargetUsd:1, repeatability:.96, distributionLeverage:.90, marginalCostEfficiency:.94, volumeClass:"HIGH" },
+  research:{ event:"paid_report", unitRevenueTargetUsd:7, repeatability:.62, distributionLeverage:.60, marginalCostEfficiency:.82, volumeClass:"MEDIUM" },
+  document:{ event:"document_processed", unitRevenueTargetUsd:1, repeatability:.94, distributionLeverage:.90, marginalCostEfficiency:.95, volumeClass:"HIGH" },
+  lead_intel:{ event:"qualified_signal_or_lead", unitRevenueTargetUsd:2, repeatability:.90, distributionLeverage:.86, marginalCostEfficiency:.91, volumeClass:"HIGH" },
+  tender:{ event:"qualified_tender_or_rfq", unitRevenueTargetUsd:3, repeatability:.86, distributionLeverage:.84, marginalCostEfficiency:.91, volumeClass:"HIGH" },
+  supplier_verify:{ event:"supplier_check", unitRevenueTargetUsd:5, repeatability:.88, distributionLeverage:.88, marginalCostEfficiency:.93, volumeClass:"HIGH" },
+  quote_benchmark:{ event:"quote_check", unitRevenueTargetUsd:5, repeatability:.90, distributionLeverage:.88, marginalCostEfficiency:.94, volumeClass:"HIGH" },
+  export_intel:{ event:"market_or_buyer_brief", unitRevenueTargetUsd:9, repeatability:.72, distributionLeverage:.68, marginalCostEfficiency:.86, volumeClass:"MEDIUM" },
+  data_api:{ event:"api_call", unitRevenueTargetUsd:1, repeatability:1, distributionLeverage:1, marginalCostEfficiency:.98, volumeClass:"VERY_HIGH" },
+  agent_utility:{ event:"agent_task_or_tool_call", unitRevenueTargetUsd:1, repeatability:1, distributionLeverage:1, marginalCostEfficiency:.98, volumeClass:"VERY_HIGH" },
+  referral:{ event:"attributed_conversion", unitRevenueTargetUsd:5, repeatability:.92, distributionLeverage:.94, marginalCostEfficiency:.97, volumeClass:"VERY_HIGH" },
+  brokerage:{ event:"closed_match", unitRevenueTargetUsd:25, repeatability:.55, distributionLeverage:.66, marginalCostEfficiency:.86, volumeClass:"MEDIUM" },
+  matching:{ event:"qualified_introduction", unitRevenueTargetUsd:5, repeatability:.84, distributionLeverage:.90, marginalCostEfficiency:.92, volumeClass:"HIGH" },
+  micro_saas:{ event:"paid_usage_or_active_subscription", unitRevenueTargetUsd:1, repeatability:.98, distributionLeverage:.96, marginalCostEfficiency:.96, volumeClass:"VERY_HIGH" },
+  automation:{ event:"automated_task", unitRevenueTargetUsd:1, repeatability:.95, distributionLeverage:.84, marginalCostEfficiency:.92, volumeClass:"HIGH" },
+  local_demand:{ event:"qualified_local_lead", unitRevenueTargetUsd:2, repeatability:.86, distributionLeverage:.78, marginalCostEfficiency:.90, volumeClass:"HIGH" },
+  content_data:{ event:"dataset_access_or_download", unitRevenueTargetUsd:1, repeatability:.94, distributionLeverage:.93, marginalCostEfficiency:.98, volumeClass:"VERY_HIGH" },
+  template:{ event:"digital_sale", unitRevenueTargetUsd:3, repeatability:.82, distributionLeverage:.91, marginalCostEfficiency:.99, volumeClass:"HIGH" },
+  localization:{ event:"document_or_text_job", unitRevenueTargetUsd:2, repeatability:.91, distributionLeverage:.86, marginalCostEfficiency:.92, volumeClass:"HIGH" },
+  travel:{ event:"attributed_booking_or_partner_conversion", unitRevenueTargetUsd:5, repeatability:.92, distributionLeverage:.96, marginalCostEfficiency:.98, volumeClass:"VERY_HIGH" },
+  commerce:{ event:"paid_lookup_or_conversion", unitRevenueTargetUsd:2, repeatability:.84, distributionLeverage:.82, marginalCostEfficiency:.88, volumeClass:"HIGH" },
+  custom:{ event:"paid_event", unitRevenueTargetUsd:1, repeatability:.65, distributionLeverage:.58, marginalCostEfficiency:.82, volumeClass:"MEDIUM" }
+};
+
+function scaleProfile(archetype) {
+  return SCALE_PROFILES[archetype.id] || SCALE_PROFILES.custom;
+}
 
 function textOf(row = {}) {
   return Object.values(row).filter((v) => typeof v === "string").join(" ").slice(0, 7000);
@@ -73,21 +102,38 @@ function scoreSignal(row, text, archetype, saturationCount=0) {
   const buildEase = archetype.id === "custom" ? 0.52 : (archetype.family === "agent_native_api" ? 0.88 : 0.80);
   const recurrence = archetype.recurring ? 0.88 : 0.58;
   const novelty = num(archetype.novelty,0.5);
+  const scale=scaleProfile(archetype);
+  const scalePotential=Number(((
+    scale.repeatability*.30 +
+    scale.distributionLeverage*.28 +
+    scale.marginalCostEfficiency*.24 +
+    recurrence*.18
+  ) * (.35 + evidence*.65)).toFixed(4));
   const saturationPenalty = Math.min(0.14, Math.max(0,saturationCount) * 0.012);
   const score =
-    demand * 0.29 +
-    urgency * 0.09 +
+    demand * 0.25 +
+    urgency * 0.08 +
     evidence * 0.19 +
-    buildEase * 0.13 +
-    archetype.margin * 0.14 +
-    recurrence * 0.08 +
-    novelty * 0.08 -
+    buildEase * 0.11 +
+    archetype.margin * 0.12 +
+    recurrence * 0.07 +
+    novelty * 0.06 +
+    scalePotential * 0.12 -
     saturationPenalty;
   return {
     demand, urgency, evidence, buildEase,
     margin: archetype.margin,
     recurrence,
     novelty,
+    monetizableEvent:scale.event,
+    unitRevenueTargetUsd:scale.unitRevenueTargetUsd,
+    repeatability:scale.repeatability,
+    distributionLeverage:scale.distributionLeverage,
+    marginalCostEfficiency:scale.marginalCostEfficiency,
+    volumeClass:scale.volumeClass,
+    scalePotential,
+    tenThousandEventRevenueTargetUsd:Number((scale.unitRevenueTargetUsd*10000).toFixed(2)),
+    scaleTruth:"target_scenario_not_realized_revenue",
     saturationPenalty:Number(saturationPenalty.toFixed(4)),
     score: Number(Math.max(0,Math.min(1,score)).toFixed(4))
   };
@@ -183,13 +229,22 @@ function makeIdea(signal, signalIndex, archetype, variantIndex, saturationCount=
       revenueModel: archetype.revenue,
       recurringPotential:Boolean(archetype.recurring),
       marginAssumption:archetype.margin,
+      monetizableEvent:metrics.monetizableEvent,
+      unitRevenueTargetUsd:metrics.unitRevenueTargetUsd,
+      repeatability:metrics.repeatability,
+      distributionLeverage:metrics.distributionLeverage,
+      marginalCostEfficiency:metrics.marginalCostEfficiency,
+      volumeClass:metrics.volumeClass,
+      scalePotential:metrics.scalePotential,
+      tenThousandEventRevenueTargetUsd:metrics.tenThousandEventRevenueTargetUsd,
+      scaleTruth:metrics.scaleTruth,
       multiArchetypeSignal:true
     },
   };
 }
 
 function selectDiverseIdeas(ideas, topK) {
-  const ranked=[...ideas].sort((a,b)=>b.metrics.score-a.metrics.score || b.metrics.novelty-a.metrics.novelty);
+  const ranked=[...ideas].sort((a,b)=>b.metrics.score-a.metrics.score || b.metrics.scalePotential-a.metrics.scalePotential || b.metrics.novelty-a.metrics.novelty);
   const groups=new Map();
   for (const idea of ranked) {
     const key=idea.monetizationFamily || "open_ended";
@@ -235,6 +290,10 @@ export async function runVentureHunterV1(env, options = {}) {
     autonomousBuildPreparation: true,
     multiArchetypePerSignal: true,
     diversityFirstRanking: true,
+    eventScaleRanking: true,
+    scaleRequiresEvidence: true,
+    scaleTargetsAreNotRevenue: true,
+    targetScenarioEvents: 10000,
     maxArchetypesPerSignal: MAX_ARCHETYPES_PER_SIGNAL,
     monetizationFamiliesAvailable: [...new Set(ARCHETYPES.map(x=>x.family))].length,
     autonomousExternalLaunch: false,
@@ -289,6 +348,14 @@ export async function runVentureHunterV1(env, options = {}) {
     revenueModelsCovered: revenueModels.length,
     revenueModels,
     frontierBreadth: Number((families.length / Math.max(1,policy.monetizationFamiliesAvailable)).toFixed(4)),
+    highScaleIdeas: ideas.filter(x=>["HIGH","VERY_HIGH"].includes(x.metrics.volumeClass)).length,
+    veryHighScaleIdeas: ideas.filter(x=>x.metrics.volumeClass==="VERY_HIGH").length,
+    bestScaleCandidate: [...ideas].sort((a,b)=>b.metrics.scalePotential-a.metrics.scalePotential)[0] || null,
+    scaleScenario: {
+      targetEvents:10000,
+      realizedRevenueClaim:false,
+      purpose:"compare repeatable monetizable-event economics without treating projections as revenue"
+    },
     topOpportunity: ideas[0] || null,
     ideas,
     policy,
