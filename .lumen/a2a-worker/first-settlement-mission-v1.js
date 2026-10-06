@@ -46,13 +46,13 @@ export function diagnoseSettlementBlocker(row = {}, now = Date.now()) {
     const responseClass=String(row.response_class || row.pipeline_response_class || "").toUpperCase();
     if (["PURCHASE_INTENT","COMMERCIAL_INTEREST"].includes(responseClass)) {
       blocker = "CHECKOUT_OR_SETTLEMENT_PENDING";
-      action ||= "prepare_existing_checkout_or_close_gate";
+      action = "prepare_existing_checkout_or_close_gate";
     } else if (responseClass === "COMMERCIAL_QUESTION") {
       blocker = "COMMERCIAL_QUESTION_OPEN";
-      action ||= "answer_commercial_question_before_checkout";
+      action = "answer_commercial_question_before_checkout";
     } else {
       blocker = "NEGOTIATING_WITHOUT_VERIFIED_COMMERCIAL_INTENT";
-      action ||= "reclassify_response_before_checkout";
+      action = "reclassify_response_before_checkout";
     }
   }
   const ageHours = hoursSince(row.stage_updated_at || row.updated_at, now);
