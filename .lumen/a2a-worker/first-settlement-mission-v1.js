@@ -48,8 +48,14 @@ export function diagnoseSettlementBlocker(row = {}, now = Date.now()) {
       blocker = "CHECKOUT_OR_SETTLEMENT_PENDING";
       action = "prepare_existing_checkout_or_close_gate";
     } else if (responseClass === "COMMERCIAL_QUESTION") {
-      blocker = "COMMERCIAL_QUESTION_OPEN";
-      action = "answer_commercial_question_before_checkout";
+      const replyCount=Number(row.commercial_reply_count || 0);
+      if(replyCount >= 3){
+        blocker = "COMMERCIAL_DIALOGUE_EXHAUSTED";
+        action = "rotate_to_next_opportunity_or_human_review";
+      } else {
+        blocker = "COMMERCIAL_QUESTION_OPEN";
+        action = "answer_commercial_question_before_checkout";
+      }
     } else {
       blocker = "NEGOTIATING_WITHOUT_VERIFIED_COMMERCIAL_INTENT";
       action = "reclassify_response_before_checkout";
@@ -64,7 +70,7 @@ function missionPriority(row = {}, now = Date.now()) {
   const diagnosis = diagnoseSettlementBlocker(row, now);
   const stage = String(row.stage || "").toUpperCase();
   const action = String(diagnosis.action || "").toLowerCase();
-  if (action === "move_on") return -Infinity;
+  if (action === "move_on" || action === "rotate_to_next_opportunity_or_human_review") return -Infinity;
   let score = Number(row.first_cash_score || 0);
   const intent = Number(row.intent_score || 0);
   if (stage === "REPLIED") {
@@ -107,11 +113,13 @@ export async function getFirstSettlementMissionStatus(env) {
   if (!env?.DB) throw new Error("first_settlement_mission_persistence_required");
   const result = await env.DB.prepare(`SELECT r.*, p.quality_gate_status,
     s.response_class AS pipeline_response_class,
-    b.receipt_id AS verified_receipt_id
+    b.receipt_id AS verified_receipt_id,
+    COALESCE(cr.reply_count,0) AS commercial_reply_count
     FROM lumen_revenue_loop_v5 r
     LEFT JOIN lumen_proposal_drafts p ON p.proposal_id=r.proposal_id
     LEFT JOIN lumen_sales_pipeline s ON s.proposal_id=r.proposal_id
     LEFT JOIN lumen_x402_revenue_bridge b ON b.proposal_id=r.proposal_id AND b.bridge_status='ATTRIBUTABLE'
+    LEFT JOIN lumen_commercial_replies cr ON cr.proposal_id=r.proposal_id
     WHERE r.stage NOT IN ('PAID','DELIVERED')
     ORDER BY r.first_cash_score DESC,r.intent_score DESC,r.updated_at DESC LIMIT 25`).all();
   const rows = (result.results || []).map(r => ({ ...r, stage_updated_at: r.updated_at }));
