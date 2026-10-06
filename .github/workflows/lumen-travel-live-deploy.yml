@@ -28,15 +28,15 @@ jobs:
       - name: Validate Travel v1 before deploy
         run: |
           set -euo pipefail
-          node --check .lumen/a2a-worker/travel-consumer-entry.js
-          node --check .lumen/a2a-worker/travel-consumer-engine.js
-          node --check .lumen/a2a-worker/travel-provider-registry.js
-          node --check .lumen/a2a-worker/travel-provider-backed-discovery.js
-          node --check .lumen/a2a-worker/travel-external-providers.js
-          node .github/scripts/lumen-travel-v1-test.mjs
-          node .github/scripts/lumen-travel-provider-backed-test.mjs
-          node .github/scripts/lumen-travel-external-providers-test.mjs
-          grep -q 'import baseWorker from "./adaptive-entry.js"' .lumen/a2a-worker/travel-consumer-entry.js
+          node --experimental-default-type=module --check .lumen/a2a-worker/travel-consumer-entry.js
+          node --experimental-default-type=module --check .lumen/a2a-worker/travel-consumer-engine.js
+          node --experimental-default-type=module --check .lumen/a2a-worker/travel-provider-registry.js
+          node --experimental-default-type=module --check .lumen/a2a-worker/travel-provider-backed-discovery.js
+          node --experimental-default-type=module --check .lumen/a2a-worker/travel-external-providers.js
+          node --experimental-default-type=module .github/scripts/lumen-travel-v1-test.mjs
+          node --experimental-default-type=module .github/scripts/lumen-travel-provider-backed-test.mjs
+          node --experimental-default-type=module .github/scripts/lumen-travel-external-providers-test.mjs
+          grep -q 'import baseWorker from "./paid-boost-entry.js"' .lumen/a2a-worker/travel-consumer-entry.js
           grep -q 'autonomousSpend: false' .lumen/a2a-worker/travel-provider-registry.js
           grep -q 'createsBooking: false' .lumen/a2a-worker/travel-provider-registry.js
           grep -q 'createsCharge: false' .lumen/a2a-worker/travel-provider-registry.js
