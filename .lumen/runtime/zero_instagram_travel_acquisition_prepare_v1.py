@@ -230,10 +230,28 @@ def main():
             selected_variant = creative_variant
             existing = None
             break
-        approval_status = str((approvals.get(candidate["id"]) or {}).get("status") or "").upper()
+        approval_row = approvals.get(candidate["id"]) or {}
+        approval_status = str(approval_row.get("status") or "").upper()
+        approval_authority = str(approval_row.get("authority") or "").lower()
         state_status = str(candidate_existing.get("status") or "").lower()
-        if approval_status in duplicate_statuses or state_status == "blocked_duplicate_content":
+
+        # A real human rejection is authoritative and must not be bypassed by
+        # generating a cosmetically different replacement.
+        if approval_status == "REJECTED" and ("human" in approval_authority or state_status == "rejected_by_human"):
+            job = candidate
+            selected_variant = creative_variant
+            existing = candidate_existing
+            break
+
+        # Technical duplicate/supersede states are learning signals. Skip this
+        # creative and try a materially distinct recovery variant.
+        if (
+            approval_status in duplicate_statuses
+            or state_status in {"blocked_duplicate_content", "superseded_by_regeneration"}
+            or (approval_status == "REJECTED" and approval_authority == "travel_acquisition_refresh")
+        ):
             continue
+
         job = candidate
         selected_variant = creative_variant
         existing = candidate_existing
