@@ -19,6 +19,11 @@ export const UNIFIED_BRAIN_POLICY = Object.freeze({
   monetizationFrontier: true,
   distinctBusinessModelExploration: true,
   frontierExplorationEscapesCurrentBottleneck: true,
+  parallelMonetizationObservation: true,
+  travelAffiliateEconomicLearning: true,
+  clickIsWeakSignalNotRevenue: true,
+  confirmedBookingIsConversionNotCash: true,
+  verifiedAffiliatePayoutIsRevenue: true,
   maxAiHypotheses: MAX_AI_HYPOTHESES,
   oneGlobalEconomicMission: true,
   autonomousSpendUsd: 0,
@@ -133,10 +138,10 @@ export function chooseEconomicMission(hypotheses=[], cycleKey="", context={}) {
   const bottleneck=clean(context.bottleneck || "",40).toUpperCase();
   let exploitPool=safe;
   if (bottleneck==="DEMAND") {
-    const demandPool=safe.filter(isDemandFocusedHypothesis);
+    const demandPool=safe.filter(h=>isDemandFocusedHypothesis(h) || (h.executionLane==="TRAVEL" && context?.travelMonetization?.commercialSignal===true));
     if (demandPool.length) exploitPool=demandPool;
   } else if (["DELIVERY_OR_RESPONSE","OUTBOUND","PROPOSAL","CLOSE"].includes(bottleneck)) {
-    const revenuePool=safe.filter(h=>h.executionLane==="REVENUE");
+    const revenuePool=safe.filter(h=>h.executionLane==="REVENUE" || (h.executionLane==="TRAVEL" && context?.travelMonetization?.commercialSignal===true));
     if (revenuePool.length) exploitPool=revenuePool;
   }
 
@@ -217,6 +222,38 @@ async function persistFunnelSnapshot(env, cycleKey, funnel) {
     .bind(cycleKey,now(),funnel.qualifiedCommercialCandidates,funnel.proposals,funnel.sent,funnel.verifiedResponses,funnel.negotiations,funnel.verifiedSettlements,funnel.delivered,funnel.verifiedRevenueUsd,funnel.bottleneck,JSON.stringify({sentIsNotSuccess:true})).run();
 }
 
+async function collectTravelMonetization(env) {
+  const [readyIntents,campaigns,publishedCampaigns,clicks30d,confirmations30d,paidCommission] = await Promise.all([
+    scalar(env,"SELECT COUNT(*) n FROM lumen_travel_affiliate_intents WHERE status='READY'"),
+    scalar(env,"SELECT COUNT(*) n FROM lumen_travel_acquisition_campaigns WHERE status IN ('RECOMMENDED','APPROVED','PUBLISHED')"),
+    scalar(env,"SELECT COUNT(*) n FROM lumen_travel_acquisition_campaigns WHERE status='PUBLISHED'"),
+    scalar(env,"SELECT COUNT(*) n FROM lumen_travel_events WHERE event_type='click' AND datetime(created_at)>=datetime('now','-30 days')"),
+    scalar(env,"SELECT COUNT(*) n FROM lumen_viator_booking_events WHERE event_type='CONFIRMATION' AND datetime(last_updated)>=datetime('now','-30 days')"),
+    scalar(env,"SELECT COALESCE(SUM(commission_amount),0) n FROM lumen_viator_payouts WHERE UPPER(COALESCE(payout_status,'UNKNOWN')) IN ('PAID','COMPLETED','SENT','PROCESSED')")
+  ]);
+  const payout=await env.DB.prepare("SELECT configured,confirmed_by_user,method,currency,updated_at FROM lumen_viator_payout_settings WHERE id='primary' LIMIT 1").first().catch(()=>null);
+  const viatorApiConfigured=Boolean(env?.VIATOR_API_KEY);
+  const travelpayoutsConfigured=Boolean(env?.TRAVELPAYOUTS_API_TOKEN);
+  const payoutReady=Boolean(Number(payout?.configured||0)===1 && Number(payout?.confirmed_by_user||0)===1);
+  const commercialSignal=confirmations30d>0 || clicks30d>0 || readyIntents>0;
+  return {
+    viatorApiConfigured,
+    travelpayoutsConfigured,
+    payoutReady,
+    payoutMethod:clean(payout?.method||"",40),
+    payoutCurrency:clean(payout?.currency||"",20),
+    readyIntents,
+    campaigns,
+    publishedCampaigns,
+    clicks30d,
+    confirmations30d,
+    verifiedPaidCommissionUsd:Number(Number(paidCommission||0).toFixed(2)),
+    monetizationReady:Boolean((viatorApiConfigured||travelpayoutsConfigured) && payoutReady),
+    commercialSignal,
+    revenueTruth:"verified_paid_affiliate_payout_only"
+  };
+}
+
 async function collectObservation(env) {
   const [ideas, proposals, supplier, settlements, launches, sources] = await Promise.all([
     rows(env,"SELECT id,title,product,build_plan,score,status,evidence_json FROM lumen_venture_hunter_ideas ORDER BY score DESC,created_at DESC LIMIT 12"),
@@ -227,9 +264,10 @@ async function collectObservation(env) {
     rows(env,"SELECT * FROM lumen_source_observations ORDER BY rowid DESC LIMIT 12")
   ]);
   const funnel=await collectFunnel(env);
+  const travelMonetization=await collectTravelMonetization(env);
   const learningMemory=await rows(env,"SELECT * FROM lumen_brain_learning ORDER BY updated_at DESC LIMIT 200");
   return {
-    at: now(), verifiedSettlementCount: Math.max(settlements.length,funnel.verifiedSettlements), funnel, learningMemory,
+    at: now(), verifiedSettlementCount: Math.max(settlements.length,funnel.verifiedSettlements), funnel, travelMonetization, learningMemory,
     ventureIdeas: ideas.map(x=>{
       const evidence=parse(x.evidence_json,{});
       return {
@@ -292,6 +330,23 @@ function deterministicHypotheses(obs) {
     rationale_summary:"Verified settlement evidence exists, so the brain should exploit a proven path while retaining bounded exploration.",
     next_step:"Rank strategies by realized reward per attempt and target the nearest matching verified demand."
   }));
+  const travel=obs.travelMonetization||{};
+  if (travel.monetizationReady && travel.commercialSignal) out.push(normalizeEconomicHypothesis({
+    id:"travel-affiliate-live-lane",
+    business_model:"travel affiliate commission via Viator/Travelpayouts",
+    hypothesis:"Convert existing Travel buyer intent into attributable affiliate bookings using the live LUMEN Travel storefront and tracked provider links.",
+    target:"travel buyer intent already visible to LUMEN",
+    execution_lane:"TRAVEL",
+    source_ref:"travel-affiliate-live-lane",
+    expected_profit_usd:0,
+    probability_of_sale:Math.min(.68,.24 + Math.min(.20,num(travel.clicks30d)*.02) + Math.min(.24,num(travel.confirmations30d)*.12)),
+    time_to_cash_hours:travel.confirmations30d>0?24:72,
+    evidence_strength:Math.min(1,.55 + (travel.readyIntents>0?.08:0) + (travel.clicks30d>0?.12:0) + (travel.confirmations30d>0?.20:0)),
+    confidence:Math.min(.92,.62 + (travel.clicks30d>0?.10:0) + (travel.confirmations30d>0?.18:0)),
+    novelty:.38,risk:.05,reversibility:.99,
+    rationale_summary:"Travel monetization has configured payout rails and measurable buyer-side signals; clicks and bookings are conversion evidence, while only verified affiliate payout counts as revenue.",
+    next_step:travel.confirmations30d>0?"Prefer the highest-converting attributed Travel campaign and preserve controlled exploration.":travel.clicks30d>0?"Prioritize the highest-click attributable Travel offer and improve conversion without paid spend.":"Use existing ready Travel intents to create an attributable organic acquisition test through owned channels."
+  }));
   for (const x of obs.ventureIdeas || []) out.push(normalizeEconomicHypothesis({id:`venture-${x.id}`,business_model:`${x.product}${x.revenueModel?` via ${x.revenueModel}`:""}`,hypothesis:`Validate and package ${x.product} against the observed demand evidence using ${x.revenueModel||"the strongest compatible revenue mechanism"}, then expose the smallest sellable version through existing LUMEN channels.`,target:x.title,execution_lane:"VENTURE",source_ref:x.id,probability_of_sale:Math.min(.75,.2+num(x.score)*.55),time_to_cash_hours:72,evidence_strength:Math.min(1,num(x.score)),confidence:Math.min(.85,.3+num(x.score)*.55),novelty:x.monetizationFamily==="agent_native_api"?.9:.78,risk:.28,reversibility:.95,rationale_summary:`Venture Hunter found an evidence-backed ${x.monetizationFamily||"new"} monetization path outside the current fixed offer set.`,next_step:"Use Founder/Builder/Launcher to prepare a zero-capital reversible market test."}));
   for (const x of obs.supplierQueue || []) if ((!Array.isArray(x.blockers)||x.blockers.length===0) && x.profit>0) out.push(normalizeEconomicHypothesis({id:`commerce-${x.sku}`,business_model:"connected-supplier intermediary resale",hypothesis:`Expose supplier item ${x.title||x.sku} using live stock/cost/price validation without purchasing inventory.`,target:x.title||x.sku,execution_lane:"COMMERCE",source_ref:x.sku,expected_profit_usd:0,probability_of_sale:.3,time_to_cash_hours:48,evidence_strength:Math.min(1,.45+x.rank/200),confidence:.62,novelty:.35,risk:.22,reversibility:.92,rationale_summary:"A connected supplier candidate has positive projected economics and no stored blockers.",next_step:"Revalidate live supplier economics and publish only if existing bounded launch policy passes."}));
   const hot=(obs.proposals||[]).find(x=>x.status==="RESPONDED") || (obs.proposals||[]).find(x=>x.status==="SENT"||x.status==="APPROVED");
@@ -321,7 +376,7 @@ async function persistHypotheses(env, cycleKey, hypotheses) {
 async function persistMission(env, cycleKey, mission, observation) {
   const id=`brain-${cycleKey}`.replace(/[^a-zA-Z0-9_-]/g,"-");
   await env.DB.prepare("INSERT OR REPLACE INTO lumen_brain_missions(id,cycle_key,created_at,updated_at,status,selection_mode,execution_lane,business_model,hypothesis,target,source_ref,score,confidence,expected_profit_usd,probability_sale,time_to_cash_hours,evidence_strength,novelty,risk,reversibility,rationale_summary,next_step,evidence_json,engine_version) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
-    .bind(id,cycleKey,now(),now(),"ACTIVE",mission.selectionMode||"EXPLOIT",mission.executionLane,mission.businessModel,mission.hypothesis,mission.target,mission.sourceRef,mission.score,mission.confidence,mission.expectedProfitUsd,mission.probabilityOfSale,mission.timeToCashHours,mission.evidenceStrength,mission.novelty,mission.risk,mission.reversibility,mission.rationaleSummary,mission.nextStep,JSON.stringify({verifiedSettlementCount:observation.verifiedSettlementCount,proposalCount:observation.proposals.length,ventureIdeaCount:observation.ventureIdeas.length,supplierCandidateCount:observation.supplierQueue.length,funnel:observation.funnel,strategyKey:strategyKey(mission)}),VERSION).run();
+    .bind(id,cycleKey,now(),now(),"ACTIVE",mission.selectionMode||"EXPLOIT",mission.executionLane,mission.businessModel,mission.hypothesis,mission.target,mission.sourceRef,mission.score,mission.confidence,mission.expectedProfitUsd,mission.probabilityOfSale,mission.timeToCashHours,mission.evidenceStrength,mission.novelty,mission.risk,mission.reversibility,mission.rationaleSummary,mission.nextStep,JSON.stringify({verifiedSettlementCount:observation.verifiedSettlementCount,proposalCount:observation.proposals.length,ventureIdeaCount:observation.ventureIdeas.length,supplierCandidateCount:observation.supplierQueue.length,funnel:observation.funnel,travelMonetization:observation.travelMonetization,strategyKey:strategyKey(mission)}),VERSION).run();
   await env.DB.prepare("INSERT INTO lumen_brain_learning(strategy_key,attempts,updated_at) VALUES(?,1,?) ON CONFLICT(strategy_key) DO UPDATE SET attempts=attempts+1,updated_at=excluded.updated_at").bind(strategyKey(mission),now()).run();
   return id;
 }
@@ -330,7 +385,10 @@ async function evaluatePreviousMission(env, excludeCycleKey="") {
   const m=await env.DB.prepare("SELECT * FROM lumen_brain_missions WHERE status='ACTIVE' AND cycle_key<>? ORDER BY created_at DESC LIMIT 1").bind(excludeCycleKey).first().catch(()=>null);
   if(!m) return null;
   const current=await collectFunnel(env);
-  const baseline=parse(m.evidence_json,{}).funnel || {};
+  const currentTravel=await collectTravelMonetization(env);
+  const storedEvidence=parse(m.evidence_json,{});
+  const baseline=storedEvidence.funnel || {};
+  const baselineTravel=storedEvidence.travelMonetization || {};
   const delta={
     qualifiedCommercialCandidates:Math.max(0,current.qualifiedCommercialCandidates-num(baseline.qualifiedCommercialCandidates,0)),
     proposals:Math.max(0,current.proposals-num(baseline.proposals,0)),
@@ -341,8 +399,14 @@ async function evaluatePreviousMission(env, excludeCycleKey="") {
     delivered:Math.max(0,current.delivered-num(baseline.delivered,0)),
     verifiedRevenueUsd:Math.max(0,current.verifiedRevenueUsd-num(baseline.verifiedRevenueUsd,0))
   };
+  const travelDelta={
+    clicks30d:Math.max(0,currentTravel.clicks30d-num(baselineTravel.clicks30d,0)),
+    confirmations30d:Math.max(0,currentTravel.confirmations30d-num(baselineTravel.confirmations30d,0)),
+    verifiedPaidCommissionUsd:Math.max(0,currentTravel.verifiedPaidCommissionUsd-num(baselineTravel.verifiedPaidCommissionUsd,0))
+  };
   let reward=delta.verifiedSettlements*100 + Math.min(60,delta.verifiedRevenueUsd) + delta.negotiations*45 + delta.verifiedResponses*28 + delta.delivered*12 + delta.proposals*3 + delta.qualifiedCommercialCandidates*2;
-  const outcome={funnelBefore:baseline,funnelAfter:current,funnelDelta:delta,sentIsNotSuccess:true,currentBottleneck:current.bottleneck};
+  if(m.execution_lane==="TRAVEL") reward += travelDelta.confirmations30d*55 + Math.min(60,travelDelta.verifiedPaidCommissionUsd) + Math.min(18,travelDelta.clicks30d*3);
+  const outcome={funnelBefore:baseline,funnelAfter:current,funnelDelta:delta,travelBefore:baselineTravel,travelAfter:currentTravel,travelDelta,sentIsNotSuccess:true,currentBottleneck:current.bottleneck,travelRevenueTruth:"verified_paid_affiliate_payout_only"};
   if(m.execution_lane==="REVENUE" && m.source_ref && !String(m.source_ref).startsWith("funnel-")){
     const settled=await env.DB.prepare("SELECT r.id receipt_id FROM lumen_x402_revenue_bridge b JOIN lumen_x402_receipts r ON r.id=b.receipt_id WHERE b.proposal_id=? AND r.status='settled_verified' LIMIT 1").bind(m.source_ref).first().catch(()=>null);
     const p=await env.DB.prepare("SELECT status FROM lumen_proposal_drafts WHERE proposal_id=? LIMIT 1").bind(m.source_ref).first().catch(()=>null);
@@ -382,7 +446,7 @@ export async function runUnifiedEconomicBrain(env, options={}) {
   const deterministic=deterministicHypotheses(observation);
   const generated=await aiHypotheses(env,observation);
   const memoryByKey=new Map((observation.learningMemory||[]).map(x=>[clean(x.strategy_key,220),x]));
-  const context={bottleneck:observation.funnel.bottleneck};
+  const context={bottleneck:observation.funnel.bottleneck,travelMonetization:observation.travelMonetization};
   const hypotheses=[...generated,...deterministic].map(h=>{
     const memory=memoryByKey.get(strategyKey(h)) || {};
     const adjustment=learningAdjustment(h,memory,context);
@@ -391,7 +455,7 @@ export async function runUnifiedEconomicBrain(env, options={}) {
   await persistHypotheses(env,cycleKey,hypotheses);
   const mission=chooseEconomicMission(hypotheses,cycleKey,context);
   const missionId=await persistMission(env,cycleKey,mission,observation);
-  return {ok:true,version:VERSION,mission:{...mission,id:missionId},plan:specialistPlanForMission(mission),hypothesesConsidered:hypotheses.length,aiHypotheses:generated.length,measuredPrevious,observationSummary:{verifiedSettlements:observation.verifiedSettlementCount,ventureIdeas:observation.ventureIdeas.length,proposals:observation.proposals.length,supplierCandidates:observation.supplierQueue.length,funnel:observation.funnel}};
+  return {ok:true,version:VERSION,mission:{...mission,id:missionId},plan:specialistPlanForMission(mission),hypothesesConsidered:hypotheses.length,aiHypotheses:generated.length,measuredPrevious,observationSummary:{verifiedSettlements:observation.verifiedSettlementCount,ventureIdeas:observation.ventureIdeas.length,proposals:observation.proposals.length,supplierCandidates:observation.supplierQueue.length,funnel:observation.funnel,travelMonetization:observation.travelMonetization}};
 }
 
 function rowToMission(r){ return {id:r.id,cycleKey:r.cycle_key,status:r.status,selectionMode:r.selection_mode,executionLane:r.execution_lane,businessModel:r.business_model,hypothesis:r.hypothesis,target:r.target,sourceRef:r.source_ref,score:num(r.score),confidence:num(r.confidence),expectedProfitUsd:num(r.expected_profit_usd),probabilityOfSale:num(r.probability_sale),timeToCashHours:num(r.time_to_cash_hours),evidenceStrength:num(r.evidence_strength),novelty:num(r.novelty),risk:num(r.risk),reversibility:num(r.reversibility),rationaleSummary:r.rationale_summary,nextStep:r.next_step,reward:num(r.reward),outcome:parse(r.outcome_json,null),updatedAt:r.updated_at}; }
