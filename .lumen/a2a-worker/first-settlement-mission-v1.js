@@ -7,7 +7,10 @@ export const FIRST_SETTLEMENT_MISSION_POLICY = Object.freeze({
   autonomousContract: false,
   changesPrices: false,
   createsNewSenderAuthority: false,
-  bindingActionsHumanGated: true
+  bindingActionsHumanGated: true,
+  skipExplicitMoveOn: true,
+  penalizeWaitingSent: true,
+  rotateLowScoreDeadEnds: true
 });
 
 const STALL_HOURS = Object.freeze({
@@ -45,12 +48,34 @@ export function diagnoseSettlementBlocker(row = {}, now = Date.now()) {
   return { stalled: ageHours >= thresholdHours, blocker, action, ageHours: Number(ageHours.toFixed(2)), thresholdHours };
 }
 
+function missionPriority(row = {}, now = Date.now()) {
+  const diagnosis = diagnoseSettlementBlocker(row, now);
+  const stage = String(row.stage || "").toUpperCase();
+  const action = String(diagnosis.action || "").toLowerCase();
+  if (action === "move_on") return -Infinity;
+  let score = Number(row.first_cash_score || 0);
+  const intent = Number(row.intent_score || 0);
+  if (stage === "REPLIED") score += 1.5 + intent;
+  else if (stage === "NEGOTIATING") score += 2.5 + intent;
+  else if (stage === "PROPOSAL_READY") score += 0.4 + intent * 0.25;
+  else if (stage === "SENT") {
+    score += intent * 0.08;
+    if (diagnosis.stalled) score -= 0.5;
+    else score -= 0.08;
+  } else if (stage === "QUALIFIED") score += intent * 0.2;
+  if (diagnosis.stalled && ["DISCOVERED","QUALIFIED","PROPOSAL_READY","SENT"].includes(stage)) score -= 0.25;
+  return Number(score.toFixed(6));
+}
+
 export function chooseFirstSettlementMission(rows = [], now = Date.now()) {
-  const eligible = rows.filter(r => !r.verified_receipt_id && !["PAID", "DELIVERED"].includes(String(r.stage || "").toUpperCase()));
-  eligible.sort((a,b) => Number(b.first_cash_score || 0) - Number(a.first_cash_score || 0) || Number(b.intent_score || 0) - Number(a.intent_score || 0));
-  const focus = eligible[0] || null;
-  if (!focus) return { status: "NO_OPEN_MISSION", focus: null, diagnosis: null };
-  return { status: "ACTIVE", focus, diagnosis: diagnoseSettlementBlocker(focus, now) };
+  const candidates = rows
+    .filter(r => !r.verified_receipt_id && !["PAID", "DELIVERED"].includes(String(r.stage || "").toUpperCase()))
+    .map(r => ({ row:r, diagnosis:diagnoseSettlementBlocker(r, now), priority:missionPriority(r, now) }))
+    .filter(x => Number.isFinite(x.priority));
+  candidates.sort((a,b) => b.priority-a.priority || Number(b.row.intent_score || 0)-Number(a.row.intent_score || 0) || Number(b.row.first_cash_score || 0)-Number(a.row.first_cash_score || 0));
+  const selected = candidates[0] || null;
+  if (!selected) return { status: "NO_OPEN_MISSION", focus: null, diagnosis: null };
+  return { status: "ACTIVE", focus: selected.row, diagnosis: selected.diagnosis, selectionPriority:selected.priority };
 }
 
 export async function getFirstSettlementMissionStatus(env) {
