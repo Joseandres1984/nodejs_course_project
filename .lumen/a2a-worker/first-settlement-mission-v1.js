@@ -67,13 +67,20 @@ function missionPriority(row = {}, now = Date.now()) {
   if (action === "move_on") return -Infinity;
   let score = Number(row.first_cash_score || 0);
   const intent = Number(row.intent_score || 0);
-  if (stage === "REPLIED") score += 1.5 + intent;
+  if (stage === "REPLIED") {
+    const responseClass=String(row.response_class || row.pipeline_response_class || "").toUpperCase();
+    if (responseClass === "PURCHASE_INTENT") score += 2.2 + intent;
+    else if (responseClass === "COMMERCIAL_INTEREST") score += 1.8 + intent;
+    else if (responseClass === "COMMERCIAL_QUESTION") score += 1.2 + intent * 0.5;
+    else if (["TECHNICAL_ACK","ECHO","GENERIC_RESPONSE"].includes(responseClass)) score=Math.min(score,0.2)-0.15;
+    else score += 0.15;
+  }
   else if (stage === "NEGOTIATING") {
     const responseClass=String(row.response_class || row.pipeline_response_class || "").toUpperCase();
     if (responseClass === "PURCHASE_INTENT") score += 3.0 + intent;
     else if (responseClass === "COMMERCIAL_INTEREST") score += 2.5 + intent;
-    else if (responseClass === "COMMERCIAL_QUESTION") score += 1.2 + intent * 0.5;
-    else score -= 0.35;
+    else if (responseClass === "COMMERCIAL_QUESTION") score=Math.min(score,1.0)+1.2+intent*0.5;
+    else score=Math.min(score,0.1)-0.35;
   }
   else if (stage === "PROPOSAL_READY") score += 0.4 + intent * 0.25;
   else if (stage === "SENT") {
