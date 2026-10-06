@@ -81,7 +81,7 @@ function commissionCandidate(row) {
   return null;
 }
 
-function pipelineCandidate(row) {
+export function pipelineCandidate(row) {
   const stage = clean(row.stage, 80).toUpperCase();
   const responseClass = clean(row.response_class, 80).toUpperCase();
   const due = overdue(row.next_action_at);
