@@ -61,7 +61,7 @@ jobs:
           BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
           for attempt in $(seq 1 12); do
             if curl -fsS --max-time 20 -H 'cache-control: no-cache' "$BASE/first-settlement/policy?release=$GITHUB_SHA&probe=$attempt" -o first-settlement-policy.json; then
-              if jq -e '.version=="1.1-first-settlement-rotation" and .settlementTruth=="verified_x402_receipt_only" and .skipExplicitMoveOn==true and .penalizeWaitingSent==true and .rotateLowScoreDeadEnds==true and .autonomousSpendUsd==0 and .autonomousPurchase==false and .autonomousContract==false and .changesPrices==false and .createsNewSenderAuthority==false and .bindingActionsHumanGated==true' first-settlement-policy.json >/dev/null; then
+              if jq -e '.version=="1.2-first-settlement-commercial-truth" and .settlementTruth=="verified_x402_receipt_only" and .skipExplicitMoveOn==true and .penalizeWaitingSent==true and .rotateLowScoreDeadEnds==true and .autonomousSpendUsd==0 and .autonomousPurchase==false and .autonomousContract==false and .changesPrices==false and .createsNewSenderAuthority==false and .bindingActionsHumanGated==true' first-settlement-policy.json >/dev/null; then
                 echo 'FIRST_SETTLEMENT_PUBLIC_POLICY_OK'
                 break
               fi
