@@ -92,6 +92,11 @@ jobs:
           assert acquisition_campaigns.acquisition_campaign_tick.__module__ == 'microservice_factory_runtime'
           assert factory.LIVE_MICROPRODUCTS and len(factory.LIVE_MICROPRODUCTS) == 6
           assert all(row['id'].startswith('CAND-') for row in factory.CANDIDATE_LIBRARY)
+          assert factory.VERSION == '1.1-microincome-event-factory'
+          assert factory.TARGET_SCALE_EVENTS == 10_000
+          report = factory.microservice_factory_tick({})
+          assert report['scale_objective']['projection_is_not_revenue'] is True
+          assert report['scale_objective']['repeat_only_verified_winners'] is True
           print('MICROSERVICE_FACTORY_GUARDED_ACTIVATION ok')
           PY
       - name: Validate Cloudflare workers syntax
