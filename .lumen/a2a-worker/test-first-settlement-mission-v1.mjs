@@ -32,6 +32,10 @@ const negotiatingQuestion = diagnoseSettlementBlocker({ stage:"NEGOTIATING", res
 assert.equal(negotiatingQuestion.blocker, "COMMERCIAL_QUESTION_OPEN");
 assert.equal(negotiatingQuestion.action, "answer_commercial_question_before_checkout");
 
+const exhaustedQuestion = diagnoseSettlementBlocker({ stage:"NEGOTIATING", response_class:"COMMERCIAL_QUESTION", commercial_reply_count:3, updated_at:"2026-10-03T10:00:00Z" }, now);
+assert.equal(exhaustedQuestion.blocker, "COMMERCIAL_DIALOGUE_EXHAUSTED");
+assert.equal(exhaustedQuestion.action, "rotate_to_next_opportunity_or_human_review");
+
 const negotiatingPurchase = diagnoseSettlementBlocker({ stage:"NEGOTIATING", response_class:"PURCHASE_INTENT", updated_at:"2026-10-03T10:00:00Z" }, now);
 assert.equal(negotiatingPurchase.blocker, "CHECKOUT_OR_SETTLEMENT_PENDING");
 assert.equal(negotiatingPurchase.action, "prepare_existing_checkout_or_close_gate");
@@ -58,5 +62,11 @@ const verifiedCloseBeatsPhantomNegotiating = chooseFirstSettlementMission([
   { opportunity_id:"buyer", stage:"NEGOTIATING", first_cash_score:.2, intent_score:.6, response_class:"COMMERCIAL_INTEREST", updated_at:"2026-10-03T11:45:00Z" }
 ], now);
 assert.equal(verifiedCloseBeatsPhantomNegotiating.focus.opportunity_id,"buyer","verified commercial intent must outrank phantom NEGOTIATING state");
+
+const exhaustedRotates = chooseFirstSettlementMission([
+  { opportunity_id:"exhausted", stage:"NEGOTIATING", first_cash_score:9, intent_score:.95, response_class:"COMMERCIAL_QUESTION", commercial_reply_count:3, updated_at:"2026-10-03T11:55:00Z" },
+  { opportunity_id:"next-best", stage:"PROPOSAL_READY", first_cash_score:.2, intent_score:.7, quality_gate_status:"PASS", updated_at:"2026-10-03T11:50:00Z" }
+], now);
+assert.equal(exhaustedRotates.focus.opportunity_id,"next-best","exhausted three-turn dialogue must rotate instead of monopolizing First Settlement");
 
 console.log("First Settlement Mission v1 tests passed");
