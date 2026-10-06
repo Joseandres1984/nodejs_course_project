@@ -1,7 +1,7 @@
 const VERSION = "1.1-demand-conversion-learning";
 const MODEL = "@cf/google/gemma-4-26b-a4b-it";
 const EXPLORATION_RATE = 0.20;
-const MAX_AI_HYPOTHESES = 3;
+const MAX_AI_HYPOTHESES = 5;
 
 export const UNIFIED_BRAIN_POLICY = Object.freeze({
   version: VERSION,
@@ -16,6 +16,10 @@ export const UNIFIED_BRAIN_POLICY = Object.freeze({
   demandFirstWhenBuyerEvidenceZero: true,
   persistentFunnelMemory: true,
   strategyMemoryAffectsSelection: true,
+  monetizationFrontier: true,
+  distinctBusinessModelExploration: true,
+  frontierExplorationEscapesCurrentBottleneck: true,
+  maxAiHypotheses: MAX_AI_HYPOTHESES,
   oneGlobalEconomicMission: true,
   autonomousSpendUsd: 0,
   autonomousPurchase: false,
@@ -27,7 +31,7 @@ export const UNIFIED_BRAIN_POLICY = Object.freeze({
 });
 
 const EXECUTION_LANES = new Set(["REVENUE","VENTURE","COMMERCE","TRAVEL","DISCOVERY","EXPLORE","HOLD"]);
-const FORBIDDEN = /\b(pay|payment|spend|wire|transfer|withdraw|purchase|buy\s+with|sign\s+contract|accept\s+contract|debt|loan|private\s+key|seed\s+phrase|pagar|transferir|comprar\s+con|firmar\s+contrato|aceptar\s+contrato|deuda|pr[eé]stamo)\b/i;
+const FORBIDDEN = /\b(spend|wire|withdraw|sign\s+contract|accept\s+contract|debt|loan|private\s+key|seed\s+phrase|pagar|transferir|comprar\s+con|firmar\s+contrato|aceptar\s+contrato|deuda|pr[eé]stamo)\b|\b(?:pay|send|make|execute|initiate)\s+(?:a\s+)?(?:payment|supplier|vendor|fee|invoice|crypto|usdc)\b|\b(?:purchase|buy)\s+(?:inventory|stock|service|subscription|tool|data|api\s+access|with)\b/i;
 const now = () => new Date().toISOString();
 const clean = (v, n=600) => String(v ?? "").replace(/[\u0000-\u001f\u007f]/g," ").replace(/\s+/g," ").trim().slice(0,n);
 const num = (v, d=0) => Number.isFinite(Number(v)) ? Number(v) : d;
@@ -124,18 +128,26 @@ export function normalizeEconomicHypothesis(raw={}, fallback={}) {
 export function chooseEconomicMission(hypotheses=[], cycleKey="", context={}) {
   const safe = hypotheses.filter(h => h && h.executionLane !== "HOLD" && h.capitalRequiredUsd === 0 && h.reversibility >= 0.35);
   if (!safe.length) return normalizeEconomicHypothesis({ execution_lane:"EXPLORE", business_model:"open-ended opportunity discovery", hypothesis:"Search current demand and market evidence for a new zero-capital monetization hypothesis.", novelty:1, evidence_strength:0.25, confidence:0.4, probability_of_sale:0.15, time_to_cash_hours:72 });
-  const bottleneck=clean(context.bottleneck || "",40).toUpperCase();
-  let pool=safe;
-  if (bottleneck==="DEMAND") {
-    const demandPool=safe.filter(isDemandFocusedHypothesis);
-    if (demandPool.length) pool=demandPool;
-  } else if (["DELIVERY_OR_RESPONSE","OUTBOUND","PROPOSAL","CLOSE"].includes(bottleneck)) {
-    const revenuePool=safe.filter(h=>h.executionLane==="REVENUE");
-    if (revenuePool.length) pool=revenuePool;
-  }
   const bucket = [...clean(cycleKey,80)].reduce((sum,ch)=>sum+ch.charCodeAt(0),0) % 5;
   const explore = bucket === 0;
-  const ranked = [...pool].sort((x,y) => explore ? (y.novelty-x.novelty || y.score-x.score) : (y.score-x.score || y.evidenceStrength-x.evidenceStrength));
+  const bottleneck=clean(context.bottleneck || "",40).toUpperCase();
+  let exploitPool=safe;
+  if (bottleneck==="DEMAND") {
+    const demandPool=safe.filter(isDemandFocusedHypothesis);
+    if (demandPool.length) exploitPool=demandPool;
+  } else if (["DELIVERY_OR_RESPONSE","OUTBOUND","PROPOSAL","CLOSE"].includes(bottleneck)) {
+    const revenuePool=safe.filter(h=>h.executionLane==="REVENUE");
+    if (revenuePool.length) exploitPool=revenuePool;
+  }
+
+  // Exploitation attacks the current cash bottleneck. The bounded exploration slot
+  // deliberately sees the whole safe frontier so LUMEN can discover new business models.
+  const selectionPool=explore ? safe : exploitPool;
+  const ranked=[...selectionPool].sort((x,y) =>
+    explore
+      ? (y.novelty-x.novelty || y.score-x.score || y.evidenceStrength-x.evidenceStrength)
+      : (y.score-x.score || y.evidenceStrength-x.evidenceStrength)
+  );
   return { ...ranked[0], selectionMode: explore ? "EXPLORE" : "EXPLOIT" };
 }
 
@@ -218,7 +230,20 @@ async function collectObservation(env) {
   const learningMemory=await rows(env,"SELECT * FROM lumen_brain_learning ORDER BY updated_at DESC LIMIT 200");
   return {
     at: now(), verifiedSettlementCount: Math.max(settlements.length,funnel.verifiedSettlements), funnel, learningMemory,
-    ventureIdeas: ideas.map(x=>({id:x.id,title:clean(x.title,180),product:clean(x.product,180),buildPlan:clean(x.build_plan,240),score:num(x.score),status:x.status,evidence:parse(x.evidence_json,{})})),
+    ventureIdeas: ideas.map(x=>{
+      const evidence=parse(x.evidence_json,{});
+      return {
+        id:x.id,
+        title:clean(x.title,180),
+        product:clean(x.product,180),
+        buildPlan:clean(x.build_plan,240),
+        score:num(x.score),
+        status:x.status,
+        evidence,
+        monetizationFamily:clean(evidence.monetizationFamily||"",100),
+        revenueModel:clean(evidence.revenueModel||"",120)
+      };
+    }),
     proposals: proposals.map(x=>({id:x.proposal_id,status:x.status,quality:x.quality_gate_status,createdAt:x.created_at})),
     supplierQueue: supplier.map(x=>({sku:x.sku,title:clean(x.title,180),profit:num(x.projected_profit),margin:num(x.projected_margin_pct),rank:num(x.rank_score),state:x.state,blockers:parse(x.blockers_json,[])})),
     recentSupplierLaunches: launches,
@@ -267,7 +292,7 @@ function deterministicHypotheses(obs) {
     rationale_summary:"Verified settlement evidence exists, so the brain should exploit a proven path while retaining bounded exploration.",
     next_step:"Rank strategies by realized reward per attempt and target the nearest matching verified demand."
   }));
-  for (const x of obs.ventureIdeas || []) out.push(normalizeEconomicHypothesis({id:`venture-${x.id}`,business_model:x.product,hypothesis:`Validate and package ${x.product} against the observed demand evidence, then expose the smallest sellable version through existing LUMEN channels.`,target:x.title,execution_lane:"VENTURE",source_ref:x.id,probability_of_sale:Math.min(.75,.2+num(x.score)*.55),time_to_cash_hours:72,evidence_strength:Math.min(1,num(x.score)),confidence:Math.min(.85,.3+num(x.score)*.55),novelty:.78,risk:.28,reversibility:.95,rationale_summary:"Venture Hunter found evidence-backed demand outside the current fixed offer set.",next_step:"Use Founder/Builder/Launcher to prepare a zero-capital reversible market test."}));
+  for (const x of obs.ventureIdeas || []) out.push(normalizeEconomicHypothesis({id:`venture-${x.id}`,business_model:`${x.product}${x.revenueModel?` via ${x.revenueModel}`:""}`,hypothesis:`Validate and package ${x.product} against the observed demand evidence using ${x.revenueModel||"the strongest compatible revenue mechanism"}, then expose the smallest sellable version through existing LUMEN channels.`,target:x.title,execution_lane:"VENTURE",source_ref:x.id,probability_of_sale:Math.min(.75,.2+num(x.score)*.55),time_to_cash_hours:72,evidence_strength:Math.min(1,num(x.score)),confidence:Math.min(.85,.3+num(x.score)*.55),novelty:x.monetizationFamily==="agent_native_api"?.9:.78,risk:.28,reversibility:.95,rationale_summary:`Venture Hunter found an evidence-backed ${x.monetizationFamily||"new"} monetization path outside the current fixed offer set.`,next_step:"Use Founder/Builder/Launcher to prepare a zero-capital reversible market test."}));
   for (const x of obs.supplierQueue || []) if ((!Array.isArray(x.blockers)||x.blockers.length===0) && x.profit>0) out.push(normalizeEconomicHypothesis({id:`commerce-${x.sku}`,business_model:"connected-supplier intermediary resale",hypothesis:`Expose supplier item ${x.title||x.sku} using live stock/cost/price validation without purchasing inventory.`,target:x.title||x.sku,execution_lane:"COMMERCE",source_ref:x.sku,expected_profit_usd:0,probability_of_sale:.3,time_to_cash_hours:48,evidence_strength:Math.min(1,.45+x.rank/200),confidence:.62,novelty:.35,risk:.22,reversibility:.92,rationale_summary:"A connected supplier candidate has positive projected economics and no stored blockers.",next_step:"Revalidate live supplier economics and publish only if existing bounded launch policy passes."}));
   const hot=(obs.proposals||[]).find(x=>x.status==="RESPONDED") || (obs.proposals||[]).find(x=>x.status==="SENT"||x.status==="APPROVED");
   if (hot) out.push(normalizeEconomicHypothesis({id:`revenue-${hot.id}`,business_model:"close existing qualified demand",hypothesis:`Convert existing proposal ${hot.id} toward a verified settlement before expanding low-signal activity.`,target:hot.id,execution_lane:"REVENUE",source_ref:hot.id,probability_of_sale:hot.status==="RESPONDED"?.62:.36,time_to_cash_hours:24,evidence_strength:hot.status==="RESPONDED"?.85:.65,confidence:.78,novelty:.15,risk:.12,reversibility:.96,rationale_summary:"Existing downstream commercial inventory is closer to verified revenue than cold discovery.",next_step:"Run Revenue Loop/Response Closer in non-binding mode and preserve human gates."}));
@@ -280,7 +305,7 @@ function parseJson(text){ const s=String(text||"").replace(/^```(?:json)?\s*/i,"
 
 async function aiHypotheses(env, obs) {
   if (!env?.AI?.run) return [];
-  const prompt = `You are LUMEN's single economic strategy brain. Current commercial funnel bottleneck: ${obs?.funnel?.bottleneck || "UNKNOWN"}. Generate up to ${MAX_AI_HYPOTHESES} concrete monetization hypotheses from the supplied evidence and currently available capabilities. Attack the current bottleneck first unless stronger downstream evidence already exists. Sending or preparing a message alone is NOT economic progress: prefer verified demand, verified delivery, buyer response, quote/order intent and verified settlement. BUSINESS MODEL IS OPEN ENDED: do not limit yourself to the existing catalog or named archetypes. You may combine demand, information, brokerage, commerce, APIs, x402, services, referrals or genuinely new patterns when evidence supports them. Do not invent evidence, buyers, settlements, prices or capabilities. Every autonomous test must require zero outgoing capital, be reversible, non-binding and legal. Never propose purchases, payments, debt, contracts, secret access or price mutation. execution_lane is only the existing specialist tool family that can validate the hypothesis: REVENUE|VENTURE|COMMERCE|TRAVEL|DISCOVERY|EXPLORE|HOLD. Return ONLY JSON {"hypotheses":[{business_model,hypothesis,target,execution_lane,source_ref,expected_profit_usd,probability_of_sale,time_to_cash_hours,capital_required_usd,risk,reversibility,evidence_strength,confidence,novelty,rationale_summary,next_step}]}. Do not output chain-of-thought; rationale_summary must be one evidence-based sentence.`;
+  const prompt = `You are LUMEN's single economic strategy brain. Current commercial funnel bottleneck: ${obs?.funnel?.bottleneck || "UNKNOWN"}. Generate up to ${MAX_AI_HYPOTHESES} concrete monetization hypotheses from the supplied evidence and currently available capabilities. Attack the current bottleneck first unless stronger downstream evidence already exists. Sending or preparing a message alone is NOT economic progress: prefer verified demand, verified delivery, buyer response, quote/order intent and verified settlement. When evidence permits, produce materially different monetization mechanisms rather than near-duplicates: pay-per-use/API, subscription, fixed-fee service, success fee/brokerage, referral/affiliate, paid data/intelligence, digital product, automation/SaaS, or a genuinely new zero-capital model. BUSINESS MODEL IS OPEN ENDED: do not limit yourself to the existing catalog or named archetypes. You may combine demand, information, brokerage, commerce, APIs, x402, services, referrals or genuinely new patterns when evidence supports them. Do not invent evidence, buyers, settlements, prices or capabilities. Every autonomous test must require zero outgoing capital, be reversible, non-binding and legal. Never propose purchases, payments, debt, contracts, secret access or price mutation. execution_lane is only the existing specialist tool family that can validate the hypothesis: REVENUE|VENTURE|COMMERCE|TRAVEL|DISCOVERY|EXPLORE|HOLD. Return ONLY JSON {"hypotheses":[{business_model,hypothesis,target,execution_lane,source_ref,expected_profit_usd,probability_of_sale,time_to_cash_hours,capital_required_usd,risk,reversibility,evidence_strength,confidence,novelty,rationale_summary,next_step}]}. Do not output chain-of-thought; rationale_summary must be one evidence-based sentence.`;
   try {
     const r=await env.AI.run(MODEL,{messages:[{role:"system",content:prompt},{role:"user",content:JSON.stringify(obs).slice(0,18000)}],temperature:.35,max_completion_tokens:580,chat_template_kwargs:{enable_thinking:false}});
     const data=parseJson(extractText(r));

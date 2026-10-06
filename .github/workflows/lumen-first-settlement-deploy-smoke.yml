@@ -39,6 +39,7 @@ jobs:
           set -euo pipefail
           node .lumen/a2a-worker/test-first-settlement-mission-v1.mjs
           node .lumen/a2a-worker/test-unified-economic-brain-v1.mjs
+          node .lumen/a2a-worker/venture-hunter-v1.test.mjs
           node .lumen/a2a-worker/test-intramodule-evolution-v1.mjs
           node .lumen/a2a-worker/test-bounded-supplier-resale.mjs
           node .lumen/a2a-worker/test-paid-boost.mjs
@@ -74,7 +75,7 @@ jobs:
           set -euo pipefail
           BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
           curl -fsS --max-time 20 -H 'cache-control: no-cache' "$BASE/brain/policy?release=$GITHUB_SHA" -o brain-policy.json
-          jq -e '.version=="1.1-demand-conversion-learning" and .oneGlobalEconomicMission==true and .openEndedBusinessModels==true and .explorationRate==0.20 and .sentIsNotSuccess==true and .demandFirstWhenBuyerEvidenceZero==true and .persistentFunnelMemory==true and .strategyMemoryAffectsSelection==true and .autonomousSpendUsd==0 and .autonomousPurchase==false and .autonomousContract==false and .bindingActionsHumanGated==true and .revenueTruth=="provider_verified_settlement_only"' brain-policy.json >/dev/null
+          jq -e '.version=="1.1-demand-conversion-learning" and .oneGlobalEconomicMission==true and .openEndedBusinessModels==true and .explorationRate==0.20 and .sentIsNotSuccess==true and .demandFirstWhenBuyerEvidenceZero==true and .persistentFunnelMemory==true and .strategyMemoryAffectsSelection==true and .monetizationFrontier==true and .distinctBusinessModelExploration==true and .frontierExplorationEscapesCurrentBottleneck==true and .maxAiHypotheses==5 and .autonomousSpendUsd==0 and .autonomousPurchase==false and .autonomousContract==false and .bindingActionsHumanGated==true and .revenueTruth=="provider_verified_settlement_only"' brain-policy.json >/dev/null
           echo 'UNIFIED_BRAIN_PUBLIC_POLICY_OK'
 
       - name: Verify protected status, run one Brain cycle, and live mission

@@ -31,14 +31,14 @@ export async function runVentureFounderV2(env,{limit=8}={}){
   const ventures=[];
   for(const row of rows){
     const e=evaluate(row);
-    const validation={hypothesis:`A buyer will pay for: ${row.product}`,checks:["confirm repeated demand signal","identify reachable buyer or channel","compare existing alternatives","verify deliverable can be produced safely"],success:"real buyer evidence or attributable purchase intent",failure:"weak/repeatedly synthetic demand or no reachable buyer"};
-    const mvp={product:row.product,buildPlan:row.build_plan,scope:"smallest paid deliverable proving demand",checkout:"reuse existing x402/payment infrastructure where compatible",delivery:"reuse guarded LUMEN delivery path",pricing:"do not autonomously change production prices"};
+    const revenueModel=String(row.revenue_model||"existing approved payment model"); const validation={hypothesis:`A buyer will pay for: ${row.product} via ${revenueModel}`,checks:["confirm repeated demand signal","identify reachable buyer or channel","validate the proposed revenue mechanism against buyer behavior","compare existing alternatives","verify deliverable can be produced safely"],success:"real buyer evidence or attributable purchase intent for the proposed value/revenue mechanism",failure:"weak/repeatedly synthetic demand, no reachable buyer, or no evidence the proposed monetization fits"};
+    const mvp={product:row.product,revenueModel,buildPlan:row.build_plan,scope:"smallest paid deliverable proving demand",checkout:"reuse existing x402/payment infrastructure where compatible; otherwise preserve existing approved/human-gated collection path",delivery:"reuse guarded LUMEN delivery path",pricing:"do not autonomously change production prices"};
     const launch={mode:"PREPARE_ONLY",steps:["prepare product spec","prepare landing/API contract","prepare checkout mapping","prepare sales artifact","route through existing quality/governor gates"],externalActionRequiresHumanGate:true};
     const now=NOW();
     await env.DB.prepare(`INSERT INTO lumen_venture_founder_v2(idea_id,created_at,updated_at,verdict,confidence,opportunity_score,validation_plan_json,mvp_plan_json,launch_plan_json,policy_json)
       VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(idea_id) DO UPDATE SET updated_at=excluded.updated_at,verdict=excluded.verdict,confidence=excluded.confidence,opportunity_score=excluded.opportunity_score,validation_plan_json=excluded.validation_plan_json,mvp_plan_json=excluded.mvp_plan_json,launch_plan_json=excluded.launch_plan_json,policy_json=excluded.policy_json`)
       .bind(row.id,now,now,e.verdict,e.score,e.score,JSON.stringify(validation),JSON.stringify(mvp),JSON.stringify(launch),JSON.stringify(policy)).run();
-    ventures.push({ideaId:row.id,title:row.title,product:row.product,verdict:e.verdict,score:e.score,validation,mvp,launch});
+    ventures.push({ideaId:row.id,title:row.title,product:row.product,revenueModel,verdict:e.verdict,score:e.score,validation,mvp,launch});
   }
   return {ok:true,engine:"LUMEN Venture Founder v2",examined:rows.length,mvpReady:ventures.filter(v=>v.verdict==="MVP_READY").length,topVenture:ventures[0]||null,ventures,policy,next:ventures.some(v=>v.verdict==="MVP_READY")?"prepare_guarded_mvp":"keep_validating"};
 }
