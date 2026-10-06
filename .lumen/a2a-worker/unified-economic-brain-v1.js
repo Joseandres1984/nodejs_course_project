@@ -40,7 +40,7 @@ function strategyKey(h={}) {
 
 export function isDemandFocusedHypothesis(h={}) {
   const text = `${h.businessModel||h.business_model||""} ${h.hypothesis||""} ${h.target||""} ${h.nextStep||h.next_step||""}`;
-  return /\b(demand|buyer|rfq|request for quote|request board|procurement|tender|purchase intent|need statement|demanda|comprador|cotiz|licitaci[oó]n|necesidad)\b/i.test(text);
+  return /\b(verified demand|buyer demand|active demand|rfq|request for quote|request board|procurement|tender|purchase intent|need statement|demanda verificada|comprador|cotiz|licitaci[oó]n|necesidad)\b/i.test(text);
 }
 
 export function detectEconomicBottleneck(f={}) {
