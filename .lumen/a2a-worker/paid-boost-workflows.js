@@ -71,6 +71,14 @@ export class LumenDeepWorkflow extends WorkflowEntrypoint {
 
     const results={};
     results["verified-commercial-truth"]=await step.do("verified-commercial-truth",MUTATING_STEP,()=>runChecked(env,id,"verified-commercial-truth",()=>refreshCommercialTruth(env)));
+
+    // Cash-before-explore: when an already-qualified buyer has replied or a first-cash
+    // close is available, attempt that conversion before spending the cycle on discovery.
+    // runRevenueConversionRouter already enforces the existing sender/quality/authority gates
+    // and consumes at most one external commercial slot.
+    results["conversion-close-priority"]=await step.do("conversion-close-priority",MUTATING_STEP,()=>runChecked(env,id,"conversion-close-priority",()=>runRevenueConversionRouter(env)));
+    const priorityConversion=results["conversion-close-priority"];
+
     results["venture-hunter-v1"]=await step.do("venture-hunter-v1",MUTATING_STEP,()=>runChecked(env,id,"venture-hunter-v1",()=>runVentureHunterV1(env,{mode:"prepare_only",topK:12})));
     results["viator-conversions-observe"]=await step.do("viator-conversions-observe",MUTATING_STEP,()=>runChecked(env,id,"viator-conversions-observe",async()=>{const x=await syncViatorBookingConversions(env);return x?.skipped?{...x,ok:true,observationSkipped:true}:x;}));
     results["unified-economic-brain-v1"]=await step.do("unified-economic-brain-v1",MUTATING_STEP,()=>runChecked(env,id,"unified-economic-brain-v1",()=>runUnifiedEconomicBrain(env,{trigger:"paid_boost_hourly_workflow",scheduledTime:event.payload.scheduledTime})));
@@ -106,14 +114,16 @@ export class LumenDeepWorkflow extends WorkflowEntrypoint {
     if(plan.revenue){
       tasks.push(["sovereign-revenue-v4",()=>runSovereignCycle(env,{runId:`v4-${id}`})]);
       tasks.push(["revenue-loop-v5",()=>runRevenueLoopV5Cycle(env,{trigger:"unified_brain_revenue"})]);
-      tasks.push(["conversion-close-router",()=>runRevenueConversionRouter(env)]);
+      if(priorityConversion?.ok!==false && priorityConversion?.externalSlotConsumed!==true){
+        tasks.push(["conversion-close-router",()=>runRevenueConversionRouter(env)]);
+      }
       tasks.push(["opportunity-observers",()=>startOpportunityObservers(env)]);
     }
 
     for(const [name,action] of tasks) results[name]=await step.do(name,MUTATING_STEP,()=>runChecked(env,id,name,action));
     const failed=Object.entries(results).filter(([,v])=>v?.ok===false).map(([n])=>n);
     return step.do("finish",READ_STEP,async()=>{
-      const result={ok:failed.length===0,failed,steps:Object.keys(results).length,autonomousSpendUsd:0,brain:{version:brain?.version||null,missionId:brain?.mission?.id||null,lane:brain?.mission?.executionLane||plan.lane||null,selectionMode:brain?.mission?.selectionMode||null,hypothesesConsidered:brain?.hypothesesConsidered||null},specialistPlan:plan};
+      const result={ok:failed.length===0,failed,steps:Object.keys(results).length,autonomousSpendUsd:0,cashBeforeExplore:{enabled:true,priorityRoute:priorityConversion?.route||null,externalSlotConsumed:priorityConversion?.externalSlotConsumed===true},brain:{version:brain?.version||null,missionId:brain?.mission?.id||null,lane:brain?.mission?.executionLane||plan.lane||null,selectionMode:brain?.mission?.selectionMode||null,hypothesesConsidered:brain?.hypothesesConsidered||null},specialistPlan:plan};
       await recordRun(env,id,"DEEP",failed.length?"DEGRADED":"COMPLETED",result);
       await env.DB.prepare("DELETE FROM lumen_paid_boost_steps WHERE updated_at<datetime('now','-35 days') AND status<>'RUNNING'").run();
       await env.DB.prepare("DELETE FROM lumen_paid_boost_runs WHERE updated_at<datetime('now','-35 days') AND status<>'RUNNING'").run();
