@@ -45,7 +45,8 @@ assert.equal(detectEconomicBottleneck({proposals:2}),"OUTBOUND");
 assert.equal(detectEconomicBottleneck({sent:2}),"DELIVERY_OR_RESPONSE");
 assert.equal(detectEconomicBottleneck({verifiedResponses:1}),"CLOSE");
 assert.equal(detectEconomicBottleneck({verifiedSettlements:1}),"REPEAT_WINNER");
-assert.ok(scoreEconomicHypothesis(demand,{bottleneck:"DEMAND"}) > scoreEconomicHypothesis(shinySupply,{bottleneck:"DEMAND"}),"demand gap must bias scoring toward verified buyer demand");
+assert.ok(scoreEconomicHypothesis(demand,{bottleneck:"DEMAND"}) > scoreEconomicHypothesis(demand,{}),"demand bottleneck must boost demand-focused hypotheses");
+assert.ok(scoreEconomicHypothesis(shinySupply,{bottleneck:"DEMAND"}) < scoreEconomicHypothesis(shinySupply,{}),"demand bottleneck must suppress unrelated supply expansion");
 assert.ok(learningAdjustment(fast,{attempts:5,reward:120},{bottleneck:"CLOSE"}) > learningAdjustment(fast,{attempts:5,reward:-10},{bottleneck:"CLOSE"}),"strategy memory must reward evidence-backed progress and penalize stagnation");
 
 const unsafe=normalizeEconomicHypothesis({
