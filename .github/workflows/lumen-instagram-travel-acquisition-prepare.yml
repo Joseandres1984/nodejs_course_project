@@ -76,14 +76,20 @@ jobs:
           raise SystemExit(acquisition.main())
           PY
 
-      - name: Assert outbound remains human-gated
+      - name: Assert bounded zero-spend Travel monetization policy
         run: |
           set -euo pipefail
           test "$LIVE_OUTBOUND" = 'false'
           test "$LUMEN_INSTAGRAM_SEND_ENABLED" = 'false'
           grep -q 'approval_required.*True' .lumen/runtime/zero_instagram_travel_acquisition_prepare_v1.py
+          grep -q 'affiliate_disclosure.*True' .lumen/runtime/zero_instagram_travel_acquisition_prepare_v1.py
+          grep -q 'booking_authority.*False' .lumen/runtime/zero_instagram_travel_acquisition_prepare_v1.py
+          grep -q 'payment_authority.*False' .lumen/runtime/zero_instagram_travel_acquisition_prepare_v1.py
           grep -q 'autonomous_spend_usd.*0' .lumen/runtime/zero_instagram_travel_acquisition_prepare_v1.py
-          echo 'TRAVEL_INSTAGRAM_HUMAN_GATE_OK'
+          grep -q 'authorize_safe_travel_affiliate_job(job)' .lumen/runtime/zero_instagram_travel_acquisition_prepare_v1.py
+          grep -q 'SAFE_TRAVEL_DAILY_LIMIT = 1' .lumen/runtime/zero_instagram_control_bridge_runtime.py
+          grep -q 'SAFE_TRAVEL_MIN_QA = 95' .lumen/runtime/zero_instagram_control_bridge_runtime.py
+          echo 'TRAVEL_INSTAGRAM_ZERO_SPEND_MONETIZATION_POLICY_OK'
 
       - name: Commit generated 4x5 acquisition asset
         shell: bash
