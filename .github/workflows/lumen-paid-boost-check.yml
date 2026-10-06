@@ -25,6 +25,7 @@ jobs:
           node .lumen/a2a-worker/test-growth-engine-foundry-v2.mjs
           node .lumen/a2a-worker/test-opportunity-factory-commercial-truth.mjs
           node .lumen/a2a-worker/test-first-settlement-mission-v1.mjs
+          node .lumen/a2a-worker/test-commercial-reply-dialogue.mjs
       - name: Bundle actual production entry and Workflow exports
         working-directory: .lumen/a2a-worker
         run: npx --yes wrangler@latest deploy paid-boost-entry.js --dry-run --config wrangler.toml
