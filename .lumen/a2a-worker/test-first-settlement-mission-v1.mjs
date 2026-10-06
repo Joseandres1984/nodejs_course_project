@@ -28,7 +28,7 @@ assert.equal(negotiatingUnknown.blocker, "NEGOTIATING_WITHOUT_VERIFIED_COMMERCIA
 assert.equal(negotiatingUnknown.action, "reclassify_response_before_checkout");
 assert.equal(negotiatingUnknown.stalled, false);
 
-const negotiatingQuestion = diagnoseSettlementBlocker({ stage:"NEGOTIATING", response_class:"COMMERCIAL_QUESTION", updated_at:"2026-10-03T10:00:00Z" }, now);
+const negotiatingQuestion = diagnoseSettlementBlocker({ stage:"NEGOTIATING", response_class:"COMMERCIAL_QUESTION", next_action:"close_exact_scope_with_existing_first_cash_gate", updated_at:"2026-10-03T10:00:00Z" }, now);
 assert.equal(negotiatingQuestion.blocker, "COMMERCIAL_QUESTION_OPEN");
 assert.equal(negotiatingQuestion.action, "answer_commercial_question_before_checkout");
 
