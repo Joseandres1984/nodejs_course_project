@@ -1,6 +1,7 @@
 import { classifyCommercialResponse } from "./response-qualification.js";
+import { buildTrackedCheckoutUrl } from "./commercial-checkout-link.js";
 
-const VERSION = "1.2-bounded-commercial-dialogue";
+const VERSION = "1.3-final-turn-checkout";
 const MAX_REPLIES_PER_PROPOSAL = 3;
 const SEND_TIMEOUT_MS = 15000;
 
@@ -71,7 +72,7 @@ function questionType(text){
   return"GENERAL";
 }
 
-function replyFor(row){
+function replyFor(row,env){
   const type=questionType(row.response_text);
   const offer=clean(row.offer_name,160)||"this LUMEN service";
   const price=Number(row.amount_usd||0);
@@ -83,7 +84,24 @@ function replyFor(row){
   else if(type==="INPUTS") answer=`Please send the requirement you want checked plus any constraints that materially affect the result (for example target market, product/specification, supplier context, quotation or tender details). LUMEN will confirm the exact deliverable before checkout.`;
   else if(type==="PROCESS") answer=`The flow is: you send the requirement, LUMEN confirms the exact deliverable, then provides the exact x402 checkout for ${offer}. Work is treated as purchased only after payment settlement succeeds.`;
   else answer=`${offer} is USD ${price.toFixed(2)} per request and delivers ${scope}. If you send the exact requirement, LUMEN can confirm whether it fits and clarify the deliverable before checkout.`;
-  return clean(`${answer}\n\nThis reply is informational and non-binding. It does not create an order, payment, contract, exclusivity or commitment.`,2200);
+
+  const currentCount=Math.max(0,Number(row.reply_count||0));
+  const finalTurn=currentCount===MAX_REPLIES_PER_PROPOSAL-1;
+  let optionalCheckout="";
+  if(finalTurn){
+    const checkout=buildTrackedCheckoutUrl(env,{
+      offerId:row.offer_id,
+      proposalId:row.proposal_id,
+      opportunityId:row.opportunity_id,
+      source:"lumen_a2a",
+      medium:"commercial_dialogue",
+      creative:"final_question_checkout"
+    });
+    if(checkout){
+      optionalCheckout=`\n\nIf the scope is already clear and you prefer to proceed, the optional exact x402 checkout is: ${checkout}`;
+    }
+  }
+  return clean(`${answer}${optionalCheckout}\n\nThis reply is informational and non-binding. It does not create an order, payment, contract, exclusivity or commitment. A purchase only occurs if the buyer authorizes the exact checkout and settlement succeeds.`,2800);
 }
 
 async function findCandidate(env){
@@ -91,7 +109,7 @@ async function findCandidate(env){
     const c=classifyCommercialResponse(row.response_text,row.message);
     if(c.responseClass!=="COMMERCIAL_QUESTION")continue;
     if(!isHttps(row.agent_url))continue;
-    return{...row,classification:c,replyText:replyFor(row)};
+    return{...row,classification:c,replyText:replyFor(row,env)};
   }
   return null;
 }
@@ -145,7 +163,7 @@ export async function runCommercialReplyEngine(env,{force=false}={}){
     const info=extractResponse(body,candidate.protocol_binding);const status=info.responseText?"RESPONDED":info.taskId?"SENT_TASK":"SENT";
     await record(env,candidate,{status,...info});
     const followOnClassification=info.responseText?await promoteConversationResponse(env,candidate.proposal_id,info.responseText,candidate.replyText):null;
-    return{ok:true,sent:true,version:VERSION,proposalId:candidate.proposal_id,opportunityId:candidate.opportunity_id,offerId:candidate.offer_id,status,taskId:info.taskId,questionType:questionType(candidate.response_text),followOnClassification:followOnClassification?.responseClass||null,replyCount:Math.min(MAX_REPLIES_PER_PROPOSAL,Number(candidate.reply_count||0)+1),guardrails:{commercialQuestionOnly:true,maxRepliesPerProposal:MAX_REPLIES_PER_PROPOSAL,oneExternalReplyPerRun:true,knownOfferFactsOnly:true,unknownEtaNotInvented:true,autonomousDiscounting:false,autonomousSpend:false,autonomousContract:false,bindingActionsHumanGated:true}};
+    return{ok:true,sent:true,version:VERSION,proposalId:candidate.proposal_id,opportunityId:candidate.opportunity_id,offerId:candidate.offer_id,status,taskId:info.taskId,questionType:questionType(candidate.response_text),followOnClassification:followOnClassification?.responseClass||null,replyCount:Math.min(MAX_REPLIES_PER_PROPOSAL,Number(candidate.reply_count||0)+1),finalTurnCheckoutOffered:Number(candidate.reply_count||0)===MAX_REPLIES_PER_PROPOSAL-1 && candidate.replyText.includes("/buy/"),guardrails:{commercialQuestionOnly:true,maxRepliesPerProposal:MAX_REPLIES_PER_PROPOSAL,oneExternalReplyPerRun:true,knownOfferFactsOnly:true,unknownEtaNotInvented:true,autonomousDiscounting:false,autonomousSpend:false,autonomousContract:false,bindingActionsHumanGated:true}};
   }catch(error){const err=clean(error?.message||error,500);await record(env,candidate,{status:"SEND_FAILED",error:err});return{ok:false,sent:false,version:VERSION,proposalId:candidate.proposal_id,status:"SEND_FAILED",error:err};}
   finally{timeout.clear();}
 }
@@ -186,7 +204,7 @@ async function statsData(env){
 
 export async function handleCommercialReplyEngine(request,env){
   const url=new URL(request.url);
-  if(request.method==="GET"&&url.pathname==="/commercial-reply/policy")return json({version:VERSION,name:"LUMEN Commercial Reply Engine",handles:["COMMERCIAL_QUESTION"],purchaseIntentHandledBy:"First Cash Closer",knownOfferFactsOnly:true,unknownEtaNotInvented:true,asyncConversationPolling:true,maxExternalMessagesPerRun:1,maxRepliesPerProposal:MAX_REPLIES_PER_PROPOSAL,oneExternalReplyPerRun:true,followOnMustReclassifyAsCommercialQuestion:true,autonomousDiscounting:false,autonomousSpend:false,autonomousContract:false,bindingActionsHumanGated:true});
+  if(request.method==="GET"&&url.pathname==="/commercial-reply/policy")return json({version:VERSION,name:"LUMEN Commercial Reply Engine",handles:["COMMERCIAL_QUESTION"],purchaseIntentHandledBy:"First Cash Closer",knownOfferFactsOnly:true,unknownEtaNotInvented:true,asyncConversationPolling:true,maxExternalMessagesPerRun:1,maxRepliesPerProposal:MAX_REPLIES_PER_PROPOSAL,oneExternalReplyPerRun:true,followOnMustReclassifyAsCommercialQuestion:true,finalTurnMayOfferExistingExactCheckout:true,finalTurnCheckoutIsOptionalAndNonBinding:true,autonomousDiscounting:false,autonomousSpend:false,autonomousContract:false,bindingActionsHumanGated:true});
   if(request.method==="GET"&&url.pathname==="/commercial-reply/stats")return json({version:VERSION,...await statsData(env)});
   if(request.method==="POST"&&url.pathname==="/commercial-reply/run"){if(!authorized(request,env))return json({ok:false,error:"admin_token_required"},403);return json(await runCommercialReplyEngine(env,{force:false}),202);}
   if(request.method==="POST"&&url.pathname==="/commercial-reply/poll"){if(!authorized(request,env))return json({ok:false,error:"admin_token_required"},403);return json(await pollCommercialReplyTasks(env),202);}
