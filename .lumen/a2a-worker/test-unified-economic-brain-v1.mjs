@@ -8,6 +8,11 @@ assert.equal(UNIFIED_BRAIN_POLICY.autonomousPurchase,false);
 assert.equal(UNIFIED_BRAIN_POLICY.autonomousContract,false);
 assert.equal(UNIFIED_BRAIN_POLICY.bindingActionsHumanGated,true);
 assert.equal(UNIFIED_BRAIN_POLICY.revenueTruth,"provider_verified_settlement_only");
+assert.equal(UNIFIED_BRAIN_POLICY.version,"1.1-demand-conversion-learning");
+assert.equal(UNIFIED_BRAIN_POLICY.sentIsNotSuccess,true);
+assert.equal(UNIFIED_BRAIN_POLICY.demandFirstWhenBuyerEvidenceZero,true);
+assert.equal(UNIFIED_BRAIN_POLICY.persistentFunnelMemory,true);
+assert.equal(UNIFIED_BRAIN_POLICY.strategyMemoryAffectsSelection,true);
 assert.equal(UNIFIED_BRAIN_POLICY.sentIsNotSuccess,true);
 assert.equal(UNIFIED_BRAIN_POLICY.demandFirstWhenBuyerEvidenceZero,true);
 assert.equal(UNIFIED_BRAIN_POLICY.persistentFunnelMemory,true);
@@ -79,6 +84,37 @@ const revenuePlan=specialistPlanForMission({executionLane:"REVENUE"});
 assert.equal(revenuePlan.revenue,true);
 assert.equal(revenuePlan.venture,false);
 assert.equal(revenuePlan.commerce,false);
+
+const discoveryPlan=specialistPlanForMission({executionLane:"DISCOVERY"});
+assert.equal(discoveryPlan.revenue,true);
+assert.equal(discoveryPlan.growthDiscovery,true);
+
+assert.equal(detectEconomicBottleneck({}),"DEMAND");
+assert.equal(detectEconomicBottleneck({qualifiedCommercialCandidates:2}),"PROPOSAL");
+assert.equal(detectEconomicBottleneck({proposals:2}),"OUTBOUND");
+assert.equal(detectEconomicBottleneck({sent:2}),"DELIVERY_OR_RESPONSE");
+assert.equal(detectEconomicBottleneck({verifiedResponses:1}),"CLOSE");
+assert.equal(detectEconomicBottleneck({verifiedSettlements:1}),"REPEAT_WINNER");
+
+const demandHypothesis=normalizeEconomicHypothesis({
+  id:"demand-first",business_model:"verified buyer demand acquisition",hypothesis:"Find current RFQ and buyer demand",execution_lane:"DISCOVERY",
+  probability_of_sale:.35,time_to_cash_hours:36,evidence_strength:.8,confidence:.8,novelty:.4,risk:.1,reversibility:.99
+});
+const supplyHypothesis=normalizeEconomicHypothesis({
+  id:"supply-first",business_model:"generic catalog expansion",hypothesis:"Publish more generic supply",execution_lane:"COMMERCE",
+  probability_of_sale:.8,time_to_cash_hours:12,evidence_strength:.9,confidence:.9,novelty:.7,risk:.1,reversibility:.99
+});
+assert.equal(isDemandFocusedHypothesis(demandHypothesis),true);
+assert.equal(chooseEconomicMission([supplyHypothesis,demandHypothesis],"1",{bottleneck:"DEMAND"}).id,"demand-first");
+
+const learnedBoost=learningAdjustment(demandHypothesis,{attempts:4,reward:80},{bottleneck:"DEMAND"});
+const stagnantPenalty=learningAdjustment(supplyHypothesis,{attempts:4,reward:-8},{bottleneck:"DEMAND"});
+assert.ok(learnedBoost>0);
+assert.ok(stagnantPenalty<0);
+assert.ok(
+  scoreEconomicHypothesis(demandHypothesis,{bottleneck:"DEMAND",memory:{attempts:4,reward:80}})
+  > scoreEconomicHypothesis(demandHypothesis,{bottleneck:"DEMAND",memory:{attempts:4,reward:-8}})
+);
 
 const discoveryPlan=specialistPlanForMission({executionLane:"DISCOVERY"});
 assert.equal(discoveryPlan.revenue,true);
