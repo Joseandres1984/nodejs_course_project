@@ -52,7 +52,7 @@ const env = {
 };
 
 const configured = listTravelProviders(env);
-assert.equal(configured.find(x => x.component === "FLIGHT").id, "aviasales-data-v1");
+assert.equal(configured.find(x => x.component === "FLIGHT").id, "aviasales-data-v2");
 assert.equal(configured.find(x => x.component === "ACTIVITIES").id, "viator-basic-affiliate-v1");
 assert.equal(configured.find(x => x.component === "ACCOMMODATION").id, "seed-accommodation-v1");
 
@@ -70,7 +70,7 @@ assert.equal(quote.guardrails.createsCharge, false);
 const flight = quote.quotes.find(x => x.component === "FLIGHT");
 const activities = quote.quotes.find(x => x.component === "ACTIVITIES");
 const accommodation = quote.quotes.find(x => x.component === "ACCOMMODATION");
-assert.equal(flight.providerId, "aviasales-data-v1");
+assert.equal(flight.providerId, "aviasales-data-v2");
 assert.equal(flight.amountUSD, 700);
 assert.equal(flight.isRealtime, false);
 assert.equal(activities.providerId, "viator-basic-affiliate-v1");
@@ -108,7 +108,7 @@ const fallback = await quoteTravelComponents({
 assert.equal(fallback.ok, true);
 const fallbackFlight = fallback.quotes.find(x => x.component === "FLIGHT");
 assert.equal(fallbackFlight.providerId, "seed-flight-v1");
-assert.equal(fallbackFlight.fallbackFromProviderId, "aviasales-data-v1");
+assert.equal(fallbackFlight.fallbackFromProviderId, "aviasales-data-v2");
 assert.ok(fallback.fallbacks.length >= 1);
 
 const emptyAffiliates = listTravelAffiliateOffers({});
