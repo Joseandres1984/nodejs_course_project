@@ -1,5 +1,5 @@
 export const FIRST_SETTLEMENT_MISSION_POLICY = Object.freeze({
-  version: "1.2-first-settlement-commercial-truth",
+  version: "1.3-dialogue-cap-aware-settlement",
   objective: "move_the_best_real_opportunity_toward_first_verified_settlement",
   settlementTruth: "verified_x402_receipt_only",
   autonomousSpendUsd: 0,
@@ -48,8 +48,14 @@ export function diagnoseSettlementBlocker(row = {}, now = Date.now()) {
       blocker = "CHECKOUT_OR_SETTLEMENT_PENDING";
       action = "prepare_existing_checkout_or_close_gate";
     } else if (responseClass === "COMMERCIAL_QUESTION") {
-      blocker = "COMMERCIAL_QUESTION_OPEN";
-      action = "answer_commercial_question_before_checkout";
+      const replyCount=Math.max(0,Number(row.commercial_reply_count||0));
+      if(replyCount>=3){
+        blocker = "COMMERCIAL_DIALOGUE_LIMIT_REACHED";
+        action = "wait_for_buyer_or_human_review";
+      }else{
+        blocker = "COMMERCIAL_QUESTION_OPEN";
+        action = "answer_commercial_question_before_checkout";
+      }
     } else {
       blocker = "NEGOTIATING_WITHOUT_VERIFIED_COMMERCIAL_INTENT";
       action = "reclassify_response_before_checkout";
@@ -79,7 +85,10 @@ function missionPriority(row = {}, now = Date.now()) {
     const responseClass=String(row.response_class || row.pipeline_response_class || "").toUpperCase();
     if (responseClass === "PURCHASE_INTENT") score += 3.0 + intent;
     else if (responseClass === "COMMERCIAL_INTEREST") score += 2.5 + intent;
-    else if (responseClass === "COMMERCIAL_QUESTION") score=Math.min(score,1.0)+1.2+intent*0.5;
+    else if (responseClass === "COMMERCIAL_QUESTION") {
+      const replyCount=Math.max(0,Number(row.commercial_reply_count||0));
+      score=replyCount>=3 ? Math.min(score,0.15)-0.2 : Math.min(score,1.0)+1.2+intent*0.5;
+    }
     else score=Math.min(score,0.1)-0.35;
   }
   else if (stage === "PROPOSAL_READY") score += 0.4 + intent * 0.25;
@@ -107,10 +116,12 @@ export async function getFirstSettlementMissionStatus(env) {
   if (!env?.DB) throw new Error("first_settlement_mission_persistence_required");
   const result = await env.DB.prepare(`SELECT r.*, p.quality_gate_status,
     s.response_class AS pipeline_response_class,
+    COALESCE(cr.reply_count,0) AS commercial_reply_count,
     b.receipt_id AS verified_receipt_id
     FROM lumen_revenue_loop_v5 r
     LEFT JOIN lumen_proposal_drafts p ON p.proposal_id=r.proposal_id
     LEFT JOIN lumen_sales_pipeline s ON s.proposal_id=r.proposal_id
+    LEFT JOIN lumen_commercial_replies cr ON cr.proposal_id=r.proposal_id
     LEFT JOIN lumen_x402_revenue_bridge b ON b.proposal_id=r.proposal_id AND b.bridge_status='ATTRIBUTABLE'
     WHERE r.stage NOT IN ('PAID','DELIVERED')
     ORDER BY r.first_cash_score DESC,r.intent_score DESC,r.updated_at DESC LIMIT 25`).all();
