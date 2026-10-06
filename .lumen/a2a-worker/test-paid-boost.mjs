@@ -70,7 +70,8 @@ try{
   assert.equal(result.specialistPlan.revenue,true);
   assert.equal(result.specialistPlan.venture,false);
   assert.equal(result.specialistPlan.commerce,false);
-  for(const name of ["sovereign-revenue-v4","revenue-loop-v5","opportunity-observers"]) assert.ok(persisted.has(name),`${name} must run for REVENUE mission`);
+  for(const name of ["sovereign-revenue-v4","revenue-loop-v5","first-cash-close","opportunity-observers"]) assert.ok(persisted.has(name),`${name} must run for REVENUE mission`);
+  assert.equal(persisted.get("first-cash-close")?.sent,false,"closer must stay silent when there is no verified commercial intent");
   for(const name of ["venture-founder-v2","venture-builder-v1","venture-launcher-v1","supplier-market-launch","travel-acquisition","growth-decision"]) assert.equal(persisted.has(name),false,`${name} must stay off when Brain selected REVENUE`);
   assert.ok(result.steps<20,"Brain must reduce indiscriminate specialist execution");
 
