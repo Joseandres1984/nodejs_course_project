@@ -1,6 +1,7 @@
 import { classifyCommercialResponse } from "./response-qualification.js";
 
-const VERSION = "1.1-commercial-reply-engine";
+const VERSION = "1.2-bounded-commercial-dialogue";
+const MAX_REPLIES_PER_PROPOSAL = 3;
 const SEND_TIMEOUT_MS = 15000;
 
 const OFFER_SCOPES = {
@@ -23,23 +24,40 @@ function withTimeout(ms){const controller=new AbortController();const timer=setT
 async function ensureSchema(env){
   if(!env?.DB)return false;
   await env.DB.batch([
-    env.DB.prepare("CREATE TABLE IF NOT EXISTS lumen_commercial_replies (proposal_id TEXT PRIMARY KEY,opportunity_id TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,status TEXT NOT NULL,response_class TEXT NOT NULL,question_text TEXT,reply_text TEXT,task_id TEXT,context_id TEXT,response_text TEXT,error TEXT,engine_version TEXT NOT NULL)"),
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS lumen_commercial_replies (proposal_id TEXT PRIMARY KEY,opportunity_id TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,status TEXT NOT NULL,response_class TEXT NOT NULL,question_text TEXT,reply_text TEXT,task_id TEXT,context_id TEXT,response_text TEXT,error TEXT,reply_count INTEGER NOT NULL DEFAULT 0,last_reply_at TEXT,engine_version TEXT NOT NULL)"),
     env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_lumen_commercial_replies_status ON lumen_commercial_replies(status,updated_at)")
   ]);
+  for(const sql of [
+    "ALTER TABLE lumen_commercial_replies ADD COLUMN reply_count INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE lumen_commercial_replies ADD COLUMN last_reply_at TEXT"
+  ]){
+    try{await env.DB.prepare(sql).run();}catch(error){if(!/duplicate column|already exists/i.test(String(error?.message||error)))throw error;}
+  }
+  try{await env.DB.prepare("UPDATE lumen_commercial_replies SET reply_count=1 WHERE reply_count=0 AND status IN ('SENT','SENT_TASK','WORKING','RESPONDED')").run();}catch{}
   return true;
 }
 
 async function candidateRows(env){
   const sql=`SELECT p.proposal_id,p.opportunity_id,p.offer_id,p.offer_name,p.amount_usd,p.message,o.name AS target,
     x.agent_url,x.protocol_binding,x.protocol_version,x.context_id,
-    COALESCE((SELECT f.response_text FROM lumen_followups f WHERE f.proposal_id=p.proposal_id AND f.response_text IS NOT NULL AND TRIM(f.response_text)<>'' ORDER BY COALESCE(f.sent_at,f.updated_at) DESC LIMIT 1),x.response_text) AS response_text
+    COALESCE(r.reply_count,0) AS reply_count,
+    COALESCE(
+      CASE WHEN r.status='RESPONDED' AND r.response_text IS NOT NULL AND TRIM(r.response_text)<>'' THEN r.response_text END,
+      (SELECT f.response_text FROM lumen_followups f WHERE f.proposal_id=p.proposal_id AND f.response_text IS NOT NULL AND TRIM(f.response_text)<>'' ORDER BY COALESCE(f.sent_at,f.updated_at) DESC LIMIT 1),
+      x.response_text
+    ) AS response_text
     FROM lumen_proposal_drafts p
     JOIN lumen_opportunities o ON o.id=p.opportunity_id
     JOIN lumen_outreach_attempts x ON x.proposal_id=p.proposal_id
     LEFT JOIN lumen_commercial_replies r ON r.proposal_id=p.proposal_id
-    WHERE p.quality_gate_status='PASS' AND r.proposal_id IS NULL AND x.agent_url IS NOT NULL
-      AND (x.response_text IS NOT NULL OR EXISTS(SELECT 1 FROM lumen_followups f2 WHERE f2.proposal_id=p.proposal_id AND f2.response_text IS NOT NULL AND TRIM(f2.response_text)<>''))
-    ORDER BY x.updated_at DESC LIMIT 100`;
+    WHERE p.quality_gate_status='PASS' AND x.agent_url IS NOT NULL
+      AND (r.proposal_id IS NULL OR (r.status='RESPONDED' AND COALESCE(r.reply_count,0)<${MAX_REPLIES_PER_PROPOSAL}))
+      AND (
+        (r.status='RESPONDED' AND r.response_text IS NOT NULL AND TRIM(r.response_text)<>'')
+        OR x.response_text IS NOT NULL
+        OR EXISTS(SELECT 1 FROM lumen_followups f2 WHERE f2.proposal_id=p.proposal_id AND f2.response_text IS NOT NULL AND TRIM(f2.response_text)<>'')
+      )
+    ORDER BY COALESCE(r.updated_at,x.updated_at) DESC LIMIT 100`;
   try{const r=await env.DB.prepare(sql).all();return r.results||[];}catch{return[];}
 }
 
@@ -109,8 +127,8 @@ async function promoteConversationResponse(env,proposalId,responseText,originalR
 
 async function record(env,row,values){
   const now=new Date().toISOString();
-  await env.DB.prepare("INSERT INTO lumen_commercial_replies(proposal_id,opportunity_id,created_at,updated_at,status,response_class,question_text,reply_text,task_id,context_id,response_text,error,engine_version) VALUES(?,?,?,?,?,'COMMERCIAL_QUESTION',?,?,?,?,?,?,?) ON CONFLICT(proposal_id) DO UPDATE SET updated_at=excluded.updated_at,status=excluded.status,reply_text=excluded.reply_text,task_id=excluded.task_id,context_id=excluded.context_id,response_text=excluded.response_text,error=excluded.error,engine_version=excluded.engine_version")
-    .bind(row.proposal_id,row.opportunity_id,now,now,values.status,clean(row.response_text,5000),row.replyText,values.taskId||null,values.contextId||null,values.responseText||null,values.error||null,VERSION).run();
+  await env.DB.prepare("INSERT INTO lumen_commercial_replies(proposal_id,opportunity_id,created_at,updated_at,status,response_class,question_text,reply_text,task_id,context_id,response_text,error,reply_count,last_reply_at,engine_version) VALUES(?,?,?,?,?,'COMMERCIAL_QUESTION',?,?,?,?,?,?,1,?,?) ON CONFLICT(proposal_id) DO UPDATE SET updated_at=excluded.updated_at,status=excluded.status,response_class=excluded.response_class,question_text=excluded.question_text,reply_text=excluded.reply_text,task_id=excluded.task_id,context_id=excluded.context_id,response_text=excluded.response_text,error=excluded.error,reply_count=CASE WHEN lumen_commercial_replies.reply_count<3 THEN lumen_commercial_replies.reply_count+1 ELSE lumen_commercial_replies.reply_count END,last_reply_at=excluded.last_reply_at,engine_version=excluded.engine_version")
+    .bind(row.proposal_id,row.opportunity_id,now,now,values.status,clean(row.response_text,5000),row.replyText,values.taskId||null,values.contextId||null,values.responseText||null,values.error||null,now,VERSION).run();
 }
 
 export async function runCommercialReplyEngine(env,{force=false}={}){
@@ -127,7 +145,7 @@ export async function runCommercialReplyEngine(env,{force=false}={}){
     const info=extractResponse(body,candidate.protocol_binding);const status=info.responseText?"RESPONDED":info.taskId?"SENT_TASK":"SENT";
     await record(env,candidate,{status,...info});
     const followOnClassification=info.responseText?await promoteConversationResponse(env,candidate.proposal_id,info.responseText,candidate.replyText):null;
-    return{ok:true,sent:true,version:VERSION,proposalId:candidate.proposal_id,opportunityId:candidate.opportunity_id,offerId:candidate.offer_id,status,taskId:info.taskId,questionType:questionType(candidate.response_text),followOnClassification:followOnClassification?.responseClass||null,guardrails:{commercialQuestionOnly:true,oneReplyPerProposal:true,knownOfferFactsOnly:true,unknownEtaNotInvented:true,autonomousDiscounting:false,autonomousSpend:false,autonomousContract:false,bindingActionsHumanGated:true}};
+    return{ok:true,sent:true,version:VERSION,proposalId:candidate.proposal_id,opportunityId:candidate.opportunity_id,offerId:candidate.offer_id,status,taskId:info.taskId,questionType:questionType(candidate.response_text),followOnClassification:followOnClassification?.responseClass||null,replyCount:Math.min(MAX_REPLIES_PER_PROPOSAL,Number(candidate.reply_count||0)+1),guardrails:{commercialQuestionOnly:true,maxRepliesPerProposal:MAX_REPLIES_PER_PROPOSAL,oneExternalReplyPerRun:true,knownOfferFactsOnly:true,unknownEtaNotInvented:true,autonomousDiscounting:false,autonomousSpend:false,autonomousContract:false,bindingActionsHumanGated:true}};
   }catch(error){const err=clean(error?.message||error,500);await record(env,candidate,{status:"SEND_FAILED",error:err});return{ok:false,sent:false,version:VERSION,proposalId:candidate.proposal_id,status:"SEND_FAILED",error:err};}
   finally{timeout.clear();}
 }
@@ -162,12 +180,13 @@ export async function pollCommercialReplyTasks(env){
 async function statsData(env){
   await ensureSchema(env);let row=null;try{row=await env.DB.prepare("SELECT COUNT(*) total,SUM(CASE WHEN status IN ('SENT','SENT_TASK','WORKING','RESPONDED') THEN 1 ELSE 0 END) sent,SUM(CASE WHEN status='RESPONDED' THEN 1 ELSE 0 END) responded,SUM(CASE WHEN status='SEND_FAILED' THEN 1 ELSE 0 END) failed,SUM(CASE WHEN status IN ('SENT_TASK','WORKING') THEN 1 ELSE 0 END) async_pending FROM lumen_commercial_replies").first();}catch{}
   const candidate=await findCandidate(env);
-  return{total:Number(row?.total||0),sent:Number(row?.sent||0),responded:Number(row?.responded||0),failed:Number(row?.failed||0),asyncPending:Number(row?.async_pending||0),readyToReply:Boolean(candidate),readyProposalId:candidate?.proposal_id||null,autonomousEnabled:boolVar(env?.A2A_AUTONOMOUS_OUTREACH,false)&&boolVar(env?.A2A_AUTONOMOUS_COMMERCIAL_REPLY,false)};
+  let turns=0;try{const t=await env.DB.prepare("SELECT COALESCE(SUM(reply_count),0) n FROM lumen_commercial_replies").first();turns=Number(t?.n||0);}catch{}
+  return{total:Number(row?.total||0),sent:Number(row?.sent||0),responded:Number(row?.responded||0),failed:Number(row?.failed||0),asyncPending:Number(row?.async_pending||0),replyTurns:turns,maxRepliesPerProposal:MAX_REPLIES_PER_PROPOSAL,readyToReply:Boolean(candidate),readyProposalId:candidate?.proposal_id||null,readyReplyCount:Number(candidate?.reply_count||0),autonomousEnabled:boolVar(env?.A2A_AUTONOMOUS_OUTREACH,false)&&boolVar(env?.A2A_AUTONOMOUS_COMMERCIAL_REPLY,false)};
 }
 
 export async function handleCommercialReplyEngine(request,env){
   const url=new URL(request.url);
-  if(request.method==="GET"&&url.pathname==="/commercial-reply/policy")return json({version:VERSION,name:"LUMEN Commercial Reply Engine",handles:["COMMERCIAL_QUESTION"],purchaseIntentHandledBy:"First Cash Closer",knownOfferFactsOnly:true,unknownEtaNotInvented:true,asyncConversationPolling:true,maxExternalMessagesPerRun:1,oneReplyPerProposal:true,autonomousDiscounting:false,autonomousSpend:false,autonomousContract:false,bindingActionsHumanGated:true});
+  if(request.method==="GET"&&url.pathname==="/commercial-reply/policy")return json({version:VERSION,name:"LUMEN Commercial Reply Engine",handles:["COMMERCIAL_QUESTION"],purchaseIntentHandledBy:"First Cash Closer",knownOfferFactsOnly:true,unknownEtaNotInvented:true,asyncConversationPolling:true,maxExternalMessagesPerRun:1,maxRepliesPerProposal:MAX_REPLIES_PER_PROPOSAL,oneExternalReplyPerRun:true,followOnMustReclassifyAsCommercialQuestion:true,autonomousDiscounting:false,autonomousSpend:false,autonomousContract:false,bindingActionsHumanGated:true});
   if(request.method==="GET"&&url.pathname==="/commercial-reply/stats")return json({version:VERSION,...await statsData(env)});
   if(request.method==="POST"&&url.pathname==="/commercial-reply/run"){if(!authorized(request,env))return json({ok:false,error:"admin_token_required"},403);return json(await runCommercialReplyEngine(env,{force:false}),202);}
   if(request.method==="POST"&&url.pathname==="/commercial-reply/poll"){if(!authorized(request,env))return json({ok:false,error:"admin_token_required"},403);return json(await pollCommercialReplyTasks(env),202);}
