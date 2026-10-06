@@ -182,7 +182,7 @@ const providerPolicyResponse = await handleTravelProviderRegistry(
 );
 assert.equal(providerPolicyResponse.status, 200);
 const providerPolicy = await providerPolicyResponse.json();
-assert.equal(providerPolicy.version, "1.1-travel-provider-registry");
+assert.equal(providerPolicy.version, "1.2-travel-provider-registry");
 assert.equal(providerPolicy.contractVersion, "1.0");
 assert.equal(providerPolicy.providerSelection, "external_over_seed_per_component");
 assert.equal(providerPolicy.providerReplacementWithoutTravelEngineRewrite, true);
