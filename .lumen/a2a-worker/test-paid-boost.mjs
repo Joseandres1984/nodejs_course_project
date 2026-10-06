@@ -63,6 +63,7 @@ try{
   const result=await deep.run({instanceId:"deep-test",payload:{scheduledTime:3600000}},durableSteps);
   assert.ok(persisted.has("verified-commercial-truth"));
   assert.ok(persisted.has("venture-hunter-v1"));
+  assert.ok(persisted.has("viator-conversions-observe"));
   assert.ok(persisted.has("unified-economic-brain-v1"));
   assert.equal(result.brain.version,"1.1-demand-conversion-learning");
   assert.equal(result.brain.lane,"REVENUE");
