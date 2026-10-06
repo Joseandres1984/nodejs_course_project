@@ -40,7 +40,7 @@ const demand=normalizeEconomicHypothesis({
   probability_of_sale:.35,time_to_cash_hours:36,evidence_strength:.8,confidence:.8,novelty:.45,risk:.08,reversibility:.99
 });
 const supply=normalizeEconomicHypothesis({
-  id:"supply",business_model:"generic catalog expansion",hypothesis:"Publish more generic supply without a current buyer requirement",target:"generic supplier market",execution_lane:"COMMERCE",
+  id:"supply",business_model:"generic catalog expansion",hypothesis:"Expand supplier catalog breadth and publish more generic supply",target:"generic supplier market",execution_lane:"COMMERCE",
   probability_of_sale:.8,time_to_cash_hours:12,evidence_strength:.9,confidence:.9,novelty:.7,risk:.1,reversibility:.99
 });
 assert.equal(isDemandFocusedHypothesis(demand),true);
