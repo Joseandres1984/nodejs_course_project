@@ -87,6 +87,7 @@ jobs:
           jq -e '.qualifiedCommercialClasses == ["COMMERCIAL_QUESTION","COMMERCIAL_INTEREST","PURCHASE_INTENT"] and .rawResponseIsNotCommercialIntent == true and .autonomousSpend == false' /tmp/qualification.json >/dev/null
           jq -e '.technicalAckIsNotIntent == true and .echoIsNotIntent == true and .genericResponseIsNotIntent == true and .autonomousSpend == false and .autonomousContract == false' /tmp/cash.json >/dev/null
 
+      # bounded-nudge-sequence: 2
       - name: One-time bounded commercial nudge
         if: contains(github.event.head_commit.message, '[commercial-nudge]')
         run: |
