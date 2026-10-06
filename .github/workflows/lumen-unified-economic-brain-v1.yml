@@ -61,6 +61,10 @@ jobs:
           grep -q 'scaleRequiresEvidence: true' .lumen/a2a-worker/unified-economic-brain-v1.js
           grep -q 'projectedScaleIsNotRevenue: true' .lumen/a2a-worker/unified-economic-brain-v1.js
           grep -q 'targetScaleEvents: 10000' .lumen/a2a-worker/unified-economic-brain-v1.js
+          grep -q 'microincomeScaleEngine: true' .lumen/a2a-worker/unified-economic-brain-v1.js
+          grep -q 'scaleRequiresEvidence: true' .lumen/a2a-worker/unified-economic-brain-v1.js
+          grep -q 'projectedScaleIsNotRevenue: true' .lumen/a2a-worker/unified-economic-brain-v1.js
+          grep -q 'targetScaleEvents: 10000' .lumen/a2a-worker/unified-economic-brain-v1.js
           grep -q 'lumen_brain_funnel_memory' .lumen/a2a-worker/unified-economic-brain-v1.js
           grep -q 'sentIsNotSuccess: true' .lumen/a2a-worker/unified-economic-brain-v1.js
           grep -q 'demandFirstWhenBuyerEvidenceZero: true' .lumen/a2a-worker/unified-economic-brain-v1.js
