@@ -3,6 +3,9 @@ name: LUMEN Instagram approved flush
 on:
   schedule:
     - cron: '*/5 * * * *'
+  workflow_run:
+    workflows: ["LUMEN Instagram Travel acquisition prepare"]
+    types: [completed]
   workflow_dispatch:
 
 permissions:
@@ -14,6 +17,7 @@ concurrency:
 
 jobs:
   publish-approved-pending:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
