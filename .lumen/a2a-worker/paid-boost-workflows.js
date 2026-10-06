@@ -14,6 +14,7 @@ import { withBudgetedAi } from "./ai-router.js";
 import { ensureBoostSchema, checkpoint, recordRun, startOpportunityObservers, observeOpportunity } from "./paid-boost-runtime.js";
 import { runSovereignCycle } from "./sovereign-runtime.js";
 import { runRevenueLoopV5Cycle } from "./revenue-loop-v5.js";
+import { runFirstCashCloser } from "./first-cash-closer.js";
 import { runVentureHunterV1 } from "./venture-hunter-v1.js";
 import { runVentureFounderV2 } from "./venture-founder-v2.js";
 import { runVentureBuilderV1 } from "./venture-builder-v1.js";
@@ -74,6 +75,7 @@ export class LumenDeepWorkflow extends WorkflowEntrypoint {
     if(plan.revenue){
       tasks.push(["sovereign-revenue-v4",()=>runSovereignCycle(env,{runId:`v4-${id}`})]);
       tasks.push(["revenue-loop-v5",()=>runRevenueLoopV5Cycle(env,{trigger:"unified_brain_revenue"})]);
+      tasks.push(["first-cash-close",()=>runFirstCashCloser(env,{force:false})]);
       tasks.push(["opportunity-observers",()=>startOpportunityObservers(env)]);
     }
 
