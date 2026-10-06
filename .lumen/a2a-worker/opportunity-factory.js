@@ -1,6 +1,6 @@
 import { classifyCommercialResponse } from "./response-qualification.js";
 
-const VERSION = "1.1-commercial-truth-opportunity-factory";
+const VERSION = "1.2-dialogue-cap-aware-opportunity-factory";
 
 const LANE_ORDER = ["COLLECTION", "CLOSE", "INBOUND", "FOLLOW_UP", "NEW_BUSINESS", "EXPERIMENT"];
 const EXTERNAL_ACTIONS = new Set(["COMMISSION_AUTOPILOT", "FIRST_CASH", "COMMERCIAL_REPLY", "FOLLOWUP", "NEW_OUTREACH"]);
@@ -100,6 +100,17 @@ export function pipelineCandidate(row) {
       };
     }
     if (responseClass === "COMMERCIAL_QUESTION") {
+      const replyCount=Math.max(0,num(row.dialogue_reply_count));
+      if(replyCount>=3){
+        return {
+          lane:"FOLLOW_UP",
+          probability:0.20,
+          urgency:0.32,
+          evidenceScore:70,
+          actionKind:"POLL_ONLY",
+          rationale:"commercial_question_dialogue_cap_reached_wait_for_buyer_or_human_review"
+        };
+      }
       return {
         lane: "INBOUND",
         probability: 0.58,
@@ -151,11 +162,12 @@ export async function runOpportunityFactory(env) {
   const pipeline = await safeAll(env, "SELECT proposal_id,opportunity_id,target,offer_name,amount_usd,stage,response_class,next_action,next_action_at,last_contact_at,updated_at FROM lumen_sales_pipeline WHERE stage NOT IN ('LOST','NO_RESPONSE','BLOCKED') ORDER BY updated_at DESC LIMIT 300");
   const [proposalRows, commercialReplyRows, followupRows, outreachRows] = await Promise.all([
     safeAll(env, "SELECT proposal_id,message FROM lumen_proposal_drafts LIMIT 500"),
-    safeAll(env, "SELECT proposal_id,response_text,updated_at FROM lumen_commercial_replies WHERE response_text IS NOT NULL AND TRIM(response_text)<>'' ORDER BY updated_at DESC LIMIT 500"),
+    safeAll(env, "SELECT proposal_id,response_text,reply_count,updated_at FROM lumen_commercial_replies WHERE response_text IS NOT NULL AND TRIM(response_text)<>'' ORDER BY updated_at DESC LIMIT 500"),
     safeAll(env, "SELECT proposal_id,response_text,COALESCE(sent_at,updated_at) updated_at FROM lumen_followups WHERE response_text IS NOT NULL AND TRIM(response_text)<>'' ORDER BY COALESCE(sent_at,updated_at) DESC LIMIT 500"),
     safeAll(env, "SELECT proposal_id,response_text,updated_at FROM lumen_outreach_attempts WHERE response_text IS NOT NULL AND TRIM(response_text)<>'' ORDER BY updated_at DESC LIMIT 500")
   ]);
   const proposalMessage = new Map(proposalRows.map(row => [clean(row.proposal_id,180), clean(row.message,8000)]));
+  const commercialReplyMeta = new Map(commercialReplyRows.map(row => [clean(row.proposal_id,180), {replyCount:Math.max(0,num(row.reply_count)),updatedAt:row.updated_at}]));
   const latestResponse = new Map();
   for (const rows of [commercialReplyRows, followupRows, outreachRows]) {
     for (const row of rows) {
@@ -171,6 +183,7 @@ export async function runOpportunityFactory(env) {
       const inferred=classifyCommercialResponse(responseText, proposalMessage.get(clean(row.proposal_id,180)) || "");
       row.response_class=inferred.responseClass;
     }
+    row.dialogue_reply_count=commercialReplyMeta.get(clean(row.proposal_id,180))?.replyCount || 0;
     const mapped = pipelineCandidate(row); if (!mapped) continue;
     created.push(await upsertCandidate(env, {
       sourceType: "SALES_PIPELINE",
