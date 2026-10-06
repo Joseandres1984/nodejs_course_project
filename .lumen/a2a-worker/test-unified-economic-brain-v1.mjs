@@ -26,6 +26,11 @@ assert.equal(UNIFIED_BRAIN_POLICY.monetizationFrontier,true);
 assert.equal(UNIFIED_BRAIN_POLICY.distinctBusinessModelExploration,true);
 assert.equal(UNIFIED_BRAIN_POLICY.frontierExplorationEscapesCurrentBottleneck,true);
 assert.equal(UNIFIED_BRAIN_POLICY.maxAiHypotheses,5);
+assert.equal(UNIFIED_BRAIN_POLICY.parallelMonetizationObservation,true);
+assert.equal(UNIFIED_BRAIN_POLICY.travelAffiliateEconomicLearning,true);
+assert.equal(UNIFIED_BRAIN_POLICY.clickIsWeakSignalNotRevenue,true);
+assert.equal(UNIFIED_BRAIN_POLICY.confirmedBookingIsConversionNotCash,true);
+assert.equal(UNIFIED_BRAIN_POLICY.verifiedAffiliatePayoutIsRevenue,true);
 
 const fast=normalizeEconomicHypothesis({
   id:"fast",business_model:"novel zero-capital B2B information exchange",hypothesis:"Sell a verified information outcome to observed demand",execution_lane:"VENTURE",
@@ -109,6 +114,14 @@ assert.equal(chooseEconomicMission([fast,novel],explorationKey).id,"novel");
 const frontierDuringDemandGap=chooseEconomicMission([demand,frontier],explorationKey,{bottleneck:"DEMAND"});
 assert.equal(frontierDuringDemandGap.selectionMode,"EXPLORE");
 assert.equal(frontierDuringDemandGap.id,"frontier","bounded exploration must be able to leave the current bottleneck and search new monetization models");
+
+const travelLive=normalizeEconomicHypothesis({
+  id:"travel-live",business_model:"travel affiliate commission",hypothesis:"Convert measured travel clicks into attributable affiliate bookings",target:"travel buyer intent",execution_lane:"TRAVEL",
+  probability_of_sale:.62,time_to_cash_hours:24,evidence_strength:.9,confidence:.88,novelty:.35,risk:.05,reversibility:.99
+});
+const travelCompetes=chooseEconomicMission([demand,travelLive],"1",{bottleneck:"DEMAND",travelMonetization:{commercialSignal:true}});
+assert.equal(travelCompetes.id,"travel-live","a Travel lane with measured commercial signal must compete with generic demand discovery during exploitation");
+
 
 const revenuePlan=specialistPlanForMission({executionLane:"REVENUE"});
 assert.equal(revenuePlan.revenue,true);
