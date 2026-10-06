@@ -27,7 +27,29 @@ jobs:
           jq -e '.. | objects | select((.id? == "MP-SUPPLIER-SNAPSHOT") or (.slug? == "supplier-snapshot")) | select((.price_usd? == 1) or (.priceUsd? == 1) or (.price? == 1))' /tmp/x402-catalog.json >/dev/null
           echo 'USD_1_LIVE_VERIFIED'
 
+      - name: Reply to one qualified commercial question
+        id: reply
+        env:
+          OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "${OPPORTUNITY_ADMIN_TOKEN:-}"
+          base='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          code=$(curl --show-error --silent --max-time 60 -o /tmp/commercial-reply.json -w '%{http_code}' \
+            -X POST "$base/commercial-reply/run" \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'accept: application/json')
+          echo "COMMERCIAL_REPLY_HTTP=$code"
+          cat /tmp/commercial-reply.json; echo
+          test "$code" = '202'
+          if jq -e '(.sent == true) or (.status == "SEND_FAILED")' /tmp/commercial-reply.json >/dev/null 2>&1; then
+            echo 'consumed=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'consumed=false' >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Try qualified FIRST CASH close
+        if: steps.reply.outputs.consumed != 'true'
         id: close
         env:
           OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
@@ -49,7 +71,7 @@ jobs:
           fi
 
       - name: Reassess market if no hot close consumed the slot
-        if: steps.close.outputs.consumed != 'true'
+        if: steps.reply.outputs.consumed != 'true' && steps.close.outputs.consumed != 'true'
         env:
           OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
         run: |
@@ -64,7 +86,7 @@ jobs:
           test "$code" = '202'
 
       - name: Find one viable buyer and use at most one external slot
-        if: steps.close.outputs.consumed != 'true'
+        if: steps.reply.outputs.consumed != 'true' && steps.close.outputs.consumed != 'true'
         env:
           OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
         run: |
@@ -93,6 +115,8 @@ jobs:
         run: |
           set -euo pipefail
           base='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          echo '===== commercial reply ====='
+          curl --fail --show-error --silent --max-time 30 "$base/commercial-reply/stats"; echo
           echo '===== first cash ====='
           curl --fail --show-error --silent --max-time 30 "$base/first-cash/stats"; echo
           echo '===== outreach ====='
