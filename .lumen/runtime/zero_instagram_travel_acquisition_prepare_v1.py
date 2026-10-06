@@ -51,7 +51,7 @@ def build_job(destination, request_id, creative_variant=0):
     destination_code = destination["code"]
     query = urlencode({"destination": destination_code, "source": "instagram"})
     landing = f"{PUBLIC_BASE_URL}/travel/package?{query}"
-    stable = f"travel-full-trip-v1|{destination_code}|{request_id}|creative-{creative_variant}"
+    stable = f"travel-full-trip-v1|{destination_code}|{request_id}" if creative_variant == 0 else f"travel-full-trip-v1|{destination_code}|{request_id}|creative-{creative_variant}"
     token = hashlib.sha1(stable.encode()).hexdigest()[:12].upper()
     jid = f"IGTRAVEL-{token}"
     variants = [
