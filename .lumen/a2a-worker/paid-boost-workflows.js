@@ -40,6 +40,7 @@ export class LumenDeepWorkflow extends WorkflowEntrypoint {
     const results={};
     results["verified-commercial-truth"]=await step.do("verified-commercial-truth",MUTATING_STEP,()=>runChecked(env,id,"verified-commercial-truth",()=>refreshCommercialTruth(env)));
     results["venture-hunter-v1"]=await step.do("venture-hunter-v1",MUTATING_STEP,()=>runChecked(env,id,"venture-hunter-v1",()=>runVentureHunterV1(env,{mode:"prepare_only",topK:12})));
+    results["viator-conversions-observe"]=await step.do("viator-conversions-observe",MUTATING_STEP,()=>runChecked(env,id,"viator-conversions-observe",async()=>{const x=await syncViatorBookingConversions(env);return x?.skipped?{...x,ok:true,observationSkipped:true}:x;}));
     results["unified-economic-brain-v1"]=await step.do("unified-economic-brain-v1",MUTATING_STEP,()=>runChecked(env,id,"unified-economic-brain-v1",()=>runUnifiedEconomicBrain(env,{trigger:"paid_boost_hourly_workflow",scheduledTime:event.payload.scheduledTime})));
 
     const brain=results["unified-economic-brain-v1"];
@@ -68,7 +69,6 @@ export class LumenDeepWorkflow extends WorkflowEntrypoint {
       tasks.push(["supplier-market-launch",()=>runSupplierMarketLaunchEvolution(env)]);
     }
     if(plan.travel){
-      tasks.push(["viator-conversions",()=>syncViatorBookingConversions(env)]);
       tasks.push(["travel-acquisition",()=>runTravelAcquisitionEngine(env)]);
     }
     if(plan.revenue){
