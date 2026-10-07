@@ -13,6 +13,8 @@ export const UNIFIED_BRAIN_POLICY = Object.freeze({
   rewardOrder: ["VERIFIED_SETTLEMENT","VERIFIED_REVENUE","ORDER_OR_PURCHASE_INTENT","QUOTE_REQUEST","VERIFIED_BUYER_DEMAND","COMMERCIAL_RESPONSE","VERIFIED_DELIVERY","PUBLISHED_OFFER","CLICK","IMPRESSION"],
   learningTarget: "economic_funnel_progress_not_activity",
   sentIsNotSuccess: true,
+  rawResponseIsNotCommercialIntent: true,
+  qualifiedCommercialResponseClasses: ["COMMERCIAL_QUESTION","COMMERCIAL_INTEREST","PURCHASE_INTENT"],
   demandFirstWhenBuyerEvidenceZero: true,
   persistentFunnelMemory: true,
   strategyMemoryAffectsSelection: true,
