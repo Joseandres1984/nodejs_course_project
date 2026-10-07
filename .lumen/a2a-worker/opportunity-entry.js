@@ -52,6 +52,7 @@ import { handleTrustedDelegationDispatch } from "./trusted-delegation-dispatch.j
 import { handleDelegationRuntime, pollDelegationTasks } from "./delegation-runtime.js";
 import { handleObservedPartnerReputation, recomputeObservedReputation } from "./partner-observed-reputation.js";
 import { handleCouncilRuntime, pollCouncilRuntime } from "./council-runtime.js";
+import { handleEntrepreneurMode, runEntrepreneurMode } from "./entrepreneur-mode.js";
 
 function consumedExternalSlot(result) {
   return Boolean(
@@ -114,6 +115,7 @@ export default {
     const firstCashResponse = await handleFirstCashCloser(request, env); if (firstCashResponse) return firstCashResponse;
     const x402RevenueBridgeResponse = await handleX402RevenueBridge(request, env); if (x402RevenueBridgeResponse) return x402RevenueBridgeResponse;
     const revenueDirectorResponse = await handleRevenueDirector(request, env); if (revenueDirectorResponse) return revenueDirectorResponse;
+    const entrepreneurResponse = await handleEntrepreneurMode(request, env); if (entrepreneurResponse) return entrepreneurResponse;
     const recruitmentResponse = await handleRecruitmentEngine(request, env); if (recruitmentResponse) return recruitmentResponse;
     const councilReplacementResponse = await handleCouncilReplacement(request, env); if (councilReplacementResponse) return councilReplacementResponse;
     const councilJsonRpcResponse = await handleCouncilJsonRpcFallback(request, env); if (councilJsonRpcResponse) return councilJsonRpcResponse;
@@ -160,12 +162,16 @@ export default {
       await runOpportunityScan(env, { trigger: "cloudflare_cron", scheduledTime: controller?.scheduledTime || null });
       await runCommercialReassessment(env);
 
+      const scheduledAt = new Date(controller?.scheduledTime || Date.now());
+      if (scheduledAt.getUTCMinutes() === 22) {
+        await runEntrepreneurMode(env, { trigger: "cloudflare_hourly_entrepreneur", scheduledTime: controller?.scheduledTime || Date.now() });
+      }
+
       await pollOutstandingResponses(env);
       await pollCommercialReplyTasks(env);
       await pollReferralCommissionAutopilot(env);
       await pollTravelReferralTasks(env);
 
-      const scheduledAt = new Date(controller?.scheduledTime || Date.now());
       if (scheduledAt.getUTCHours() % 6 === 0) {
         await runPartnerDiscovery(env, { trigger: "cloudflare_cron", scheduledTime: controller?.scheduledTime || null });
         await runTravelPartnerDiscovery(env);
