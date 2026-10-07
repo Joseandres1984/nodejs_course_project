@@ -1,5 +1,5 @@
 export const FIRST_SETTLEMENT_MISSION_POLICY = Object.freeze({
-  version: "1.2-first-settlement-commercial-truth",
+  version: "1.3-tender-lead-close-priority",
   objective: "move_the_best_real_opportunity_toward_first_verified_settlement",
   settlementTruth: "verified_x402_receipt_only",
   autonomousSpendUsd: 0,
@@ -91,6 +91,18 @@ function missionPriority(row = {}, now = Date.now()) {
   if (["move_on","rotate_to_next_opportunity_or_human_review","rotate_while_outreach_retry_cools_down"].includes(action)) return -Infinity;
   let score = Number(row.first_cash_score || 0);
   const intent = Number(row.intent_score || 0);
+  const offerId = String(row.offer_id || "").toUpperCase();
+  const responseClass = String(row.response_class || row.pipeline_response_class || "").toUpperCase();
+  const tenderLead = offerId === "MP-TENDER-LEAD";
+
+  // Broken proposal drafts must not outrank live send/response opportunities.
+  if (diagnosis.blocker === "QUALITY_GATE_FAIL") score -= 1.25;
+
+  // A $1 tender lead is the shortest verified path to first cash, but only
+  // receives a strong boost after quality PASS or real commercial response.
+  if (tenderLead && stage === "PROPOSAL_READY" && String(row.quality_gate_status || "").toUpperCase() === "PASS") score += 0.85;
+  if (tenderLead && stage === "SENT") score += 0.20;
+  if (tenderLead && ["COMMERCIAL_QUESTION","COMMERCIAL_INTEREST","PURCHASE_INTENT"].includes(responseClass)) score += 2.0;
   if (stage === "REPLIED") {
     const responseClass=String(row.response_class || row.pipeline_response_class || "").toUpperCase();
     if (responseClass === "PURCHASE_INTENT") score += 2.2 + intent;
@@ -143,7 +155,7 @@ export async function getFirstSettlementMissionStatus(env) {
     LEFT JOIN lumen_commercial_replies cr ON cr.proposal_id=r.proposal_id
     LEFT JOIN lumen_outreach_attempts x ON x.proposal_id=r.proposal_id
     WHERE r.stage NOT IN ('PAID','DELIVERED')
-    ORDER BY r.first_cash_score DESC,r.intent_score DESC,r.updated_at DESC LIMIT 25`).all();
+    ORDER BY r.first_cash_score DESC,r.intent_score DESC,r.updated_at DESC LIMIT 100`).all();
   const rows = (result.results || []).map(r => ({ ...r, stage_updated_at: r.updated_at }));
   const mission = chooseFirstSettlementMission(rows);
   const stalled = rows.map(r => ({ opportunity_id:r.opportunity_id, proposal_id:r.proposal_id, stage:r.stage, first_cash_score:r.first_cash_score, ...diagnoseSettlementBlocker(r) })).filter(r => r.stalled);
