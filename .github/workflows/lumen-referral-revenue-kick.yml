@@ -1,0 +1,81 @@
+name: LUMEN Referral Revenue Kick
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-referral-revenue-kick.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lumen-referral-revenue-kick
+  cancel-in-progress: false
+
+jobs:
+  referral-revenue-kick:
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: https://lumen-zero-a2a.lumen-b2b.workers.dev
+      ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+    steps:
+      - name: Verify protected runtime
+        run: |
+          set -euo pipefail
+          test -n "${ADMIN_TOKEN:-}"
+          curl -fsS --max-time 20 "$BASE_URL/referrals/commissions/autopilot/policy" -o /tmp/policy.json
+          jq -e '
+            .version == "2.0-commission-autopilot-close-to-cash" and
+            .standardSuccessFeePct == 5 and
+            .maxExternalMessagesPerRun == 1 and
+            .autonomousSpend == false and
+            .automaticContract == false and
+            .revenueOnlyAfterVerifiedSettlement == true
+          ' /tmp/policy.json >/dev/null
+          echo REFERRAL_REVENUE_POLICY_OK
+
+      - name: Plan commission opportunities
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 45 -X POST             -H "x-lumen-admin: $ADMIN_TOKEN"             -H 'content-type: application/json'             -d '{}'             "$BASE_URL/referrals/commissions/plan" -o /tmp/plan.json
+          jq -e '.ok == true' /tmp/plan.json >/dev/null
+          cat /tmp/plan.json
+
+      - name: Poll existing commission conversations
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 45 -X POST             -H "x-lumen-admin: $ADMIN_TOKEN"             "$BASE_URL/referrals/commissions/autopilot/poll" -o /tmp/poll.json
+          jq -e '.ok == true' /tmp/poll.json >/dev/null
+          cat /tmp/poll.json
+
+      - name: Execute one bounded commission action
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 60 -X POST             -H "x-lumen-admin: $ADMIN_TOKEN"             "$BASE_URL/referrals/commissions/autopilot/run" -o /tmp/run.json
+          jq -e '.ok == true or .sent == false' /tmp/run.json >/dev/null
+          cat /tmp/run.json
+
+      - name: Reconcile verified settlements
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 45 -X POST             -H "x-lumen-admin: $ADMIN_TOKEN"             "$BASE_URL/x402-revenue-bridge/sync" -o /tmp/x402.json
+          curl -fsS --max-time 45 -X POST             -H "x-lumen-admin: $ADMIN_TOKEN"             "$BASE_URL/referrals/commissions/sync" -o /tmp/commission-sync.json
+          jq -e '.ok == true' /tmp/x402.json >/dev/null
+          jq -e '.ok == true' /tmp/commission-sync.json >/dev/null
+          cat /tmp/x402.json
+          cat /tmp/commission-sync.json
+
+      - name: Read revenue state
+        run: |
+          set -euo pipefail
+          echo '===== commission stats ====='
+          curl -fsS --max-time 30 "$BASE_URL/referrals/commissions/stats"
+          echo
+          echo '===== autopilot stats ====='
+          curl -fsS --max-time 30 "$BASE_URL/referrals/commissions/autopilot/stats"
+          echo
+          echo '===== portfolio ====='
+          curl -fsS --max-time 30 "$BASE_URL/portfolio-governor/state"
+          echo
