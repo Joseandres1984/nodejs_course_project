@@ -5,6 +5,7 @@ on:
     paths:
       - '.lumen/public-worker/discover.js'
       - '.lumen/public-worker/test-discover.mjs'
+      - '.lumen/public-worker/indexnow-submit.mjs'
       - '.lumen/public-worker/worker.js'
       - '.github/workflows/lumen-discover-check.yml'
   push:
@@ -12,6 +13,7 @@ on:
     paths:
       - '.lumen/public-worker/discover.js'
       - '.lumen/public-worker/test-discover.mjs'
+      - '.lumen/public-worker/indexnow-submit.mjs'
       - '.lumen/public-worker/worker.js'
       - '.github/workflows/lumen-discover-check.yml'
 
@@ -27,5 +29,7 @@ jobs:
         working-directory: .lumen/public-worker
         run: |
           node --check discover.js
+          node --check indexnow-submit.mjs
           node --check worker.js
           node test-discover.mjs
+          INDEXNOW_DRY_RUN=true node indexnow-submit.mjs
