@@ -35,6 +35,14 @@ async function recommend(env, text) {
   return data;
 }
 
+async function affiliateExtras(env) {
+  if (!env?.A2A || typeof env.A2A.fetch !== "function") return [];
+  const response = await env.A2A.fetch(new Request("https://a2a.internal/travel/affiliates", { headers:{"user-agent":"LUMEN-Travel-Site/4.4"} }));
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !Array.isArray(data?.offers)) return [];
+  return data.offers.filter(x => x?.enabled === true && safeHttps(x?.affiliateUrl)).slice(0,6);
+}
+
 async function quoteCompleteTrip(env, input) {
   if (!env?.A2A || typeof env.A2A.fetch !== "function") throw new Error("travel_quote_unavailable");
   const response = await env.A2A.fetch(new Request("https://a2a.internal/travel/providers/quote", {
@@ -76,6 +84,12 @@ function experienceCards(plan, source) {
   return `<div class="grid">${rows.slice(0,6).map((rec,index) => { const href=trackedPath(rec,plan,source); const image=imageOf(rec); return `<article class="card">${image ? `<img class="photo" src="${esc(image)}" alt="${esc(titleOf(rec,index))}" loading="lazy">` : ""}<div class="card-body"><small>${ratingOf(rec)}</small><h3>${esc(titleOf(rec,index))}</h3><div class="card-foot"><strong>${priceOf(rec)}</strong><a class="btn" href="${esc(href)}" rel="nofollow sponsored">Ver disponibilidad →</a></div></div></article>`; }).join("")}</div>`;
 }
 
+function extraPartnerCards(extras=[]) {
+  if (!Array.isArray(extras) || !extras.length) return "";
+  const labels = { ESIM:"eSIM para viajar", TRANSFER:"Traslados", CAR_RENTAL:"Alquiler de auto", TRAVEL_INSURANCE:"Seguro de viaje" };
+  return `<section class="section"><div class="shell"><div class="eyebrow">Partners útiles para completar el viaje</div><h2>Más opciones antes de salir</h2><div class="grid">${extras.map(x=>`<article class="component"><small>${esc(labels[clean(x.category,60)] || clean(x.category,60).replaceAll("_"," "))}</small><h3>${esc(x.brand || x.id)}</h3><p>Revisá disponibilidad, condiciones y precio final directamente con el partner.</p><a class="btn secondary" href="${esc(safeHttps(x.affiliateUrl))}" rel="nofollow sponsored noopener" target="_blank">Ver opción →</a></article>`).join("")}</div><div class="disclosure"><strong>Afiliados:</strong> si completás una acción elegible en alguno de estos partners, LUMEN puede recibir una comisión sin costo adicional para vos.</div></div></section>`;
+}
+
 function quoteMap(packageQuote) { const map = new Map(); for (const q of Array.isArray(packageQuote?.quotes) ? packageQuote.quotes : []) map.set(clean(q?.component,40),q); return map; }
 function quoteAmount(quote) { return Number(quote?.amountUSD || 0); }
 function monthOptions(selected) { return MONTHS.map((name,i)=>`<option value="${i+1}" ${i+1===selected?"selected":""}>${name}</option>`).join(""); }
@@ -97,9 +111,9 @@ function componentCard(title, quote, note, actionLabel) {
   return `<article class="component"><small>${esc(clean(quote?.providerMode || "ESTIMATED",80).replaceAll("_"," "))}</small><h3>${esc(title)}</h3><strong>${money(quote?.amountUSD, quote?.currency || "USD")}</strong><p>${esc(note)}</p><span class="muted-text">Fuente: ${esc(quote?.providerName || "LUMEN estimate")}</span>${affiliate ? `<div><a href="${esc(affiliate)}" rel="nofollow sponsored">${esc(actionLabel)} →</a></div>` : ""}</article>`;
 }
 
-function experiencesPage(plan, q, source, error="") {
+function experiencesPage(plan, q, source, error="", extras=[]) {
   const destination = clean(plan?.destination || q,160);
-  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LUMEN Travel | Experiencias</title><style>${STYLES}</style></head><body>${nav(source,"experiences")}<header class="hero"><div class="shell hero-in"><div class="eyebrow">Experiencias opcionales</div><h1>Sumá algo que <em>valga el viaje.</em></h1><p>Podés explorar experiencias de Viator o armar primero tu viaje base.</p></div></header><main><section class="section"><div class="shell">${error ? `<div class="notice">${esc(error)}</div>` : experienceCards(plan,source)}<div class="actions"><a class="btn secondary" href="/travel/package?destination=${encodeURIComponent(destinationByName(destination).code)}&source=${encodeURIComponent(source)}">Armá tu viaje →</a></div><div class="disclosure"><strong>Transparencia:</strong> LUMEN Travel puede usar enlaces de afiliado. LUMEN no realiza reservas ni procesa pagos.</div></div></section></main><div class="shell footer"><span>© LUMEN Travel</span><span>Gasto autónomo USD 0</span></div></body></html>`;
+  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LUMEN Travel | Experiencias</title><style>${STYLES}</style></head><body>${nav(source,"experiences")}<header class="hero"><div class="shell hero-in"><div class="eyebrow">Experiencias opcionales</div><h1>Sumá algo que <em>valga el viaje.</em></h1><p>Podés explorar experiencias de Viator o armar primero tu viaje base.</p></div></header><main><section class="section"><div class="shell">${error ? `<div class="notice">${esc(error)}</div>` : experienceCards(plan,source)}<div class="actions"><a class="btn secondary" href="/travel/package?destination=${encodeURIComponent(destinationByName(destination).code)}&source=${encodeURIComponent(source)}">Armá tu viaje →</a></div><div class="disclosure"><strong>Transparencia:</strong> LUMEN Travel puede usar enlaces de afiliado. LUMEN no realiza reservas ni procesa pagos.</div></div></section>${extraPartnerCards(extras)}</main><div class="shell footer"><span>© LUMEN Travel</span><span>Gasto autónomo USD 0</span></div></body></html>`;
 }
 
 function packageInput(url) {
@@ -151,5 +165,5 @@ export async function handleTravelStorefront(request, env) {
       return new Response(packagePage(packageQuote,plan,input,source),{headers:{"content-type":"text/html; charset=utf-8","cache-control":"no-store","x-content-type-options":"nosniff","x-lumen-travel-storefront":VERSION}});
     } catch(error){ if(path.endsWith(".json")) return publicJson({ok:false,version:VERSION,error:clean(error?.message||error,180),bookingAuthority:false,paymentAuthority:false,autonomousSpendUsd:0},503); const page=path==="/travel/package/continue"?continuationPage({},input,source,"No pudimos cargar la continuación del viaje en este momento."):packagePage({},null,input,source,"No pudimos armar el viaje completo en este momento. Probá nuevamente."); return new Response(page,{status:503,headers:{"content-type":"text/html; charset=utf-8","cache-control":"no-store"}}); }
   }
-  const q=clean(url.searchParams.get("q")||DEFAULT_QUERY,220); try { const plan=await recommend(env,q); if(path==="/travel.json") return publicJson({ok:true,version:VERSION,uiRevision:UI_REVISION,source,query:q,completeTripBuilder:true,experiencesOptional:true,affiliateDisclosure:true,bookingAuthority:false,paymentAuthority:false,autonomousSpendUsd:0,plan}); return new Response(experiencesPage(plan,q,source),{headers:{"content-type":"text/html; charset=utf-8","cache-control":"no-store","x-content-type-options":"nosniff","x-lumen-travel-storefront":VERSION}}); } catch(error){ if(path==="/travel.json") return publicJson({ok:false,version:VERSION,error:clean(error?.message||error,180),bookingAuthority:false,paymentAuthority:false,autonomousSpendUsd:0},503); return new Response(experiencesPage({},q,source,"No pudimos cargar las experiencias en este momento. Probá nuevamente."),{status:503,headers:{"content-type":"text/html; charset=utf-8","cache-control":"no-store"}}); }
+  const q=clean(url.searchParams.get("q")||DEFAULT_QUERY,220); try { const [plan,extras]=await Promise.all([recommend(env,q),affiliateExtras(env).catch(()=>[])]); if(path==="/travel.json") return publicJson({ok:true,version:VERSION,uiRevision:UI_REVISION,source,query:q,completeTripBuilder:true,experiencesOptional:true,affiliateDisclosure:true,bookingAuthority:false,paymentAuthority:false,autonomousSpendUsd:0,plan,partnerExtras:extras}); return new Response(experiencesPage(plan,q,source,"",extras),{headers:{"content-type":"text/html; charset=utf-8","cache-control":"no-store","x-content-type-options":"nosniff","x-lumen-travel-storefront":VERSION}}); } catch(error){ if(path==="/travel.json") return publicJson({ok:false,version:VERSION,error:clean(error?.message||error,180),bookingAuthority:false,paymentAuthority:false,autonomousSpendUsd:0},503); const extras=await affiliateExtras(env).catch(()=>[]); return new Response(experiencesPage({},q,source,"No pudimos cargar las experiencias en este momento. Probá nuevamente.",extras),{status:503,headers:{"content-type":"text/html; charset=utf-8","cache-control":"no-store"}}); }
 }
