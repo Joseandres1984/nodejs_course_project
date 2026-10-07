@@ -1,5 +1,5 @@
 name: LUMEN Entrepreneur Mode Smoke
-# rerun entrepreneur: 2026-10-07 after qualified-intent brain fix
+# rerun entrepreneur: 2026-10-07 post-deploy fresh manual decision
 
 on:
   pull_request:
