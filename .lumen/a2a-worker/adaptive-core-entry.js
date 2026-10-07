@@ -3,6 +3,7 @@ import { handleAdaptiveMarketHunter, runAdaptiveMarketHunter } from "./adaptive-
 import { handleMarketHunterPruner, pruneMarketHunterStrategies } from "./market-hunter-pruner.js";
 import { handleSourceIntelligence, runSourceIntelligence } from "./source-intelligence.js";
 import { handleSourceIntelligencePolicy } from "./source-intelligence-policy.js";
+import { handleTenderSupplierMatch, runTenderSupplierMatch } from "./tender-supplier-match.js";
 import { handleProductCommerceRadar, runProductCommerceRadar } from "./product-commerce-radar.js";
 import { handleCommerceMachine, runCommerceMachine } from "./commerce-machine.js";
 import { handleCommerceOperations, runCommerceOperations } from "./commerce-operations.js";
@@ -146,6 +147,8 @@ export default {
     if (productCommerceResponse) return productCommerceResponse;
     const sourceResponse = await handleSourceIntelligence(request, env);
     if (sourceResponse) return sourceResponse;
+    const tenderMatchResponse = await handleTenderSupplierMatch(request, env);
+    if (tenderMatchResponse) return tenderMatchResponse;
     const hunterResponse = await handleAdaptiveMarketHunter(request, env);
     if (hunterResponse) return hunterResponse;
     const prunerResponse = await handleMarketHunterPruner(request, env);
