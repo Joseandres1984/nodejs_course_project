@@ -65,3 +65,43 @@ jobs:
           echo '===== /outreach/next ====='
           curl --fail --show-error --silent --max-time 30 "$BASE_URL/outreach/next"
           echo
+
+      - name: One-time First Settlement send
+        if: contains(github.event.head_commit.message, '[first-settlement-send]')
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 60 \
+            -X POST "$BASE_URL/outreach/send-next" \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'accept: application/json' \
+            -o /tmp/send.json
+          echo '===== bounded send ====='
+          cat /tmp/send.json
+          echo
+          jq -e '.sent == true and .proposalId != null' /tmp/send.json >/dev/null
+
+          curl --fail --show-error --silent --max-time 60 \
+            -X POST "$BASE_URL/revenue-loop-v5/run" \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'cache-control: no-cache' \
+            -o /tmp/revenue-cycle.json
+          echo '===== revenue sync ====='
+          jq '{ok,version,lifecycle,settlementSync,closer,memory}' /tmp/revenue-cycle.json
+
+          curl --fail --show-error --silent --max-time 30 \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'cache-control: no-cache' \
+            "$BASE_URL/first-settlement/status" -o /tmp/first-settlement-after-send.json
+          echo '===== first settlement after send ====='
+          jq '{
+            ok,
+            successCriterion,
+            mission:{
+              status:.mission.status,
+              opportunity_id:.mission.focus.opportunity_id,
+              proposal_id:.mission.focus.proposal_id,
+              stage:.mission.focus.stage,
+              blocker:.mission.diagnosis.blocker,
+              action:.mission.diagnosis.action
+            }
+          }' /tmp/first-settlement-after-send.json
