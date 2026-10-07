@@ -1,0 +1,14 @@
+import assert from "node:assert/strict";
+import { DatabaseSync } from "node:sqlite";
+import { runVentureSellerV1 } from "./venture-seller-v1.js";
+const sqlite=new DatabaseSync(":memory:");
+const DB={prepare(sql){let stmt=null,args=[];return{bind(...v){args=v;return this;},async run(){stmt ||= sqlite.prepare(sql);const r=stmt.run(...args);return{meta:{changes:Number(r.changes)}};},async all(){stmt ||= sqlite.prepare(sql);return{results:stmt.all(...args)}}};}};
+sqlite.exec(`CREATE TABLE lumen_venture_launches_v1(idea_id TEXT PRIMARY KEY,created_at TEXT,updated_at TEXT,status TEXT,product_key TEXT,readiness_json TEXT,launch_packet_json TEXT,policy_json TEXT)`);
+sqlite.prepare("INSERT INTO lumen_venture_launches_v1 VALUES(?,?,?,?,?,?,?,?)").run("I1","now","now","AWAITING_EXTERNAL_LAUNCH_APPROVAL","P1",JSON.stringify({pass:true}),JSON.stringify({decision:"AWAITING_EXTERNAL_LAUNCH_APPROVAL",nonBindingPreparationComplete:true,executesExternalAction:false}),JSON.stringify({bindingActionsHumanGated:true}));
+const r=await runVentureSellerV1({DB},{limit:5});
+assert.equal(r.ok,true);assert.equal(r.readyToSell,1);assert.equal(r.kpi,"settled_verified");
+assert.equal(r.policy.autonomousExternalPublish,false);assert.equal(r.policy.autonomousOutbound,false);assert.equal(r.policy.autonomousSpendUsd,0);assert.equal(r.policy.bindingActionsHumanGated,true);
+assert.equal(r.offers[0].externalActionExecuted,false);assert.equal(r.offers[0].pricingMode,"EXISTING_APPROVED_PRICE_OR_HUMAN_GATE");
+const saved=sqlite.prepare("SELECT status,offer_packet_json FROM lumen_venture_seller_v1 WHERE idea_id='I1'").get();
+assert.equal(saved.status,"READY_FOR_GOVERNED_SELL");assert.equal(JSON.parse(saved.offer_packet_json).settlementTruth,"settled_verified_only");
+console.log("VENTURE_SELLER_V1_TESTS_OK");
