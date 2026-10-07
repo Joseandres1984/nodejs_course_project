@@ -39,6 +39,7 @@ jobs:
           echo 'AUTONOMOUS_CONTRACT=false'
 
       - name: Run Street Mode commercial cycle
+        id: street
         shell: bash
         run: |
           set -euo pipefail
@@ -78,8 +79,8 @@ jobs:
           done
 
           if [ "$consumed" != 'true' ]; then
-            for attempt in 1 2 3 4 5 6 7 8; do
-              echo "===== STREET PROSPECT ROTATION $attempt/8 ====="
+            for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16; do
+              echo "===== STREET PROSPECT ROTATION $attempt/16 ====="
               post proposals/prepare-top || continue
               post quality/review-next || continue
               post outreach/probe-next || continue
@@ -95,10 +96,12 @@ jobs:
           fi
 
           echo "STREET_MODE_EXTERNAL_SLOT_CONSUMED=$consumed"
+          echo "external_slot_consumed=$consumed" >> "$GITHUB_OUTPUT"
           post outreach/poll || true
           post revenue-loop-v5/run || true
 
       - name: Read closing evidence
+        if: always()
         shell: bash
         run: |
           set -euo pipefail
@@ -126,3 +129,16 @@ jobs:
           get portfolio-governor/state
 
           echo 'LUMEN_STREET_MODE_CYCLE_OK'
+
+      - name: Enforce commercial effectiveness
+        if: always()
+        shell: bash
+        env:
+          EXTERNAL_SLOT_CONSUMED: ${{ steps.street.outputs.external_slot_consumed }}
+        run: |
+          set -euo pipefail
+          if [ "${EXTERNAL_SLOT_CONSUMED:-false}" != 'true' ]; then
+            echo "::error::Street Mode completed without a guarded commercial attempt after 16 candidate rotations."
+            exit 1
+          fi
+          echo 'LUMEN_STREET_MODE_EFFECTIVENESS=green'
