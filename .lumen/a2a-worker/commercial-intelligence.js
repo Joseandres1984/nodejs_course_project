@@ -1,4 +1,4 @@
-const VERSION = "1.2-unassessed-first-commercial-intelligence";
+const VERSION = "1.3-explicit-buyer-truth";
 
 const HARD_TEST_PHRASES = [
   "paper-only",
@@ -47,10 +47,7 @@ const HIGH_INTENT_PHRASES = [
   "tender",
   "bid deadline",
   "quantity",
-  "budget",
-  "paid",
-  "payment",
-  "invoice"
+  "budget"
 ];
 
 const COMMERCIAL_CONTEXT_PHRASES = [
@@ -198,14 +195,20 @@ export function assessCommercialOpportunity(row) {
 
   score = Math.max(0, Math.min(100, Math.round(score)));
   const fit = score >= 80 ? "A" : score >= 65 ? "B" : score >= 45 ? "C" : "D";
-  const evidenceStrength = intentHits >= 3
+  const evidenceStrength = intentHits >= 2
     ? "strong"
-    : (intentHits >= 1 || microbuyerFit)
+    : intentHits >= 1
       ? "medium"
-      : Number(row?.demand_signal || 0) === 1
+      : (microbuyerFit || Number(row?.demand_signal || 0) === 1)
         ? "weak"
         : "none";
-  const commerciallyActionable = !explicitNoCommerce && score >= 45 && Number(row?.demand_signal || 0) === 1;
+  // FIRST CASH buyer truth: compatibility/payment language is not demand.
+  // An opportunity is actionable only when explicit buyer-intent evidence exists.
+  const commerciallyActionable = !explicitNoCommerce &&
+    Number(row?.demand_signal || 0) === 1 &&
+    intentHits >= 1 &&
+    ["medium","strong"].includes(evidenceStrength) &&
+    score >= 65;
 
   return {
     commercialScore: score,
