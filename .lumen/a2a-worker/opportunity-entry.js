@@ -13,6 +13,7 @@ import { handleResponseQualification } from "./response-qualification.js";
 import { handleCommercialReplyEngine, runCommercialReplyEngine, pollCommercialReplyTasks } from "./commercial-reply-engine.js";
 import { handleFirstCashCloser, runFirstCashCloser } from "./first-cash-closer.js";
 import { handleX402RevenueBridge, syncX402SettlementsToRevenue } from "./x402-revenue-bridge.js";
+import { handleRevenueLoopV5 } from "./revenue-loop-v5.js";
 import { handleRevenueDirector, recomputeRevenueDirector } from "./revenue-director.js";
 import { handlePartnerNetwork, runPartnerDiscovery } from "./partner-network.js";
 import { handlePartnerCouncilQuality, buildQualityPartnerMatches } from "./partner-council-quality.js";
@@ -114,6 +115,7 @@ export default {
     const commercialReplyResponse = await handleCommercialReplyEngine(request, env); if (commercialReplyResponse) return commercialReplyResponse;
     const firstCashResponse = await handleFirstCashCloser(request, env); if (firstCashResponse) return firstCashResponse;
     const x402RevenueBridgeResponse = await handleX402RevenueBridge(request, env); if (x402RevenueBridgeResponse) return x402RevenueBridgeResponse;
+    const revenueLoopV5Response = await handleRevenueLoopV5(request, env); if (revenueLoopV5Response) return revenueLoopV5Response;
     const revenueDirectorResponse = await handleRevenueDirector(request, env); if (revenueDirectorResponse) return revenueDirectorResponse;
     const entrepreneurResponse = await handleEntrepreneurMode(request, env); if (entrepreneurResponse) return entrepreneurResponse;
     const recruitmentResponse = await handleRecruitmentEngine(request, env); if (recruitmentResponse) return recruitmentResponse;
