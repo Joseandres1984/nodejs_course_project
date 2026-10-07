@@ -51,6 +51,20 @@ const crawlerAgent = {
 };
 assert.equal(matchScore(refurbTender,crawlerAgent), null, "generic words must not create a construction/software false match");
 
+const highwaysTender = {
+  name:"Framework for Highways Services",
+  description:"Maintenance services across the strategic road network.",
+  score:82,
+  raw_json:future
+};
+const networkSoftwareAgent = {
+  name:"AgentLux",
+  description:"Software provider for API network automation and digital services.",
+  tags_json:'["software","network","api"]',
+  score:78
+};
+assert.equal(matchScore(highwaysTender,networkSoftwareAgent), null, "road network language must not be treated as an IT-network supplier match");
+
 assert.equal(supplierLike({
   name:"AI Crawler Index",
   description:"Data index and analysis agent.",
