@@ -1,0 +1,72 @@
+name: LUMEN Referral Commission Kick
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-referral-commission-kick.yml'
+
+jobs:
+  commission-kick:
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: https://lumen-zero-a2a.lumen-b2b.workers.dev
+      ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+    steps:
+      - name: Verify safe commission runtime
+        run: |
+          set -euo pipefail
+          test -n "${ADMIN_TOKEN:-}"
+          curl --fail --show-error --silent --max-time 20 "$BASE_URL/referrals/commissions/autopilot/policy" -o /tmp/policy.json
+          cat /tmp/policy.json; echo
+          jq -e '
+            .version == "2.0-commission-autopilot-close-to-cash" and
+            .standardSuccessFeePct == 5 and
+            .explicitAcceptanceRequired == true and
+            .revenueOnlyAfterVerifiedSettlement == true and
+            .maxExternalMessagesPerRun == 1 and
+            .autonomousSpend == false and
+            .automaticContract == false
+          ' /tmp/policy.json >/dev/null
+
+      - name: Plan current referral commission cases
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 45             -X POST "$BASE_URL/referrals/commissions/plan"             -H "x-lumen-admin: $ADMIN_TOKEN"             -H 'content-type: application/json' -d '{}'             -o /tmp/plan.json
+          cat /tmp/plan.json; echo
+          jq -e '.ok == true and .guardrails.autonomousSpend == false and .guardrails.automaticContract == false' /tmp/plan.json >/dev/null
+
+      - name: Execute one commission action
+        run: |
+          set -euo pipefail
+          code=$(curl --show-error --silent --max-time 60 -o /tmp/run.json -w '%{http_code}'             -X POST "$BASE_URL/referrals/commissions/autopilot/run"             -H "x-lumen-admin: $ADMIN_TOKEN"             -H 'content-type: application/json' -d '{}')
+          echo "AUTOPILOT_HTTP=$code"
+          cat /tmp/run.json; echo
+          test "$code" = '202'
+          jq -e '.ok == true and ((.sent == false) or (.maxExternalMessagesPerRun == 1))' /tmp/run.json >/dev/null
+
+      - name: Poll existing commission responses
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 60             -X POST "$BASE_URL/referrals/commissions/autopilot/poll"             -H "x-lumen-admin: $ADMIN_TOKEN"             -H 'content-type: application/json' -d '{}'             -o /tmp/poll.json
+          cat /tmp/poll.json; echo
+
+      - name: Reconcile verified settlements
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 45             -X POST "$BASE_URL/x402-revenue-bridge/sync"             -H "x-lumen-admin: $ADMIN_TOKEN" -o /tmp/bridge.json
+          curl --fail --show-error --silent --max-time 45             -X POST "$BASE_URL/referrals/commissions/sync"             -H "x-lumen-admin: $ADMIN_TOKEN" -o /tmp/sync.json
+          cat /tmp/bridge.json; echo
+          cat /tmp/sync.json; echo
+          jq -e '.ok == true and .guardrails.noUnverifiedRevenue == true' /tmp/bridge.json >/dev/null
+          jq -e '.ok == true and .guardrails.verifiedPaymentEventRequired == true and .guardrails.autonomousSpend == false' /tmp/sync.json >/dev/null
+
+      - name: Read commission and revenue state
+        run: |
+          set -euo pipefail
+          for endpoint in referrals/commissions/stats referrals/commissions/autopilot/stats referrals/stats portfolio-governor/state; do
+            echo "===== /$endpoint ====="
+            curl --fail --show-error --silent --max-time 30 "$BASE_URL/$endpoint"
+            echo
+          done
