@@ -17,7 +17,7 @@ jobs:
         run: |
           set -euo pipefail
           base='https://lumen-zero-a2a.lumen-b2b.workers.dev'
-          for path in health opportunities/stats commercial/stats outreach/stats outreach/next referrals/stats referrals/commissions/stats referrals/commissions/autopilot/stats partners/stats partners/top portfolio-governor/state; do
+          for path in health opportunities/stats commercial/stats outreach/stats outreach/next followup/stats followup/pipeline referrals/stats referrals/commissions/stats referrals/commissions/autopilot/stats partners/stats partners/top portfolio-governor/state travel/acquisition/status viator/conversions/status viator/revenue/status travelpayouts/finance/status; do
             echo "===== /$path ====="
             curl --fail --show-error --silent --max-time 30 "$base/$path"
             echo
@@ -30,4 +30,15 @@ jobs:
           base='https://lumen-zero-a2a.lumen-b2b.workers.dev'
           echo '===== /referrals/ledger ====='
           curl --fail --show-error --silent --max-time 30             -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN"             "$base/referrals/ledger"
+          echo
+
+      - name: Read protected travel acquisition recommendations
+        run: |
+          set -euo pipefail
+          test -n "${OPPORTUNITY_ADMIN_TOKEN:-}"
+          base='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          echo '===== /travel/acquisition/recommendations ====='
+          curl --fail --show-error --silent --max-time 30 \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            "$base/travel/acquisition/recommendations"
           echo
