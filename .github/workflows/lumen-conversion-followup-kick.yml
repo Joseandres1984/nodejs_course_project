@@ -1,4 +1,5 @@
 name: LUMEN Conversion Followup Kick
+# entrepreneur close push: 2026-10-07 after Entrepreneur Mode selected CLOSE
 
 on:
   workflow_dispatch:
