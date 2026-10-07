@@ -38,3 +38,14 @@ jobs:
             curl --show-error --silent --location --max-time 15 "$endpoint" | head -c 3000 || true
             echo
           done < /tmp/endpoints.txt
+
+      - name: Read referral trust eligibility from production D1
+        working-directory: .lumen/a2a-worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@latest d1 execute lumen-zero --remote --config wrangler.toml --command "SELECT partner_id,name,trust_score,trust_level,auth_required,manipulation_hits,card_fetch_status,https_card,https_endpoint,protocol_supported,runtime_failures FROM lumen_partner_trust WHERE partner_id IN ('PAR-6FFC7D6CE2EBD7E80030','PAR-47226E0A6A5412D0A381','PAR-7158FB51354055416E6F') ORDER BY partner_id;" --json
+          npx --yes wrangler@latest d1 execute lumen-zero --remote --config wrangler.toml --command "SELECT referral_id,state,counterparty_partner_id,counterparty_name,endpoint,proposal_sent_at,error FROM lumen_referral_commission_autopilot ORDER BY updated_at DESC LIMIT 10;" --json
+          npx --yes wrangler@latest d1 execute lumen-zero --remote --config wrangler.toml --command "SELECT referral_id,kind,sequence,status,endpoint,error,created_at,sent_at FROM lumen_referral_commission_messages ORDER BY created_at DESC LIMIT 12;" --json
