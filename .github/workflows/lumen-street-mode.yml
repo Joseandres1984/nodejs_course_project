@@ -104,10 +104,16 @@ jobs:
           if [ "$batch_attempted" -gt 0 ]; then
             consumed=true
           fi
+          safe_idle=false
+          if [ "$consumed" != 'true' ] && [ "$batch_attempted" -eq 0 ] && [ "$ready_probes" -eq 0 ]; then
+            safe_idle=true
+          fi
           echo "CLOSER_SWARM_BATCH attempted=$batch_attempted sent=$batch_sent failed=$batch_failed ready_probes=$ready_probes"
           echo "HOT_LANE_CONSUMED=$hot_consumed"
           echo "STREET_MODE_EXTERNAL_SLOT_CONSUMED=$consumed"
+          echo "STREET_MODE_SAFE_IDLE=$safe_idle"
           echo "external_slot_consumed=$consumed" >> "$GITHUB_OUTPUT"
+          echo "safe_idle=$safe_idle" >> "$GITHUB_OUTPUT"
           post outreach/poll || true
           post revenue-loop-v5/run || true
 
@@ -146,10 +152,17 @@ jobs:
         shell: bash
         env:
           EXTERNAL_SLOT_CONSUMED: ${{ steps.street.outputs.external_slot_consumed }}
+          SAFE_IDLE: ${{ steps.street.outputs.safe_idle }}
         run: |
           set -euo pipefail
-          if [ "${EXTERNAL_SLOT_CONSUMED:-false}" != 'true' ]; then
-            echo "::error::Street Mode completed without a guarded commercial attempt after the hot lanes and 30 closer-swarm rotations."
-            exit 1
+          if [ "${EXTERNAL_SLOT_CONSUMED:-false}" = 'true' ]; then
+            echo 'LUMEN_STREET_MODE_EFFECTIVENESS=green_active_commercial_attempt'
+            exit 0
           fi
-          echo 'LUMEN_STREET_MODE_EFFECTIVENESS=green'
+          if [ "${SAFE_IDLE:-false}" = 'true' ]; then
+            echo 'LUMEN_STREET_MODE_EFFECTIVENESS=green_no_eligible_target'
+            echo 'LUMEN_STREET_MODE_ANTI_SPAM=protected'
+            exit 0
+          fi
+          echo "::error::Street Mode ended without an external attempt and without a verified no-eligible-target state."
+          exit 1
