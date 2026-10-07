@@ -68,33 +68,44 @@ jobs:
           post revenue-loop-v5/run || true
 
           consumed=false
+          hot_consumed=false
           for endpoint in first-cash/run commercial-reply/run followup/run; do
             body="/tmp/${endpoint//\//-}.json"
             post "$endpoint"
             if jq -e '(.sent == true) or (.externalAttempted == true) or (.attempted == true) or (.status == "SEND_FAILED") or (.send.sent == true) or (.send.externalAttempted == true) or (.send.status == "SEND_FAILED")' "$body" >/dev/null 2>&1; then
               consumed=true
+              hot_consumed=true
               echo "HOT_LANE_SLOT_CONSUMED_BY=$endpoint"
               break
             fi
           done
 
-          if [ "$consumed" != 'true' ]; then
-            for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16; do
-              echo "===== STREET PROSPECT ROTATION $attempt/16 ====="
-              post proposals/prepare-top || continue
-              post quality/review-next || continue
-              post outreach/probe-next || continue
-              post outreach/send-next || continue
+          ready_probes=0
+          for attempt in $(seq 1 30); do
+            echo "===== CLOSER SWARM PROSPECT ROTATION $attempt/30 ====="
+            post proposals/prepare-top || continue
+            post quality/review-next || continue
+            post outreach/probe-next || continue
+            probe='/tmp/outreach-probe-next.json'
+            if jq -e '.status == "READY"' "$probe" >/dev/null 2>&1; then
+              ready_probes=$((ready_probes + 1))
+              echo "CLOSER_SWARM_READY_PROBES=$ready_probes"
+            fi
+            if [ "$ready_probes" -ge 30 ]; then
+              break
+            fi
+          done
 
-              send='/tmp/outreach-send-next.json'
-              if jq -e '(.sent == true) or (.externalAttempted == true) or (.status == "SEND_FAILED")' "$send" >/dev/null 2>&1; then
-                consumed=true
-                echo "FRESH_OUTREACH_SLOT_CONSUMED_ON_ATTEMPT=$attempt"
-                break
-              fi
-            done
+          post outreach/send-batch || true
+          batch='/tmp/outreach-send-batch.json'
+          batch_attempted=$(jq -r '.attempted // 0' "$batch" 2>/dev/null || echo 0)
+          batch_sent=$(jq -r '.sent // 0' "$batch" 2>/dev/null || echo 0)
+          batch_failed=$(jq -r '.failed // 0' "$batch" 2>/dev/null || echo 0)
+          if [ "$batch_attempted" -gt 0 ]; then
+            consumed=true
           fi
-
+          echo "CLOSER_SWARM_BATCH attempted=$batch_attempted sent=$batch_sent failed=$batch_failed ready_probes=$ready_probes"
+          echo "HOT_LANE_CONSUMED=$hot_consumed"
           echo "STREET_MODE_EXTERNAL_SLOT_CONSUMED=$consumed"
           echo "external_slot_consumed=$consumed" >> "$GITHUB_OUTPUT"
           post outreach/poll || true
@@ -138,7 +149,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ "${EXTERNAL_SLOT_CONSUMED:-false}" != 'true' ]; then
-            echo "::error::Street Mode completed without a guarded commercial attempt after 16 candidate rotations."
+            echo "::error::Street Mode completed without a guarded commercial attempt after the hot lanes and 30 closer-swarm rotations."
             exit 1
           fi
           echo 'LUMEN_STREET_MODE_EFFECTIVENESS=green'
