@@ -1,4 +1,4 @@
-const VERSION = "2.0-economic-autonomy-governor";
+const VERSION = "2.1-superseded-match-aware-governor";
 const COMPATIBILITY_VERSION = "1.0-portfolio-governor";
 const LANE_ORDER = ["COLLECTION", "CLOSE", "INBOUND", "FOLLOW_UP", "NEW_BUSINESS", "EXPERIMENT"];
 const BUSINESS_FAMILIES = ["B2B_A2A", "REFERRAL", "COMMERCE", "TRAVEL", "VENTURE", "OTHER"];
@@ -130,14 +130,29 @@ async function updateFamilyState(env, rows, selectedFamily, now) {
 
 export async function recomputePortfolioGovernor(env) {
   if (!(await ensureSchema(env))) return { ok: false, error: "persistence_unavailable", version: VERSION };
-  const factoryRows = await safeAll(env, "SELECT id,source_type,source_id,lane,stage,title,estimated_value_usd,probability,urgency,evidence_score,signal_score,economic_score,action_kind,action_ref,rationale,updated_at FROM lumen_opportunity_factory_candidates WHERE active=1 ORDER BY economic_score DESC,updated_at DESC LIMIT 500");
-  const [commerceRows, feedbackMap, learning] = await Promise.all([virtualCommerceCandidates(env), loadFeedbackAdjustments(env), familyLearning(env)]);
+  const rawFactoryRows = await safeAll(env, "SELECT id,source_type,source_id,lane,stage,title,estimated_value_usd,probability,urgency,evidence_score,signal_score,economic_score,action_kind,action_ref,rationale,updated_at FROM lumen_opportunity_factory_candidates WHERE active=1 ORDER BY economic_score DESC,updated_at DESC LIMIT 500");
+  const [supersededOppRows, supersededProposalRows, commerceRows, feedbackMap, learning] = await Promise.all([
+    safeAll(env, "SELECT id FROM lumen_opportunities WHERE status='SUPERSEDED_MATCH'"),
+    safeAll(env, "SELECT p.proposal_id FROM lumen_proposal_drafts p JOIN lumen_opportunities o ON o.id=p.opportunity_id WHERE o.status='SUPERSEDED_MATCH'"),
+    virtualCommerceCandidates(env),
+    loadFeedbackAdjustments(env),
+    familyLearning(env)
+  ]);
+  const supersededOpps = new Set(supersededOppRows.map(row => clean(row.id, 180)));
+  const supersededProposals = new Set(supersededProposalRows.map(row => clean(row.proposal_id, 180)));
+  const factoryRows = rawFactoryRows.filter(row => {
+    const sourceType = clean(row.source_type, 80).toUpperCase();
+    const sourceId = clean(row.source_id, 180);
+    if (sourceType === "DISCOVERY" && supersededOpps.has(sourceId)) return false;
+    if (sourceType === "SALES_PIPELINE" && supersededProposals.has(sourceId)) return false;
+    return true;
+  });
   const rows = enrichRows([...factoryRows, ...commerceRows], feedbackMap, learning);
   const counts = Object.fromEntries(LANE_ORDER.map(lane => [lane, rows.filter(x => x.lane === lane).length])); const attention = activeAttention(counts); const familyCounts = Object.fromEntries(BUSINESS_FAMILIES.map(family => [family, rows.filter(x => x.business_family === family).length])); const familyAttentionPct = familyAttention(rows);
   const top = chooseEconomicCandidate(rows); const external = chooseEconomicCandidate(rows, { externalOnly: true });
   const verifiedRevenueUsd = await safeNumber(env, "SELECT COALESCE(SUM(amount_usd),0) n FROM lumen_revenue_events WHERE event_type='payment_settled' AND status='verified'"); const verifiedSettlements = await safeNumber(env, "SELECT COUNT(*) n FROM lumen_revenue_events WHERE event_type='payment_settled' AND status='verified'");
   const previous = await env.DB.prepare("SELECT cycle FROM lumen_portfolio_governor_state WHERE id='GLOBAL' LIMIT 1").first(); const cycle = num(previous?.cycle) + 1; const now = new Date().toISOString(); const recommendedLane = top?.lane || "NEW_BUSINESS"; const recommendedFamily = top?.business_family || "B2B_A2A"; const recommendedAction = external?.action_kind || "NONE";
-  const metrics = { activeCandidates: rows.length, factoryCandidates: factoryRows.length, commerceCandidates: commerceRows.length, laneCounts: counts, businessFamilyCounts: familyCounts, businessFamilyAttention: familyAttentionPct, recommendedBusinessFamily: recommendedFamily, verifiedSettlements, verifiedRevenueUsd, collectionReady: counts.COLLECTION, closeReady: counts.CLOSE, inboundReady: counts.INBOUND, followupReady: counts.FOLLOW_UP, newBusinessReady: counts.NEW_BUSINESS, experimentsReady: counts.EXPERIMENT };
+  const metrics = { activeCandidates: rows.length, factoryCandidates: factoryRows.length, supersededFactoryCandidatesFiltered: rawFactoryRows.length - factoryRows.length, commerceCandidates: commerceRows.length, laneCounts: counts, businessFamilyCounts: familyCounts, businessFamilyAttention: familyAttentionPct, recommendedBusinessFamily: recommendedFamily, verifiedSettlements, verifiedRevenueUsd, collectionReady: counts.COLLECTION, closeReady: counts.CLOSE, inboundReady: counts.INBOUND, followupReady: counts.FOLLOW_UP, newBusinessReady: counts.NEW_BUSINESS, experimentsReady: counts.EXPERIMENT };
   const normalizedTop = normalizeCandidate(top); const normalizedExternal = normalizeCandidate(external);
   await env.DB.prepare("INSERT INTO lumen_portfolio_governor_state(id,updated_at,cycle,recommended_lane,recommended_action,recommended_source_type,recommended_source_id,attention_json,metrics_json,top_candidate_json,external_candidate_json,engine_version) VALUES('GLOBAL',?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET updated_at=excluded.updated_at,cycle=excluded.cycle,recommended_lane=excluded.recommended_lane,recommended_action=excluded.recommended_action,recommended_source_type=excluded.recommended_source_type,recommended_source_id=excluded.recommended_source_id,attention_json=excluded.attention_json,metrics_json=excluded.metrics_json,top_candidate_json=excluded.top_candidate_json,external_candidate_json=excluded.external_candidate_json,engine_version=excluded.engine_version").bind(now, cycle, recommendedLane, recommendedAction, external?.source_type || null, external?.source_id || null, JSON.stringify(attention), JSON.stringify(metrics), normalizedTop ? JSON.stringify(normalizedTop) : null, normalizedExternal ? JSON.stringify(normalizedExternal) : null, VERSION).run();
   await updateFamilyState(env, rows, recommendedFamily, now);

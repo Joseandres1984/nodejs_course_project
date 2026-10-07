@@ -1,6 +1,6 @@
 import { classifyCommercialResponse } from "./response-qualification.js";
 
-const VERSION = "1.3-fast-pipeline-commercial-followup";
+const VERSION = "1.4-superseded-match-aware-followup";
 const SEND_TIMEOUT_MS = 15000;
 const POLL_TIMEOUT_MS = 7000;
 
@@ -68,12 +68,13 @@ async function followupCount(env, proposalId) {
 
 async function syncPipeline(env) {
   if (!(await ensureSchema(env))) return { ok: false, error: "persistence_unavailable" };
-  const rows = await env.DB.prepare("SELECT p.proposal_id,p.opportunity_id,p.status AS proposal_status,p.quality_gate_status,p.offer_name,p.amount_usd,p.message AS original_message,p.updated_at AS proposal_updated_at,o.name,x.status AS outreach_status,x.updated_at AS outreach_updated_at,x.response_text AS outreach_response,x.error AS outreach_error FROM lumen_proposal_drafts p JOIN lumen_opportunities o ON o.id=p.opportunity_id LEFT JOIN lumen_outreach_attempts x ON x.proposal_id=p.proposal_id WHERE p.quality_gate_status='PASS' ORDER BY p.updated_at DESC LIMIT 250").all();
+  const now = new Date().toISOString();
+  await env.DB.prepare("UPDATE lumen_sales_pipeline SET stage='LOST',next_action='move_on',next_action_at=NULL,updated_at=?,notes='superseded_match' WHERE opportunity_id IN (SELECT id FROM lumen_opportunities WHERE status='SUPERSEDED_MATCH') AND stage NOT IN ('LOST','PAID','DELIVERED')").bind(now).run();
+  const rows = await env.DB.prepare("SELECT p.proposal_id,p.opportunity_id,p.status AS proposal_status,p.quality_gate_status,p.offer_name,p.amount_usd,p.message AS original_message,p.updated_at AS proposal_updated_at,o.name,x.status AS outreach_status,x.updated_at AS outreach_updated_at,x.response_text AS outreach_response,x.error AS outreach_error FROM lumen_proposal_drafts p JOIN lumen_opportunities o ON o.id=p.opportunity_id LEFT JOIN lumen_outreach_attempts x ON x.proposal_id=p.proposal_id WHERE p.quality_gate_status='PASS' AND COALESCE(o.status,'')<>'SUPERSEDED_MATCH' ORDER BY p.updated_at DESC LIMIT 250").all();
   const latestResponses = await env.DB.prepare("SELECT proposal_id,response_text FROM (SELECT proposal_id,response_text,ROW_NUMBER() OVER (PARTITION BY proposal_id ORDER BY sequence DESC) AS rn FROM lumen_followups WHERE response_text IS NOT NULL AND response_text<>'') WHERE rn=1").all();
   const aggregates = await env.DB.prepare("SELECT proposal_id,COUNT(*) AS n,MAX(sent_at) AS latest_sent_at FROM lumen_followups WHERE status IN ('SENT','SENT_TASK','WORKING','RESPONDED') GROUP BY proposal_id").all();
   const responseByProposal = new Map((latestResponses.results || []).map(row => [row.proposal_id,row.response_text]));
   const aggregateByProposal = new Map((aggregates.results || []).map(row => [row.proposal_id,row]));
-  const now = new Date().toISOString();
   const writes = [];
 
   for (const row of rows.results || []) {
@@ -182,7 +183,7 @@ async function sendDueFollowup(env, { syncFirst = true } = {}) {
   if (syncFirst) await syncPipeline(env);
   if (!autoEnabled(env)) return { ok: true, sent: false, reason: "autonomous_followup_disabled", version: VERSION };
   const now = new Date().toISOString();
-  const row = await env.DB.prepare("SELECT s.proposal_id,s.opportunity_id,s.target,s.offer_name,s.amount_usd,s.followup_count,s.next_action_at,x.card_url,x.agent_url,x.protocol_binding,x.protocol_version,p.status AS proposal_status FROM lumen_sales_pipeline s JOIN lumen_outreach_attempts x ON x.proposal_id=s.proposal_id JOIN lumen_proposal_drafts p ON p.proposal_id=s.proposal_id WHERE s.stage='WAITING' AND s.next_action_at IS NOT NULL AND s.next_action_at<=? AND s.followup_count<? AND p.quality_gate_status='PASS' AND p.status IN ('SENT','RESPONDED') ORDER BY s.next_action_at ASC LIMIT 1").bind(now,maxFollowups(env)).first();
+  const row = await env.DB.prepare("SELECT s.proposal_id,s.opportunity_id,s.target,s.offer_name,s.amount_usd,s.followup_count,s.next_action_at,x.card_url,x.agent_url,x.protocol_binding,x.protocol_version,p.status AS proposal_status FROM lumen_sales_pipeline s JOIN lumen_outreach_attempts x ON x.proposal_id=s.proposal_id JOIN lumen_proposal_drafts p ON p.proposal_id=s.proposal_id JOIN lumen_opportunities o ON o.id=s.opportunity_id WHERE s.stage='WAITING' AND s.next_action_at IS NOT NULL AND s.next_action_at<=? AND s.followup_count<? AND p.quality_gate_status='PASS' AND p.status IN ('SENT','RESPONDED') AND COALESCE(o.status,'')<>'SUPERSEDED_MATCH' ORDER BY s.next_action_at ASC LIMIT 1").bind(now,maxFollowups(env)).first();
   if (!row) return { ok: true, sent: false, reason: "no_followup_due", version: VERSION };
   if (!isHttps(row.agent_url)) return { ok: false, sent: false, error: "agent_url_not_https", proposalId: row.proposal_id };
 
@@ -218,7 +219,7 @@ async function sendDueFollowup(env, { syncFirst = true } = {}) {
 
 async function pollFollowupTasks(env) {
   if (!(await ensureSchema(env))) return { ok: false, error: "persistence_unavailable" };
-  const rows = await env.DB.prepare("SELECT f.id,f.proposal_id,f.task_id,x.agent_url,x.protocol_binding,x.protocol_version FROM lumen_followups f JOIN lumen_outreach_attempts x ON x.proposal_id=f.proposal_id WHERE f.status IN ('SENT_TASK','WORKING') AND f.task_id IS NOT NULL ORDER BY f.updated_at ASC LIMIT 5").all();
+  const rows = await env.DB.prepare("SELECT f.id,f.proposal_id,f.task_id,x.agent_url,x.protocol_binding,x.protocol_version FROM lumen_followups f JOIN lumen_outreach_attempts x ON x.proposal_id=f.proposal_id JOIN lumen_opportunities o ON o.id=f.opportunity_id WHERE f.status IN ('SENT_TASK','WORKING') AND f.task_id IS NOT NULL AND COALESCE(o.status,'')<>'SUPERSEDED_MATCH' ORDER BY f.updated_at ASC LIMIT 5").all();
   const candidates = (rows.results || []).filter(row => isHttps(row.agent_url));
   const outcomes = await Promise.all(candidates.map(async row => {
     const version = clean(row.protocol_version, 20) || "0.3.0";
