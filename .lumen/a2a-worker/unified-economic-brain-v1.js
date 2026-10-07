@@ -13,6 +13,8 @@ export const UNIFIED_BRAIN_POLICY = Object.freeze({
   rewardOrder: ["VERIFIED_SETTLEMENT","VERIFIED_REVENUE","ORDER_OR_PURCHASE_INTENT","QUOTE_REQUEST","VERIFIED_BUYER_DEMAND","COMMERCIAL_RESPONSE","VERIFIED_DELIVERY","PUBLISHED_OFFER","CLICK","IMPRESSION"],
   learningTarget: "economic_funnel_progress_not_activity",
   sentIsNotSuccess: true,
+  rawResponseIsNotCommercialIntent: true,
+  qualifiedCommercialResponseClasses: ["COMMERCIAL_QUESTION","COMMERCIAL_INTEREST","PURCHASE_INTENT"],
   demandFirstWhenBuyerEvidenceZero: true,
   persistentFunnelMemory: true,
   strategyMemoryAffectsSelection: true,
@@ -222,8 +224,8 @@ async function collectFunnel(env) {
     scalar(env,"SELECT COUNT(*) n FROM lumen_revenue_loop_v5 WHERE stage IN ('QUALIFIED','PROPOSAL_READY','SENT','REPLIED','NEGOTIATING','PAID','DELIVERED')"),
     scalar(env,"SELECT COUNT(*) n FROM lumen_proposal_drafts WHERE UPPER(COALESCE(status,'')) NOT IN ('REJECTED','DISCARDED')"),
     scalar(env,"SELECT COUNT(*) n FROM lumen_revenue_loop_v5 WHERE stage IN ('SENT','REPLIED','NEGOTIATING','PAID','DELIVERED')"),
-    scalar(env,"SELECT COUNT(*) n FROM lumen_revenue_loop_v5 WHERE stage IN ('REPLIED','NEGOTIATING','PAID','DELIVERED')"),
-    scalar(env,"SELECT COUNT(*) n FROM lumen_revenue_loop_v5 WHERE stage IN ('NEGOTIATING','PAID','DELIVERED')"),
+    scalar(env,"SELECT COUNT(*) n FROM lumen_sales_pipeline WHERE response_class IN ('COMMERCIAL_QUESTION','COMMERCIAL_INTEREST','PURCHASE_INTENT')"),
+    scalar(env,"SELECT COUNT(*) n FROM lumen_sales_pipeline WHERE stage='NEGOTIATING' AND response_class IN ('COMMERCIAL_QUESTION','COMMERCIAL_INTEREST','PURCHASE_INTENT')"),
     scalar(env,"SELECT COUNT(*) n FROM lumen_revenue_events WHERE event_type='payment_settled' AND status='verified'"),
     scalar(env,"SELECT COUNT(*) n FROM lumen_paid_deliveries WHERE LOWER(COALESCE(status,''))='delivered'"),
     scalar(env,"SELECT COALESCE(SUM(amount_usd),0) n FROM lumen_revenue_events WHERE event_type='payment_settled' AND status='verified'")
@@ -308,9 +310,10 @@ async function collectClickMonetization(env) {
 }
 
 async function collectObservation(env) {
-  const [ideas, proposals, supplier, settlements, launches, sources] = await Promise.all([
+  const [ideas, proposals, salesPipeline, supplier, settlements, launches, sources] = await Promise.all([
     rows(env,"SELECT id,title,product,build_plan,score,status,evidence_json FROM lumen_venture_hunter_ideas ORDER BY score DESC,created_at DESC LIMIT 12"),
     rows(env,"SELECT proposal_id,status,quality_gate_status,created_at FROM lumen_proposal_drafts ORDER BY created_at DESC LIMIT 20"),
+    rows(env,"SELECT proposal_id,stage,response_class,next_action,next_action_at,followup_count FROM lumen_sales_pipeline ORDER BY updated_at DESC LIMIT 100"),
     rows(env,"SELECT sku,title,projected_profit,projected_margin_pct,rank_score,state,blockers_json FROM lumen_supplier_launch_queue ORDER BY rank_score DESC,updated_at DESC LIMIT 12"),
     rows(env,"SELECT b.proposal_id,r.id receipt_id,r.status FROM lumen_x402_revenue_bridge b JOIN lumen_x402_receipts r ON r.id=b.receipt_id WHERE r.status='settled_verified' ORDER BY b.created_at DESC LIMIT 20"),
     rows(env,"SELECT sku,state,projected_profit,projected_margin_pct,created_at FROM lumen_supplier_launches ORDER BY created_at DESC LIMIT 15"),
@@ -344,7 +347,10 @@ async function collectObservation(env) {
         projectedScaleRevenueUsd:Math.max(0,num(evidence.tenThousandEventRevenueTargetUsd,0))
       };
     }),
-    proposals: proposals.map(x=>({id:x.proposal_id,status:x.status,quality:x.quality_gate_status,createdAt:x.created_at})),
+    proposals: proposals.map(x=>{
+      const sales=salesPipeline.find(s=>s.proposal_id===x.proposal_id)||{};
+      return {id:x.proposal_id,status:x.status,quality:x.quality_gate_status,createdAt:x.created_at,salesStage:sales.stage||null,responseClass:sales.response_class||null,nextAction:sales.next_action||null,nextActionAt:sales.next_action_at||null,followupCount:num(sales.followup_count,0)};
+    }),
     supplierQueue: supplier.map(x=>({sku:x.sku,title:clean(x.title,180),profit:num(x.projected_profit),margin:num(x.projected_margin_pct),rank:num(x.rank_score),state:x.state,blockers:parse(x.blockers_json,[])})),
     recentSupplierLaunches: launches,
     recentVerifiedSettlements: settlements,
@@ -466,8 +472,39 @@ function deterministicHypotheses(obs) {
     next_step:"Use Founder/Builder/Launcher to prepare a zero-capital reversible test, then measure paid-event conversion before replication."
   }));
   for (const x of obs.supplierQueue || []) if ((!Array.isArray(x.blockers)||x.blockers.length===0) && x.profit>0) out.push(normalizeEconomicHypothesis({id:`commerce-${x.sku}`,business_model:"connected-supplier intermediary resale",hypothesis:`Expose supplier item ${x.title||x.sku} using live stock/cost/price validation without purchasing inventory.`,target:x.title||x.sku,execution_lane:"COMMERCE",source_ref:x.sku,expected_profit_usd:0,probability_of_sale:.3,time_to_cash_hours:48,evidence_strength:Math.min(1,.45+x.rank/200),confidence:.62,novelty:.35,risk:.22,reversibility:.92,rationale_summary:"A connected supplier candidate has positive projected economics and no stored blockers.",next_step:"Revalidate live supplier economics and publish only if existing bounded launch policy passes."}));
-  const hot=(obs.proposals||[]).find(x=>x.status==="RESPONDED") || (obs.proposals||[]).find(x=>x.status==="SENT"||x.status==="APPROVED");
-  if (hot) out.push(normalizeEconomicHypothesis({id:`revenue-${hot.id}`,business_model:"close existing qualified demand",hypothesis:`Convert existing proposal ${hot.id} toward a verified settlement before expanding low-signal activity.`,target:hot.id,execution_lane:"REVENUE",source_ref:hot.id,probability_of_sale:hot.status==="RESPONDED"?.62:.36,time_to_cash_hours:24,evidence_strength:hot.status==="RESPONDED"?.85:.65,confidence:.78,novelty:.15,risk:.12,reversibility:.96,rationale_summary:"Existing downstream commercial inventory is closer to verified revenue than cold discovery.",next_step:"Run Revenue Loop/Response Closer in non-binding mode and preserve human gates."}));
+  const qualifiedClasses=new Set(["PURCHASE_INTENT","COMMERCIAL_INTEREST","COMMERCIAL_QUESTION"]);
+  const hotQualified=(obs.proposals||[]).find(x=>qualifiedClasses.has(String(x.responseClass||"").toUpperCase()) || x.salesStage==="NEGOTIATING");
+  const hotFallback=(obs.proposals||[]).find(x=>x.status==="SENT"||x.status==="APPROVED");
+  const hot=hotQualified||hotFallback;
+  if (hot) {
+    const cls=String(hot.responseClass||"").toUpperCase();
+    const qualified=qualifiedClasses.has(cls)||hot.salesStage==="NEGOTIATING";
+    const probability=cls==="PURCHASE_INTENT"?.78:cls==="COMMERCIAL_INTEREST"?.65:cls==="COMMERCIAL_QUESTION"?.52:hot.status==="SENT"?.32:.24;
+    const evidence=qualified?.88:hot.status==="SENT"?.62:.52;
+    out.push(normalizeEconomicHypothesis({
+      id:`revenue-${hot.id}`,
+      business_model:qualified?"close existing qualified demand":"advance existing commercial touch",
+      hypothesis:qualified
+        ? `Convert commercially qualified proposal ${hot.id} toward a verified settlement before expanding low-signal activity.`
+        : `Advance proposal ${hot.id} only through its existing governed follow-up path; do not treat delivery or a generic response as purchase intent.`,
+      target:hot.id,
+      execution_lane:"REVENUE",
+      source_ref:hot.id,
+      probability_of_sale:probability,
+      time_to_cash_hours:qualified?24:72,
+      evidence_strength:evidence,
+      confidence:qualified?.82:.58,
+      novelty:.15,
+      risk:.12,
+      reversibility:.96,
+      rationale_summary:qualified
+        ? `Qualified commercial response ${cls||"NEGOTIATING"} is downstream evidence closer to settlement.`
+        : "Existing proposal inventory is useful, but no qualified buying intent is present; follow-up must preserve response qualification.",
+      next_step:qualified
+        ? "Run Revenue Loop/Response Closer in non-binding mode and preserve human gates."
+        : "Use the bounded follow-up engine only when due; otherwise continue demand discovery and do not inflate close probability."
+    }));
+  }
   out.push(normalizeEconomicHypothesis({id:"explore-open",business_model:"open-ended market discovery",hypothesis:"Combine current demand signals, distribution channels and LUMEN capabilities to discover a monetization path not represented by the existing catalog.",target:"new external demand",execution_lane:"EXPLORE",source_ref:"open-exploration",probability_of_sale:.16,time_to_cash_hours:96,evidence_strength:.28,confidence:.42,novelty:1,risk:.3,reversibility:.97,rationale_summary:"Deliberate exploration prevents the system from only optimizing yesterday's business models.",next_step:"Search, formulate and test one zero-capital hypothesis with measurable buyer feedback."}));
   return out;
 }

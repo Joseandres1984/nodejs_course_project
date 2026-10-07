@@ -19,6 +19,8 @@ assert.equal(UNIFIED_BRAIN_POLICY.autonomousContract,false);
 assert.equal(UNIFIED_BRAIN_POLICY.bindingActionsHumanGated,true);
 assert.equal(UNIFIED_BRAIN_POLICY.revenueTruth,"provider_verified_settlement_only");
 assert.equal(UNIFIED_BRAIN_POLICY.sentIsNotSuccess,true);
+assert.equal(UNIFIED_BRAIN_POLICY.rawResponseIsNotCommercialIntent,true);
+assert.deepEqual(UNIFIED_BRAIN_POLICY.qualifiedCommercialResponseClasses,["COMMERCIAL_QUESTION","COMMERCIAL_INTEREST","PURCHASE_INTENT"]);
 assert.equal(UNIFIED_BRAIN_POLICY.demandFirstWhenBuyerEvidenceZero,true);
 assert.equal(UNIFIED_BRAIN_POLICY.persistentFunnelMemory,true);
 assert.equal(UNIFIED_BRAIN_POLICY.strategyMemoryAffectsSelection,true);
