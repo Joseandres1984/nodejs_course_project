@@ -147,14 +147,16 @@ export async function getFirstSettlementMissionStatus(env) {
     COALESCE(cr.reply_count,0) AS commercial_reply_count,
     x.status AS outreach_status,
     x.error AS outreach_error,
-    x.updated_at AS outreach_updated_at
+    x.updated_at AS outreach_updated_at,
+    o.status AS opportunity_status
     FROM lumen_revenue_loop_v5 r
     LEFT JOIN lumen_proposal_drafts p ON p.proposal_id=r.proposal_id
     LEFT JOIN lumen_sales_pipeline s ON s.proposal_id=r.proposal_id
     LEFT JOIN lumen_x402_revenue_bridge b ON b.proposal_id=r.proposal_id AND b.bridge_status='ATTRIBUTABLE'
     LEFT JOIN lumen_commercial_replies cr ON cr.proposal_id=r.proposal_id
     LEFT JOIN lumen_outreach_attempts x ON x.proposal_id=r.proposal_id
-    WHERE r.stage NOT IN ('PAID','DELIVERED')
+    LEFT JOIN lumen_opportunities o ON o.id=r.opportunity_id
+    WHERE r.stage NOT IN ('PAID','DELIVERED') AND COALESCE(o.status,'')<>'SUPERSEDED_MATCH'
     ORDER BY r.first_cash_score DESC,r.intent_score DESC,r.updated_at DESC LIMIT 100`).all();
   const rows = (result.results || []).map(r => ({ ...r, stage_updated_at: r.updated_at }));
   const mission = chooseFirstSettlementMission(rows);
