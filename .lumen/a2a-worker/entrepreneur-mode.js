@@ -6,7 +6,7 @@ import { runVentureBuilderV1 } from "./venture-builder-v1.js";
 import { runVentureLauncherV1 } from "./venture-launcher-v1.js";
 import { recomputeRevenueDirector } from "./revenue-director.js";
 
-const VERSION = "1.2-entrepreneur-role-council";
+const VERSION = "1.1-entrepreneur-cash-pressure";
 const ROLES = Object.freeze([
   { id:"SCOUT", objective:"find current demand and overlooked zero-capital monetization signals" },
   { id:"FOUNDER", objective:"turn evidence into distinct business models and minimum paid offers" },
@@ -188,6 +188,7 @@ export const ENTREPRENEUR_POLICY = Object.freeze({
   verifiedWinnerCompounding:true,
   cashDiscipline:["START_FROM_DEMAND","SELL_BEFORE_BUILD","RUN_SMALLEST_REVERSIBLE_TEST","KILL_STALLED_STRATEGIES","REPEAT_VERIFIED_WINNERS","CASH_IS_TRUTH"],
   multiRoleCouncil:true,
+  roleCouncilVersion:"1.0",
   roleCouncilNoChainOfThought:true,
   roleRecommendationsDoNotGrantExternalAuthority:true,
   externalCommercialExecution:"delegated_to_existing_quality_governor_and_one-message-slot",
