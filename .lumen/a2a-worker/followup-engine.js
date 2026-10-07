@@ -1,6 +1,6 @@
 import { classifyCommercialResponse } from "./response-qualification.js";
 
-const VERSION = "1.2-bounded-qualified-commercial-followup";
+const VERSION = "1.3-fast-pipeline-commercial-followup";
 const SEND_TIMEOUT_MS = 15000;
 const POLL_TIMEOUT_MS = 7000;
 
@@ -69,16 +69,20 @@ async function followupCount(env, proposalId) {
 async function syncPipeline(env) {
   if (!(await ensureSchema(env))) return { ok: false, error: "persistence_unavailable" };
   const rows = await env.DB.prepare("SELECT p.proposal_id,p.opportunity_id,p.status AS proposal_status,p.quality_gate_status,p.offer_name,p.amount_usd,p.message AS original_message,p.updated_at AS proposal_updated_at,o.name,x.status AS outreach_status,x.updated_at AS outreach_updated_at,x.response_text AS outreach_response,x.error AS outreach_error FROM lumen_proposal_drafts p JOIN lumen_opportunities o ON o.id=p.opportunity_id LEFT JOIN lumen_outreach_attempts x ON x.proposal_id=p.proposal_id WHERE p.quality_gate_status='PASS' ORDER BY p.updated_at DESC LIMIT 250").all();
+  const latestResponses = await env.DB.prepare("SELECT proposal_id,response_text FROM (SELECT proposal_id,response_text,ROW_NUMBER() OVER (PARTITION BY proposal_id ORDER BY sequence DESC) AS rn FROM lumen_followups WHERE response_text IS NOT NULL AND response_text<>'') WHERE rn=1").all();
+  const aggregates = await env.DB.prepare("SELECT proposal_id,COUNT(*) AS n,MAX(sent_at) AS latest_sent_at FROM lumen_followups WHERE status IN ('SENT','SENT_TASK','WORKING','RESPONDED') GROUP BY proposal_id").all();
+  const responseByProposal = new Map((latestResponses.results || []).map(row => [row.proposal_id,row.response_text]));
+  const aggregateByProposal = new Map((aggregates.results || []).map(row => [row.proposal_id,row]));
   const now = new Date().toISOString();
-  let tracked = 0;
+  const writes = [];
 
   for (const row of rows.results || []) {
-    const fuResponse = await env.DB.prepare("SELECT response_text FROM lumen_followups WHERE proposal_id=? AND response_text IS NOT NULL AND response_text<>'' ORDER BY sequence DESC LIMIT 1").bind(row.proposal_id).first();
-    const responseText = fuResponse?.response_text || row.outreach_response || null;
+    const responseText = responseByProposal.get(row.proposal_id) || row.outreach_response || null;
     const classification = classifyCommercialResponse(responseText, row.original_message || "");
     const responseClass = classification.responseClass === "EMPTY" ? null : classification.responseClass;
-    const count = await followupCount(env, row.proposal_id);
-    const contactAt = await latestContact(env, row.proposal_id, row.outreach_updated_at || row.proposal_updated_at);
+    const agg = aggregateByProposal.get(row.proposal_id) || {};
+    const count = Number(agg.n || 0);
+    const contactAt = agg.latest_sent_at || row.outreach_updated_at || row.proposal_updated_at || null;
     const max = maxFollowups(env);
     let stage = classification.stage || "APPROVED";
     let nextAction = classification.nextAction || "await_initial_send";
@@ -133,11 +137,11 @@ async function syncPipeline(env) {
       notes = `terminal_response:${responseClass};${classification.reason}`;
     }
 
-    await env.DB.prepare("INSERT INTO lumen_sales_pipeline(proposal_id,opportunity_id,target,offer_name,amount_usd,stage,response_class,last_contact_at,next_action,next_action_at,followup_count,updated_at,notes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(proposal_id) DO UPDATE SET target=excluded.target,offer_name=excluded.offer_name,amount_usd=excluded.amount_usd,stage=excluded.stage,response_class=excluded.response_class,last_contact_at=excluded.last_contact_at,next_action=excluded.next_action,next_action_at=excluded.next_action_at,followup_count=excluded.followup_count,updated_at=excluded.updated_at,notes=excluded.notes")
-      .bind(row.proposal_id,row.opportunity_id,row.name || null,row.offer_name || null,Number(row.amount_usd || 0),stage,responseClass,contactAt,nextAction,nextActionAt,count,now,notes).run();
-    tracked += 1;
+    writes.push(env.DB.prepare("INSERT INTO lumen_sales_pipeline(proposal_id,opportunity_id,target,offer_name,amount_usd,stage,response_class,last_contact_at,next_action,next_action_at,followup_count,updated_at,notes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(proposal_id) DO UPDATE SET target=excluded.target,offer_name=excluded.offer_name,amount_usd=excluded.amount_usd,stage=excluded.stage,response_class=excluded.response_class,last_contact_at=excluded.last_contact_at,next_action=excluded.next_action,next_action_at=excluded.next_action_at,followup_count=excluded.followup_count,updated_at=excluded.updated_at,notes=excluded.notes")
+      .bind(row.proposal_id,row.opportunity_id,row.name || null,row.offer_name || null,Number(row.amount_usd || 0),stage,responseClass,contactAt,nextAction,nextActionAt,count,now,notes));
   }
-  return { ok: true, tracked, version: VERSION };
+  for (let i = 0; i < writes.length; i += 50) await env.DB.batch(writes.slice(i, i + 50));
+  return { ok: true, tracked: (rows.results || []).length, version: VERSION, batched: true };
 }
 
 function followupMessage(row, sequence) {
@@ -174,8 +178,8 @@ function extractResponse(body, binding) {
   };
 }
 
-async function sendDueFollowup(env) {
-  await syncPipeline(env);
+async function sendDueFollowup(env, { syncFirst = true } = {}) {
+  if (syncFirst) await syncPipeline(env);
   if (!autoEnabled(env)) return { ok: true, sent: false, reason: "autonomous_followup_disabled", version: VERSION };
   const now = new Date().toISOString();
   const row = await env.DB.prepare("SELECT s.proposal_id,s.opportunity_id,s.target,s.offer_name,s.amount_usd,s.followup_count,s.next_action_at,x.card_url,x.agent_url,x.protocol_binding,x.protocol_version,p.status AS proposal_status FROM lumen_sales_pipeline s JOIN lumen_outreach_attempts x ON x.proposal_id=s.proposal_id JOIN lumen_proposal_drafts p ON p.proposal_id=s.proposal_id WHERE s.stage='WAITING' AND s.next_action_at IS NOT NULL AND s.next_action_at<=? AND s.followup_count<? AND p.quality_gate_status='PASS' AND p.status IN ('SENT','RESPONDED') ORDER BY s.next_action_at ASC LIMIT 1").bind(now,maxFollowups(env)).first();
@@ -253,17 +257,21 @@ async function pollFollowupTasks(env) {
     }
   }
   if (writes.length) await env.DB.batch(writes);
-  await syncPipeline(env);
   return { ok: true, polled: results.length, results, version: VERSION, concurrentPolling: true, pollTimeoutMs: POLL_TIMEOUT_MS };
 }
 
 export async function processFollowupCycle(env, { pollTasks = true } = {}) {
+  const started = Date.now();
+  const pollStarted = Date.now();
   const poll = pollTasks
     ? await pollFollowupTasks(env)
     : { ok: true, polled: 0, results: [], skipped: true, reason: "poll_disabled_for_bounded_orchestrator", version: VERSION };
+  const syncStarted = Date.now();
   const sync = await syncPipeline(env);
-  const send = await sendDueFollowup(env);
-  return { ok: true, version: VERSION, poll, sync, send };
+  const sendStarted = Date.now();
+  const send = await sendDueFollowup(env, { syncFirst: false });
+  const finished = Date.now();
+  return { ok: true, version: VERSION, poll, sync, send, timingsMs: { poll: syncStarted - pollStarted, sync: sendStarted - syncStarted, send: finished - sendStarted, total: finished - started } };
 }
 
 async function stats(env) {
