@@ -1,3 +1,4 @@
+import { getFirstSettlementMissionStatus } from "./first-settlement-mission-v1.js";
 const VERSION = "1.0-proposal-quality-gate";
 
 const BLOCKED_PHRASES = [
@@ -46,8 +47,17 @@ async function ensureSchema(env) {
   return true;
 }
 
+async function preferredOpportunityId(env) {
+  try {
+    const status=await getFirstSettlementMissionStatus(env);
+    return clean(status?.mission?.focus?.opportunity_id,120)||null;
+  } catch { return null; }
+}
+
 async function getNextDraft(env) {
-  const row = await env.DB.prepare("SELECT p.proposal_id,p.opportunity_id,p.created_at,p.updated_at,p.status,p.offer_id,p.offer_name,p.amount_usd,p.subject,p.message,p.quality_gate_status,p.metadata_json,o.name,o.endpoint,o.description,a.commercial_score,a.commercial_fit,a.evidence_strength,a.synthetic_or_test_only FROM lumen_proposal_drafts p JOIN lumen_opportunities o ON o.id=p.opportunity_id LEFT JOIN lumen_opportunity_assessments a ON a.opportunity_id=p.opportunity_id WHERE p.status='DRAFT' AND p.quality_gate_status='PENDING_QUALITY_GATE' ORDER BY COALESCE(a.commercial_score,0) DESC,p.created_at ASC LIMIT 1").first();
+  const preferred=await preferredOpportunityId(env);
+  const stmt=env.DB.prepare("SELECT p.proposal_id,p.opportunity_id,p.created_at,p.updated_at,p.status,p.offer_id,p.offer_name,p.amount_usd,p.subject,p.message,p.quality_gate_status,p.metadata_json,o.name,o.endpoint,o.description,a.commercial_score,a.commercial_fit,a.evidence_strength,a.synthetic_or_test_only FROM lumen_proposal_drafts p JOIN lumen_opportunities o ON o.id=p.opportunity_id LEFT JOIN lumen_opportunity_assessments a ON a.opportunity_id=p.opportunity_id WHERE p.status='DRAFT' AND p.quality_gate_status='PENDING_QUALITY_GATE' ORDER BY CASE WHEN p.opportunity_id=? THEN 0 ELSE 1 END,COALESCE(a.commercial_score,0) DESC,p.created_at ASC LIMIT 1");
+  const row = await stmt.bind(preferred||"").first();
   if (!row) return null;
   return { ...row, metadata: safeParse(row.metadata_json, {}) };
 }
