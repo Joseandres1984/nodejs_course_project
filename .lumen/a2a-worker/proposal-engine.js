@@ -1,6 +1,6 @@
 import { classifyCommercialResponse } from "./response-qualification.js";
 
-const VERSION = "1.6-first-cash-microbuyer-revision";
+const VERSION = "1.7-cash-selector-recovery";
 const PRIORITY_BRIDGE_VERSION = "4.1-sovereign-revenue-priority";
 const EVOLUTION_VERSION = "1.1-conversion-rate-proposal-evolution";
 
@@ -74,23 +74,26 @@ async function ensureSchema(env) {
 
 async function getBestProposalCandidate(env) {
   const firstCashMode = boolVar(env?.LUMEN_FIRST_CASH_MODE, false);
-  const baseFields = "SELECT o.id,o.name,o.description,o.remote_id,o.endpoint,o.evidence,o.score AS discovery_score,o.fit AS discovery_fit,o.demand_signal,o.revenue_offer_id,o.status,a.assessed_at,a.commercial_score,a.commercial_fit,a.evidence_strength,a.commercially_actionable,a.synthetic_or_test_only,a.reasons_json,p.proposal_id AS existing_proposal_id,p.created_at AS existing_created_at,p.status AS existing_proposal_status,p.quality_gate_status AS existing_quality_gate_status";
+  const baseFields = "SELECT o.id,o.name,o.description,o.remote_id,o.endpoint,o.evidence,o.score AS discovery_score,o.fit AS discovery_fit,o.demand_signal,o.revenue_offer_id,o.status,a.assessed_at,a.commercial_score,a.commercial_fit,a.evidence_strength,a.commercially_actionable,a.synthetic_or_test_only,a.reasons_json,p.proposal_id AS existing_proposal_id,p.created_at AS existing_created_at,p.status AS existing_proposal_status,p.quality_gate_status AS existing_quality_gate_status,p.metadata_json AS existing_metadata_json,x.status AS existing_outreach_status,x.updated_at AS existing_outreach_updated_at";
   const oneTimeMicrobuyerRevision = firstCashMode
     ? " OR (p.status='DRAFT' AND p.quality_gate_status='NEEDS_REVISION' AND a.reasons_json LIKE '%microbuyer_fit%' AND COALESCE(p.metadata_json,'') NOT LIKE '%\"one_time_revision\":true%')"
     : "";
-  const where = ` WHERE a.commercially_actionable=1 AND a.synthetic_or_test_only=0 AND (p.opportunity_id IS NULL OR (p.status='DRAFT' AND p.quality_gate_status='PENDING_QUALITY_GATE')${oneTimeMicrobuyerRevision})`;
-  const firstCashOrder = firstCashMode ? "CASE WHEN a.reasons_json LIKE '%microbuyer_fit%' THEN 0 ELSE 1 END," : "";
+  const conversionRecovery = firstCashMode
+    ? " OR (a.commercial_score>=85 AND COALESCE(p.metadata_json,'') NOT LIKE '%\"conversion_recovery\":true%' AND p.status IN ('DRAFT','APPROVED') AND p.quality_gate_status IN ('NEEDS_REVISION','PASS') AND (x.proposal_id IS NULL OR (x.status IN ('CARD_FETCH_FAILED','SEND_FAILED','INCOMPATIBLE') AND datetime(x.updated_at)<=datetime('now','-6 hours'))))"
+    : "";
+  const where = ` WHERE a.commercially_actionable=1 AND a.synthetic_or_test_only=0 AND (p.opportunity_id IS NULL OR (p.status='DRAFT' AND p.quality_gate_status='PENDING_QUALITY_GATE')${oneTimeMicrobuyerRevision}${conversionRecovery})`;
+  const firstCashOrder = firstCashMode ? "CASE WHEN a.reasons_json LIKE '%microbuyer_fit%' THEN 0 ELSE 1 END,CASE WHEN p.opportunity_id IS NULL THEN 0 ELSE 1 END," : "";
   let row = null;
   try {
-    row = await env.DB.prepare(`${baseFields},COALESCE(f.priority_adjustment,0) AS profit_priority_adjustment,COALESCE(f.evidence_level,'COLD') AS profit_evidence_level,COALESCE(f.verified_settlements,0) AS profit_verified_settlements,COALESCE(f.verified_revenue_usd,0) AS profit_verified_revenue_usd,COALESCE(d.priority_adjustment,0) AS director_priority_adjustment,COALESCE(d.tactic,'NEUTRAL') AS director_tactic,COALESCE(d.evidence_level,'COLD_START') AS director_evidence_level,d.reason AS director_reason,COALESCE(pf.economic_score,0) AS portfolio_economic_score,pf.id AS portfolio_candidate_id,pf.lane AS portfolio_lane,pf.rationale AS portfolio_rationale,COALESCE(v4.score,0) AS sovereign_priority_adjustment,v4.run_id AS sovereign_run_id FROM lumen_opportunities o JOIN lumen_opportunity_assessments a ON a.opportunity_id=o.id LEFT JOIN lumen_proposal_drafts p ON p.opportunity_id=o.id LEFT JOIN lumen_offer_performance f ON f.offer_id=o.revenue_offer_id LEFT JOIN lumen_revenue_director_offer_focus d ON d.offer_id=o.revenue_offer_id LEFT JOIN lumen_opportunity_factory_candidates pf ON pf.source_type='DISCOVERY' AND pf.source_id=o.id AND pf.active=1 LEFT JOIN lumen_v4_allocations v4 ON v4.candidate_id=pf.id${where} ORDER BY ${firstCashOrder}(a.commercial_score + COALESCE(f.priority_adjustment,0) + COALESCE(d.priority_adjustment,0) + COALESCE(pf.economic_score,0)*0.20 + COALESCE(v4.score,0)) DESC,a.commercial_score DESC,o.score DESC,o.updated_at DESC LIMIT 1`).first();
+    row = await env.DB.prepare(`${baseFields},COALESCE(f.priority_adjustment,0) AS profit_priority_adjustment,COALESCE(f.evidence_level,'COLD') AS profit_evidence_level,COALESCE(f.verified_settlements,0) AS profit_verified_settlements,COALESCE(f.verified_revenue_usd,0) AS profit_verified_revenue_usd,COALESCE(d.priority_adjustment,0) AS director_priority_adjustment,COALESCE(d.tactic,'NEUTRAL') AS director_tactic,COALESCE(d.evidence_level,'COLD_START') AS director_evidence_level,d.reason AS director_reason,COALESCE(pf.economic_score,0) AS portfolio_economic_score,pf.id AS portfolio_candidate_id,pf.lane AS portfolio_lane,pf.rationale AS portfolio_rationale,COALESCE(v4.score,0) AS sovereign_priority_adjustment,v4.run_id AS sovereign_run_id FROM lumen_opportunities o JOIN lumen_opportunity_assessments a ON a.opportunity_id=o.id LEFT JOIN lumen_proposal_drafts p ON p.opportunity_id=o.id LEFT JOIN lumen_outreach_attempts x ON x.proposal_id=p.proposal_id LEFT JOIN lumen_offer_performance f ON f.offer_id=o.revenue_offer_id LEFT JOIN lumen_revenue_director_offer_focus d ON d.offer_id=o.revenue_offer_id LEFT JOIN lumen_opportunity_factory_candidates pf ON pf.source_type='DISCOVERY' AND pf.source_id=o.id AND pf.active=1 LEFT JOIN lumen_v4_allocations v4 ON v4.candidate_id=pf.id${where} ORDER BY ${firstCashOrder}(a.commercial_score + COALESCE(f.priority_adjustment,0) + COALESCE(d.priority_adjustment,0) + COALESCE(pf.economic_score,0)*0.20 + COALESCE(v4.score,0)) DESC,a.commercial_score DESC,o.score DESC,o.updated_at DESC LIMIT 1`).first();
   } catch {
     try {
-      row = await env.DB.prepare(`${baseFields},COALESCE(f.priority_adjustment,0) AS profit_priority_adjustment,COALESCE(f.evidence_level,'COLD') AS profit_evidence_level,COALESCE(f.verified_settlements,0) AS profit_verified_settlements,COALESCE(f.verified_revenue_usd,0) AS profit_verified_revenue_usd,COALESCE(d.priority_adjustment,0) AS director_priority_adjustment,COALESCE(d.tactic,'NEUTRAL') AS director_tactic,COALESCE(d.evidence_level,'COLD_START') AS director_evidence_level,d.reason AS director_reason,COALESCE(pf.economic_score,0) AS portfolio_economic_score,pf.id AS portfolio_candidate_id,pf.lane AS portfolio_lane,pf.rationale AS portfolio_rationale,0 AS sovereign_priority_adjustment,NULL AS sovereign_run_id FROM lumen_opportunities o JOIN lumen_opportunity_assessments a ON a.opportunity_id=o.id LEFT JOIN lumen_proposal_drafts p ON p.opportunity_id=o.id LEFT JOIN lumen_offer_performance f ON f.offer_id=o.revenue_offer_id LEFT JOIN lumen_revenue_director_offer_focus d ON d.offer_id=o.revenue_offer_id LEFT JOIN lumen_opportunity_factory_candidates pf ON pf.source_type='DISCOVERY' AND pf.source_id=o.id AND pf.active=1${where} ORDER BY ${firstCashOrder}(a.commercial_score + COALESCE(f.priority_adjustment,0) + COALESCE(d.priority_adjustment,0) + COALESCE(pf.economic_score,0)*0.20) DESC,a.commercial_score DESC,o.score DESC,o.updated_at DESC LIMIT 1`).first();
+      row = await env.DB.prepare(`${baseFields},COALESCE(f.priority_adjustment,0) AS profit_priority_adjustment,COALESCE(f.evidence_level,'COLD') AS profit_evidence_level,COALESCE(f.verified_settlements,0) AS profit_verified_settlements,COALESCE(f.verified_revenue_usd,0) AS profit_verified_revenue_usd,COALESCE(d.priority_adjustment,0) AS director_priority_adjustment,COALESCE(d.tactic,'NEUTRAL') AS director_tactic,COALESCE(d.evidence_level,'COLD_START') AS director_evidence_level,d.reason AS director_reason,COALESCE(pf.economic_score,0) AS portfolio_economic_score,pf.id AS portfolio_candidate_id,pf.lane AS portfolio_lane,pf.rationale AS portfolio_rationale,0 AS sovereign_priority_adjustment,NULL AS sovereign_run_id FROM lumen_opportunities o JOIN lumen_opportunity_assessments a ON a.opportunity_id=o.id LEFT JOIN lumen_proposal_drafts p ON p.opportunity_id=o.id LEFT JOIN lumen_outreach_attempts x ON x.proposal_id=p.proposal_id LEFT JOIN lumen_offer_performance f ON f.offer_id=o.revenue_offer_id LEFT JOIN lumen_revenue_director_offer_focus d ON d.offer_id=o.revenue_offer_id LEFT JOIN lumen_opportunity_factory_candidates pf ON pf.source_type='DISCOVERY' AND pf.source_id=o.id AND pf.active=1${where} ORDER BY ${firstCashOrder}(a.commercial_score + COALESCE(f.priority_adjustment,0) + COALESCE(d.priority_adjustment,0) + COALESCE(pf.economic_score,0)*0.20) DESC,a.commercial_score DESC,o.score DESC,o.updated_at DESC LIMIT 1`).first();
     } catch {
       try {
-        row = await env.DB.prepare(`${baseFields},COALESCE(f.priority_adjustment,0) AS profit_priority_adjustment,COALESCE(f.evidence_level,'COLD') AS profit_evidence_level,COALESCE(f.verified_settlements,0) AS profit_verified_settlements,COALESCE(f.verified_revenue_usd,0) AS profit_verified_revenue_usd,0 AS director_priority_adjustment,'NEUTRAL' AS director_tactic,'UNINITIALIZED' AS director_evidence_level,NULL AS director_reason,0 AS portfolio_economic_score,NULL AS portfolio_candidate_id,NULL AS portfolio_lane,NULL AS portfolio_rationale,0 AS sovereign_priority_adjustment,NULL AS sovereign_run_id FROM lumen_opportunities o JOIN lumen_opportunity_assessments a ON a.opportunity_id=o.id LEFT JOIN lumen_proposal_drafts p ON p.opportunity_id=o.id LEFT JOIN lumen_offer_performance f ON f.offer_id=o.revenue_offer_id${where} ORDER BY ${firstCashOrder}(a.commercial_score + COALESCE(f.priority_adjustment,0)) DESC,a.commercial_score DESC,o.score DESC,o.updated_at DESC LIMIT 1`).first();
+        row = await env.DB.prepare(`${baseFields},COALESCE(f.priority_adjustment,0) AS profit_priority_adjustment,COALESCE(f.evidence_level,'COLD') AS profit_evidence_level,COALESCE(f.verified_settlements,0) AS profit_verified_settlements,COALESCE(f.verified_revenue_usd,0) AS profit_verified_revenue_usd,0 AS director_priority_adjustment,'NEUTRAL' AS director_tactic,'UNINITIALIZED' AS director_evidence_level,NULL AS director_reason,0 AS portfolio_economic_score,NULL AS portfolio_candidate_id,NULL AS portfolio_lane,NULL AS portfolio_rationale,0 AS sovereign_priority_adjustment,NULL AS sovereign_run_id FROM lumen_opportunities o JOIN lumen_opportunity_assessments a ON a.opportunity_id=o.id LEFT JOIN lumen_proposal_drafts p ON p.opportunity_id=o.id LEFT JOIN lumen_outreach_attempts x ON x.proposal_id=p.proposal_id LEFT JOIN lumen_offer_performance f ON f.offer_id=o.revenue_offer_id${where} ORDER BY ${firstCashOrder}(a.commercial_score + COALESCE(f.priority_adjustment,0)) DESC,a.commercial_score DESC,o.score DESC,o.updated_at DESC LIMIT 1`).first();
       } catch {
-        row = await env.DB.prepare(`${baseFields},0 AS profit_priority_adjustment,'COLD' AS profit_evidence_level,0 AS profit_verified_settlements,0 AS profit_verified_revenue_usd,0 AS director_priority_adjustment,'NEUTRAL' AS director_tactic,'UNINITIALIZED' AS director_evidence_level,NULL AS director_reason,0 AS portfolio_economic_score,NULL AS portfolio_candidate_id,NULL AS portfolio_lane,NULL AS portfolio_rationale,0 AS sovereign_priority_adjustment,NULL AS sovereign_run_id FROM lumen_opportunities o JOIN lumen_opportunity_assessments a ON a.opportunity_id=o.id LEFT JOIN lumen_proposal_drafts p ON p.opportunity_id=o.id${where} ORDER BY ${firstCashOrder}a.commercial_score DESC,o.score DESC,o.updated_at DESC LIMIT 1`).first();
+        row = await env.DB.prepare(`${baseFields},0 AS profit_priority_adjustment,'COLD' AS profit_evidence_level,0 AS profit_verified_settlements,0 AS profit_verified_revenue_usd,0 AS director_priority_adjustment,'NEUTRAL' AS director_tactic,'UNINITIALIZED' AS director_evidence_level,NULL AS director_reason,0 AS portfolio_economic_score,NULL AS portfolio_candidate_id,NULL AS portfolio_lane,NULL AS portfolio_rationale,0 AS sovereign_priority_adjustment,NULL AS sovereign_run_id FROM lumen_opportunities o JOIN lumen_opportunity_assessments a ON a.opportunity_id=o.id LEFT JOIN lumen_proposal_drafts p ON p.opportunity_id=o.id LEFT JOIN lumen_outreach_attempts x ON x.proposal_id=p.proposal_id${where} ORDER BY ${firstCashOrder}a.commercial_score DESC,o.score DESC,o.updated_at DESC LIMIT 1`).first();
       }
     }
   }
@@ -251,7 +254,13 @@ export async function prepareTopProposal(env) {
   const now = new Date().toISOString();
   const proposalId = opportunity.existing_proposal_id || `PROP-${crypto.randomUUID().replaceAll("-", "").slice(0, 12).toUpperCase()}`;
   const createdAt = opportunity.existing_created_at || now;
-  const evolution = await selectProposalVariant(env, proposalId);
+  const conversionRecovery = Boolean(opportunity.existing_proposal_id) &&
+    Number(opportunity.commercial_score || 0) >= 85 &&
+    ["NEEDS_REVISION","PASS"].includes(clean(opportunity.existing_quality_gate_status, 80).toUpperCase()) &&
+    !clean(opportunity.existing_metadata_json, 12000).includes('"conversion_recovery":true');
+  const evolution = conversionRecovery
+    ? { variantId: "low_friction", reason: "cash_recovery_low_friction", stats: await proposalVariantStats(env) }
+    : await selectProposalVariant(env, proposalId);
   const draft = makeDraft(opportunity, env, evolution.variantId);
   const selectedStats = evolution.stats.find(s => s.id === draft.variantId) || null;
   const metadata = {
@@ -284,6 +293,16 @@ export async function prepareTopProposal(env) {
       selected_offer_id: draft.offerId,
       autonomous_discounting: false,
       one_time_revision: opportunity.existing_quality_gate_status === "NEEDS_REVISION"
+    },
+    conversion_recovery: {
+      enabled: conversionRecovery,
+      prior_proposal_status: opportunity.existing_proposal_status || null,
+      prior_quality_gate_status: opportunity.existing_quality_gate_status || null,
+      prior_outreach_status: opportunity.existing_outreach_status || null,
+      strategy: conversionRecovery ? "high_score_unexposed_or_failed_retry_low_friction" : null,
+      max_recovery_passes: 1,
+      bypasses_domain_cooldown: false,
+      bypasses_daily_cap: false
     },
     profit_feedback: {
       priority_adjustment: Number(opportunity.profit_priority_adjustment || 0),
@@ -322,7 +341,7 @@ export async function prepareTopProposal(env) {
 
   await env.DB.prepare("INSERT INTO lumen_proposal_drafts(opportunity_id,proposal_id,created_at,updated_at,status,offer_id,offer_name,amount_usd,subject,message,quality_gate_status,autonomous_send,metadata_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(opportunity_id) DO UPDATE SET updated_at=excluded.updated_at,status=excluded.status,offer_id=excluded.offer_id,offer_name=excluded.offer_name,amount_usd=excluded.amount_usd,subject=excluded.subject,message=excluded.message,quality_gate_status=excluded.quality_gate_status,autonomous_send=excluded.autonomous_send,metadata_json=excluded.metadata_json")
     .bind(opportunity.id, proposalId, createdAt, now, "DRAFT", draft.offerId, draft.offerName, draft.amountUsd, draft.subject, draft.message, "PENDING_QUALITY_GATE", 0, JSON.stringify(metadata)).run();
-  await env.DB.prepare("INSERT INTO lumen_proposal_variant_assignments(proposal_id,opportunity_id,offer_id,variant_id,created_at,engine_version) VALUES(?,?,?,?,?,?) ON CONFLICT(proposal_id) DO UPDATE SET offer_id=excluded.offer_id,engine_version=excluded.engine_version")
+  await env.DB.prepare("INSERT INTO lumen_proposal_variant_assignments(proposal_id,opportunity_id,offer_id,variant_id,created_at,engine_version) VALUES(?,?,?,?,?,?) ON CONFLICT(proposal_id) DO UPDATE SET offer_id=excluded.offer_id,variant_id=excluded.variant_id,engine_version=excluded.engine_version")
     .bind(proposalId, opportunity.id, draft.offerId, draft.variantId, now, EVOLUTION_VERSION).run();
 
   return {
