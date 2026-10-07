@@ -1,0 +1,57 @@
+name: LUMEN Conversion Followup Kick
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-conversion-followup-kick.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lumen-conversion-followup-kick
+  cancel-in-progress: false
+
+jobs:
+  followup:
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: https://lumen-zero-a2a.lumen-b2b.workers.dev
+      ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+    steps:
+      - name: Verify followup state
+        run: |
+          set -euo pipefail
+          test -n "${ADMIN_TOKEN:-}"
+          curl -fsS --max-time 30 "$BASE_URL/followup/stats" -o /tmp/before.json
+          jq -e '.version == "1.1-qualified-commercial-followup" and .autonomousFollowupEnabled == true and .autonomousOutgoingSpend == false and .autonomousContract == false' /tmp/before.json >/dev/null
+          echo '===== BEFORE ====='
+          cat /tmp/before.json
+
+      - name: Execute one bounded followup cycle
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 60 -X POST             -H "x-lumen-admin: $ADMIN_TOKEN"             "$BASE_URL/followup/run" -o /tmp/run.json
+          jq -e '.ok == true and .version == "1.1-qualified-commercial-followup"' /tmp/run.json >/dev/null
+          echo '===== FOLLOWUP RUN ====='
+          cat /tmp/run.json
+
+      - name: Reconcile revenue truth
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 45 -X POST             -H "x-lumen-admin: $ADMIN_TOKEN"             "$BASE_URL/x402-revenue-bridge/sync" -o /tmp/x402.json
+          jq -e '.ok == true' /tmp/x402.json >/dev/null
+          echo '===== X402 ====='
+          cat /tmp/x402.json
+
+      - name: Read after state
+        run: |
+          set -euo pipefail
+          echo '===== AFTER ====='
+          curl -fsS --max-time 30 "$BASE_URL/followup/stats"
+          echo
+          echo '===== PORTFOLIO ====='
+          curl -fsS --max-time 30 "$BASE_URL/portfolio-governor/state"
+          echo
