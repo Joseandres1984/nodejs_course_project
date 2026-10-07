@@ -22,3 +22,13 @@ assert.equal(declined.responseClass,"DECLINED");
 assert.equal(declined.qualified,false);
 
 console.log("response-closer-v2 shared commercial truth tests: PASS");
+
+const genericQuestion = classifyCommercialResponse("Who are you?", "Supplier Snapshot is USD 5 per request.");
+assert.equal(genericQuestion.responseClass, "GENERIC_RESPONSE");
+assert.equal(genericQuestion.reason, "question_without_commercial_context");
+
+const priceQuestion = classifyCommercialResponse("What is the price?", "Supplier Snapshot is USD 5 per request.");
+assert.equal(priceQuestion.responseClass, "COMMERCIAL_QUESTION");
+
+const interestedQuestion = classifyCommercialResponse("I'm interested. Can you explain?", "Supplier Snapshot is USD 5 per request.");
+assert.equal(interestedQuestion.responseClass, "COMMERCIAL_QUESTION");
