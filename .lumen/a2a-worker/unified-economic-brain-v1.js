@@ -1,4 +1,4 @@
-const VERSION = "1.1-demand-conversion-learning";
+const VERSION = "1.2-entrepreneurial-adaptation";
 const MODEL = "@cf/google/gemma-4-26b-a4b-it";
 const EXPLORATION_RATE = 0.20;
 const MAX_AI_HYPOTHESES = 5;
@@ -18,6 +18,10 @@ export const UNIFIED_BRAIN_POLICY = Object.freeze({
   demandFirstWhenBuyerEvidenceZero: true,
   persistentFunnelMemory: true,
   strategyMemoryAffectsSelection: true,
+  strategyFatigueAvoidance: true,
+  zeroRewardAttemptsTriggerPivot: 3,
+  verifiedWinnerReplication: true,
+  cashPressurePrioritizesFastValidation: true,
   monetizationFrontier: true,
   distinctBusinessModelExploration: true,
   frontierExplorationEscapesCurrentBottleneck: true,
@@ -78,18 +82,36 @@ export function detectEconomicBottleneck(f={}) {
 
 export function learningAdjustment(h={}, memory={}, context={}) {
   const attempts=Math.max(0,num(memory.attempts,0));
-  const averageReward=attempts>0 ? num(memory.reward,0)/attempts : 0;
+  const reward=num(memory.reward,0);
+  const averageReward=attempts>0 ? reward/attempts : 0;
+  const verifiedSettlements=Math.max(0,num(memory.verified_settlements ?? memory.verifiedSettlements,0));
+  const commercialResponses=Math.max(0,num(memory.commercial_responses ?? memory.commercialResponses,0));
   let delta=Math.max(-0.14,Math.min(0.18,averageReward/120));
   const bottleneck=clean(context.bottleneck || "",40).toUpperCase();
   const lane=clean(h.executionLane || h.execution_lane || "EXPLORE",30).toUpperCase();
   const demandFocused=isDemandFocusedHypothesis(h);
+
+  // Entrepreneur discipline: do not keep falling in love with a strategy that
+  // repeatedly produces neither commercial evidence nor cash.
+  if (attempts>=3 && reward<=0 && verifiedSettlements===0 && commercialResponses===0) {
+    delta-=Math.min(0.16,0.04*(attempts-2));
+  }
+
+  // Conversely, a verified winner deserves compounding attention.
+  if (verifiedSettlements>0) delta+=Math.min(0.18,0.06*verifiedSettlements);
+  else if (commercialResponses>0) delta+=Math.min(0.08,0.02*commercialResponses);
+
+  // When there is still no cash, prefer fast reversible tests only when they
+  // are backed by real evidence; speed alone must not outrank evidence.
+  if (Math.max(0,num(context.verifiedSettlements,0))===0 && num(h.timeToCashHours,168)<=24 && num(h.evidenceStrength,0)>=0.5) delta+=0.05;
+
   if (bottleneck==="DEMAND" && demandFocused) delta+=0.18;
   if (bottleneck==="DEMAND" && ["COMMERCE","TRAVEL","VENTURE"].includes(lane) && !demandFocused) delta-=0.14;
   if (bottleneck==="DELIVERY_OR_RESPONSE" && lane==="REVENUE") delta+=0.12;
   if (bottleneck==="OUTBOUND" && lane==="REVENUE") delta+=0.10;
   if (bottleneck==="PROPOSAL" && (lane==="REVENUE" || demandFocused)) delta+=0.10;
   if (bottleneck==="CLOSE" && lane==="REVENUE") delta+=0.16;
-  return Number(Math.max(-0.25,Math.min(0.25,delta)).toFixed(4));
+  return Number(Math.max(-0.30,Math.min(0.30,delta)).toFixed(4));
 }
 
 export function scoreEconomicHypothesis(h={}, context={}) {
@@ -600,7 +622,7 @@ export async function runUnifiedEconomicBrain(env, options={}) {
   const deterministic=deterministicHypotheses(observation);
   const generated=await aiHypotheses(env,observation);
   const memoryByKey=new Map((observation.learningMemory||[]).map(x=>[clean(x.strategy_key,220),x]));
-  const context={bottleneck:observation.funnel.bottleneck,travelMonetization:observation.travelMonetization,clickMonetization:observation.clickMonetization};
+  const context={bottleneck:observation.funnel.bottleneck,verifiedSettlements:observation.verifiedSettlementCount,travelMonetization:observation.travelMonetization,clickMonetization:observation.clickMonetization};
   const hypotheses=[...generated,...deterministic].map(h=>{
     const memory=memoryByKey.get(strategyKey(h)) || {};
     const adjustment=learningAdjustment(h,memory,context);
