@@ -105,12 +105,12 @@ assert.ok(winnerAdjustment>freshAdjustment,"verified winners must gain compoundi
 const fastEvidenceAdjustment=learningAdjustment(
   fast,
   {attempts:0,reward:0},
-  {bottleneck:"DEMAND",verifiedSettlements:0}
+  {bottleneck:"OUTBOUND",verifiedSettlements:0}
 );
 const slowEvidenceAdjustment=learningAdjustment(
   slow,
   {attempts:0,reward:0},
-  {bottleneck:"DEMAND",verifiedSettlements:0}
+  {bottleneck:"OUTBOUND",verifiedSettlements:0}
 );
 assert.ok(fastEvidenceAdjustment>slowEvidenceAdjustment,"zero-cash pressure should prefer fast evidence-backed validation");
 
