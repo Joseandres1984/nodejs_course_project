@@ -12,6 +12,10 @@ assert.equal(CLICK_REVENUE_POLICY.providerVerifiedPayoutIsRevenue, true);
 assert.equal(CLICK_REVENUE_POLICY.syntheticClicksForbidden, true);
 assert.equal(CLICK_REVENUE_POLICY.selfClicksForbidden, true);
 assert.equal(CLICK_REVENUE_POLICY.autonomousSpendUsd, 0);
+assert.equal(CLICK_REVENUE_POLICY.persistentProgramConfig, true);
+assert.equal(CLICK_REVENUE_POLICY.activationRequiresExplicitApprovalEvidence, true);
+assert.equal(CLICK_REVENUE_POLICY.activationRequiresExplicitTermsEvidence, true);
+assert.equal(CLICK_REVENUE_POLICY.automaticEnrollment, false);
 
 const inactive = normalizeClickProgram({
   id:"demo-cpc",
