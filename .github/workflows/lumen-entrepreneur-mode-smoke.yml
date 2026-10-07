@@ -1,5 +1,5 @@
 name: LUMEN Entrepreneur Mode Smoke
-# rerun entrepreneur: 2026-10-07 post-deploy fresh manual decision
+# rerun entrepreneur: 2026-10-07 verify hard-pivot selects a fresh strategy
 
 on:
   pull_request:
