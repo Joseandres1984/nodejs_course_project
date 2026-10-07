@@ -28,8 +28,13 @@ jobs:
           set -euo pipefail
           card='https://attestly.co/.well-known/agent-card.json'
           curl --fail --show-error --silent --location --max-time 20 "$card" -o /tmp/card.json
+          echo '===== URL-bearing card fields ====='
+          jq -r 'paths(scalars) as $p | getpath($p) as $v | select(($v|type)=="string" and ($v|startswith("https://"))) | [($p|map(tostring)|join(".")),$v] | @tsv' /tmp/card.json
           jq -r '[.url, (.supportedInterfaces[]?.url)] | map(select(type=="string" and startswith("https://"))) | unique[]' /tmp/card.json > /tmp/endpoints.txt
           while IFS= read -r endpoint; do
-            echo "===== $endpoint ====="
+            echo "===== OPTIONS $endpoint ====="
             curl --show-error --silent --max-time 15 -o /dev/null -D - -X OPTIONS "$endpoint" | grep -Ei '^(HTTP/|allow:|content-type:)' || true
+            echo "===== GET $endpoint ====="
+            curl --show-error --silent --location --max-time 15 "$endpoint" | head -c 3000 || true
+            echo
           done < /tmp/endpoints.txt
