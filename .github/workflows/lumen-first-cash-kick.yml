@@ -1,5 +1,5 @@
 name: LUMEN First Cash Kick
-# revenue kick: 2026-10-07 owner-requested monetization push v2
+# revenue kick: 2026-10-07 after actionable-commission governor fix
 
 on:
   workflow_dispatch:
