@@ -26,6 +26,7 @@ assert.equal(UNIFIED_BRAIN_POLICY.persistentFunnelMemory,true);
 assert.equal(UNIFIED_BRAIN_POLICY.strategyMemoryAffectsSelection,true);
 assert.equal(UNIFIED_BRAIN_POLICY.strategyFatigueAvoidance,true);
 assert.equal(UNIFIED_BRAIN_POLICY.zeroRewardAttemptsTriggerPivot,3);
+assert.equal(UNIFIED_BRAIN_POLICY.hardPivotWhenAlternativesExist,true);
 assert.equal(UNIFIED_BRAIN_POLICY.verifiedWinnerReplication,true);
 assert.equal(UNIFIED_BRAIN_POLICY.cashPressurePrioritizesFastValidation,true);
 assert.equal(UNIFIED_BRAIN_POLICY.monetizationFrontier,true);
@@ -94,6 +95,14 @@ const freshAdjustment=learningAdjustment(
   {bottleneck:"OUTBOUND",verifiedSettlements:0}
 );
 assert.ok(stalledAdjustment<freshAdjustment,"repeated zero-signal strategies must lose priority");
+
+const stalledHard={...fast,id:"stalled-hard",score:0.99,priorAttempts:3,priorReward:-8,priorVerifiedSettlements:0,priorCommercialResponses:0};
+const freshHard={...slow,id:"fresh-hard",score:0.20,priorAttempts:0,priorReward:0,priorVerifiedSettlements:0,priorCommercialResponses:0};
+assert.equal(
+  chooseEconomicMission([stalledHard,freshHard],"1",{bottleneck:"OUTBOUND",verifiedSettlements:0}).id,
+  "fresh-hard",
+  "a repeated zero-signal strategy must be excluded when a safe alternative exists"
+);
 
 const winnerAdjustment=learningAdjustment(
   fast,

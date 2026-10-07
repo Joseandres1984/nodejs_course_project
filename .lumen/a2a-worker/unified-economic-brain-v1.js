@@ -20,6 +20,7 @@ export const UNIFIED_BRAIN_POLICY = Object.freeze({
   strategyMemoryAffectsSelection: true,
   strategyFatigueAvoidance: true,
   zeroRewardAttemptsTriggerPivot: 3,
+  hardPivotWhenAlternativesExist: true,
   verifiedWinnerReplication: true,
   cashPressurePrioritizesFastValidation: true,
   monetizationFrontier: true,
@@ -183,21 +184,32 @@ export function normalizeEconomicHypothesis(raw={}, fallback={}) {
 export function chooseEconomicMission(hypotheses=[], cycleKey="", context={}) {
   const safe = hypotheses.filter(h => h && h.executionLane !== "HOLD" && h.capitalRequiredUsd === 0 && h.reversibility >= 0.35);
   if (!safe.length) return normalizeEconomicHypothesis({ execution_lane:"EXPLORE", business_model:"open-ended opportunity discovery", hypothesis:"Search current demand and market evidence for a new zero-capital monetization hypothesis.", novelty:1, evidence_strength:0.25, confidence:0.4, probability_of_sale:0.15, time_to_cash_hours:72 });
+
+  // A founder must actually pivot, not merely label a strategy as stale.
+  // Exclude repeated zero-signal strategies whenever another safe hypothesis exists.
+  const nonStalled=safe.filter(h => !(
+    num(h.priorAttempts,0)>=3 &&
+    num(h.priorReward,0)<=0 &&
+    num(h.priorVerifiedSettlements,0)===0 &&
+    num(h.priorCommercialResponses,0)===0
+  ));
+  const viable=nonStalled.length ? nonStalled : safe;
+
   const bucket = [...clean(cycleKey,80)].reduce((sum,ch)=>sum+ch.charCodeAt(0),0) % 5;
   const explore = bucket === 0;
   const bottleneck=clean(context.bottleneck || "",40).toUpperCase();
-  let exploitPool=safe;
+  let exploitPool=viable;
   if (bottleneck==="DEMAND") {
-    const demandPool=safe.filter(h=>isDemandFocusedHypothesis(h) || (h.executionLane==="TRAVEL" && context?.travelMonetization?.commercialSignal===true));
+    const demandPool=viable.filter(h=>isDemandFocusedHypothesis(h) || (h.executionLane==="TRAVEL" && context?.travelMonetization?.commercialSignal===true));
     if (demandPool.length) exploitPool=demandPool;
   } else if (["DELIVERY_OR_RESPONSE","OUTBOUND","PROPOSAL","CLOSE"].includes(bottleneck)) {
-    const revenuePool=safe.filter(h=>h.executionLane==="REVENUE" || (h.executionLane==="TRAVEL" && context?.travelMonetization?.commercialSignal===true));
+    const revenuePool=viable.filter(h=>h.executionLane==="REVENUE" || (h.executionLane==="TRAVEL" && context?.travelMonetization?.commercialSignal===true));
     if (revenuePool.length) exploitPool=revenuePool;
   }
 
   // Exploitation attacks the current cash bottleneck. The bounded exploration slot
   // deliberately sees the whole safe frontier so LUMEN can discover new business models.
-  const selectionPool=explore ? safe : exploitPool;
+  const selectionPool=explore ? viable : exploitPool;
   const ranked=[...selectionPool].sort((x,y) =>
     explore
       ? ((y.novelty + y.scalePotential*y.evidenceStrength) - (x.novelty + x.scalePotential*x.evidenceStrength) || y.score-x.score || y.evidenceStrength-x.evidenceStrength)
@@ -626,7 +638,7 @@ export async function runUnifiedEconomicBrain(env, options={}) {
   const hypotheses=[...generated,...deterministic].map(h=>{
     const memory=memoryByKey.get(strategyKey(h)) || {};
     const adjustment=learningAdjustment(h,memory,context);
-    return {...h,score:scoreEconomicHypothesis(h,{...context,memory}),learningAdjustment:adjustment,priorAttempts:num(memory.attempts,0),priorReward:num(memory.reward,0)};
+    return {...h,score:scoreEconomicHypothesis(h,{...context,memory}),learningAdjustment:adjustment,priorAttempts:num(memory.attempts,0),priorReward:num(memory.reward,0),priorVerifiedSettlements:num(memory.verified_settlements,0),priorCommercialResponses:num(memory.commercial_responses,0)};
   });
   await persistHypotheses(env,cycleKey,hypotheses);
   const mission=chooseEconomicMission(hypotheses,cycleKey,context);

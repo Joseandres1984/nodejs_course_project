@@ -50,6 +50,7 @@ jobs:
           grep -q 'strategyMemoryAffectsSelection: true' .lumen/a2a-worker/unified-economic-brain-v1.js
           grep -q 'strategyFatigueAvoidance: true' .lumen/a2a-worker/unified-economic-brain-v1.js
           grep -q 'zeroRewardAttemptsTriggerPivot: 3' .lumen/a2a-worker/unified-economic-brain-v1.js
+          grep -q 'hardPivotWhenAlternativesExist: true' .lumen/a2a-worker/unified-economic-brain-v1.js
           grep -q 'verifiedWinnerReplication: true' .lumen/a2a-worker/unified-economic-brain-v1.js
           grep -q 'cashPressurePrioritizesFastValidation: true' .lumen/a2a-worker/unified-economic-brain-v1.js
           grep -q 'monetizationFrontier: true' .lumen/a2a-worker/unified-economic-brain-v1.js
