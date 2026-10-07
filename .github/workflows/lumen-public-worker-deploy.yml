@@ -19,7 +19,11 @@ jobs:
 
       - name: Validate public worker bundle
         working-directory: .lumen/public-worker
-        run: npx --yes wrangler@latest deploy --dry-run --config wrangler.toml
+        run: |
+          node --check discover.js
+          node --check worker.js
+          node --check gateway.js
+          npx --yes wrangler@latest deploy --dry-run --config wrangler.toml
 
       - name: Verify Cloudflare credentials
         env:
@@ -48,13 +52,21 @@ jobs:
           for i in $(seq 1 20); do
             health_code="$(curl -sS --max-time 20 -o health.json -w '%{http_code}' "$BASE/health" || true)"
             home_code="$(curl -sS --max-time 20 -o home.html -w '%{http_code}' "$BASE/" || true)"
+            discover_code="$(curl -sS --max-time 20 -o discover.html -w '%{http_code}' "$BASE/discover" || true)"
+            guide_code="$(curl -sS --max-time 20 -o guide.html -w '%{http_code}' "$BASE/discover/comparar-precios-online-sin-falsas-ofertas" || true)"
+            sitemap_code="$(curl -sS --max-time 20 -o sitemap.xml -w '%{http_code}' "$BASE/sitemap.xml" || true)"
+            robots_code="$(curl -sS --max-time 20 -o robots.txt -w '%{http_code}' "$BASE/robots.txt" || true)"
             travel_code="$(curl -sS --max-time 30 -o travel.html -w '%{http_code}' "$BASE/travel?q=Rio%20de%20Janeiro&source=web" || true)"
             travel_json_code="$(curl -sS --max-time 30 -o travel.json -w '%{http_code}' "$BASE/travel.json?q=Rio%20de%20Janeiro&source=web" || true)"
             package_code="$(curl -sS --max-time 40 -o package.html -w '%{http_code}' "$BASE/travel/package?destination=GIG&duration=7&month=11&travelers=2&budget=2500&source=web" || true)"
             package_json_code="$(curl -sS --max-time 40 -o package.json -w '%{http_code}' "$BASE/travel/package.json?destination=GIG&duration=7&month=11&travelers=2&budget=2500&source=web" || true)"
-            if [ "$health_code" = '200' ] && [ "$home_code" = '200' ] && [ "$travel_code" = '200' ] && [ "$travel_json_code" = '200' ] && [ "$package_code" = '200' ] && [ "$package_json_code" = '200' ] \
+            if [ "$health_code" = '200' ] && [ "$home_code" = '200' ] && [ "$discover_code" = '200' ] && [ "$guide_code" = '200' ] && [ "$sitemap_code" = '200' ] && [ "$robots_code" = '200' ] && [ "$travel_code" = '200' ] && [ "$travel_json_code" = '200' ] && [ "$package_code" = '200' ] && [ "$package_json_code" = '200' ] \
               && grep -q '"ok":true' health.json \
               && grep -q 'LUMEN' home.html \
+              && grep -q 'LUMEN Discover' discover.html \
+              && grep -q 'Cómo comparar precios online' guide.html \
+              && grep -q '/discover/' sitemap.xml \
+              && grep -q 'Sitemap:' robots.txt \
               && grep -q 'LUMEN Travel' travel.html \
               && grep -q 'Transparencia' travel.html \
               && grep -q 'Armá tu viaje' package.html \
@@ -66,7 +78,7 @@ jobs:
             sleep 4
           done
           if [ "$ok" -ne 1 ]; then
-            echo "PUBLIC_SMOKE_FAILED health=${health_code:-none} home=${home_code:-none} travel=${travel_code:-none} travel_json=${travel_json_code:-none} package=${package_code:-none} package_json=${package_json_code:-none}"
+            echo "PUBLIC_SMOKE_FAILED health=${health_code:-none} home=${home_code:-none} discover=${discover_code:-none} guide=${guide_code:-none} sitemap=${sitemap_code:-none} robots=${robots_code:-none} travel=${travel_code:-none} travel_json=${travel_json_code:-none} package=${package_code:-none} package_json=${package_json_code:-none}"
             cat health.json 2>/dev/null || true
             head -c 500 home.html 2>/dev/null || true
             head -c 800 travel.html 2>/dev/null || true
@@ -74,4 +86,4 @@ jobs:
             cat package.json 2>/dev/null || true
             exit 1
           fi
-          echo 'PUBLIC_TRAVEL_STOREFRONT_AND_COMPLETE_TRIP_SMOKE_OK'
+          echo 'PUBLIC_DISCOVER_TRAVEL_AND_COMPLETE_TRIP_SMOKE_OK'
