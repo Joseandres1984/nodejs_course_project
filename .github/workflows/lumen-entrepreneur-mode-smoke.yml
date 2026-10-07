@@ -73,24 +73,31 @@ jobs:
         run: |
           set -euo pipefail
           test -n "${ADMIN_TOKEN:-}"
-          code=$(curl --show-error --silent --max-time 90 -o /tmp/run.json -w '%{http_code}'             -X POST "$BASE_URL/entrepreneur/run"             -H "x-lumen-admin: $ADMIN_TOKEN"             -H 'content-type: application/json' -d '{}')
-          echo "ENTREPRENEUR_HTTP=$code"
-          cat /tmp/run.json; echo
-          test "$code" = '202'
-          jq -e '
-            .ok == true and
-            .version == "1.1-entrepreneur-cash-pressure" and
-            .mission.businessModel != null and
-            .mission.hypothesis != null and
-            .cashSprint.pressure != null and
-            .cashSprint.strategyDisposition != null and
-            .actionBoundary.huntRunsBeforeEconomicDecision == true and
-            .actionBoundary.maxExternalMessagesAddedByEntrepreneurMode == 0 and
-            .actionBoundary.autonomousSpendUsd == 0 and
-            .actionBoundary.autonomousContract == false and
-            .actionBoundary.autonomousPriceMutation == false and
-            (.revenueTruth.verifiedRevenueUsd | type) == "number"
-          ' /tmp/run.json >/dev/null
+          ready=0
+          for attempt in $(seq 1 18); do
+            code=$(curl --show-error --silent --max-time 90 -o /tmp/run.json -w '%{http_code}'               -X POST "$BASE_URL/entrepreneur/run?rollout=$GITHUB_SHA&attempt=$attempt"               -H "x-lumen-admin: $ADMIN_TOKEN"               -H 'cache-control: no-cache'               -H 'content-type: application/json' -d '{}')
+            echo "ENTREPRENEUR_HTTP=$code ATTEMPT=$attempt"
+            cat /tmp/run.json; echo
+            if [ "$code" = '202' ] && jq -e '
+              .ok == true and
+              .version == "1.1-entrepreneur-cash-pressure" and
+              .mission.businessModel != null and
+              .mission.hypothesis != null and
+              .cashSprint.pressure != null and
+              .cashSprint.strategyDisposition != null and
+              .actionBoundary.huntRunsBeforeEconomicDecision == true and
+              .actionBoundary.maxExternalMessagesAddedByEntrepreneurMode == 0 and
+              .actionBoundary.autonomousSpendUsd == 0 and
+              .actionBoundary.autonomousContract == false and
+              .actionBoundary.autonomousPriceMutation == false and
+              (.revenueTruth.verifiedRevenueUsd | type) == "number"
+            ' /tmp/run.json >/dev/null; then
+              ready=1
+              break
+            fi
+            sleep 4
+          done
+          test "$ready" -eq 1
 
       - name: Read persisted entrepreneur state
         run: |
