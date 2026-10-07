@@ -1,4 +1,4 @@
-const VERSION = "1.0-click-revenue-lane";
+const VERSION = "1.1-click-revenue-persistent-config";
 const TARGET_SCALE_EVENTS = 10000;
 
 export const CLICK_REVENUE_POLICY = Object.freeze({
@@ -13,6 +13,9 @@ export const CLICK_REVENUE_POLICY = Object.freeze({
   incentivizedInvalidTrafficForbidden: true,
   arbitraryOpenRedirectsForbidden: true,
   automaticEnrollment: false,
+  persistentProgramConfig: true,
+  activationRequiresExplicitApprovalEvidence: true,
+  activationRequiresExplicitTermsEvidence: true,
   autonomousSpendUsd: 0,
   autonomousPurchase: false,
   autonomousContract: false,
@@ -28,6 +31,14 @@ const KNOWN_CANDIDATES = Object.freeze([
     name: "Sovrn Commerce CPC",
     model: "CPC",
     sourceUrl: "https://www.sovrn.com/sovrn-for-creators/",
+    status: "REQUIRES_ENROLLMENT"
+  },
+  {
+    id: "skimlinks-commerce",
+    provider: "Skimlinks",
+    name: "Skimlinks Commerce",
+    model: "CPC",
+    sourceUrl: "https://www.skimlinks.com/",
     status: "REQUIRES_ENROLLMENT"
   },
   {
@@ -143,6 +154,8 @@ async function ensureSchema(env) {
   await env.DB.batch([
     env.DB.prepare("CREATE TABLE IF NOT EXISTS lumen_click_programs (id TEXT PRIMARY KEY,provider TEXT NOT NULL,name TEXT NOT NULL,model TEXT NOT NULL,tracking_url TEXT,source_url TEXT,currency TEXT NOT NULL DEFAULT 'USD',expected_cpc_usd REAL NOT NULL DEFAULT 0,status TEXT NOT NULL,approved INTEGER NOT NULL DEFAULT 0,terms_verified INTEGER NOT NULL DEFAULT 0,click_id_param TEXT,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,metadata_json TEXT NOT NULL)"),
     env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_lumen_click_programs_status ON lumen_click_programs(status,updated_at)"),
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS lumen_click_program_config (id TEXT PRIMARY KEY,provider TEXT NOT NULL,name TEXT NOT NULL,model TEXT NOT NULL,tracking_url TEXT,source_url TEXT,currency TEXT NOT NULL DEFAULT 'USD',expected_cpc_usd REAL NOT NULL DEFAULT 0,status TEXT NOT NULL,approved INTEGER NOT NULL DEFAULT 0,terms_verified INTEGER NOT NULL DEFAULT 0,click_id_param TEXT,approval_evidence TEXT,terms_evidence TEXT,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,metadata_json TEXT NOT NULL)"),
+    env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_lumen_click_program_config_status ON lumen_click_program_config(status,updated_at)"),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS lumen_click_events (id TEXT PRIMARY KEY,program_id TEXT NOT NULL,created_at TEXT NOT NULL,source_tag TEXT,status TEXT NOT NULL,referrer_host TEXT,user_agent_class TEXT,metadata_json TEXT NOT NULL)"),
     env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_lumen_click_events_program ON lumen_click_events(program_id,created_at)"),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS lumen_click_settlements (provider_event_id TEXT PRIMARY KEY,program_id TEXT NOT NULL,click_id TEXT,amount_usd REAL NOT NULL,currency TEXT NOT NULL,status TEXT NOT NULL,verified_at TEXT NOT NULL,evidence_ref TEXT NOT NULL,revenue_event_id TEXT,created_at TEXT NOT NULL,metadata_json TEXT NOT NULL)"),
@@ -155,13 +168,32 @@ function configuredPrograms(env) {
   const rows = parseArray(env?.CLICK_REVENUE_PROGRAMS_JSON).map(normalizeClickProgram).filter(x => x.id);
   return rows;
 }
+async function persistentPrograms(env) {
+  const rows = await env.DB.prepare("SELECT * FROM lumen_click_program_config ORDER BY updated_at ASC").all();
+  return (rows.results || []).map(row => normalizeClickProgram({
+    id:row.id,
+    provider:row.provider,
+    name:row.name,
+    model:row.model,
+    trackingUrl:row.tracking_url,
+    sourceUrl:row.source_url,
+    currency:row.currency,
+    expectedCpcUsd:row.expected_cpc_usd,
+    status:row.status,
+    approved:Number(row.approved)===1,
+    termsVerified:Number(row.terms_verified)===1,
+    clickIdParam:row.click_id_param
+  })).filter(x => x.id);
+}
 
 export async function syncClickRevenuePrograms(env) {
   if (!(await ensureSchema(env))) return { ok:false, error:"persistence_unavailable", version:VERSION };
   const now = new Date().toISOString();
   const configured = configuredPrograms(env);
+  const persistent = await persistentPrograms(env);
   const merged = new Map();
   for (const seed of KNOWN_CANDIDATES) merged.set(seed.id, normalizeClickProgram(seed));
+  for (const row of persistent) merged.set(row.id, row);
   for (const row of configured) merged.set(row.id, row);
   let active = 0;
   for (const p of merged.values()) {
@@ -170,7 +202,7 @@ export async function syncClickRevenuePrograms(env) {
       .bind(p.id,p.provider,p.name,p.model,p.trackingUrl,p.sourceUrl,p.currency,p.expectedCpcUsd,p.status,p.approved?1:0,p.termsVerified?1:0,p.clickIdParam||null,now,now,JSON.stringify({version:VERSION,active:p.active,projectedScaleIsNotRevenue:true,targetScaleEvents:TARGET_SCALE_EVENTS}))
       .run();
   }
-  return { ok:true, version:VERSION, knownPrograms:merged.size, configuredPrograms:configured.length, activePrograms:active };
+  return { ok:true, version:VERSION, knownPrograms:merged.size, persistentPrograms:persistent.length, configuredPrograms:configured.length, activePrograms:active };
 }
 
 async function programById(env, id) {
@@ -272,6 +304,75 @@ export async function runClickRevenueEngine(env) {
   return { ok:programs.ok !== false && revenue.ok !== false, version:VERSION, programs, revenue, status:await statusData(env), guardrails:CLICK_REVENUE_POLICY };
 }
 
+async function registerPersistentProgram(request, env) {
+  if (!authorized(request, env)) return json({ ok:false, error:"admin_token_required" }, 403);
+  let body;
+  try { body = await request.json(); } catch { return json({ ok:false, error:"invalid_json" }, 400); }
+  if (!(await ensureSchema(env))) return json({ ok:false, error:"persistence_unavailable" }, 500);
+
+  const normalized = normalizeClickProgram({
+    ...body,
+    approved:false,
+    termsVerified:false,
+    status:"PENDING_APPROVAL"
+  });
+  if (!normalized.id) return json({ ok:false, error:"program_id_required" }, 400);
+  if (normalized.model !== "CPC") return json({ ok:false, error:"only_cpc_supported" }, 400);
+  if (!normalized.trackingUrl) return json({ ok:false, error:"safe_https_tracking_url_required" }, 400);
+
+  const now = new Date().toISOString();
+  const existing = await env.DB.prepare("SELECT approved,terms_verified,approval_evidence,terms_evidence,status,created_at FROM lumen_click_program_config WHERE id=? LIMIT 1").bind(normalized.id).first();
+  const approved = Number(existing?.approved || 0) === 1;
+  const termsVerified = Number(existing?.terms_verified || 0) === 1;
+  const status = approved && termsVerified ? "ACTIVE" : "PENDING_APPROVAL";
+  await env.DB.prepare("INSERT INTO lumen_click_program_config(id,provider,name,model,tracking_url,source_url,currency,expected_cpc_usd,status,approved,terms_verified,click_id_param,approval_evidence,terms_evidence,created_at,updated_at,metadata_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET provider=excluded.provider,name=excluded.name,model=excluded.model,tracking_url=excluded.tracking_url,source_url=excluded.source_url,currency=excluded.currency,expected_cpc_usd=excluded.expected_cpc_usd,status=excluded.status,click_id_param=excluded.click_id_param,updated_at=excluded.updated_at,metadata_json=excluded.metadata_json")
+    .bind(normalized.id,normalized.provider,normalized.name,normalized.model,normalized.trackingUrl,normalized.sourceUrl,normalized.currency,normalized.expectedCpcUsd,status,approved?1:0,termsVerified?1:0,normalized.clickIdParam||null,existing?.approval_evidence||null,existing?.terms_evidence||null,existing?.created_at||now,now,JSON.stringify({version:VERSION,registeredBy:"protected_admin",activationRequiresExplicitEvidence:true}))
+    .run();
+  await syncClickRevenuePrograms(env);
+  return json({ ok:true, version:VERSION, programId:normalized.id, status, active:approved&&termsVerified, trackingUrlStored:true, enrollmentExecuted:false, contractCreated:false, spendExecuted:false }, 202);
+}
+
+async function activatePersistentProgram(request, env) {
+  if (!authorized(request, env)) return json({ ok:false, error:"admin_token_required" }, 403);
+  let body;
+  try { body = await request.json(); } catch { return json({ ok:false, error:"invalid_json" }, 400); }
+  if (!(await ensureSchema(env))) return json({ ok:false, error:"persistence_unavailable" }, 500);
+
+  const id = clean(body?.programId || body?.program_id, 120).toLowerCase().replace(/[^a-z0-9_-]+/g, "-");
+  const approvalEvidence = clean(body?.approvalEvidence || body?.approval_evidence, 1200);
+  const termsEvidence = clean(body?.termsEvidence || body?.terms_evidence, 1200);
+  const confirmProgramApproved = body?.confirmProgramApproved === true || body?.confirm_program_approved === true;
+  const confirmTermsAccepted = body?.confirmTermsAccepted === true || body?.confirm_terms_accepted === true;
+  if (!id) return json({ ok:false, error:"program_id_required" }, 400);
+  if (!confirmProgramApproved || !confirmTermsAccepted || !approvalEvidence || !termsEvidence) {
+    return json({ ok:false, error:"explicit_approval_and_terms_evidence_required" }, 409);
+  }
+
+  const row = await env.DB.prepare("SELECT id,tracking_url FROM lumen_click_program_config WHERE id=? LIMIT 1").bind(id).first();
+  if (!row) return json({ ok:false, error:"program_not_registered" }, 404);
+  if (!safeHttps(row.tracking_url)) return json({ ok:false, error:"valid_tracking_url_required_before_activation" }, 409);
+
+  const now = new Date().toISOString();
+  await env.DB.prepare("UPDATE lumen_click_program_config SET approved=1,terms_verified=1,status='ACTIVE',approval_evidence=?,terms_evidence=?,updated_at=?,metadata_json=? WHERE id=?")
+    .bind(approvalEvidence,termsEvidence,now,JSON.stringify({version:VERSION,activatedBy:"explicit_human_confirmation",activatedAt:now,automaticEnrollment:false}),id)
+    .run();
+  await syncClickRevenuePrograms(env);
+  return json({ ok:true, version:VERSION, programId:id, status:"ACTIVE", active:true, approvalEvidenceStored:true, termsEvidenceStored:true, enrollmentExecuted:false, contractCreated:false, spendExecuted:false }, 202);
+}
+
+async function persistentProgramState(env) {
+  await ensureSchema(env);
+  const rows = await env.DB.prepare("SELECT id,provider,name,model,tracking_url IS NOT NULL AS has_tracking_url,status,approved,terms_verified,expected_cpc_usd,currency,updated_at,approval_evidence IS NOT NULL AS has_approval_evidence,terms_evidence IS NOT NULL AS has_terms_evidence FROM lumen_click_program_config ORDER BY updated_at DESC").all();
+  return (rows.results || []).map(r => ({
+    id:r.id,provider:r.provider,name:r.name,model:r.model,
+    hasTrackingUrl:Number(r.has_tracking_url)===1,status:r.status,
+    approved:Number(r.approved)===1,termsVerified:Number(r.terms_verified)===1,
+    expectedCpcUsd:Number(r.expected_cpc_usd||0),currency:r.currency,
+    hasApprovalEvidence:Number(r.has_approval_evidence)===1,
+    hasTermsEvidence:Number(r.has_terms_evidence)===1,updatedAt:r.updated_at
+  }));
+}
+
 async function ingestProviderSettlements(request, env) {
   if (!authorized(request, env)) return json({ ok:false, error:"admin_token_required" }, 403);
   if (!bool(env?.CLICK_REVENUE_PROVIDER_IMPORT_ENABLED)) return json({ ok:false, error:"provider_import_disabled" }, 403);
@@ -321,6 +422,12 @@ export async function handleClickRevenue(request, env) {
     const rows = await env.DB.prepare("SELECT id,provider,name,model,currency,expected_cpc_usd,status,approved,terms_verified,source_url FROM lumen_click_programs ORDER BY status='ACTIVE' DESC,expected_cpc_usd DESC,provider ASC").all();
     return json({ ok:true, version:VERSION, programs:(rows.results||[]).map(r=>({id:r.id,provider:r.provider,name:r.name,model:r.model,currency:r.currency,expectedCpcUsd:Number(r.expected_cpc_usd||0),status:r.status,approved:Number(r.approved)===1,termsVerified:Number(r.terms_verified)===1,sourceUrl:r.source_url||null})) });
   }
+  if (request.method === "GET" && url.pathname === "/click-revenue/config") {
+    if (!authorized(request, env)) return json({ ok:false, error:"admin_token_required" }, 403);
+    return json({ ok:true, version:VERSION, programs:await persistentProgramState(env), activationRule:"tracking_url_plus_explicit_program_approval_plus_explicit_terms_evidence" });
+  }
+  if (request.method === "POST" && url.pathname === "/click-revenue/programs/register") return registerPersistentProgram(request, env);
+  if (request.method === "POST" && url.pathname === "/click-revenue/programs/activate") return activatePersistentProgram(request, env);
   if (request.method === "POST" && url.pathname === "/click-revenue/settlements/provider") return ingestProviderSettlements(request, env);
 
   const match = request.method === "GET" ? url.pathname.match(/^\/click-revenue\/go\/([a-z0-9_-]{1,120})$/i) : null;
