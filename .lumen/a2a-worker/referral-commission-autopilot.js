@@ -3,6 +3,8 @@ import { recordCommissionAgreement, markCommissionDue } from "./referral-commiss
 const VERSION = "2.0-commission-autopilot-close-to-cash";
 const STANDARD_RATE_PCT = 5;
 const MAX_EXTERNAL_MESSAGES_PER_RUN = 1;
+const CARD_TIMEOUT_MS = 8000;
+const SEND_TIMEOUT_MS = 15000;
 
 function clean(v,n=5000){return String(v??"").trim().replace(/\s+/g," ").slice(0,n);}
 function num(v,f=0){const n=Number(v);return Number.isFinite(n)?n:f;}
@@ -32,15 +34,55 @@ async function ensure(env){
   return true;
 }
 
+function normalizeBaseUrl(value){const u=new URL(value);u.hash="";u.search="";return u.toString().replace(/\/$/,"");}
+function withTimeout(ms){const controller=new AbortController();const timer=setTimeout(()=>controller.abort("timeout"),ms);return{signal:controller.signal,clear:()=>clearTimeout(timer)};}
+function hasRequiredAuth(card){const req=card?.securityRequirements;if(Array.isArray(req)&&req.length>0)return true;const legacy=card?.security;return Array.isArray(legacy)&&legacy.length>0;}
+function selectInterface(card){
+  const interfaces=Array.isArray(card?.supportedInterfaces)?card.supportedInterfaces:[];
+  for(const entry of interfaces){
+    const binding=clean(entry?.protocolBinding,80).toUpperCase();
+    if(!safeHttps(entry?.url))continue;
+    if(binding==="JSONRPC"||binding==="HTTP+JSON")return{endpoint:normalizeBaseUrl(entry.url),binding,version:clean(entry?.protocolVersion||"1.0",20),tenant:clean(entry?.tenant,200)||null};
+  }
+  if(safeHttps(card?.url)){
+    const transport=clean(card?.preferredTransport||card?.transport||"JSONRPC",80).toUpperCase();
+    if(["JSONRPC","JSON-RPC","HTTP+JSON"].includes(transport))return{endpoint:normalizeBaseUrl(card.url),binding:transport==="HTTP+JSON"?"HTTP+JSON":"JSONRPC",version:clean(card?.protocolVersion||"0.3",20),tenant:null};
+  }
+  return null;
+}
+async function fetchAgentCard(cardUrl){
+  if(!safeHttps(cardUrl))return{ok:false,error:"card_url_not_https"};
+  const timeout=withTimeout(CARD_TIMEOUT_MS);
+  try{
+    const r=await fetch(cardUrl,{method:"GET",headers:{accept:"application/json, application/a2a+json"},signal:timeout.signal});
+    const raw=await r.text();
+    if(!r.ok)return{ok:false,error:`card_http_${r.status}`};
+    let card=null;try{card=JSON.parse(raw);}catch{return{ok:false,error:"card_invalid_json"};}
+    if(hasRequiredAuth(card))return{ok:false,error:"agent_requires_authentication"};
+    const selected=selectInterface(card);
+    return selected?{ok:true,selected}:{ok:false,error:"no_supported_public_a2a_interface"};
+  }catch(error){return{ok:false,error:clean(error?.message||error,300)};}finally{timeout.clear();}
+}
 async function counterparty(env,ref){
   const partnerId=ref.direction==="OUTBOUND"?clean(ref.target_partner_id,100):clean(ref.origin_partner_id,100);
   if(!partnerId)return null;
   try{
-    const p=await env.DB.prepare("SELECT id,name,endpoint,card_url FROM lumen_partner_agents WHERE id=? LIMIT 1").bind(partnerId).first();
+    const p=await env.DB.prepare("SELECT id,name,endpoint,card_url,protocol_version FROM lumen_partner_agents WHERE id=? LIMIT 1").bind(partnerId).first();
     if(!p)return null;
-    const endpoint=clean(p.endpoint||p.card_url,2000);
+    if(safeHttps(p.card_url)){
+      const card=await fetchAgentCard(p.card_url);
+      if(!card.ok)return null;
+      return{id:p.id,name:clean(p.name,220)||partnerId,cardUrl:p.card_url,...card.selected};
+    }
+    const endpoint=clean(p.endpoint,2000);
     if(!safeHttps(endpoint))return null;
-    return{id:p.id,name:clean(p.name,220)||partnerId,endpoint};
+    return{id:p.id,name:clean(p.name,220)||partnerId,endpoint:normalizeBaseUrl(endpoint),binding:"JSONRPC",version:clean(p.protocol_version||"0.3",20),tenant:null};
+  }catch{return null;}
+}
+async function counterpartyForReferral(env,referralId){
+  try{
+    const ref=await env.DB.prepare("SELECT id referral_id,direction,target_partner_id,origin_partner_id FROM lumen_referrals WHERE id=? LIMIT 1").bind(referralId).first();
+    return ref?counterparty(env,ref):null;
   }catch{return null;}
 }
 
@@ -69,20 +111,45 @@ function extractText(payload){
 }
 function extractTaskId(payload){return clean(payload?.task_id||payload?.taskId||payload?.id||payload?.result?.id||payload?.result?.task_id||payload?.result?.taskId||payload?.result?.task?.id,200);}
 
-async function sendA2A(endpoint,message,referralId,kind){
-  const payload={jsonrpc:"2.0",id:`lumen-${Date.now()}`,method:"message/send",params:{message:{role:"user",parts:[{kind:"text",text:message}],messageId:`lumen-commission-${kind.toLowerCase()}-${referralId}-${Date.now()}`}}};
-  const r=await fetch(endpoint,{method:"POST",headers:{"content-type":"application/json","accept":"application/json"},body:JSON.stringify(payload)});
-  const raw=await r.text();let body=null;try{body=JSON.parse(raw);}catch{body={text:raw};}
-  if(!r.ok)return{ok:false,error:clean(raw||`http_${r.status}`,1000),status:r.status,responseText:extractText(body)};
-  return{ok:true,status:r.status,taskId:extractTaskId(body),responseText:extractText(body)};
+async function sendA2A(target,message,referralId,kind){
+  const id=`lumen-commission-${kind.toLowerCase()}-${referralId}-${crypto.randomUUID()}`;
+  const isV1=String(target?.version||"").startsWith("1.");
+  const a2aMessage={messageId:id,role:isV1?"ROLE_USER":"user",parts:[{text:message}]};
+  let url=target.endpoint,headers,payload;
+  if(target.binding==="HTTP+JSON"){
+    url=`${target.endpoint}/message:send`;
+    headers={"content-type":"application/a2a+json","accept":"application/a2a+json, application/json","a2a-version":target.version||"1.0"};
+    payload={message:a2aMessage};
+    if(target.tenant)payload.tenant=target.tenant;
+  }else{
+    headers={"content-type":"application/json","accept":"application/json","a2a-version":target.version||(isV1?"1.0":"0.3")};
+    const params={message:a2aMessage};if(target.tenant)params.tenant=target.tenant;
+    payload={jsonrpc:"2.0",id,method:isV1?"SendMessage":"message/send",params};
+  }
+  const timeout=withTimeout(SEND_TIMEOUT_MS);
+  try{
+    const r=await fetch(url,{method:"POST",headers,body:JSON.stringify(payload),signal:timeout.signal});
+    const raw=await r.text();let body=null;try{body=JSON.parse(raw);}catch{body={text:raw};}
+    if(!r.ok)return{ok:false,error:clean(raw||`http_${r.status}`,1000),status:r.status,responseText:extractText(body)};
+    return{ok:true,status:r.status,taskId:extractTaskId(body),responseText:extractText(body)};
+  }catch(error){return{ok:false,error:clean(error?.message||error,1000),status:0,responseText:""};}finally{timeout.clear();}
 }
-async function pollA2A(endpoint,taskId){
+async function pollA2A(target,taskId){
   if(!taskId)return{ok:false,error:"task_id_missing"};
-  const payload={jsonrpc:"2.0",id:`lumen-poll-${Date.now()}`,method:"tasks/get",params:{id:taskId}};
-  const r=await fetch(endpoint,{method:"POST",headers:{"content-type":"application/json","accept":"application/json"},body:JSON.stringify(payload)});
-  const raw=await r.text();let body=null;try{body=JSON.parse(raw);}catch{body={text:raw};}
-  if(!r.ok)return{ok:false,error:clean(raw,1000),status:r.status};
-  return{ok:true,responseText:extractText(body)};
+  const isV1=String(target?.version||"").startsWith("1.");
+  const timeout=withTimeout(SEND_TIMEOUT_MS);
+  try{
+    let r;
+    if(target.binding==="HTTP+JSON"){
+      r=await fetch(`${target.endpoint}/tasks/${encodeURIComponent(taskId)}`,{method:"GET",headers:{"accept":"application/a2a+json, application/json","a2a-version":target.version||"1.0"},signal:timeout.signal});
+    }else{
+      const payload={jsonrpc:"2.0",id:`lumen-poll-${crypto.randomUUID()}`,method:isV1?"GetTask":"tasks/get",params:{id:taskId,historyLength:5}};
+      r=await fetch(target.endpoint,{method:"POST",headers:{"content-type":"application/json","accept":"application/json","a2a-version":target.version||(isV1?"1.0":"0.3")},body:JSON.stringify(payload),signal:timeout.signal});
+    }
+    const raw=await r.text();let body=null;try{body=JSON.parse(raw);}catch{body={text:raw};}
+    if(!r.ok)return{ok:false,error:clean(raw||`http_${r.status}`,1000),status:r.status};
+    return{ok:true,responseText:extractText(body)};
+  }catch(error){return{ok:false,error:clean(error?.message||error,1000),status:0};}finally{timeout.clear();}
 }
 
 function esc(v){return String(v).replace(/[.*+?^${}()|[\]\\]/g,"\\$&");}
@@ -166,14 +233,16 @@ export async function pollReferralCommissionAutopilot(env){
     if(!safeHttps(row.endpoint))continue;
     const already=await env.DB.prepare("SELECT id FROM lumen_referral_commission_messages WHERE referral_id=? AND kind='COMMISSION_PROPOSAL' LIMIT 1").bind(row.referral_id).first();
     if(already)continue;
-    const p=await pollA2A(row.endpoint,row.proposal_task_id);if(!p.ok||!clean(p.responseText,6000))continue;
+    const target=await counterpartyForReferral(env,row.referral_id);if(!target)continue;
+    const p=await pollA2A(target,row.proposal_task_id);if(!p.ok||!clean(p.responseText,6000))continue;
     const msg={id:null,referral_id:row.referral_id,kind:"COMMISSION_PROPOSAL",endpoint:row.endpoint,task_id:row.proposal_task_id};
     const r=await processMessageResponse(env,msg,p.responseText);results.push({referralId:row.referral_id,kind:"COMMISSION_PROPOSAL",responseClass:r.type||"OTHER",legacy:true});
   }
   const rows=await env.DB.prepare("SELECT * FROM lumen_referral_commission_messages WHERE status='SENT' AND task_id IS NOT NULL ORDER BY sent_at ASC LIMIT 40").all();
   for(const msg of rows.results||[]){
     if(!safeHttps(msg.endpoint))continue;
-    const p=await pollA2A(msg.endpoint,msg.task_id);if(!p.ok)continue;
+    const target=await counterpartyForReferral(env,msg.referral_id);if(!target)continue;
+    const p=await pollA2A(target,msg.task_id);if(!p.ok)continue;
     const text=clean(p.responseText,6000);if(!text)continue;
     const r=await processMessageResponse(env,msg,text);
     results.push({referralId:msg.referral_id,kind:msg.kind,responseClass:r.type||"OTHER"});
@@ -187,10 +256,12 @@ async function messageSummary(env,referralId,kind){
 }
 async function messageAttemptSummary(env,referralId,kind){
   const r=await env.DB.prepare("SELECT COUNT(*) n,MAX(created_at) last_attempt FROM lumen_referral_commission_messages WHERE referral_id=? AND kind=?").bind(referralId,kind).first();
-  return{count:Number(r?.n||0),lastAttempt:r?.last_attempt||null};
+  const latest=await env.DB.prepare("SELECT status,error FROM lumen_referral_commission_messages WHERE referral_id=? AND kind=? ORDER BY created_at DESC LIMIT 1").bind(referralId,kind).first();
+  const technicalCompatibilityFailure=String(latest?.status||"").toUpperCase()==="SEND_FAILED"&&/(method not allowed|http[_= ]?405|status.?405)/i.test(String(latest?.error||""));
+  return{count:Number(r?.n||0),lastAttempt:r?.last_attempt||null,technicalCompatibilityFailure};
 }
 async function sendTracked(env,{row,p,kind,sequence,message,state}){
-  const send=await sendA2A(p.endpoint,message,row.referral_id,kind);
+  const send=await sendA2A(p,message,row.referral_id,kind);
   const msg=await logMessage(env,{referralId:row.referral_id,kind,sequence,endpoint:p.endpoint,message,send});
   if(kind==="COMMISSION_PROPOSAL")await upsertAutopilot(env,row,p,send.ok?"PROPOSAL_SENT":"PROPOSAL_READY",send);
   else if(send.ok)await env.DB.prepare("UPDATE lumen_referral_commission_autopilot SET state=?,updated_at=?,error=NULL,engine_version=? WHERE referral_id=?").bind(state||row.commission_status||"TRACKING",new Date().toISOString(),VERSION,row.referral_id).run();
@@ -201,7 +272,7 @@ async function sendTracked(env,{row,p,kind,sequence,message,state}){
 async function chooseCollectionAction(env){
   const rows=await env.DB.prepare("SELECT r.id referral_id,r.direction,r.target_partner_id,r.origin_partner_id,r.title,c.status commission_status,c.deal_value_usd,c.agreed_amount_usd,c.checkout_url,a.endpoint,a.counterparty_partner_id,a.counterparty_name FROM lumen_referrals r JOIN lumen_referral_commissions c ON c.referral_id=r.id LEFT JOIN lumen_referral_commission_autopilot a ON a.referral_id=r.id WHERE c.status='PAYMENT_DUE' AND c.agreed_amount_usd>0 AND c.checkout_url IS NOT NULL ORDER BY c.payment_due_at ASC LIMIT 30").all();
   for(const row of rows.results||[]){
-    const p=row.endpoint&&safeHttps(row.endpoint)?{id:row.counterparty_partner_id,name:row.counterparty_name,endpoint:row.endpoint}:await counterparty(env,row);
+    const p=await counterparty(env,row);
     if(!p)continue;
     const initial=await messageSummary(env,row.referral_id,"PAYMENT_REQUEST");
     if(initial.count===0)return{row,p,kind:"PAYMENT_REQUEST",sequence:1,message:paymentMessage(row,false),state:"PAYMENT_DUE"};
@@ -217,7 +288,7 @@ async function chooseCloseAction(env){
     const s=await messageSummary(env,row.referral_id,"CLOSE_CHECK");
     if(s.count>=maxCloseChecks(env))continue;
     if(s.count>0&&!olderThan(s.lastSent,closeCooldownDays(env)))continue;
-    const p=row.endpoint&&safeHttps(row.endpoint)?{id:row.counterparty_partner_id,name:row.counterparty_name,endpoint:row.endpoint}:await counterparty(env,row);
+    const p=await counterparty(env,row);
     if(!p)continue;
     return{row,p,kind:"CLOSE_CHECK",sequence:s.count+1,message:closeCheckMessage(row),state:"AGREED_PENDING_CLOSE"};
   }
@@ -232,8 +303,8 @@ async function chooseProposalAction(env){
   for(const row of rows){
     const attempts=await messageAttemptSummary(env,row.referral_id,"COMMISSION_PROPOSAL");
     if(attempts.count>=maxProposalAttempts(env))continue;
-    if(attempts.count>0&&!olderThanHours(attempts.lastAttempt,proposalRetryCooldownHours(env)))continue;
-    const p=row.endpoint&&safeHttps(row.endpoint)?{id:row.counterparty_partner_id,name:row.counterparty_name,endpoint:row.endpoint}:await counterparty(env,row);
+    if(attempts.count>0&&!attempts.technicalCompatibilityFailure&&!olderThanHours(attempts.lastAttempt,proposalRetryCooldownHours(env)))continue;
+    const p=await counterparty(env,row);
     if(!p)continue;
     return{row,p,kind:"COMMISSION_PROPOSAL",sequence:attempts.count+1,message:proposalMessage(row),state:"PROPOSAL_SENT"};
   }
@@ -258,7 +329,7 @@ async function stats(env){
 
 export async function handleReferralCommissionAutopilot(request,env){
   const u=new URL(request.url);
-  if(request.method==="GET"&&u.pathname==="/referrals/commissions/autopilot/policy")return json({version:VERSION,standardSuccessFeePct:STANDARD_RATE_PCT,percentageFeeBasis:"final_confirmed_deal_value",estimatedDealValueRequiredForProposal:false,explicitAcceptanceRequired:true,exactAcceptancePhrase:true,closeEvidenceRequired:true,closeReportRequiresFinalValue:true,checkoutRail:"x402",exactAmountCheckout:true,revenueOnlyAfterVerifiedSettlement:true,counteroffersAutoAccepted:false,maxExternalMessagesPerRun:MAX_EXTERNAL_MESSAGES_PER_RUN,proposalRetryCooldownHours:proposalRetryCooldownHours(env),maxProposalAttempts:maxProposalAttempts(env),failedProposalAttemptsCanRetry:true,closeCheckCooldownDays:closeCooldownDays(env),maxCloseChecks:maxCloseChecks(env),paymentFollowupDays:paymentCooldownDays(env),maxPaymentFollowups:maxPaymentFollowups(env),autonomousSpend:false,automaticContract:false,priority:["PAYMENT_DUE_COLLECTION","CLOSE_TRACKING","NEW_COMMISSION_PROPOSAL"]});
+  if(request.method==="GET"&&u.pathname==="/referrals/commissions/autopilot/policy")return json({version:VERSION,standardSuccessFeePct:STANDARD_RATE_PCT,percentageFeeBasis:"final_confirmed_deal_value",estimatedDealValueRequiredForProposal:false,explicitAcceptanceRequired:true,exactAcceptancePhrase:true,closeEvidenceRequired:true,closeReportRequiresFinalValue:true,checkoutRail:"x402",exactAmountCheckout:true,revenueOnlyAfterVerifiedSettlement:true,counteroffersAutoAccepted:false,maxExternalMessagesPerRun:MAX_EXTERNAL_MESSAGES_PER_RUN,proposalRetryCooldownHours:proposalRetryCooldownHours(env),maxProposalAttempts:maxProposalAttempts(env),failedProposalAttemptsCanRetry:true,technicalCompatibilityRetryWithoutCooldown:true,agentCardAwareProtocolRouting:true,closeCheckCooldownDays:closeCooldownDays(env),maxCloseChecks:maxCloseChecks(env),paymentFollowupDays:paymentCooldownDays(env),maxPaymentFollowups:maxPaymentFollowups(env),autonomousSpend:false,automaticContract:false,priority:["PAYMENT_DUE_COLLECTION","CLOSE_TRACKING","NEW_COMMISSION_PROPOSAL"]});
   if(request.method==="GET"&&u.pathname==="/referrals/commissions/autopilot/stats")return json({version:VERSION,...await stats(env),autonomousEnabled:enabled(env)});
   if(request.method==="POST"&&u.pathname==="/referrals/commissions/autopilot/run"){if(!authorized(request,env))return json({ok:false,error:"admin_token_required"},403);return json(await runReferralCommissionAutopilot(env,{force:false}),202);}
   if(request.method==="POST"&&u.pathname==="/referrals/commissions/autopilot/poll"){if(!authorized(request,env))return json({ok:false,error:"admin_token_required"},403);return json(await pollReferralCommissionAutopilot(env),202);}
