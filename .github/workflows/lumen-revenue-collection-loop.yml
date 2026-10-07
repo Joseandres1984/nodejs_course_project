@@ -30,10 +30,25 @@ jobs:
           test -n "${ADMIN_TOKEN:-}"
           curl --fail --show-error --silent --max-time 20 "$BASE_URL/health" >/dev/null
 
-      - name: Refresh a bounded trust batch
+      - name: Refresh trust for active referral partners first
         run: |
           set -euo pipefail
-          curl --fail --show-error --silent --max-time 90             -X POST "$BASE_URL/trust/recompute"             -H "x-lumen-admin: $ADMIN_TOKEN"             -H 'content-type: application/json'             -d '{"limit":12}' > /tmp/trust.json
+          curl --fail --show-error --silent --max-time 90 \
+            -X POST "$BASE_URL/trust/recompute-referrals" \
+            -H "x-lumen-admin: $ADMIN_TOKEN" \
+            -H 'content-type: application/json' \
+            -d '{"limit":8}' > /tmp/referral-trust.json
+          cat /tmp/referral-trust.json; echo
+          jq -e '.ok == true and .policy.noTrustBypass == true and .policy.quarantineCanOnlyExitByFreshAssessment == true and .policy.autonomousSpend == false' /tmp/referral-trust.json >/dev/null
+
+      - name: Refresh general bounded trust batch
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 90 \
+            -X POST "$BASE_URL/trust/recompute" \
+            -H "x-lumen-admin: $ADMIN_TOKEN" \
+            -H 'content-type: application/json' \
+            -d '{"limit":8}' > /tmp/trust.json
           cat /tmp/trust.json; echo
           jq -e '.ok == true and .policy.autonomousSpend == false' /tmp/trust.json >/dev/null
 
