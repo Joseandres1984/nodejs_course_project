@@ -1,7 +1,7 @@
 const AFFILIATE_URL = "https://sovrn.co/yj7fjei";
 const INDEXNOW_KEY = "a3ca2e44211bc1b3934273e4de9b9ed6";
-const DISCOVER_PUBLISHED_AT = "2026-10-06";
-const DISCOVER_RENDER_VERSION = "1.1-organic-discovery";
+const DISCOVER_PUBLISHED_AT = "2026-10-07";
+const DISCOVER_RENDER_VERSION = "1.2-travel-intent";
 
 const ARTICLES = [
   {
@@ -160,6 +160,64 @@ const ARTICLES = [
       ["Decidí por valor, no por porcentaje", "Un 50% de descuento en algo que no necesitás sigue siendo un gasto. La pregunta útil es si el producto resuelve una necesidad a un costo total mejor que las alternativas disponibles."]
     ]
   }
+  ,
+  {
+    slug: "que-hacer-en-rio-de-janeiro-experiencias",
+    category: "Viajes · Río de Janeiro",
+    title: "Qué hacer en Río de Janeiro: cómo elegir experiencias sin llenar de más el viaje",
+    description: "Una guía práctica para elegir actividades en Río de Janeiro según tiempo, zona, ritmo y presupuesto.",
+    intro: "Río de Janeiro ofrece muchas experiencias atractivas, pero intentar hacer todo suele empeorar el viaje. Conviene elegir unas pocas actividades que encajen con la zona donde te alojás, el tiempo disponible y el ritmo que querés llevar.",
+    travelQuery: "Rio de Janeiro",
+    sections: [
+      ["Separá imprescindibles de extras", "Elegí primero una o dos experiencias que realmente definan el viaje. Después sumá alternativas sólo si los traslados y horarios siguen siendo razonables. Dejar espacios libres también permite adaptarte al clima."],
+      ["Agrupá por zona", "Cristo Redentor, Pan de Azúcar, playas y recorridos culturales pueden implicar desplazamientos distintos. Agrupar actividades cercanas reduce tiempo perdido y hace más fácil comparar excursiones con traslado incluido frente a entradas por separado."],
+      ["Revisá exactamente qué incluye", "Antes de reservar, compará punto de encuentro, traslados, entradas, duración, idioma y política de cancelación. Dos experiencias con nombres parecidos pueden tener alcances muy distintos."],
+      ["Usá el precio como parte de la decisión", "El precio importa, pero también cuánto tiempo te ahorra la opción y qué problema resuelve. Una actividad organizada puede valer más si simplifica accesos o traslados; una visita independiente puede convenir si preferís flexibilidad."]
+    ]
+  },
+  {
+    slug: "que-hacer-en-cancun-excursiones",
+    category: "Viajes · Cancún",
+    title: "Qué hacer en Cancún: cómo comparar cenotes, ruinas y excursiones",
+    description: "Cómo comparar excursiones desde Cancún por duración, traslados, inclusiones y ritmo del viaje.",
+    intro: "Desde Cancún aparecen muchas excursiones de día completo y combinaciones de actividades. La mejor elección depende menos de acumular paradas y más de entender cuánto tiempo se pasa viajando, qué incluye la tarifa y cuánto margen queda para disfrutar cada lugar.",
+    travelQuery: "Cancún",
+    sections: [
+      ["Mirá la duración real", "Una excursión de doce horas puede incluir varias horas de ruta. Revisá horarios aproximados de salida y regreso para saber si el itinerario coincide con el ritmo que querés para tus vacaciones."],
+      ["Compará inclusiones", "Traslado, guía, comidas, entradas y equipos pueden estar incluidos o cobrarse aparte. Comparar el costo final evita que una opción aparentemente barata termine siendo más cara."],
+      ["Elegí combinaciones coherentes", "Cenotes, sitios arqueológicos y actividades acuáticas se pueden combinar, pero más paradas no siempre significan mejor experiencia. Priorizá las que realmente te interesan."],
+      ["Revisá cancelación y clima", "Algunas actividades dependen del clima o del estado del mar. Una política de cancelación clara puede ser especialmente valiosa cuando reservás con anticipación."]
+    ]
+  },
+  {
+    slug: "que-hacer-en-madrid-tours-y-escapadas",
+    category: "Viajes · Madrid",
+    title: "Qué hacer en Madrid: tours, entradas y escapadas que conviene comparar",
+    description: "Cómo elegir actividades en Madrid comparando ubicación, duración, entradas y excursiones cercanas.",
+    intro: "Madrid se presta tanto a recorridos cortos dentro de la ciudad como a escapadas de un día. Para armar un itinerario equilibrado conviene separar lo que podés hacer caminando por tu cuenta de las actividades donde una entrada, guía o traslado realmente agrega valor.",
+    travelQuery: "Madrid",
+    sections: [
+      ["Reservá sólo donde tenga sentido", "Muchos barrios y espacios urbanos se disfrutan caminando sin necesidad de tour. Priorizá reservas para lugares con cupos, horarios definidos o visitas donde una guía aporte contexto que realmente te interese."],
+      ["Compará punto de encuentro y final", "La ubicación puede cambiar mucho el costo práctico de una actividad. Un tour barato que exige dos traslados largos puede ocupar más tiempo que una opción algo más cara pero mejor ubicada."],
+      ["Evaluá escapadas por tiempo total", "Toledo, Segovia y otros destinos cercanos compiten por un día completo del viaje. Compará transporte, horas efectivas en destino y libertad para recorrer antes de decidir."],
+      ["No sobrecargues los días", "Museos, gastronomía y caminatas también consumen energía. Dejar bloques libres ayuda a absorber demoras y descubrir lugares sin convertir el viaje en una agenda de horarios."]
+    ]
+  },
+  {
+    slug: "que-hacer-en-lima-gastronomia-y-tours",
+    category: "Viajes · Lima",
+    title: "Qué hacer en Lima: gastronomía, historia y experiencias para comparar",
+    description: "Una guía para elegir actividades en Lima según barrio, duración, gastronomía y tipo de experiencia.",
+    intro: "Lima combina patrimonio, costa y una escena gastronómica muy amplia. La comparación útil no es sólo entre precios: también importa dónde empieza la actividad, cuánto dura y si encaja con los barrios que ya pensás recorrer.",
+    travelQuery: "Lima",
+    sections: [
+      ["Definí qué parte de Lima querés conocer", "Centro histórico, Miraflores y Barranco ofrecen experiencias distintas. Elegir primero el foco del día ayuda a evitar traslados innecesarios y a comparar actividades realmente equivalentes."],
+      ["En gastronomía, mirá el formato", "Una clase, un recorrido de mercados y una cena guiada pueden costar parecido y ofrecer experiencias muy diferentes. Revisá duración, degustaciones, comidas incluidas y tamaño del grupo."],
+      ["Comprobá logística y horarios", "El tránsito puede afectar los tiempos entre zonas. Mirá punto de encuentro, traslado incluido y hora de finalización antes de encadenar actividades."],
+      ["Compará con tu propio itinerario", "Una excursión tiene sentido si agrega acceso, contexto o comodidad. Si podés hacer la misma visita fácilmente por tu cuenta, evaluá si preferís conservar flexibilidad y presupuesto."]
+    ]
+  }
+
 ];
 
 function esc(value) {
@@ -180,7 +238,7 @@ function layout({title, description, origin, path, body, structuredData=null}) {
 ${structuredData ? jsonLdScript(structuredData) : ""}
 <title>${esc(title)} | LUMEN Discover</title><style>
 :root{--bg:#071019;--panel:#0d1822;--text:#edf6fb;--muted:#9eb1bd;--line:#1c3545;--accent:#d8ff66;--accent2:#8ed7ff}*{box-sizing:border-box}body{margin:0;background:linear-gradient(180deg,#061019,#09131c 55%,#071019);color:var(--text);font-family:Inter,system-ui,-apple-system,Segoe UI,Arial,sans-serif;line-height:1.65}a{color:inherit}.wrap{max-width:1080px;margin:auto;padding:0 22px}.nav{min-height:74px;display:flex;gap:18px;align-items:center;justify-content:space-between;border-bottom:1px solid #ffffff12}.brand{font-weight:950;letter-spacing:.2em;text-decoration:none}.links{display:flex;gap:16px;flex-wrap:wrap}.links a{text-decoration:none;color:var(--muted);font-weight:750}.hero{padding:72px 0 42px}.eyebrow{color:var(--accent);font-weight:900;text-transform:uppercase;letter-spacing:.12em;font-size:12px}h1{font-size:clamp(40px,7vw,68px);line-height:1.02;letter-spacing:-.045em;margin:12px 0 20px}h2{font-size:27px;line-height:1.2}.lead{font-size:19px;color:var(--muted);max-width:820px}.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}.card,.box{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:24px}.card h2,.card h3{margin:6px 0 10px}.card p,.small{color:var(--muted)}.section{padding:26px 0 56px}.cta{display:inline-block;background:var(--accent);color:#071019;text-decoration:none;font-weight:950;padding:13px 18px;border-radius:10px}.tag{display:inline-block;border:1px solid #315069;border-radius:999px;padding:5px 9px;font-size:11px;font-weight:850;color:var(--accent2)}.article{max-width:780px}.article section{padding:13px 0}.article p{color:#c4d1d8}.disclosure{border-left:3px solid var(--accent);padding:12px 14px;background:#0d1b22;color:#aebfc9;font-size:13px}.footer{border-top:1px solid #ffffff12;padding:28px 0 42px;color:#78909e;font-size:13px}@media(max-width:760px){.grid{grid-template-columns:1fr}.nav{align-items:flex-start;padding:18px 0}.links{justify-content:flex-end}}
-</style></head><body><div class="wrap"><nav class="nav"><a class="brand" href="/">LUMEN</a><div class="links"><a href="/discover">Discover</a><a href="/services">Servicios</a><a href="/intelligence">Intelligence</a><a href="/privacy">Privacidad</a></div></nav>${body}<footer class="footer">© 2026 LUMEN Discover · Guías para decidir mejor · Argentina</footer></div></body></html>`;
+</style></head><body><div class="wrap"><nav class="nav"><a class="brand" href="/">LUMEN</a><div class="links"><a href="/discover">Discover</a><a href="/travel?source=organic">Travel</a><a href="/services">Servicios</a><a href="/intelligence">Intelligence</a><a href="/privacy">Privacidad</a></div></nav>${body}<footer class="footer">© 2026 LUMEN Discover · Guías para decidir mejor · Argentina</footer></div></body></html>`;
 }
 
 function indexPage(origin) {
@@ -203,8 +261,7 @@ function indexPage(origin) {
   });
 }
 
-function articlePage(article, origin) {
-  const sections = article.sections.map(([heading, text])=>`<section><h2>${esc(heading)}</h2><p>${esc(text)}</p></section>`).join("");
+function articlePage(article, origin) {\n  const sections = article.sections.map(([heading, text])=>`<section><h2>${esc(heading)}</h2><p>${esc(text)}</p></section>`).join("");\n  const travelCta = article.travelQuery ? `<section class="section"><div class="box"><div class="eyebrow">Explorá opciones reales</div><h2>Ver experiencias disponibles en ${esc(article.travelQuery)}</h2><p class="small">LUMEN Travel compara experiencias del destino y puede mostrar enlaces de afiliado de Viator u otros partners. La reserva y el pago se completan siempre con el proveedor.</p><p><a class="cta" href="/travel?q=${encodeURIComponent(article.travelQuery)}&source=organic" rel="sponsored">Explorar ${esc(article.travelQuery)} →</a></p></div></section>` : "";
   const canonical = `${origin}/discover/${article.slug}`;
   return layout({
     title:article.title,
@@ -223,7 +280,7 @@ function articlePage(article, origin) {
       publisher:{"@type":"Organization",name:"LUMEN"},
       mainEntityOfPage:{"@type":"WebPage","@id":canonical}
     },
-    body:`<main class="article"><section class="hero"><div class="eyebrow">${esc(article.category)} · LUMEN Discover</div><h1>${esc(article.title)}</h1><p class="lead">${esc(article.intro)}</p></section>${sections}<section class="section"><div class="disclosure"><b>Cómo trabajamos:</b> estas guías buscan ayudar a comparar y verificar. Si una página contiene un enlace afiliado, lo identificamos. Un clic o una visita no se consideran ingresos de LUMEN hasta que exista evidencia del proveedor.</div><p><a href="/discover">← Volver a Discover</a></p></section></main>`
+    body:`<main class="article"><section class="hero"><div class="eyebrow">${esc(article.category)} · LUMEN Discover</div><h1>${esc(article.title)}</h1><p class="lead">${esc(article.intro)}</p></section>${sections}${travelCta}<section class="section"><div class="disclosure"><b>Cómo trabajamos:</b> estas guías buscan ayudar a comparar y verificar. Si una página contiene un enlace afiliado, lo identificamos. Un clic o una visita no se consideran ingresos de LUMEN hasta que exista evidencia del proveedor.</div><p><a href="/discover">← Volver a Discover</a></p></section></main>`
   });
 }
 
