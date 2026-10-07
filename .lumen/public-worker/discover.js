@@ -246,15 +246,15 @@ export function handleDiscover(request) {
     return new Response(indexPage(url.origin), {status:200,headers:{"content-type":"text/html; charset=utf-8","cache-control":"public, max-age=300","x-content-type-options":"nosniff"}});
   }
 
+  if (path === "/discover/feed.xml") {
+    return new Response(rss(url.origin), {status:200,headers:{"content-type":"application/rss+xml; charset=utf-8","cache-control":"public, max-age=900","x-content-type-options":"nosniff"}});
+  }
+
   if (path.startsWith("/discover/")) {
     const slug = decodeURIComponent(path.slice("/discover/".length));
     const article = ARTICLES.find((a)=>a.slug === slug);
     if (!article) return new Response("not_found",{status:404,headers:{"content-type":"text/plain; charset=utf-8"}});
     return new Response(articlePage(article,url.origin), {status:200,headers:{"content-type":"text/html; charset=utf-8","cache-control":"public, max-age=300","x-content-type-options":"nosniff"}});
-  }
-
-  if (path === "/discover/feed.xml") {
-    return new Response(rss(url.origin), {status:200,headers:{"content-type":"application/rss+xml; charset=utf-8","cache-control":"public, max-age=900","x-content-type-options":"nosniff"}});
   }
 
   if (path === `/${INDEXNOW_KEY}.txt`) {
