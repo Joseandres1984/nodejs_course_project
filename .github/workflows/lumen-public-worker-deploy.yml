@@ -13,6 +13,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -21,6 +23,7 @@ jobs:
         working-directory: .lumen/public-worker
         run: |
           node --check discover.js
+          node --check indexnow-submit.mjs
           node --check worker.js
           node --check gateway.js
           npx --yes wrangler@latest deploy --dry-run --config wrangler.toml
@@ -54,17 +57,22 @@ jobs:
             home_code="$(curl -sS --max-time 20 -o home.html -w '%{http_code}' "$BASE/" || true)"
             discover_code="$(curl -sS --max-time 20 -o discover.html -w '%{http_code}' "$BASE/discover" || true)"
             guide_code="$(curl -sS --max-time 20 -o guide.html -w '%{http_code}' "$BASE/discover/comparar-precios-online-sin-falsas-ofertas" || true)"
+            feed_code="$(curl -sS --max-time 20 -o discover-feed.xml -w '%{http_code}' "$BASE/discover/feed.xml" || true)"
+            indexnow_key_code="$(curl -sS --max-time 20 -o indexnow-key.txt -w '%{http_code}' "$BASE/a3ca2e44211bc1b3934273e4de9b9ed6.txt" || true)"
             sitemap_code="$(curl -sS --max-time 20 -o sitemap.xml -w '%{http_code}' "$BASE/sitemap.xml" || true)"
             robots_code="$(curl -sS --max-time 20 -o robots.txt -w '%{http_code}' "$BASE/robots.txt" || true)"
             travel_code="$(curl -sS --max-time 30 -o travel.html -w '%{http_code}' "$BASE/travel?q=Rio%20de%20Janeiro&source=web" || true)"
             travel_json_code="$(curl -sS --max-time 30 -o travel.json -w '%{http_code}' "$BASE/travel.json?q=Rio%20de%20Janeiro&source=web" || true)"
             package_code="$(curl -sS --max-time 40 -o package.html -w '%{http_code}' "$BASE/travel/package?destination=GIG&duration=7&month=11&travelers=2&budget=2500&source=web" || true)"
             package_json_code="$(curl -sS --max-time 40 -o package.json -w '%{http_code}' "$BASE/travel/package.json?destination=GIG&duration=7&month=11&travelers=2&budget=2500&source=web" || true)"
-            if [ "$health_code" = '200' ] && [ "$home_code" = '200' ] && [ "$discover_code" = '200' ] && [ "$guide_code" = '200' ] && [ "$sitemap_code" = '200' ] && [ "$robots_code" = '200' ] && [ "$travel_code" = '200' ] && [ "$travel_json_code" = '200' ] && [ "$package_code" = '200' ] && [ "$package_json_code" = '200' ] \
+            if [ "$health_code" = '200' ] && [ "$home_code" = '200' ] && [ "$discover_code" = '200' ] && [ "$guide_code" = '200' ] && [ "$feed_code" = '200' ] && [ "$indexnow_key_code" = '200' ] && [ "$sitemap_code" = '200' ] && [ "$robots_code" = '200' ] && [ "$travel_code" = '200' ] && [ "$travel_json_code" = '200' ] && [ "$package_code" = '200' ] && [ "$package_json_code" = '200' ] \
               && grep -q '"ok":true' health.json \
               && grep -q 'LUMEN' home.html \
               && grep -q 'LUMEN Discover' discover.html \
               && grep -q 'Cómo comparar precios online' guide.html \
+              && grep -q 'application/ld+json' guide.html \
+              && grep -q '<rss version="2.0">' discover-feed.xml \
+              && grep -q 'a3ca2e44211bc1b3934273e4de9b9ed6' indexnow-key.txt \
               && grep -q '/discover/' sitemap.xml \
               && grep -q 'Sitemap:' robots.txt \
               && grep -q 'LUMEN Travel' travel.html \
@@ -78,7 +86,7 @@ jobs:
             sleep 4
           done
           if [ "$ok" -ne 1 ]; then
-            echo "PUBLIC_SMOKE_FAILED health=${health_code:-none} home=${home_code:-none} discover=${discover_code:-none} guide=${guide_code:-none} sitemap=${sitemap_code:-none} robots=${robots_code:-none} travel=${travel_code:-none} travel_json=${travel_json_code:-none} package=${package_code:-none} package_json=${package_json_code:-none}"
+            echo "PUBLIC_SMOKE_FAILED health=${health_code:-none} home=${home_code:-none} discover=${discover_code:-none} guide=${guide_code:-none} feed=${feed_code:-none} indexnow_key=${indexnow_key_code:-none} sitemap=${sitemap_code:-none} robots=${robots_code:-none} travel=${travel_code:-none} travel_json=${travel_json_code:-none} package=${package_code:-none} package_json=${package_json_code:-none}"
             cat health.json 2>/dev/null || true
             head -c 500 home.html 2>/dev/null || true
             head -c 800 travel.html 2>/dev/null || true
@@ -87,3 +95,10 @@ jobs:
             exit 1
           fi
           echo 'PUBLIC_DISCOVER_TRAVEL_AND_COMPLETE_TRIP_SMOKE_OK'
+
+      - name: Notify IndexNow about changed Discover URLs
+        continue-on-error: true
+        working-directory: .lumen/public-worker
+        env:
+          LUMEN_PUBLIC_BASE_URL: 'https://lumen-zero-public.lumen-b2b.workers.dev'
+        run: node indexnow-submit.mjs
