@@ -1,6 +1,7 @@
 const AFFILIATE_URL = "https://sovrn.co/yj7fjei";
 const INDEXNOW_KEY = "a3ca2e44211bc1b3934273e4de9b9ed6";
 const DISCOVER_PUBLISHED_AT = "2026-10-06";
+const DISCOVER_RENDER_VERSION = "1.1-organic-discovery";
 
 const ARTICLES = [
   {
@@ -272,4 +273,4 @@ export function handleDiscover(request) {
   return null;
 }
 
-export { ARTICLES, INDEXNOW_KEY };
+export { ARTICLES, INDEXNOW_KEY, DISCOVER_RENDER_VERSION };
