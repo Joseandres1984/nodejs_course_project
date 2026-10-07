@@ -47,3 +47,15 @@ jobs:
             test "$code" -ge 200
             test "$code" -lt 300
           done
+
+      - name: Force Travelpayouts finance diagnostic sync
+        run: |
+          set -euo pipefail
+          test -n "${OPPORTUNITY_ADMIN_TOKEN:-}"
+          base='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          code=$(curl --show-error --silent --max-time 60 -o /tmp/travelpayouts-sync.json -w '%{http_code}' \
+            -X POST -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            "$base/travelpayouts/finance/sync")
+          echo "TRAVELPAYOUTS_SYNC_HTTP=$code"
+          cat /tmp/travelpayouts-sync.json; echo
+          test "$code" = '202'
