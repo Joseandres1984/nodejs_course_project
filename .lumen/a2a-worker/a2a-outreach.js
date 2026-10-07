@@ -57,7 +57,7 @@ async function preferredOpportunityId(env) {
 
 async function getNextApproved(env) {
   const preferred=await preferredOpportunityId(env);
-  return env.DB.prepare("SELECT p.proposal_id,p.opportunity_id,p.offer_id,p.offer_name,p.amount_usd,p.subject,p.message,p.metadata_json,o.name,o.endpoint FROM lumen_proposal_drafts p JOIN lumen_opportunities o ON o.id=p.opportunity_id LEFT JOIN lumen_outreach_attempts x ON x.proposal_id=p.proposal_id WHERE p.status='APPROVED' AND p.quality_gate_status='PASS' AND x.proposal_id IS NULL ORDER BY CASE WHEN p.opportunity_id=? THEN 0 ELSE 1 END,p.updated_at ASC LIMIT 1").bind(preferred||"").first();
+  return env.DB.prepare("SELECT p.proposal_id,p.opportunity_id,p.offer_id,p.offer_name,p.amount_usd,p.subject,p.message,p.metadata_json,o.name,o.endpoint FROM lumen_proposal_drafts p JOIN lumen_opportunities o ON o.id=p.opportunity_id LEFT JOIN lumen_outreach_attempts x ON x.proposal_id=p.proposal_id WHERE p.status='APPROVED' AND p.quality_gate_status='PASS' AND (x.proposal_id IS NULL OR (x.status IN ('CARD_FETCH_FAILED','SEND_FAILED') AND datetime(x.updated_at)<=datetime('now','-6 hours'))) ORDER BY CASE WHEN p.opportunity_id=? THEN 0 ELSE 1 END,p.updated_at ASC LIMIT 1").bind(preferred||"").first();
 }
 
 function hasRequiredAuth(card) {
@@ -224,7 +224,7 @@ async function getReadyAttempt(env) {
   if(preferred){
     const priorityReady=await env.DB.prepare("SELECT x.proposal_id,x.opportunity_id,x.card_url,x.agent_url,x.protocol_binding,x.protocol_version,p.offer_id,p.offer_name,p.amount_usd,p.subject,p.message,p.metadata_json,o.name FROM lumen_outreach_attempts x JOIN lumen_proposal_drafts p ON p.proposal_id=x.proposal_id JOIN lumen_opportunities o ON o.id=p.opportunity_id WHERE x.status='READY' AND p.status='APPROVED' AND p.quality_gate_status='PASS' AND p.opportunity_id=? ORDER BY x.updated_at ASC LIMIT 1").bind(preferred).first();
     if(priorityReady) return priorityReady;
-    const priorityPending=await env.DB.prepare("SELECT p.proposal_id FROM lumen_proposal_drafts p LEFT JOIN lumen_outreach_attempts x ON x.proposal_id=p.proposal_id WHERE p.status='APPROVED' AND p.quality_gate_status='PASS' AND p.opportunity_id=? AND x.proposal_id IS NULL LIMIT 1").bind(preferred).first();
+    const priorityPending=await env.DB.prepare("SELECT p.proposal_id FROM lumen_proposal_drafts p LEFT JOIN lumen_outreach_attempts x ON x.proposal_id=p.proposal_id WHERE p.status='APPROVED' AND p.quality_gate_status='PASS' AND p.opportunity_id=? AND (x.proposal_id IS NULL OR (x.status IN ('CARD_FETCH_FAILED','SEND_FAILED') AND datetime(x.updated_at)<=datetime('now','-6 hours'))) LIMIT 1").bind(preferred).first();
     if(priorityPending) return null;
   }
   return env.DB.prepare("SELECT x.proposal_id,x.opportunity_id,x.card_url,x.agent_url,x.protocol_binding,x.protocol_version,p.offer_id,p.offer_name,p.amount_usd,p.subject,p.message,p.metadata_json,o.name FROM lumen_outreach_attempts x JOIN lumen_proposal_drafts p ON p.proposal_id=x.proposal_id JOIN lumen_opportunities o ON o.id=p.opportunity_id WHERE x.status='READY' AND p.status='APPROVED' AND p.quality_gate_status='PASS' ORDER BY x.updated_at ASC LIMIT 1").first();

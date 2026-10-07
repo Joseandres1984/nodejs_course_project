@@ -10,7 +10,9 @@ export const FIRST_SETTLEMENT_MISSION_POLICY = Object.freeze({
   bindingActionsHumanGated: true,
   skipExplicitMoveOn: true,
   penalizeWaitingSent: true,
-  rotateLowScoreDeadEnds: true
+  rotateLowScoreDeadEnds: true,
+  rotateTerminalOutreachBlocks: true,
+  retryTransientOutreachAfterHours: 6
 });
 
 const STALL_HOURS = Object.freeze({
@@ -37,8 +39,24 @@ export function diagnoseSettlementBlocker(row = {}, now = Date.now()) {
   if (stage === "DISCOVERED") { blocker = "NO_QUALIFIED_DEMAND"; action ||= "continue_verified_demand_discovery"; }
   if (stage === "QUALIFIED") { blocker = "PROPOSAL_NOT_READY"; action ||= "prepare_non_binding_proposal"; }
   if (stage === "PROPOSAL_READY") {
-    blocker = row.quality_gate_status === "FAIL" ? "QUALITY_GATE_FAIL" : "AWAITING_EXISTING_SEND_GATE";
-    action ||= row.quality_gate_status === "FAIL" ? "repair_proposal_quality_without_price_mutation" : "request_existing_human_send_approval";
+    const outreachStatus=String(row.outreach_status || "").toUpperCase();
+    const outreachAge=hoursSince(row.outreach_updated_at || row.stage_updated_at || row.updated_at, now);
+    if (row.quality_gate_status === "FAIL" || row.quality_gate_status === "NEEDS_REVISION") {
+      blocker = "QUALITY_GATE_FAIL";
+      action = "repair_proposal_quality_without_price_mutation";
+    } else if (["AUTH_REQUIRED","INCOMPATIBLE","TASK_TERMINAL"].includes(outreachStatus)) {
+      blocker = "OUTREACH_PATH_TERMINAL";
+      action = "rotate_to_next_opportunity_or_human_review";
+    } else if (["CARD_FETCH_FAILED","SEND_FAILED"].includes(outreachStatus) && outreachAge < 6) {
+      blocker = "OUTREACH_RETRY_COOLDOWN";
+      action = "rotate_while_outreach_retry_cools_down";
+    } else if (["CARD_FETCH_FAILED","SEND_FAILED"].includes(outreachStatus)) {
+      blocker = "OUTREACH_RETRY_DUE";
+      action = "retry_existing_outreach_probe";
+    } else {
+      blocker = "AWAITING_EXISTING_SEND_GATE";
+      action ||= "existing_quality_and_governor_gate";
+    }
   }
   if (stage === "SENT") { blocker = "WAITING_BUYER_RESPONSE"; action ||= "follow_up_when_existing_cooldown_allows"; }
   if (stage === "REPLIED") { blocker = "RESPONSE_NOT_CLOSED"; action ||= "classify_response_and_prepare_close"; }
@@ -70,7 +88,7 @@ function missionPriority(row = {}, now = Date.now()) {
   const diagnosis = diagnoseSettlementBlocker(row, now);
   const stage = String(row.stage || "").toUpperCase();
   const action = String(diagnosis.action || "").toLowerCase();
-  if (action === "move_on" || action === "rotate_to_next_opportunity_or_human_review") return -Infinity;
+  if (["move_on","rotate_to_next_opportunity_or_human_review","rotate_while_outreach_retry_cools_down"].includes(action)) return -Infinity;
   let score = Number(row.first_cash_score || 0);
   const intent = Number(row.intent_score || 0);
   if (stage === "REPLIED") {
@@ -114,12 +132,16 @@ export async function getFirstSettlementMissionStatus(env) {
   const result = await env.DB.prepare(`SELECT r.*, p.quality_gate_status,
     s.response_class AS pipeline_response_class,
     b.receipt_id AS verified_receipt_id,
-    COALESCE(cr.reply_count,0) AS commercial_reply_count
+    COALESCE(cr.reply_count,0) AS commercial_reply_count,
+    x.status AS outreach_status,
+    x.error AS outreach_error,
+    x.updated_at AS outreach_updated_at
     FROM lumen_revenue_loop_v5 r
     LEFT JOIN lumen_proposal_drafts p ON p.proposal_id=r.proposal_id
     LEFT JOIN lumen_sales_pipeline s ON s.proposal_id=r.proposal_id
     LEFT JOIN lumen_x402_revenue_bridge b ON b.proposal_id=r.proposal_id AND b.bridge_status='ATTRIBUTABLE'
     LEFT JOIN lumen_commercial_replies cr ON cr.proposal_id=r.proposal_id
+    LEFT JOIN lumen_outreach_attempts x ON x.proposal_id=r.proposal_id
     WHERE r.stage NOT IN ('PAID','DELIVERED')
     ORDER BY r.first_cash_score DESC,r.intent_score DESC,r.updated_at DESC LIMIT 25`).all();
   const rows = (result.results || []).map(r => ({ ...r, stage_updated_at: r.updated_at }));
