@@ -64,6 +64,7 @@ jobs:
           post outreach/poll || true
           post source-intelligence/cycle || true
           post market-hunter/run || true
+          post tender-match/run || true
           post commercial/reassess || true
           post revenue-loop-v5/run || true
 
@@ -140,6 +141,7 @@ jobs:
           get outreach/stats
           get outreach/next
           get commercial/stats
+          get tender-match/state
           get commercial/next
           get first-cash/stats
           get followup/stats
