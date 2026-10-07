@@ -1,5 +1,5 @@
 import { getFirstSettlementMissionStatus } from "./first-settlement-mission-v1.js";
-const VERSION = "2.1-transport-fallback-closer-swarm";
+const VERSION = "2.0-closer-swarm";
 const CARD_TIMEOUT_MS = 8000;
 const SEND_TIMEOUT_MS = 15000;
 const MAX_CLOSERS_PER_CYCLE = 30;
