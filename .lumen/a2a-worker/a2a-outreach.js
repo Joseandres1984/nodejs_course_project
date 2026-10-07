@@ -1,7 +1,11 @@
 import { getFirstSettlementMissionStatus } from "./first-settlement-mission-v1.js";
-const VERSION = "1.0-guarded-a2a-outreach";
+const VERSION = "2.0-closer-swarm";
 const CARD_TIMEOUT_MS = 8000;
 const SEND_TIMEOUT_MS = 15000;
+const MAX_CLOSERS_PER_CYCLE = 30;
+const CLOSER_CONCURRENT_WAVE = 5;
+const MAX_NEW_OUTREACH_24H = 120;
+const DOMAIN_COOLDOWN_HOURS = 24;
 
 function json(data, status = 200) {
   return Response.json(data, {
@@ -31,6 +35,10 @@ function normalizeBaseUrl(value) {
   url.hash = "";
   url.search = "";
   return url.toString().replace(/\/$/, "");
+}
+
+function outreachOrigin(value) {
+  try { return new URL(value).origin.toLowerCase(); } catch { return ""; }
 }
 
 function withTimeout(ms) {
@@ -230,6 +238,86 @@ async function getReadyAttempt(env) {
   return env.DB.prepare("SELECT x.proposal_id,x.opportunity_id,x.card_url,x.agent_url,x.protocol_binding,x.protocol_version,p.offer_id,p.offer_name,p.amount_usd,p.subject,p.message,p.metadata_json,o.name FROM lumen_outreach_attempts x JOIN lumen_proposal_drafts p ON p.proposal_id=x.proposal_id JOIN lumen_opportunities o ON o.id=p.opportunity_id WHERE x.status='READY' AND p.status='APPROVED' AND p.quality_gate_status='PASS' ORDER BY x.updated_at ASC LIMIT 1").first();
 }
 
+async function sentLast24h(env) {
+  const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM lumen_outreach_attempts WHERE status IN ('SENT','SENT_TASK','WORKING','RESPONDED','TASK_TERMINAL') AND datetime(updated_at)>=datetime('now','-24 hours')").first();
+  return Number(row?.n || 0);
+}
+
+async function getReadyAttempts(env, limit = MAX_CLOSERS_PER_CYCLE) {
+  const recent = await env.DB.prepare("SELECT card_url,agent_url FROM lumen_outreach_attempts WHERE status IN ('SENT','SENT_TASK','WORKING','RESPONDED','TASK_TERMINAL') AND datetime(updated_at)>=datetime('now','-24 hours') ORDER BY updated_at DESC LIMIT 500").all();
+  const blockedOrigins = new Set();
+  for (const row of recent.results || []) {
+    const origin = outreachOrigin(row.agent_url || row.card_url);
+    if (origin) blockedOrigins.add(origin);
+  }
+
+  const candidates = await env.DB.prepare("SELECT x.proposal_id,x.opportunity_id,x.card_url,x.agent_url,x.protocol_binding,x.protocol_version,p.offer_id,p.offer_name,p.amount_usd,p.subject,p.message,p.metadata_json,o.name FROM lumen_outreach_attempts x JOIN lumen_proposal_drafts p ON p.proposal_id=x.proposal_id JOIN lumen_opportunities o ON o.id=p.opportunity_id WHERE x.status='READY' AND p.status='APPROVED' AND p.quality_gate_status='PASS' ORDER BY x.updated_at ASC LIMIT 240").all();
+  const selected = [];
+  const seenOrigins = new Set();
+  const seenOpportunities = new Set();
+  for (const row of candidates.results || []) {
+    const origin = outreachOrigin(row.agent_url || row.card_url);
+    if (!origin || blockedOrigins.has(origin) || seenOrigins.has(origin) || seenOpportunities.has(row.opportunity_id)) continue;
+    seenOrigins.add(origin);
+    seenOpportunities.add(row.opportunity_id);
+    selected.push(row);
+    if (selected.length >= limit) break;
+  }
+  return selected;
+}
+
+async function claimReadyAttempts(env, rows) {
+  const claimed = [];
+  for (const row of rows) {
+    const result = await env.DB.prepare("UPDATE lumen_outreach_attempts SET status='CLAIMED',updated_at=? WHERE proposal_id=? AND status='READY'")
+      .bind(new Date().toISOString(), row.proposal_id).run();
+    if (Number(result?.meta?.changes || 0) > 0) claimed.push(row);
+  }
+  return claimed;
+}
+
+export async function sendApprovedBatch(env, { force = false, limit = MAX_CLOSERS_PER_CYCLE } = {}) {
+  if (!(await ensureSchema(env))) return { ok: false, error: "persistence_unavailable", version: VERSION };
+  const autoEnabled = String(env?.A2A_AUTONOMOUS_OUTREACH || "false").toLowerCase() === "true";
+  if (!force && !autoEnabled) {
+    return { ok: true, attempted: 0, sent: 0, reason: "autonomous_outreach_disabled", version: VERSION };
+  }
+
+  const dailyUsed = await sentLast24h(env);
+  const dailyRemaining = Math.max(0, MAX_NEW_OUTREACH_24H - dailyUsed);
+  const requested = Math.max(0, Math.min(Number(limit || 0), MAX_CLOSERS_PER_CYCLE, dailyRemaining));
+  if (requested < 1) {
+    return { ok: true, attempted: 0, sent: 0, reason: "daily_new_outreach_cap_reached", dailyUsed, dailyRemaining, version: VERSION };
+  }
+
+  const ready = await getReadyAttempts(env, requested);
+  const claimed = await claimReadyAttempts(env, ready);
+  const results = [];
+  for (let offset = 0; offset < claimed.length; offset += CLOSER_CONCURRENT_WAVE) {
+    const wave = claimed.slice(offset, offset + CLOSER_CONCURRENT_WAVE);
+    const waveResults = await Promise.all(wave.map(row => sendReady(env, row)));
+    results.push(...waveResults);
+  }
+  const sent = results.filter(row => row?.sent === true).length;
+  const responded = results.filter(row => row?.status === "RESPONDED").length;
+  const failed = results.filter(row => row?.ok === false).length;
+  return {
+    ok: failed < results.length || results.length === 0,
+    version: VERSION,
+    closerCapacity: MAX_CLOSERS_PER_CYCLE,
+    concurrentCloserWave: CLOSER_CONCURRENT_WAVE,
+    dailyNewOutreachCap: MAX_NEW_OUTREACH_24H,
+    domainCooldownHours: DOMAIN_COOLDOWN_HOURS,
+    dailyUsedBefore: dailyUsed,
+    dailyRemainingBefore: dailyRemaining,
+    attempted: results.length,
+    sent,
+    responded,
+    failed,
+    results
+  };
+}
+
 async function sendReady(env, row) {
   const cardProbe = await fetchAgentCard(row.card_url);
   if (!cardProbe.ok) {
@@ -385,6 +473,11 @@ async function outreachStats(env) {
     ready: Number(ready?.n || 0),
     sent: Number(sent?.n || 0),
     responded: Number(responded?.n || 0),
+    closerCapacity: MAX_CLOSERS_PER_CYCLE,
+    concurrentCloserWave: CLOSER_CONCURRENT_WAVE,
+    dailyNewOutreachCap: MAX_NEW_OUTREACH_24H,
+    domainCooldownHours: DOMAIN_COOLDOWN_HOURS,
+    dedupePolicy: "one_opportunity_per_closer_and_one_origin_per_24h",
     autonomousOutreachEnabled: String(env?.A2A_AUTONOMOUS_OUTREACH || "false").toLowerCase() === "true",
     autonomousOutgoingSpend: false,
     autonomousContract: false
@@ -423,10 +516,11 @@ export async function handleA2AOutreach(request, env) {
   if (request.method === "GET" && url.pathname === "/outreach/stats") return outreachStats(env);
   if (request.method === "GET" && url.pathname === "/outreach/next") return outreachNext(env);
 
-  if (request.method === "POST" && ["/outreach/probe-next","/outreach/send-next","/outreach/poll"].includes(url.pathname)) {
+  if (request.method === "POST" && ["/outreach/probe-next","/outreach/send-next","/outreach/send-batch","/outreach/poll"].includes(url.pathname)) {
     if (!authorized(request, env)) return json({ ok: false, error: "admin_token_required" }, 403);
     if (url.pathname === "/outreach/probe-next") return json(await probeNextApproved(env), 202);
     if (url.pathname === "/outreach/send-next") return json(await sendNextApproved(env, { force: true }), 202);
+    if (url.pathname === "/outreach/send-batch") return json(await sendApprovedBatch(env, { force: true, limit: MAX_CLOSERS_PER_CYCLE }), 202);
     if (url.pathname === "/outreach/poll") return json(await pollOutstandingResponses(env), 202);
   }
   return null;
