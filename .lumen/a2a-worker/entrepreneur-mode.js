@@ -6,7 +6,7 @@ import { runVentureBuilderV1 } from "./venture-builder-v1.js";
 import { runVentureLauncherV1 } from "./venture-launcher-v1.js";
 import { recomputeRevenueDirector } from "./revenue-director.js";
 
-const VERSION = "1.1-entrepreneur-cash-pressure";
+const VERSION = "1.2-entrepreneur-role-council";
 const ROLES = Object.freeze([
   { id:"SCOUT", objective:"find current demand and overlooked zero-capital monetization signals" },
   { id:"FOUNDER", objective:"turn evidence into distinct business models and minimum paid offers" },
@@ -67,6 +67,113 @@ async function cashPressureState(env,truth){
   return {pressure,consecutiveZeroCashCycles,recentCyclesObserved:recent.length};
 }
 
+
+function clamp01(v){return Math.max(0,Math.min(1,Number(v)||0));}
+function parseModelJson(text){
+  const raw=String(text||"").replace(/^\x60\x60\x60(?:json)?\s*/i,"").replace(/\s*\x60\x60\x60$/,"");
+  const a=raw.indexOf("{"),b=raw.lastIndexOf("}");
+  if(a<0||b<=a)throw new Error("entrepreneur_council_json_missing");
+  return JSON.parse(raw.slice(a,b+1));
+}
+function unsafeAdvisoryText(v){return /\b(spend|buy|purchase|loan|debt|sign contract|accept contract|private key|seed phrase|fake clicks?|self[- ]?click|click farm|spam)\b/i.test(String(v||""));}
+
+export function deterministicEntrepreneurCouncil({mission={},hunter={},founder={},director={},truth={},pressure={}}={}){
+  const top=founder?.topVenture||hunter?.topOpportunity||hunter?.bestScaleCandidate||null;
+  const opportunity=clean(mission?.hypothesis||top?.product||top?.title||"Find a current buyer problem that LUMEN can solve with existing capabilities.",420);
+  const target=clean(mission?.target||top?.title||"current buyer demand",220);
+  const model=clean(mission?.businessModel||top?.revenueModel||"zero-capital paid service",220);
+  const cash=Number(truth?.verifiedRevenueUsd||0);
+  const settlements=Number(truth?.verifiedSettlements||0);
+  const bottleneck=clean(director?.bottleneck||"unknown",100);
+  const roleViews=[
+    {role:"SCOUT",verdict:"Prioritize evidence of an active buyer problem around "+target+".",recommendation:"Search for current demand, RFQs, purchase intent or repeated pain before expanding supply.",confidence:.78},
+    {role:"FOUNDER",verdict:"Package the smallest paid version of "+model+".",recommendation:"Use an existing capability and prepare the minimum deliverable that can test willingness to pay.",confidence:.74},
+    {role:"SELLER",verdict:"Current commercial bottleneck: "+bottleneck+".",recommendation:"Prefer the nearest existing buyer conversation or qualified demand over additional cold volume.",confidence:.82},
+    {role:"GROWTH",verdict:"Scale only after a paid or strongly attributable conversion signal exists.",recommendation:"Favor repeatable low-marginal-cost channels and measure monetizable events, not activity.",confidence:.80},
+    {role:"CFO",verdict:"Verified cash is USD "+cash.toFixed(2)+" across "+settlements+" verified settlements.",recommendation:"Reject projections as revenue and keep autonomous capital at zero until a verified winner exists.",confidence:.98}
+  ];
+  return {
+    source:"DETERMINISTIC_FALLBACK",
+    roles:roleViews,
+    consensus:{
+      opportunity,
+      businessModel:model,
+      customer:target,
+      smallestTest:clean(mission?.nextStep||"Validate one real buyer signal using an existing zero-cost LUMEN capability.",360),
+      successMetric:"buyer purchase intent, quote request, attributable conversion, or verified settlement",
+      killCondition:"stop or pivot after repeated zero-signal attempts or if evidence weakens",
+      timeBoxHours:Math.max(1,Math.min(168,Number(mission?.timeToCashHours||48))),
+      confidence:clamp01(Number(mission?.confidence||mission?.score||0.55)),
+      executionBoundary:"INTERNAL_RECOMMENDATION_ONLY"
+    }
+  };
+}
+
+async function runEntrepreneurRoleCouncil(aiEnv,evidence){
+  const fallback=deterministicEntrepreneurCouncil(evidence);
+  if(!aiEnv?.AI?.run)return fallback;
+  const compact={
+    mission:evidence.mission,
+    brainPlan:evidence.brainPlan,
+    topOpportunity:evidence.hunter?.topOpportunity||null,
+    bestScaleCandidate:evidence.hunter?.bestScaleCandidate||null,
+    topVenture:evidence.founder?.topVenture||null,
+    revenueDirector:{bottleneck:evidence.director?.bottleneck,tactic:evidence.director?.tactic,targetMetric:evidence.director?.targetMetric},
+    revenueTruth:evidence.truth,
+    cashPressure:evidence.pressure
+  };
+  const prompt=[
+    "Act as five concise entrepreneurial roles inside LUMEN:",
+    "SCOUT finds real demand; FOUNDER designs the smallest zero-capital offer;",
+    "SELLER chooses the shortest truthful route to buyer intent;",
+    "GROWTH looks for repeatability and distribution; CFO enforces verified-cash truth.",
+    "Review the supplied evidence independently, then give one consensus.",
+    "Do not invent buyers, payments, prices, demand or capabilities.",
+    "Do not recommend spending, purchases, debt, contracts, fake clicks, self-clicking, spam or deceptive tactics.",
+    "All recommendations are INTERNAL ONLY and grant no external authority.",
+    "Return only JSON with roles [{role,verdict,recommendation,confidence}] and consensus",
+    "{opportunity,businessModel,customer,smallestTest,successMetric,killCondition,timeBoxHours,confidence}.",
+    "Do not provide chain-of-thought."
+  ].join(" ");
+  try{
+    const r=await aiEnv.AI.run("@cf/meta/llama-3.1-8b-instruct-fast",{messages:[{role:"system",content:prompt},{role:"user",content:JSON.stringify(compact).slice(0,14000)}],temperature:.25,max_completion_tokens:360});
+    const text=typeof r==="string"?r:(typeof r?.response==="string"?r.response:r?.choices?.[0]?.message?.content||"");
+    const data=parseModelJson(text);
+    const byRole=new Map((Array.isArray(data?.roles)?data.roles:[]).map(x=>[clean(x?.role,20).toUpperCase(),x]));
+    const roles=ROLES.map((role,index)=>{
+      const raw=byRole.get(role.id);
+      const fb=fallback.roles[index];
+      const verdict=clean(raw?.verdict||fb.verdict,360);
+      const recommendation=clean(raw?.recommendation||fb.recommendation,360);
+      return {
+        role:role.id,
+        verdict:unsafeAdvisoryText(verdict)?fb.verdict:verdict,
+        recommendation:unsafeAdvisoryText(recommendation)?fb.recommendation:recommendation,
+        confidence:clamp01(raw?.confidence??fb.confidence)
+      };
+    });
+    const raw=data?.consensus||{};
+    const safe=(value,fallbackValue,n=420)=>{const x=clean(value||fallbackValue,n);return unsafeAdvisoryText(x)?clean(fallbackValue,n):x;};
+    return {
+      source:"BUDGETED_AI_COUNCIL",
+      roles,
+      consensus:{
+        opportunity:safe(raw.opportunity,fallback.consensus.opportunity),
+        businessModel:safe(raw.businessModel,fallback.consensus.businessModel,240),
+        customer:safe(raw.customer,fallback.consensus.customer,240),
+        smallestTest:safe(raw.smallestTest,fallback.consensus.smallestTest),
+        successMetric:safe(raw.successMetric,fallback.consensus.successMetric,320),
+        killCondition:safe(raw.killCondition,fallback.consensus.killCondition,320),
+        timeBoxHours:Math.max(1,Math.min(168,Number(raw.timeBoxHours||fallback.consensus.timeBoxHours))),
+        confidence:clamp01(raw.confidence??fallback.consensus.confidence),
+        executionBoundary:"INTERNAL_RECOMMENDATION_ONLY"
+      }
+    };
+  }catch{
+    return fallback;
+  }
+}
+
 export const ENTREPRENEUR_POLICY = Object.freeze({
   version:VERSION,
   identity:"LUMEN Entrepreneur Mode",
@@ -80,6 +187,9 @@ export const ENTREPRENEUR_POLICY = Object.freeze({
   stalledStrategyPivot:true,
   verifiedWinnerCompounding:true,
   cashDiscipline:["START_FROM_DEMAND","SELL_BEFORE_BUILD","RUN_SMALLEST_REVERSIBLE_TEST","KILL_STALLED_STRATEGIES","REPEAT_VERIFIED_WINNERS","CASH_IS_TRUTH"],
+  multiRoleCouncil:true,
+  roleCouncilNoChainOfThought:true,
+  roleRecommendationsDoNotGrantExternalAuthority:true,
   externalCommercialExecution:"delegated_to_existing_quality_governor_and_one-message-slot",
   noSyntheticDemand:true,
   noFakeBuyers:true,
@@ -104,8 +214,9 @@ export async function runEntrepreneurMode(env,{trigger="scheduled",scheduledTime
     : `entrepreneur-manual-${scheduled}`;
   // Entrepreneur order matters: hunt first so the decision is made with the
   // freshest opportunity set rather than yesterday's idea inventory.
+  const budgetEnv=withBudgetedAi(env);
   const hunter=await runVentureHunterV1(env,{limit:80,topK:18,mode:"entrepreneur_zero_capital"});
-  const brain=await runUnifiedEconomicBrain(withBudgetedAi(env),{trigger:`entrepreneur_mode:${trigger}`,scheduledTime,cycleKey});
+  const brain=await runUnifiedEconomicBrain(budgetEnv,{trigger:`entrepreneur_mode:${trigger}`,scheduledTime,cycleKey});
   const founder=await runVentureFounderV2(env,{limit:10});
   const builder=await runVentureBuilderV1(env,{limit:5});
   const launcher=await runVentureLauncherV1(env,{limit:5});
@@ -123,6 +234,7 @@ export async function runEntrepreneurMode(env,{trigger="scheduled",scheduledTime
       : pressure.pressure==="CRITICAL"||pressure.pressure==="HIGH"
         ? "PREFER_FASTEST_EVIDENCE_BACKED_CASH_TEST"
         : "RUN_SMALLEST_REVERSIBLE_TEST";
+  const council=await runEntrepreneurRoleCouncil(budgetEnv,{mission,hunter,founder,director,truth,pressure,brainPlan:brain?.plan||{}});
   const result={
     ok:true,
     version:VERSION,
@@ -158,6 +270,7 @@ export async function runEntrepreneurMode(env,{trigger="scheduled",scheduledTime
       targetMetric:director?.targetMetric||null,
       preferredOffers:director?.preferredOffers||[]
     },
+    roleCouncil:council,
     revenueTruth:truth,
     cashSprint:{
       pressure:pressure.pressure,
@@ -181,6 +294,7 @@ export async function runEntrepreneurMode(env,{trigger="scheduled",scheduledTime
       canPrepareLaunchPacket:true,
       huntRunsBeforeEconomicDecision:true,
       externalMessagesHandledByExistingBoundedCommercialLoop:true,
+      roleCouncilAdvisoryOnly:true,
       maxExternalMessagesAddedByEntrepreneurMode:0,
       autonomousSpendUsd:0,
       autonomousContract:false,
