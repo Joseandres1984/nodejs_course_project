@@ -1,6 +1,6 @@
 import { classifyCommercialResponse } from "./response-qualification.js";
 
-const VERSION = "1.7-cash-selector-recovery";
+const VERSION = "1.8-cash-selector-quality-aware-recovery";
 const PRIORITY_BRIDGE_VERSION = "4.1-sovereign-revenue-priority";
 const EVOLUTION_VERSION = "1.1-conversion-rate-proposal-evolution";
 
@@ -79,7 +79,7 @@ async function getBestProposalCandidate(env) {
     ? " OR (p.status='DRAFT' AND p.quality_gate_status='NEEDS_REVISION' AND a.reasons_json LIKE '%microbuyer_fit%' AND COALESCE(p.metadata_json,'') NOT LIKE '%\"one_time_revision\":true%')"
     : "";
   const conversionRecovery = firstCashMode
-    ? " OR (a.commercial_score>=85 AND COALESCE(p.metadata_json,'') NOT LIKE '%\"conversion_recovery\":true%' AND p.status IN ('DRAFT','APPROVED') AND p.quality_gate_status IN ('NEEDS_REVISION','PASS') AND (x.proposal_id IS NULL OR (x.status IN ('CARD_FETCH_FAILED','SEND_FAILED','INCOMPATIBLE') AND datetime(x.updated_at)<=datetime('now','-6 hours'))))"
+    ? " OR (a.commercial_score>=85 AND LOWER(COALESCE(a.evidence_strength,'')) IN ('medium','strong') AND COALESCE(p.metadata_json,'') NOT LIKE '%\"conversion_recovery\":{\"enabled\":true%' AND p.status IN ('DRAFT','APPROVED') AND p.quality_gate_status IN ('NEEDS_REVISION','PASS') AND (x.proposal_id IS NULL OR (x.status IN ('CARD_FETCH_FAILED','SEND_FAILED','INCOMPATIBLE') AND datetime(x.updated_at)<=datetime('now','-6 hours'))))"
     : "";
   const where = ` WHERE a.commercially_actionable=1 AND a.synthetic_or_test_only=0 AND (p.opportunity_id IS NULL OR (p.status='DRAFT' AND p.quality_gate_status='PENDING_QUALITY_GATE')${oneTimeMicrobuyerRevision}${conversionRecovery})`;
   const firstCashOrder = firstCashMode ? "CASE WHEN a.reasons_json LIKE '%microbuyer_fit%' THEN 0 ELSE 1 END,CASE WHEN p.opportunity_id IS NULL THEN 0 ELSE 1 END," : "";
@@ -257,7 +257,7 @@ export async function prepareTopProposal(env) {
   const conversionRecovery = Boolean(opportunity.existing_proposal_id) &&
     Number(opportunity.commercial_score || 0) >= 85 &&
     ["NEEDS_REVISION","PASS"].includes(clean(opportunity.existing_quality_gate_status, 80).toUpperCase()) &&
-    !clean(opportunity.existing_metadata_json, 12000).includes('"conversion_recovery":true');
+    !clean(opportunity.existing_metadata_json, 12000).includes('"conversion_recovery":{"enabled":true');
   const evolution = conversionRecovery
     ? { variantId: "low_friction", reason: "cash_recovery_low_friction", stats: await proposalVariantStats(env) }
     : await selectProposalVariant(env, proposalId);
