@@ -6,7 +6,7 @@ import { runVentureBuilderV1 } from "./venture-builder-v1.js";
 import { runVentureLauncherV1 } from "./venture-launcher-v1.js";
 import { recomputeRevenueDirector } from "./revenue-director.js";
 
-const VERSION = "1.1-entrepreneur-cash-pressure";
+const VERSION = "1.2-entrepreneur-commercial-steering";
 const ROLES = Object.freeze([
   { id:"SCOUT", objective:"find current demand and overlooked zero-capital monetization signals" },
   { id:"FOUNDER", objective:"turn evidence into distinct business models and minimum paid offers" },
@@ -67,6 +67,40 @@ async function cashPressureState(env,truth){
   return {pressure,consecutiveZeroCashCycles,recentCyclesObserved:recent.length};
 }
 
+export function entrepreneurCommercialDirective(mission={},brainPlan={},director={},pressure={}){
+  const lane=clean(mission.executionLane||mission.lane||"",30).toUpperCase();
+  const score=Number(mission.score||0);
+  const probability=Number(mission.probabilityOfSale||0);
+  const bottleneck=clean(director?.bottleneck||"",80).toLowerCase();
+  let action="PORTFOLIO";
+  let reason="entrepreneur_mission_prepares_evidence_but_keeps_existing_commercial_priority";
+
+  if(lane==="TRAVEL" && brainPlan?.travel){
+    action="TRAVEL_REFERRAL";
+    reason="entrepreneur_selected_travel_and_existing_bounded_travel_referral_lane_can_validate_demand";
+  }else if(lane==="DISCOVERY"||lane==="EXPLORE"){
+    action="NEW_OUTREACH";
+    reason="entrepreneur_selected_demand_discovery_and_existing_quality_gates_can_attempt_one_verified_buyer_touch";
+  }else if(lane==="REVENUE"){
+    if(bottleneck==="conversion"){
+      action="FIRST_CASH";
+      reason="entrepreneur_selected_revenue_and_revenue_director_detected_conversion_bottleneck";
+    }else if(bottleneck==="response_qualification"){
+      action="COMMERCIAL_REPLY";
+      reason="entrepreneur_selected_revenue_and_existing_responses_need_qualification";
+    }else if(bottleneck==="response_generation"){
+      action="FOLLOWUP";
+      reason="entrepreneur_selected_revenue_and_existing_sent_pipeline_needs_bounded_followup";
+    }
+  }
+
+  const evidenceStrongEnough=score>=0.45 || probability>=0.30 || ["HIGH","CRITICAL","WINNER"].includes(clean(pressure?.pressure,20).toUpperCase());
+  if(action!=="PORTFOLIO"&&!evidenceStrongEnough){
+    return {action:"PORTFOLIO",requestedAction:action,steerExistingCommercialSlot:false,reason:"entrepreneur_evidence_below_execution_threshold",lane,score,probability};
+  }
+  return {action,steerExistingCommercialSlot:action!=="PORTFOLIO",reason,lane,score,probability};
+}
+
 export const ENTREPRENEUR_POLICY = Object.freeze({
   version:VERSION,
   identity:"LUMEN Entrepreneur Mode",
@@ -80,7 +114,9 @@ export const ENTREPRENEUR_POLICY = Object.freeze({
   stalledStrategyPivot:true,
   verifiedWinnerCompounding:true,
   cashDiscipline:["START_FROM_DEMAND","SELL_BEFORE_BUILD","RUN_SMALLEST_REVERSIBLE_TEST","KILL_STALLED_STRATEGIES","REPEAT_VERIFIED_WINNERS","CASH_IS_TRUTH"],
-  externalCommercialExecution:"delegated_to_existing_quality_governor_and_one-message-slot",
+  externalCommercialExecution:"mission_may_steer_existing_quality_governor_and_one-message-slot",
+  missionSteersBoundedCommercialSlot:true,
+  maxDelegatedExternalMessagesPerCycle:1,
   noSyntheticDemand:true,
   noFakeBuyers:true,
   noFakeClicks:true,
@@ -123,6 +159,7 @@ export async function runEntrepreneurMode(env,{trigger="scheduled",scheduledTime
       : pressure.pressure==="CRITICAL"||pressure.pressure==="HIGH"
         ? "PREFER_FASTEST_EVIDENCE_BACKED_CASH_TEST"
         : "RUN_SMALLEST_REVERSIBLE_TEST";
+  const commercialDirective=entrepreneurCommercialDirective(mission,brain?.plan||{},director,pressure);
   const result={
     ok:true,
     version:VERSION,
@@ -158,6 +195,7 @@ export async function runEntrepreneurMode(env,{trigger="scheduled",scheduledTime
       targetMetric:director?.targetMetric||null,
       preferredOffers:director?.preferredOffers||[]
     },
+    commercialDirective,
     revenueTruth:truth,
     cashSprint:{
       pressure:pressure.pressure,
@@ -181,6 +219,8 @@ export async function runEntrepreneurMode(env,{trigger="scheduled",scheduledTime
       canPrepareLaunchPacket:true,
       huntRunsBeforeEconomicDecision:true,
       externalMessagesHandledByExistingBoundedCommercialLoop:true,
+      missionCanSteerExistingCommercialSlot:true,
+      maxDelegatedExternalMessagesPerCycle:1,
       maxExternalMessagesAddedByEntrepreneurMode:0,
       autonomousSpendUsd:0,
       autonomousContract:false,
