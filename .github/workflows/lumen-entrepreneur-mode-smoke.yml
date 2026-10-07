@@ -8,6 +8,7 @@ on:
       - '.lumen/a2a-worker/entrepreneur-mode.js'
       - '.lumen/a2a-worker/unified-economic-brain-v1.js'
       - '.lumen/a2a-worker/test-unified-economic-brain-v1.mjs'
+      - '.lumen/a2a-worker/test-entrepreneur-role-council.mjs'
       - '.lumen/a2a-worker/opportunity-entry.js'
       - '.github/workflows/lumen-entrepreneur-mode-smoke.yml'
   push:
@@ -32,6 +33,7 @@ jobs:
           node --check .lumen/a2a-worker/entrepreneur-mode.js
           node --check .lumen/a2a-worker/unified-economic-brain-v1.js
           node .lumen/a2a-worker/test-unified-economic-brain-v1.mjs
+          node .lumen/a2a-worker/test-entrepreneur-role-council.mjs
           node --check .lumen/a2a-worker/opportunity-entry.js
           grep -q 'handleEntrepreneurMode' .lumen/a2a-worker/opportunity-entry.js
           grep -q 'runEntrepreneurMode' .lumen/a2a-worker/opportunity-entry.js
@@ -42,6 +44,10 @@ jobs:
           grep -q 'verifiedWinnerCompounding:true' .lumen/a2a-worker/entrepreneur-mode.js
           grep -q 'KILL_STALLED_STRATEGIES' .lumen/a2a-worker/entrepreneur-mode.js
           grep -q 'autonomousSpendUsd:0' .lumen/a2a-worker/entrepreneur-mode.js
+          grep -q 'multiRoleCouncil:true' .lumen/a2a-worker/entrepreneur-mode.js
+          grep -q 'roleCouncilNoChainOfThought:true' .lumen/a2a-worker/entrepreneur-mode.js
+          grep -q 'roleRecommendationsDoNotGrantExternalAuthority:true' .lumen/a2a-worker/entrepreneur-mode.js
+          grep -q 'INTERNAL_RECOMMENDATION_ONLY' .lumen/a2a-worker/entrepreneur-mode.js
           grep -q 'maxExternalMessagesAddedByEntrepreneurMode:0' .lumen/a2a-worker/entrepreneur-mode.js
           echo ENTREPRENEUR_MODE_SOURCE_OK
 
@@ -59,7 +65,7 @@ jobs:
           ok=0
           for i in $(seq 1 36); do
             if curl --fail --show-error --silent --max-time 15 "$BASE_URL/entrepreneur/policy" -o /tmp/policy.json; then
-              if jq -e '.version == "1.1-entrepreneur-cash-pressure" and .autonomousSpendUsd == 0 and .autonomousExternalPublish == false and .bindingActionsHumanGated == true' /tmp/policy.json >/dev/null; then
+              if jq -e '.version == "1.2-entrepreneur-role-council" and .autonomousSpendUsd == 0 and .autonomousExternalPublish == false and .bindingActionsHumanGated == true' /tmp/policy.json >/dev/null; then
                 ok=1
                 break
               fi
@@ -80,11 +86,16 @@ jobs:
             cat /tmp/run.json; echo
             if [ "$code" = '202' ] && jq -e '
               .ok == true and
-              .version == "1.1-entrepreneur-cash-pressure" and
+              .version == "1.2-entrepreneur-role-council" and
               .mission.businessModel != null and
               .mission.hypothesis != null and
               .cashSprint.pressure != null and
               .cashSprint.strategyDisposition != null and
+              (.roleCouncil.roles | length) == 5 and
+              .roleCouncil.consensus.executionBoundary == "INTERNAL_RECOMMENDATION_ONLY" and
+              .roleCouncil.consensus.smallestTest != null and
+              .roleCouncil.consensus.successMetric != null and
+              .roleCouncil.consensus.killCondition != null and
               .actionBoundary.huntRunsBeforeEconomicDecision == true and
               .actionBoundary.maxExternalMessagesAddedByEntrepreneurMode == 0 and
               .actionBoundary.autonomousSpendUsd == 0 and
