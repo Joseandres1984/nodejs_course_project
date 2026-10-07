@@ -168,7 +168,10 @@ export async function syncTravelpayoutsFinance(env, options = {}) {
   const rewardSample = [];
   const payoutSample = [];
   try {
-    const from = clean(options.from, 20) || dateOnly(new Date(Date.now() - LOOKBACK_DAYS * 86400000));
+    const until = clean(options.until, 20) || dateOnly(new Date());
+    const defaultFrom = dateOnly(new Date(Date.now() - LOOKBACK_DAYS * 86400000));
+    const requestedFrom = clean(options.from, 20) || defaultFrom;
+    const from = requestedFrom <= until ? requestedFrom : until;
     const maxPages = Math.max(1, Math.min(Number(options.maxPages || MAX_PAGES), 10));
     let offset = 0;
     for (let page = 0; page < maxPages; page += 1) {
@@ -176,6 +179,7 @@ export async function syncTravelpayoutsFinance(env, options = {}) {
         currency: "usd",
         action_state: "paid",
         from,
+        until,
         limit: PAGE_SIZE,
         offset
       });
@@ -213,6 +217,7 @@ export async function syncTravelpayoutsFinance(env, options = {}) {
       payoutsInserted,
       rewardSample,
       payoutSample,
+      queryWindow:{from,until},
       truth:{
         confirmedAffiliateRewardEvent:"affiliate_reward_confirmed",
         bankPayoutEvent:"affiliate_payout_received",
