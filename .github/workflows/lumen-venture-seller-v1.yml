@@ -1,0 +1,28 @@
+name: LUMEN Venture Seller v1 validation
+
+on:
+  pull_request:
+    paths:
+      - '.lumen/a2a-worker/venture-seller-v1.js'
+      - '.lumen/a2a-worker/test-venture-seller-v1.mjs'
+      - '.lumen/a2a-worker/paid-boost-workflows.js'
+      - '.github/workflows/lumen-venture-seller-v1.yml'
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/a2a-worker/venture-seller-v1.js'
+      - '.lumen/a2a-worker/test-venture-seller-v1.mjs'
+      - '.lumen/a2a-worker/paid-boost-workflows.js'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax check
+        run: node --check .lumen/a2a-worker/venture-seller-v1.js
+      - name: Venture Seller governance and persistence tests
+        run: node .lumen/a2a-worker/test-venture-seller-v1.mjs
