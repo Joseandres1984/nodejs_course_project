@@ -21,6 +21,9 @@ export const UNIFIED_BRAIN_POLICY = Object.freeze({
   frontierExplorationEscapesCurrentBottleneck: true,
   parallelMonetizationObservation: true,
   travelAffiliateEconomicLearning: true,
+  clickRevenueEconomicLearning: true,
+  verifiedCpcPayoutIsRevenue: true,
+  syntheticClickRevenueForbidden: true,
   clickIsWeakSignalNotRevenue: true,
   confirmedBookingIsConversionNotCash: true,
   verifiedAffiliatePayoutIsRevenue: true,
@@ -221,9 +224,9 @@ async function collectFunnel(env) {
     scalar(env,"SELECT COUNT(*) n FROM lumen_revenue_loop_v5 WHERE stage IN ('SENT','REPLIED','NEGOTIATING','PAID','DELIVERED')"),
     scalar(env,"SELECT COUNT(*) n FROM lumen_revenue_loop_v5 WHERE stage IN ('REPLIED','NEGOTIATING','PAID','DELIVERED')"),
     scalar(env,"SELECT COUNT(*) n FROM lumen_revenue_loop_v5 WHERE stage IN ('NEGOTIATING','PAID','DELIVERED')"),
-    scalar(env,"SELECT COUNT(*) n FROM lumen_x402_receipts WHERE status='settled_verified'"),
+    scalar(env,"SELECT COUNT(*) n FROM lumen_revenue_events WHERE event_type='payment_settled' AND status='verified'"),
     scalar(env,"SELECT COUNT(*) n FROM lumen_paid_deliveries WHERE LOWER(COALESCE(status,''))='delivered'"),
-    scalar(env,"SELECT COALESCE(SUM(amount_usd),0) n FROM lumen_x402_revenue_bridge WHERE bridge_status IN ('ATTRIBUTABLE','REFERRAL_ATTRIBUTABLE')")
+    scalar(env,"SELECT COALESCE(SUM(amount_usd),0) n FROM lumen_revenue_events WHERE event_type='payment_settled' AND status='verified'")
   ]);
   const funnel={
     qualifiedCommercialCandidates:qualified,
@@ -277,6 +280,33 @@ async function collectTravelMonetization(env) {
   };
 }
 
+async function collectClickMonetization(env) {
+  const [programs,activePrograms,observedClicks,ignoredAutomation,verifiedPaidClicks,verifiedRevenue,expectedCpc] = await Promise.all([
+    scalar(env,"SELECT COUNT(*) n FROM lumen_click_programs"),
+    scalar(env,"SELECT COUNT(*) n FROM lumen_click_programs WHERE status='ACTIVE'"),
+    scalar(env,"SELECT COUNT(*) n FROM lumen_click_events WHERE status='OBSERVED' AND datetime(created_at)>=datetime('now','-30 days')"),
+    scalar(env,"SELECT COUNT(*) n FROM lumen_click_events WHERE status='IGNORED_AUTOMATION' AND datetime(created_at)>=datetime('now','-30 days')"),
+    scalar(env,"SELECT COUNT(*) n FROM lumen_click_settlements WHERE status='PROVIDER_VERIFIED' AND datetime(verified_at)>=datetime('now','-30 days')"),
+    scalar(env,"SELECT COALESCE(SUM(amount_usd),0) n FROM lumen_click_settlements WHERE status='PROVIDER_VERIFIED'"),
+    scalar(env,"SELECT COALESCE(MAX(expected_cpc_usd),0) n FROM lumen_click_programs WHERE status='ACTIVE'")
+  ]);
+  const epc=observedClicks>0 ? verifiedRevenue/observedClicks : 0;
+  return {
+    knownPrograms:programs,
+    activePrograms,
+    observedClicks30d:observedClicks,
+    ignoredAutomation30d:ignoredAutomation,
+    verifiedPaidClicks30d:verifiedPaidClicks,
+    verifiedRevenueUsd:Number(Number(verifiedRevenue||0).toFixed(4)),
+    verifiedEpcUsd:Number(Number(epc||0).toFixed(6)),
+    bestConfiguredExpectedCpcUsd:Number(Number(expectedCpc||0).toFixed(4)),
+    targetScaleEvents:10000,
+    commercialSignal:activePrograms>0 || verifiedPaidClicks>0,
+    clickIsRevenue:false,
+    revenueTruth:"provider_verified_paid_click_or_payout_only"
+  };
+}
+
 async function collectObservation(env) {
   const [ideas, proposals, supplier, settlements, launches, sources] = await Promise.all([
     rows(env,"SELECT id,title,product,build_plan,score,status,evidence_json FROM lumen_venture_hunter_ideas ORDER BY score DESC,created_at DESC LIMIT 12"),
@@ -288,9 +318,10 @@ async function collectObservation(env) {
   ]);
   const funnel=await collectFunnel(env);
   const travelMonetization=await collectTravelMonetization(env);
+  const clickMonetization=await collectClickMonetization(env);
   const learningMemory=await rows(env,"SELECT * FROM lumen_brain_learning ORDER BY updated_at DESC LIMIT 200");
   return {
-    at: now(), verifiedSettlementCount: Math.max(settlements.length,funnel.verifiedSettlements), funnel, travelMonetization, learningMemory,
+    at: now(), verifiedSettlementCount: Math.max(settlements.length,funnel.verifiedSettlements), funnel, travelMonetization, clickMonetization, learningMemory,
     ventureIdeas: ideas.map(x=>{
       const evidence=parse(x.evidence_json,{});
       return {
@@ -325,6 +356,33 @@ async function collectObservation(env) {
 function deterministicHypotheses(obs) {
   const out=[];
   const bottleneck=obs?.funnel?.bottleneck || "DEMAND";
+  const click=obs?.clickMonetization || {};
+  if (Number(click.activePrograms||0) > 0) out.push(normalizeEconomicHypothesis({
+    id:"click-revenue-cpc",
+    business_model:"verified CPC click monetization",
+    hypothesis:"Route legitimate human traffic through approved CPC programs, optimize by verified EPC, and recognize revenue only from provider-verified paid click or payout events.",
+    target:"approved CPC programs with legitimate publisher traffic",
+    execution_lane:"COMMERCE",
+    source_ref:"click-revenue-engine",
+    expected_profit_usd:Math.max(0,Number(click.verifiedRevenueUsd||0)),
+    probability_of_sale:Number(click.verifiedPaidClicks30d||0)>0?.58:.28,
+    time_to_cash_hours:Number(click.verifiedPaidClicks30d||0)>0?24:72,
+    evidence_strength:Number(click.verifiedPaidClicks30d||0)>0?.92:.58,
+    confidence:Number(click.verifiedPaidClicks30d||0)>0?.88:.62,
+    novelty:.82,
+    risk:.12,
+    reversibility:.99,
+    monetizable_event:"provider_verified_paid_click",
+    unit_revenue_target_usd:Math.max(0,Number(click.verifiedEpcUsd||click.bestConfiguredExpectedCpcUsd||0)),
+    scale_potential:.96,
+    repeatability:.92,
+    distribution_leverage:.90,
+    marginal_cost_efficiency:.99,
+    target_scale_events:10000,
+    projected_scale_revenue_usd:Math.max(0,Number(click.verifiedEpcUsd||click.bestConfiguredExpectedCpcUsd||0))*10000,
+    rationale_summary:"CPC reduces purchase friction, but clicks remain only funnel signals until the provider verifies a payable event.",
+    next_step:"Grow legitimate traffic only through approved CPC links, reject automation/self-clicks, measure provider-verified EPC, and repeat only verified winners."
+  }));
   if (bottleneck==="DEMAND") out.push(normalizeEconomicHypothesis({
     id:"funnel-demand-gap",business_model:"verified buyer demand acquisition",hypothesis:"Find a current public buyer need, RFQ, tender, request board post or explicit sourcing requirement before expanding cold company lists.",target:"buyer with current verifiable need",execution_lane:"DISCOVERY",source_ref:"funnel-demand-gap",
     probability_of_sale:.42,time_to_cash_hours:36,evidence_strength:.92,confidence:.9,novelty:.45,risk:.08,reversibility:.99,
@@ -505,7 +563,7 @@ export async function runUnifiedEconomicBrain(env, options={}) {
   const deterministic=deterministicHypotheses(observation);
   const generated=await aiHypotheses(env,observation);
   const memoryByKey=new Map((observation.learningMemory||[]).map(x=>[clean(x.strategy_key,220),x]));
-  const context={bottleneck:observation.funnel.bottleneck,travelMonetization:observation.travelMonetization};
+  const context={bottleneck:observation.funnel.bottleneck,travelMonetization:observation.travelMonetization,clickMonetization:observation.clickMonetization};
   const hypotheses=[...generated,...deterministic].map(h=>{
     const memory=memoryByKey.get(strategyKey(h)) || {};
     const adjustment=learningAdjustment(h,memory,context);
@@ -514,7 +572,7 @@ export async function runUnifiedEconomicBrain(env, options={}) {
   await persistHypotheses(env,cycleKey,hypotheses);
   const mission=chooseEconomicMission(hypotheses,cycleKey,context);
   const missionId=await persistMission(env,cycleKey,mission,observation);
-  return {ok:true,version:VERSION,mission:{...mission,id:missionId},plan:specialistPlanForMission(mission),hypothesesConsidered:hypotheses.length,aiHypotheses:generated.length,measuredPrevious,observationSummary:{verifiedSettlements:observation.verifiedSettlementCount,ventureIdeas:observation.ventureIdeas.length,proposals:observation.proposals.length,supplierCandidates:observation.supplierQueue.length,funnel:observation.funnel,travelMonetization:observation.travelMonetization}};
+  return {ok:true,version:VERSION,mission:{...mission,id:missionId},plan:specialistPlanForMission(mission),hypothesesConsidered:hypotheses.length,aiHypotheses:generated.length,measuredPrevious,observationSummary:{verifiedSettlements:observation.verifiedSettlementCount,ventureIdeas:observation.ventureIdeas.length,proposals:observation.proposals.length,supplierCandidates:observation.supplierQueue.length,funnel:observation.funnel,travelMonetization:observation.travelMonetization,clickMonetization:observation.clickMonetization}};
 }
 
 function rowToMission(r){ return {id:r.id,cycleKey:r.cycle_key,status:r.status,selectionMode:r.selection_mode,executionLane:r.execution_lane,businessModel:r.business_model,hypothesis:r.hypothesis,target:r.target,sourceRef:r.source_ref,score:num(r.score),confidence:num(r.confidence),expectedProfitUsd:num(r.expected_profit_usd),probabilityOfSale:num(r.probability_sale),timeToCashHours:num(r.time_to_cash_hours),evidenceStrength:num(r.evidence_strength),novelty:num(r.novelty),risk:num(r.risk),reversibility:num(r.reversibility),rationaleSummary:r.rationale_summary,nextStep:r.next_step,reward:num(r.reward),outcome:parse(r.outcome_json,null),updatedAt:r.updated_at}; }
