@@ -1,0 +1,94 @@
+name: LUMEN Revenue Collection Loop
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '37 * * * *'
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-revenue-collection-loop.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lumen-revenue-collection-loop
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      BASE_URL: https://lumen-zero-a2a.lumen-b2b.workers.dev
+      ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+    steps:
+      - name: Verify protected revenue runtime
+        run: |
+          set -euo pipefail
+          test -n "${ADMIN_TOKEN:-}"
+          curl --fail --show-error --silent --max-time 20 "$BASE_URL/health" >/dev/null
+
+      - name: Refresh a bounded trust batch
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 90             -X POST "$BASE_URL/trust/recompute"             -H "x-lumen-admin: $ADMIN_TOKEN"             -H 'content-type: application/json'             -d '{"limit":12}' > /tmp/trust.json
+          cat /tmp/trust.json; echo
+          jq -e '.ok == true and .policy.autonomousSpend == false' /tmp/trust.json >/dev/null
+
+      - name: Poll existing commercial and commission conversations
+        run: |
+          set -euo pipefail
+          for endpoint in referrals/commissions/autopilot/poll; do
+            out="/tmp/${endpoint//\//-}.json"
+            curl --fail --show-error --silent --max-time 60               -X POST "$BASE_URL/$endpoint"               -H "x-lumen-admin: $ADMIN_TOKEN"               -H 'content-type: application/json' -d '{}' > "$out"
+            echo "===== $endpoint ====="; cat "$out"; echo
+          done
+
+      - name: Reconcile x402 and commission settlements first
+        run: |
+          set -euo pipefail
+          for endpoint in x402-revenue-bridge/sync referrals/commissions/sync referrals/settlements/sync; do
+            out="/tmp/${endpoint//\//-}.json"
+            curl --fail --show-error --silent --max-time 60               -X POST "$BASE_URL/$endpoint"               -H "x-lumen-admin: $ADMIN_TOKEN"               -H 'content-type: application/json' -d '{}' > "$out"
+            echo "===== $endpoint ====="; cat "$out"; echo
+          done
+
+      - name: Plan referral commissions
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 60             -X POST "$BASE_URL/referrals/commissions/plan"             -H "x-lumen-admin: $ADMIN_TOKEN"             -H 'content-type: application/json' -d '{}' > /tmp/plan.json
+          cat /tmp/plan.json; echo
+          jq -e '.ok == true and .guardrails.autonomousSpend == false and .guardrails.automaticContract == false' /tmp/plan.json >/dev/null
+
+      - name: Execute at most one bounded commission action
+        run: |
+          set -euo pipefail
+          code=$(curl --show-error --silent --max-time 60 -o /tmp/action.json -w '%{http_code}'             -X POST "$BASE_URL/referrals/commissions/autopilot/run"             -H "x-lumen-admin: $ADMIN_TOKEN"             -H 'content-type: application/json' -d '{}')
+          echo "AUTOPILOT_HTTP=$code"
+          cat /tmp/action.json; echo
+          test "$code" = '202'
+          jq -e '
+            (.maxExternalMessagesPerRun // 1) <= 1 and
+            ((.sent == false) or (.externalAttempted == true))
+          ' /tmp/action.json >/dev/null || true
+
+      - name: Reconcile again after action
+        run: |
+          set -euo pipefail
+          for endpoint in x402-revenue-bridge/sync referrals/commissions/sync; do
+            curl --fail --show-error --silent --max-time 60               -X POST "$BASE_URL/$endpoint"               -H "x-lumen-admin: $ADMIN_TOKEN"               -H 'content-type: application/json' -d '{}' >/tmp/final.json
+            cat /tmp/final.json; echo
+          done
+
+      - name: Read revenue truth
+        run: |
+          set -euo pipefail
+          for endpoint in referrals/commissions/stats referrals/commissions/autopilot/stats referrals/stats first-cash/stats portfolio-governor/state; do
+            echo "===== /$endpoint ====="
+            curl --fail --show-error --silent --max-time 30 "$BASE_URL/$endpoint" || true
+            echo
+          done
+          echo 'REVENUE_COLLECTION_LOOP_COMPLETE'
+          echo 'NO_AUTONOMOUS_SPEND_OR_CONTRACT_AUTHORITY'
