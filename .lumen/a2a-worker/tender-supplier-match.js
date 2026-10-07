@@ -1,4 +1,4 @@
-const VERSION = "1.1-domain-verified-tender-match";
+const VERSION = "1.2-semantic-cleanup-tender-match";
 const MAX_TENDERS = 80;
 const MAX_SUPPLIERS = 180;
 const MAX_MATCHES_PER_RUN = 6;
@@ -17,7 +17,7 @@ const STOPWORDS = new Set([
 const HIGH_SIGNAL_TERMS = new Set([
   "automation","automotive","battery","cable","cables","chemical","chemicals","compressor","compressors",
   "cybersecurity","electrical","electric","electronics","fire","freight","generator","generators","hardware",
-  "instrumentation","laboratory","logistics","maintenance","mechanical","motor","motors","network","piping",
+  "instrumentation","laboratory","logistics","maintenance","mechanical","motor","motors","piping",
   "plc","pump","pumps","safety","scada","security","sensor","sensors","software","switchgear","telecom",
   "transformer","transformers","transport","valve","valves","water","welding"
 ]);
@@ -117,8 +117,40 @@ async function ensureSchema(env){
   return true;
 }
 
+async function revalidateExistingMatches(env){
+  const rows=await safeAll(env,`SELECT m.match_id,m.tender_opportunity_id,m.supplier_opportunity_id,m.match_opportunity_id,m.status,
+      t.name AS tender_name,t.description AS tender_description,t.score AS tender_score,t.raw_json AS tender_raw_json,
+      s.name AS supplier_name,s.description AS supplier_description,s.tags_json AS supplier_tags_json,s.score AS supplier_score
+    FROM lumen_tender_supplier_matches m
+    JOIN lumen_opportunities t ON t.id=m.tender_opportunity_id
+    JOIN lumen_opportunities s ON s.id=m.supplier_opportunity_id
+    WHERE m.status='CREATED'
+    ORDER BY m.updated_at DESC LIMIT 100`);
+  const now=new Date().toISOString();
+  let retained=0,superseded=0;
+  for(const row of rows){
+    const tender={name:row.tender_name,description:row.tender_description,score:row.tender_score,raw_json:row.tender_raw_json};
+    const supplier={name:row.supplier_name,description:row.supplier_description,tags_json:row.supplier_tags_json,score:row.supplier_score};
+    const matched=matchScore(tender,supplier);
+    if(!matched||matched.score<MIN_MATCH_SCORE){
+      await env.DB.batch([
+        env.DB.prepare("UPDATE lumen_tender_supplier_matches SET status='SUPERSEDED',updated_at=?,engine_version=? WHERE match_id=?").bind(now,VERSION,row.match_id),
+        env.DB.prepare("UPDATE lumen_opportunities SET demand_signal=0,status='SUPERSEDED_MATCH',updated_at=? WHERE id=? AND source='tender_supplier_match'").bind(now,row.match_opportunity_id),
+        env.DB.prepare("UPDATE lumen_proposal_drafts SET status='REJECTED',quality_gate_status='FAIL',updated_at=? WHERE opportunity_id=? AND NOT EXISTS (SELECT 1 FROM lumen_outreach_attempts x WHERE x.proposal_id=lumen_proposal_drafts.proposal_id)").bind(now,row.match_opportunity_id)
+      ]);
+      superseded++;
+    } else {
+      await env.DB.prepare("UPDATE lumen_tender_supplier_matches SET match_score=?,matched_terms_json=?,updated_at=?,engine_version=? WHERE match_id=?")
+        .bind(matched.score,JSON.stringify(matched.strong),now,VERSION,row.match_id).run();
+      retained++;
+    }
+  }
+  return {checked:rows.length,retained,superseded};
+}
+
 async function runTenderSupplierMatch(env){
   if(!(await ensureSchema(env))) return {ok:false,error:"persistence_unavailable",version:VERSION};
+  const revalidation=await revalidateExistingMatches(env);
   const tenders=await safeAll(env,`SELECT id,source,remote_id,name,endpoint,description,score,evidence,raw_json,updated_at
     FROM lumen_opportunities
     WHERE source IN ('ted_eu_public_procurement','uk_contracts_finder')
@@ -190,6 +222,7 @@ async function runTenderSupplierMatch(env){
     tendersConsidered:tenders.length,
     suppliersConsidered:suppliers.length,
     candidatePairs:candidates.length,
+    revalidation,
     created:created.length,
     matches:created,
     guardrails:{
@@ -220,7 +253,7 @@ export async function handleTenderSupplierMatch(request,env){
     objective:"turn verified public procurement demand into paid tender-intelligence offers for reachable supplier agents",
     offerId:"MP-TENDER-LEAD",
     priceUsd:1,
-    matchingPolicy:"shared_domain_bucket_plus_exact_high_signal_capability_term",
+    matchingPolicy:"shared_domain_bucket_plus_exact_high_signal_capability_term; ambiguous_network_token_not_sufficient; prior_matches_revalidated_each_run",
     maxMatchesPerRun:MAX_MATCHES_PER_RUN,
     sourceEvidence:["ted_eu_public_procurement","uk_contracts_finder"],
     autonomousSpendUsd:0,
