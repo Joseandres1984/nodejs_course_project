@@ -5,6 +5,7 @@ on:
     branches: [lumen-zero]
     paths:
       - '.github/workflows/lumen-trust-layer-smoke.yml'
+      - '.lumen/a2a-worker/trust-layer.js'
   workflow_dispatch:
 
 jobs:
@@ -44,6 +45,18 @@ jobs:
           done
           jq -e '.ok == true and .version == "1.0-trust-layer" and .assessed >= 1 and .policy.unsignedCardsAllowed == true and .policy.verifiedSignaturesIncreaseTrust == true and .policy.presentButUnverifiedSignaturesDoNotClaimValidity == true and .policy.manipulationSignalsCanQuarantine == true and .policy.privateJwksHostsBlocked == true and .policy.autonomousSpend == false' /tmp/trust.json >/dev/null
           jq -e '[.results[] | select((.trustLevel != "ALLOW") and (.trustLevel != "CAUTION") and (.trustLevel != "RESTRICTED") and (.trustLevel != "QUARANTINE"))] | length == 0' /tmp/trust.json >/dev/null
+
+      - name: Verify referral-priority trust refresh
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 90 \
+            -X POST "$BASE_URL/trust/recompute-referrals" \
+            -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
+            -H 'content-type: application/json' \
+            -d '{"limit":4}' > /tmp/referral-trust.json
+          cat /tmp/referral-trust.json
+          echo
+          jq -e '.ok == true and .scope == "active_referral_partners" and .policy.noTrustBypass == true and .policy.quarantineCanOnlyExitByFreshAssessment == true and .policy.autonomousSpend == false and .policy.bindingActionsHumanGated == true' /tmp/referral-trust.json >/dev/null
 
       - name: Verify live trust state
         run: |
