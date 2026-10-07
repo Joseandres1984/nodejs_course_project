@@ -7,13 +7,40 @@ on:
       - '.github/workflows/lumen-referral-commission-smoke.yml'
       - '.lumen/a2a-worker/referral-commission-engine.js'
       - '.lumen/a2a-worker/referral-commission-autopilot.js'
+      - '.lumen/a2a-worker/travel-broker.js'
       - '.lumen/a2a-worker/x402-revenue-bridge.js'
       - '.lumen/a2a-worker/opportunity-entry.js'
       - '.lumen/a2a-worker/wrangler.toml'
+  pull_request:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-referral-commission-smoke.yml'
+      - '.lumen/a2a-worker/referral-commission-autopilot.js'
+      - '.lumen/a2a-worker/travel-broker.js'
   workflow_dispatch:
 
 jobs:
+  source-validation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validate commission retry and travel trust source
+        run: |
+          set -euo pipefail
+          node --check .lumen/a2a-worker/referral-commission-autopilot.js
+          node --check .lumen/a2a-worker/travel-broker.js
+          grep -q 'COMMISSION_PROPOSAL_RETRY_HOURS' .lumen/a2a-worker/referral-commission-autopilot.js
+          grep -q 'COMMISSION_PROPOSAL_MAX_ATTEMPTS' .lumen/a2a-worker/referral-commission-autopilot.js
+          grep -q "a.state='PROPOSAL_READY'" .lumen/a2a-worker/referral-commission-autopilot.js
+          grep -q 'LEFT JOIN lumen_partner_trust' .lumen/a2a-worker/referral-commission-autopilot.js
+          grep -q 'trust_score=COALESCE(excluded.trust_score' .lumen/a2a-worker/travel-broker.js
+          echo COMMISSION_RETRY_TRAVEL_TRUST_SOURCE_OK
+
   referral-commission-smoke:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     env:
       BASE_URL: https://lumen-zero-a2a.lumen-b2b.workers.dev
