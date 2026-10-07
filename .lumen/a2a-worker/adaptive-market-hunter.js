@@ -1,8 +1,9 @@
-const VERSION = "1.0-adaptive-market-hunter";
+const VERSION = "2.0-scout-swarm";
 const REGISTRY_BASE = "https://api.a2a-registry.org";
-const MAX_QUERIES_PER_RUN = 3;
+const MAX_QUERIES_PER_RUN = 24;
 const MAX_RESULTS_PER_QUERY = 20;
-const MAX_ACTIVE_STRATEGIES = 24;
+const MAX_ACTIVE_STRATEGIES = 120;
+const SCOUT_CONCURRENT_WAVE = 6;
 const FETCH_TIMEOUT_MS = 8000;
 
 const QUALIFIED_CLASSES = ["PURCHASE_INTENT", "COMMERCIAL_INTEREST", "COMMERCIAL_QUESTION"];
@@ -17,16 +18,50 @@ const OFFER_CORE = Object.freeze({
   "MP-EXPORT-PULSE": "importer distributor export sourcing"
 });
 
-const SEEDS = [
-  { id: "MH-SUPPLIER-VERIFY", query: "supplier verification due diligence procurement", offerId: "MP-SUPPLIER-SNAPSHOT" },
-  { id: "MH-RFQ-PRICE", query: "request for quote rfq supplier pricing", offerId: "MP-QUOTE-SANITY" },
-  { id: "MH-TENDER-BID", query: "tender bid procurement deadline", offerId: "MP-TENDER-SCAN" },
-  { id: "MH-SOURCING", query: "seeking supplier vendor sourcing", offerId: "MP-SOURCING-5" },
-  { id: "MH-BUYER-INTENT", query: "buyer intent looking to buy procurement", offerId: "MP-BUYER-SIGNALS" },
-  { id: "MH-EXPORT", query: "importer distributor export sourcing", offerId: "MP-EXPORT-PULSE" },
-  { id: "MH-X402-COMMERCE", query: "x402 buyer procurement agent commerce", offerId: "MP-BUYER-SIGNALS" },
-  { id: "MH-VENDOR-COMPARE", query: "vendor comparison quotation procurement", offerId: "MP-QUOTE-SANITY" }
-];
+const SCOUT_REGIONS = Object.freeze([
+  { id:"NA", query:"united states canada north america" },
+  { id:"LATAM", query:"latin america mexico brazil argentina chile colombia peru" },
+  { id:"NWEU", query:"united kingdom ireland germany france netherlands belgium nordics" },
+  { id:"SEEU", query:"spain italy portugal poland czech romania greece europe" },
+  { id:"GCC", query:"uae saudi arabia qatar kuwait oman bahrain middle east" },
+  { id:"SOUTHASIA", query:"india pakistan bangladesh sri lanka south asia" },
+  { id:"SEA", query:"singapore indonesia malaysia thailand vietnam philippines southeast asia" },
+  { id:"EASTASIA", query:"japan south korea taiwan hong kong east asia" },
+  { id:"AFRICA", query:"south africa kenya nigeria egypt morocco africa" },
+  { id:"ANZ", query:"australia new zealand oceania" }
+]);
+
+const SCOUT_SECTORS = Object.freeze([
+  { id:"IND", query:"industrial manufacturing maintenance equipment wholesale logistics" },
+  { id:"DIG", query:"software data technology consulting professional services digital" }
+]);
+
+const SCOUT_MISSIONS = Object.freeze([
+  { id:"VERIFY", query:"supplier verification due diligence procurement", offerId:"MP-SUPPLIER-SNAPSHOT" },
+  { id:"QUOTE", query:"request for quote rfq pricing comparison vendor", offerId:"MP-QUOTE-SANITY" },
+  { id:"TENDER", query:"tender bid procurement deadline contract opportunity", offerId:"MP-TENDER-SCAN" },
+  { id:"SOURCE", query:"seeking supplier vendor sourcing shortlist", offerId:"MP-SOURCING-5" },
+  { id:"BUYER", query:"buyer intent purchase demand procurement looking to buy", offerId:"MP-BUYER-SIGNALS" },
+  { id:"EXPORT", query:"importer distributor export sourcing international buyer", offerId:"MP-EXPORT-PULSE" }
+]);
+
+function buildScoutSeeds() {
+  const seeds = [];
+  for (const region of SCOUT_REGIONS) {
+    for (const sector of SCOUT_SECTORS) {
+      for (const mission of SCOUT_MISSIONS) {
+        seeds.push({
+          id: `SW-${region.id}-${sector.id}-${mission.id}`,
+          query: `${mission.query} ${sector.query} ${region.query}`,
+          offerId: mission.offerId
+        });
+      }
+    }
+  }
+  return seeds;
+}
+
+const SEEDS = Object.freeze(buildScoutSeeds());
 
 const STOPWORDS = new Set([
   "about","after","again","agent","agents","also","and","any","are","available","been","before","being","between","business","can","commerce","could","description","from","have","into","looking","market","more","need","needs","offer","public","request","service","services","signal","signals","that","their","them","there","these","they","this","through","using","vendor","with","would","your","procurement","supplier","sourcing","buyer","quote","tender","export","importer","distributor","pricing"
@@ -66,9 +101,10 @@ async function ensureSchema(env) {
   ]);
   const now = new Date().toISOString();
   for (const seed of SEEDS) {
-    await env.DB.prepare("INSERT INTO lumen_market_hunter_strategies(id,query,offer_id,parent_id,generation,active,created_at,updated_at,engine_version) VALUES(?,?,?,?,0,1,?,?,?) ON CONFLICT(id) DO NOTHING")
+    await env.DB.prepare("INSERT INTO lumen_market_hunter_strategies(id,query,offer_id,parent_id,generation,active,created_at,updated_at,engine_version) VALUES(?,?,?,?,0,1,?,?,?) ON CONFLICT(id) DO UPDATE SET active=1,updated_at=excluded.updated_at,engine_version=excluded.engine_version")
       .bind(seed.id, seed.query, seed.offerId, null, now, now, VERSION).run();
   }
+  await env.DB.prepare("UPDATE lumen_market_hunter_strategies SET active=0 WHERE id NOT LIKE 'SW-%' AND settlements=0 AND qualified_responses=0").run();
   return true;
 }
 
@@ -315,7 +351,11 @@ export async function runAdaptiveMarketHunter(env) {
   await env.DB.prepare("INSERT INTO lumen_market_hunter_runs(id,started_at,status,selected_json,engine_version) VALUES(?,?,?,?,?)")
     .bind(runId,startedAt,"running",JSON.stringify(selected.map(x=>({id:x.id,query:x.query,offerId:x.offerId,mode:x.selectionMode,score:x.score}))),VERSION).run();
   const results = [];
-  for (const strategy of selected) results.push(await scanStrategy(env,strategy));
+  for (let offset = 0; offset < selected.length; offset += SCOUT_CONCURRENT_WAVE) {
+    const wave = selected.slice(offset, offset + SCOUT_CONCURRENT_WAVE);
+    const waveResults = await Promise.all(wave.map(strategy => scanStrategy(env, strategy)));
+    results.push(...waveResults);
+  }
   const after = await refreshLearning(env);
   const generated = await maybeGenerateChild(env, after);
   const finishedAt = new Date().toISOString();
@@ -337,7 +377,9 @@ export async function runAdaptiveMarketHunter(env) {
       adaptiveStrategyLearning:true,
       adaptiveQueryGeneration:true,
       selfModifyingCode:false,
+      scoutSwarmTarget:MAX_ACTIVE_STRATEGIES,
       maxQueriesPerRun:MAX_QUERIES_PER_RUN,
+      concurrentScoutWave:SCOUT_CONCURRENT_WAVE,
       maxResultsPerQuery:MAX_RESULTS_PER_QUERY,
       createsExternalMessages:false,
       autonomousSpend:false,
@@ -359,7 +401,9 @@ export async function handleAdaptiveMarketHunter(request, env) {
     selectionPolicy:"bounded_explore_exploit; before qualified evidence favor exploration, after evidence exploit two lanes and explore one",
     queryEvolution:"bounded_child_queries_generated_from_observed_terms_of_productive_strategies",
     selfModifyingCode:false,
+    scoutSwarmTarget:MAX_ACTIVE_STRATEGIES,
     maxQueriesPerRun:MAX_QUERIES_PER_RUN,
+    concurrentScoutWave:SCOUT_CONCURRENT_WAVE,
     maxActiveStrategies:MAX_ACTIVE_STRATEGIES,
     createsExternalMessages:false,
     autonomousSpend:false,
