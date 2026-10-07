@@ -1,7 +1,7 @@
 const VERSION = "2.0-scout-swarm";
 const REGISTRY_BASE = "https://api.a2a-registry.org";
 const MAX_QUERIES_PER_RUN = 24;
-const MAX_RESULTS_PER_QUERY = 20;
+const MAX_RESULTS_PER_QUERY = 6;
 const MAX_ACTIVE_STRATEGIES = 120;
 const SCOUT_CONCURRENT_WAVE = 6;
 const FETCH_TIMEOUT_MS = 8000;
@@ -100,10 +100,11 @@ async function ensureSchema(env) {
     env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_lumen_market_hunter_runs_started ON lumen_market_hunter_runs(started_at DESC)")
   ]);
   const now = new Date().toISOString();
-  for (const seed of SEEDS) {
-    await env.DB.prepare("INSERT INTO lumen_market_hunter_strategies(id,query,offer_id,parent_id,generation,active,created_at,updated_at,engine_version) VALUES(?,?,?,?,0,1,?,?,?) ON CONFLICT(id) DO UPDATE SET active=1,updated_at=excluded.updated_at,engine_version=excluded.engine_version")
-      .bind(seed.id, seed.query, seed.offerId, null, now, now, VERSION).run();
-  }
+  const seedStatements = SEEDS.map(seed =>
+    env.DB.prepare("INSERT INTO lumen_market_hunter_strategies(id,query,offer_id,parent_id,generation,active,created_at,updated_at,engine_version) VALUES(?,?,?,?,0,1,?,?,?) ON CONFLICT(id) DO UPDATE SET active=1,updated_at=excluded.updated_at,engine_version=excluded.engine_version")
+      .bind(seed.id, seed.query, seed.offerId, null, now, now, VERSION)
+  );
+  if (seedStatements.length) await env.DB.batch(seedStatements);
   await env.DB.prepare("UPDATE lumen_market_hunter_strategies SET active=0 WHERE id NOT LIKE 'SW-%' AND settlements=0 AND qualified_responses=0").run();
   return true;
 }
@@ -188,15 +189,18 @@ async function upsertOpportunity(env, item, strategy, evidenceUrl) {
   const name = clean(item?.displayName || item?.display_name || item?.name || rid, 300);
   const description = clean(item?.description || item?.summary || item?.message || item?.text, 3000);
   const tags = stringifyTags(item?.tags || arr(item?.skills).flatMap(s => s?.tags || []));
-  const existing = await safeFirst(env, "SELECT id,score,status FROM lumen_opportunities WHERE id=? LIMIT 1", [id]);
-  const nextStatus = existing?.status && !["new","watching","qualified"].includes(existing.status) ? existing.status : scored.fit === "A" ? "qualified" : "watching";
+  const nextStatus = scored.fit === "A" ? "qualified" : "watching";
   const raw = { ...item, lumen_market_hunter: { strategyId: strategy.id, query: strategy.query, offerId: strategy.offer_id, version: VERSION } };
   await env.DB.prepare("INSERT INTO lumen_opportunities(id,discovered_at,updated_at,source,remote_id,name,endpoint,description,tags_json,score,fit,demand_signal,revenue_offer_id,status,evidence,raw_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET updated_at=excluded.updated_at,name=excluded.name,endpoint=CASE WHEN excluded.endpoint<>'' THEN excluded.endpoint ELSE lumen_opportunities.endpoint END,description=CASE WHEN excluded.description<>'' THEN excluded.description ELSE lumen_opportunities.description END,tags_json=excluded.tags_json,score=MAX(lumen_opportunities.score,excluded.score),fit=CASE WHEN excluded.score>lumen_opportunities.score THEN excluded.fit ELSE lumen_opportunities.fit END,demand_signal=MAX(lumen_opportunities.demand_signal,excluded.demand_signal),revenue_offer_id=CASE WHEN excluded.score>=lumen_opportunities.score THEN excluded.revenue_offer_id ELSE lumen_opportunities.revenue_offer_id END,evidence=excluded.evidence,raw_json=excluded.raw_json")
     .bind(id,now,now,"global_a2a_registry",rid,name,endpoint,description,JSON.stringify(tags),scored.score,scored.fit,scored.demandSignal,strategy.offer_id,nextStatus,clean(evidenceUrl,1600),JSON.stringify(raw).slice(0,12000)).run();
-  const priorAttr = await safeFirst(env, "SELECT strategy_id FROM lumen_market_hunter_attribution WHERE opportunity_id=? LIMIT 1", [id]);
-  await env.DB.prepare("INSERT INTO lumen_market_hunter_attribution(opportunity_id,strategy_id,first_seen_at,last_seen_at,engine_version) VALUES(?,?,?,?,?) ON CONFLICT(opportunity_id) DO UPDATE SET last_seen_at=excluded.last_seen_at,engine_version=excluded.engine_version")
+  const attr = await env.DB.prepare("INSERT OR IGNORE INTO lumen_market_hunter_attribution(opportunity_id,strategy_id,first_seen_at,last_seen_at,engine_version) VALUES(?,?,?,?,?)")
     .bind(id,strategy.id,now,now,VERSION).run();
-  return { skipped:false, inserted:!existing, updated:Boolean(existing), newAttribution:!priorAttr, opportunityId:id, score:scored.score, fit:scored.fit };
+  const newAttribution = Number(attr?.meta?.changes || 0) > 0;
+  if (!newAttribution) {
+    await env.DB.prepare("UPDATE lumen_market_hunter_attribution SET last_seen_at=?,engine_version=? WHERE opportunity_id=?")
+      .bind(now,VERSION,id).run();
+  }
+  return { skipped:false, inserted:false, updated:true, newAttribution, opportunityId:id, score:scored.score, fit:scored.fit };
 }
 
 function strategyScore(x) {
@@ -220,22 +224,44 @@ function strategyScore(x) {
 
 async function refreshLearning(env) {
   const strategies = await safeAll(env, "SELECT * FROM lumen_market_hunter_strategies WHERE active=1 ORDER BY id");
+  if (!strategies.length) return [];
+
+  const [discoveryRows, actionableRows, proposalRows, qualifiedRows, revenueRows] = await Promise.all([
+    safeAll(env, "SELECT strategy_id,COUNT(*) discoveries FROM lumen_market_hunter_attribution GROUP BY strategy_id"),
+    safeAll(env, "SELECT h.strategy_id,COUNT(*) actionable FROM lumen_market_hunter_attribution h JOIN lumen_opportunity_assessments a ON a.opportunity_id=h.opportunity_id WHERE a.commercially_actionable=1 AND a.synthetic_or_test_only=0 GROUP BY h.strategy_id"),
+    safeAll(env, "SELECT h.strategy_id,COUNT(*) proposals FROM lumen_market_hunter_attribution h JOIN lumen_proposal_drafts p ON p.opportunity_id=h.opportunity_id GROUP BY h.strategy_id"),
+    safeAll(env, `SELECT h.strategy_id,COUNT(*) qualified FROM lumen_market_hunter_attribution h JOIN lumen_sales_pipeline s ON s.opportunity_id=h.opportunity_id WHERE s.response_class IN ('${QUALIFIED_CLASSES.join("','")}') GROUP BY h.strategy_id`),
+    safeAll(env, "SELECT h.strategy_id,COUNT(*) settlements,COALESCE(SUM(r.amount_usd),0) revenue FROM lumen_market_hunter_attribution h JOIN lumen_revenue_attributions r ON r.opportunity_id=h.opportunity_id GROUP BY h.strategy_id")
+  ]);
+
+  const toMap = (rows, field) => new Map(rows.map(row => [row.strategy_id, num(row[field])]));
+  const discoveriesBy = toMap(discoveryRows, "discoveries");
+  const actionableBy = toMap(actionableRows, "actionable");
+  const proposalsBy = toMap(proposalRows, "proposals");
+  const qualifiedBy = toMap(qualifiedRows, "qualified");
+  const settlementsBy = toMap(revenueRows, "settlements");
+  const revenueBy = toMap(revenueRows, "revenue");
+
+  const now = new Date().toISOString();
   const updated = [];
+  const writes = [];
   for (const s of strategies) {
-    const discoveries = await safeNumber(env, "SELECT COUNT(*) n FROM lumen_market_hunter_attribution WHERE strategy_id=?", [s.id]);
-    const actionable = await safeNumber(env, "SELECT COUNT(*) n FROM lumen_market_hunter_attribution h JOIN lumen_opportunity_assessments a ON a.opportunity_id=h.opportunity_id WHERE h.strategy_id=? AND a.commercially_actionable=1 AND a.synthetic_or_test_only=0", [s.id]);
-    const proposals = await safeNumber(env, "SELECT COUNT(*) n FROM lumen_market_hunter_attribution h JOIN lumen_proposal_drafts p ON p.opportunity_id=h.opportunity_id WHERE h.strategy_id=?", [s.id]);
-    const qualified = await safeNumber(env, `SELECT COUNT(*) n FROM lumen_market_hunter_attribution h JOIN lumen_sales_pipeline s ON s.opportunity_id=h.opportunity_id WHERE h.strategy_id=? AND s.response_class IN ('${QUALIFIED_CLASSES.join("','")}')`, [s.id]);
-    const settlements = await safeNumber(env, "SELECT COUNT(*) n FROM lumen_market_hunter_attribution h JOIN lumen_revenue_attributions r ON r.opportunity_id=h.opportunity_id WHERE h.strategy_id=?", [s.id]);
-    const revenue = await safeNumber(env, "SELECT COALESCE(SUM(r.amount_usd),0) n FROM lumen_market_hunter_attribution h JOIN lumen_revenue_attributions r ON r.opportunity_id=h.opportunity_id WHERE h.strategy_id=?", [s.id]);
+    const discoveries = discoveriesBy.get(s.id) || 0;
+    const actionable = actionableBy.get(s.id) || 0;
+    const proposals = proposalsBy.get(s.id) || 0;
+    const qualified = qualifiedBy.get(s.id) || 0;
+    const settlements = settlementsBy.get(s.id) || 0;
+    const revenue = revenueBy.get(s.id) || 0;
     const snapshot = { ...s, discoveries, actionable, proposals, qualified_responses:qualified, settlements, revenue_usd:revenue };
     const score = strategyScore(snapshot);
     const evidence = settlements > 0 ? "VERIFIED_REVENUE" : qualified > 0 ? "QUALIFIED_RESPONSE" : actionable > 0 ? "ACTIONABLE" : discoveries > 0 ? "DISCOVERY" : "COLD";
-    const now = new Date().toISOString();
-    await env.DB.prepare("UPDATE lumen_market_hunter_strategies SET updated_at=?,discoveries=?,actionable=?,proposals=?,qualified_responses=?,settlements=?,revenue_usd=?,score=?,evidence_level=?,engine_version=? WHERE id=?")
-      .bind(now,discoveries,actionable,proposals,qualified,settlements,revenue,score,evidence,VERSION,s.id).run();
+    writes.push(
+      env.DB.prepare("UPDATE lumen_market_hunter_strategies SET updated_at=?,discoveries=?,actionable=?,proposals=?,qualified_responses=?,settlements=?,revenue_usd=?,score=?,evidence_level=?,engine_version=? WHERE id=?")
+        .bind(now,discoveries,actionable,proposals,qualified,settlements,revenue,score,evidence,VERSION,s.id)
+    );
     updated.push({ id:s.id, query:s.query, offerId:s.offer_id, runs:num(s.runs), discoveries, actionable, proposals, qualifiedResponses:qualified, settlements, revenueUsd:revenue, score, evidenceLevel:evidence, noSignalRuns:num(s.no_signal_runs), generation:num(s.generation) });
   }
+  if (writes.length) await env.DB.batch(writes);
   return updated.sort((a,b)=>b.score-a.score || a.runs-b.runs || a.id.localeCompare(b.id));
 }
 
