@@ -104,6 +104,58 @@ const ARTICLES = [
       ["Usá autenticación y medios protegidos", "Contraseñas únicas, autenticación en dos pasos y notificaciones de movimientos ayudan a detectar accesos no autorizados. Los medios con mecanismos de disputa también ofrecen una capa útil frente a incumplimientos."],
       ["Guardá evidencia básica", "Conservar confirmación de compra, descripción, precio y comunicaciones facilita resolver un problema después. No hace falta almacenar datos sensibles: alcanza con la información comercial necesaria para identificar la operación."]
     ]
+  },
+  {
+    slug: "como-comparar-gastos-de-envio-y-entrega",
+    category: "Compras inteligentes",
+    title: "Cómo comparar envío, entrega y costo final antes de comprar",
+    description: "Qué revisar en costos de envío, plazos, seguimiento y condiciones de entrega para comparar de forma justa.",
+    intro: "Dos tiendas pueden mostrar el mismo producto a precios parecidos y aun así ofrecer costos finales muy distintos. El envío, el plazo, el seguimiento y las condiciones de entrega forman parte de la compra y conviene compararlos junto con el precio.",
+    sections: [
+      ["Separá precio y entrega", "Anotá cuánto cuesta el producto y cuánto agrega el envío. Si una tienda ofrece envío gratis a partir de cierto monto, verificá que no estés comprando de más sólo para alcanzar ese umbral."],
+      ["Compará plazos realistas", "Una fecha estimada no siempre es una garantía. Revisá si el plazo empieza al realizar la compra o cuando el pedido es despachado y si existen demoras previsibles por fines de semana, feriados o aduana."],
+      ["Buscá seguimiento y responsable", "Saber qué empresa transporta el pedido, si existe número de seguimiento y quién responde ante una entrega fallida reduce incertidumbre. En compras de mayor valor, esa trazabilidad puede pesar más que una pequeña diferencia de precio."],
+      ["Incluí el costo de una eventual devolución", "Un envío barato puede dejar de serlo si devolver el producto implica pagar transporte adicional. Leé quién asume ese costo y en qué situaciones antes de elegir entre dos vendedores."]
+    ]
+  },
+  {
+    slug: "cuando-conviene-pagar-mas-por-un-producto",
+    category: "Comparación",
+    title: "Cuándo puede convenir pagar un poco más por un producto",
+    description: "Cómo evaluar garantía, durabilidad, soporte y costo de uso en lugar de mirar sólo el precio inicial.",
+    intro: "El precio más bajo no siempre produce el menor costo. Garantía, duración, consumo, reparación y accesorios pueden cambiar el resultado a lo largo del tiempo. La comparación mejora cuando pensamos en costo de uso y no sólo en el pago inicial.",
+    sections: [
+      ["Calculá cuánto tiempo esperás usarlo", "Un producto pensado para uso diario puede justificar una construcción más robusta que otro destinado a uso ocasional. Dividir el costo por meses o años esperados ayuda a poner la diferencia inicial en perspectiva."],
+      ["Valorá garantía y soporte", "Una garantía clara y un canal de soporte accesible reducen el costo potencial de una falla. Compará duración, cobertura y quién efectivamente responde, no sólo la palabra garantía en la publicación."],
+      ["Considerá consumibles y accesorios", "Filtros, cartuchos, baterías, repuestos o licencias pueden superar con el tiempo la diferencia entre dos productos. Verificá disponibilidad y precio aproximado antes de decidir."],
+      ["Pagá por funciones que realmente uses", "Una versión premium sólo tiene sentido si sus ventajas resuelven necesidades concretas. Si las funciones extra no cambian tu uso, pagar más no necesariamente mejora la compra."]
+    ]
+  },
+  {
+    slug: "como-comparar-marketplaces-y-tiendas-oficiales",
+    category: "Compras inteligentes",
+    title: "Marketplace o tienda oficial: qué conviene comparar",
+    description: "Diferencias prácticas entre comprar en un marketplace, una tienda oficial o un vendedor independiente.",
+    intro: "El mismo producto puede aparecer en una tienda oficial, un marketplace y comercios independientes. Cada canal ofrece combinaciones distintas de precio, protección, entrega y soporte. Compararlos exige mirar algo más que el importe publicado.",
+    sections: [
+      ["Identificá quién vende realmente", "En un marketplace, la plataforma puede procesar el pago sin ser quien vende o despacha. Revisá el vendedor específico, su reputación y las reglas que la plataforma aplica si existe un problema."],
+      ["Compará protección y devolución", "Una tienda oficial puede ofrecer soporte directo, mientras un marketplace puede sumar mecanismos propios de reclamo. Leé plazos y condiciones para saber qué protección es concreta en cada alternativa."],
+      ["Revisá stock y tiempos de entrega", "El mismo artículo puede salir de depósitos distintos. Confirmá disponibilidad real, fecha estimada y quién realiza la logística antes de asumir que todas las publicaciones son equivalentes."],
+      ["Usá el precio como una variable más", "Si la diferencia es pequeña, soporte, garantía o devolución pueden inclinar la decisión. Si es grande, verificá que no estés comparando versiones, condiciones o vendedores diferentes."]
+    ]
+  },
+  {
+    slug: "como-detectar-descuentos-reales",
+    category: "Comparación",
+    title: "Cómo detectar si un descuento online es realmente conveniente",
+    description: "Un método para evaluar porcentajes de descuento, precios de referencia y promociones sin dejarse llevar por el cartel.",
+    intro: "Un porcentaje grande de descuento puede llamar la atención, pero sólo es útil si el precio de referencia es representativo. Para saber si una promoción conviene, hay que comparar el precio actual con alternativas equivalentes y con el costo final.",
+    sections: [
+      ["No tomes el precio tachado como prueba", "El precio anterior que muestra una tienda puede responder a distintos criterios. Comparalo con otros vendedores y, cuando sea posible, con precios observados en días o semanas anteriores."],
+      ["Compará la misma variante", "Capacidad, tamaño, color, generación o accesorios pueden alterar mucho el precio. Asegurate de que la alternativa usada como referencia sea realmente equivalente."],
+      ["Sumá condiciones de la promoción", "Cuotas, cupones, membresías, medios de pago específicos o topes de reintegro pueden hacer que un descuento sólo aplique a ciertos compradores. Calculá cuánto pagarías vos en concreto."],
+      ["Decidí por valor, no por porcentaje", "Un 50% de descuento en algo que no necesitás sigue siendo un gasto. La pregunta útil es si el producto resuelve una necesidad a un costo total mejor que las alternativas disponibles."]
+    ]
   }
 ];
 
