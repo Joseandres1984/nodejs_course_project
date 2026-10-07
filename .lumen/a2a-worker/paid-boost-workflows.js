@@ -20,6 +20,7 @@ import { runVentureHunterV1 } from "./venture-hunter-v1.js";
 import { runVentureFounderV2 } from "./venture-founder-v2.js";
 import { runVentureBuilderV1 } from "./venture-builder-v1.js";
 import { runVentureLauncherV1 } from "./venture-launcher-v1.js";
+import { runVentureSellerV1 } from "./venture-seller-v1.js";
 import { runSupplierMarketLaunchEvolution } from "./supplier-market-launch.js";
 import { runUnifiedEconomicBrain, specialistPlanForMission } from "./unified-economic-brain-v1.js";
 
@@ -108,6 +109,7 @@ export class LumenDeepWorkflow extends WorkflowEntrypoint {
       tasks.push(["venture-founder-v2",()=>runVentureFounderV2(env,{limit:8})]);
       tasks.push(["venture-builder-v1",()=>runVentureBuilderV1(env,{limit:5})]);
       tasks.push(["venture-launcher-v1",()=>runVentureLauncherV1(env,{limit:5})]);
+      tasks.push(["venture-seller-v1",()=>runVentureSellerV1(env,{limit:5})]);
     }
     if(plan.commerce){
       tasks.push(["supplier-market-launch",()=>runSupplierMarketLaunchEvolution(env)]);
