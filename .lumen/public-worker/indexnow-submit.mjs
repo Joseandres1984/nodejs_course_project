@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
-import { ARTICLES, INDEXNOW_KEY } from "./discover.js";
+import { ARTICLES, INDEXNOW_KEY, DISCOVER_RENDER_VERSION } from "./discover.js";
 
 const BASE = (process.env.LUMEN_PUBLIC_BASE_URL || "https://lumen-zero-public.lumen-b2b.workers.dev").replace(/\/+$/, "");
 const endpoint = process.env.INDEXNOW_ENDPOINT || "https://api.indexnow.org/indexnow";
@@ -10,7 +10,7 @@ function bySlug(rows=[]) {
   return new Map(rows.map(row => [String(row.slug || ""), row]).filter(([slug]) => slug));
 }
 
-async function previousArticles() {
+async function previousState() {
   try {
     const raw = execFileSync("git", ["show", "HEAD^:.lumen/public-worker/discover.js"], {
       cwd: new URL("../..", import.meta.url),
@@ -20,13 +20,17 @@ async function previousArticles() {
     const path = "/tmp/lumen-discover-previous.mjs";
     writeFileSync(path, raw, "utf8");
     const mod = await import(pathToFileURL(path).href + "?v=" + Date.now());
-    return Array.isArray(mod.ARTICLES) ? mod.ARTICLES : [];
+    return {
+      articles: Array.isArray(mod.ARTICLES) ? mod.ARTICLES : [],
+      renderVersion: String(mod.DISCOVER_RENDER_VERSION || "")
+    };
   } catch {
-    return [];
+    return {articles:[],renderVersion:""};
   }
 }
 
-const previous = await previousArticles();
+const previousStateValue = await previousState();
+const previous = previousStateValue.articles;
 const before = bySlug(previous);
 const after = bySlug(ARTICLES);
 const changed = [];
@@ -36,7 +40,7 @@ for (const [slug, row] of after) {
 }
 const removed = [...before.keys()].filter(slug => !after.has(slug));
 
-if (!previous.length) {
+if (!previous.length || previousStateValue.renderVersion !== DISCOVER_RENDER_VERSION) {
   changed.splice(0, changed.length, ...ARTICLES.map(a => a.slug));
 }
 
