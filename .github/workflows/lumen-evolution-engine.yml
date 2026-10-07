@@ -40,6 +40,9 @@ jobs:
         run: |
           set -euo pipefail
           node --check .lumen/a2a-worker/adaptive-entry.js
+          node --check .lumen/a2a-worker/adaptive-core-entry.js
+          node --check .lumen/a2a-worker/adaptive-market-hunter.js
+          node --check .lumen/a2a-worker/a2a-outreach.js
           node --check .lumen/a2a-worker/autonomous-growth-loop-v11.js
           node --check .lumen/a2a-worker/growth-multiplier-v2.js
           node --check .lumen/a2a-worker/growth-engine-foundry-v2.js
@@ -70,6 +73,13 @@ jobs:
           grep -q 'handleGrowthMultiplierV2' "$entry"
           grep -q 'handleGrowthEngineFoundryV2' "$entry"
           grep -q 'codeSelfDeployment:false' "$growth"
+          grep -q 'const MAX_ACTIVE_STRATEGIES = 120' .lumen/a2a-worker/adaptive-market-hunter.js
+          grep -q 'const MAX_QUERIES_PER_RUN = 24' .lumen/a2a-worker/adaptive-market-hunter.js
+          grep -q 'const SCOUT_CONCURRENT_WAVE = 6' .lumen/a2a-worker/adaptive-market-hunter.js
+          grep -q 'const MAX_CLOSERS_PER_CYCLE = 30' .lumen/a2a-worker/a2a-outreach.js
+          grep -q 'const MAX_NEW_OUTREACH_24H = 120' .lumen/a2a-worker/a2a-outreach.js
+          grep -q 'const DOMAIN_COOLDOWN_HOURS = 24' .lumen/a2a-worker/a2a-outreach.js
+          echo 'LUMEN_SWARM_STATIC_GUARDRAILS=green'
           echo 'LUMEN_EVOLUTION_STATIC_GUARDRAILS=green'
 
       - name: Dry-run adaptive production bundle
@@ -156,6 +166,8 @@ jobs:
           get_retry growth-multiplier/policy /tmp/multiplier-policy.json
           get_retry growth-foundry/policy /tmp/foundry-policy.json
           get_retry growth/policy /tmp/growth-policy.json
+          get_retry market-hunter/policy /tmp/scout-policy.json
+          get_retry outreach/stats /tmp/closer-policy.json
 
           jq -e '.ok == true' /tmp/health.json >/dev/null
           jq -e '
@@ -168,6 +180,25 @@ jobs:
             .guardrails.verifiedRevenueOnly == true and
             .guardrails.selfModifyingCode == false
           ' /tmp/multiplier-policy.json >/dev/null
+          jq -e '
+            .version == "2.0-scout-swarm" and
+            .scoutSwarmTarget >= 120 and
+            .maxQueriesPerRun >= 24 and
+            .concurrentScoutWave >= 6 and
+            .autonomousSpend == false and
+            .autonomousPurchase == false and
+            .autonomousContract == false and
+            .bindingActionsHumanGated == true
+          ' /tmp/scout-policy.json >/dev/null
+          jq -e '
+            .version == "2.0-closer-swarm" and
+            .closerCapacity >= 30 and
+            .concurrentCloserWave >= 5 and
+            .dailyNewOutreachCap == 120 and
+            .domainCooldownHours == 24 and
+            .autonomousOutgoingSpend == false and
+            .autonomousContract == false
+          ' /tmp/closer-policy.json >/dev/null
           jq -e '
             .ok == true and
             .guardrails.autonomousSpendUsd == 0 and
@@ -219,6 +250,24 @@ jobs:
 
           echo 'LUMEN_EVOLUTION_CYCLE=success'
 
+      - name: Activate and prove scout swarm
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=$(curl --show-error --silent --max-time 120 -o /tmp/scout-run.json -w '%{http_code}'             -X POST "$BASE/market-hunter/run"             -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN"             -H 'accept: application/json'             -H 'cache-control: no-cache')
+          echo "SCOUT_SWARM_RUN_HTTP=$code"
+          cat /tmp/scout-run.json; echo
+          case "$code" in 200|201|202|204) ;; *) exit 1 ;; esac
+          jq -e '
+            .version == "2.0-scout-swarm" and
+            (.selectedStrategies | type == "array") and
+            (.selectedStrategies | length) == 24 and
+            .guardrails.scoutSwarmTarget >= 120 and
+            .guardrails.concurrentScoutWave >= 6
+          ' /tmp/scout-run.json >/dev/null
+          echo 'LUMEN_SCOUT_SWARM_LIVE=green'
+          echo 'LUMEN_SCOUTS_OUT_IN_MARKET=24_this_cycle'
+
       - name: Read live evolution evidence
         shell: bash
         run: |
@@ -236,6 +285,8 @@ jobs:
           get growth-foundry/status /tmp/foundry-status.json
           get growth/status /tmp/growth-status.json
           get growth/history?limit=12 /tmp/growth-history.json
+          get market-hunter/state /tmp/scout-state.json
+          get outreach/stats /tmp/closer-state.json
 
           # Evolution truth: a green scheduler is not enough. Prove that LUMEN
           # retains strategy memory, evaluates mature cycles and exposes the
@@ -272,6 +323,21 @@ jobs:
           verified_settlements=$(jq -r '.snapshot.B2B.verifiedSettlements30d // 0' /tmp/multiplier-status.json)
           echo "LUMEN_EVOLUTION_VERIFIED_REVENUE_USD_30D=$verified_revenue"
           echo "LUMEN_EVOLUTION_VERIFIED_SETTLEMENTS_30D=$verified_settlements"
+          jq -e '
+            .version == "2.0-scout-swarm" and
+            .totals.activeStrategies >= 120 and
+            (.lastRun.selected | length) == 24
+          ' /tmp/scout-state.json >/dev/null
+          jq -e '
+            .version == "2.0-closer-swarm" and
+            .closerCapacity >= 30 and
+            .dailyNewOutreachCap == 120 and
+            .domainCooldownHours == 24
+          ' /tmp/closer-state.json >/dev/null
+          echo "LUMEN_SCOUTS_ACTIVE=$(jq -r '.totals.activeStrategies' /tmp/scout-state.json)"
+          echo "LUMEN_SCOUTS_LAST_CYCLE=$(jq -r '.lastRun.selected | length' /tmp/scout-state.json)"
+          echo "LUMEN_CLOSER_CAPACITY=$(jq -r '.closerCapacity' /tmp/closer-state.json)"
+          echo 'LUMEN_SWARM_RUNTIME=green'
           echo 'LUMEN_EVOLUTION_ENGINE=green_with_learning_proof'
           echo "EVOLUTION_TARGET_CYCLES_PER_DAY=$EVOLUTION_CYCLES_PER_DAY_TARGET"
 
