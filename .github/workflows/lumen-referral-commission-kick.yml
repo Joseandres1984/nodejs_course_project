@@ -1,5 +1,5 @@
 name: LUMEN Referral Commission Kick
-# monetization rerun: 2026-10-07 after commission retry/trust deploy
+# monetization rerun: 2026-10-07 after A2A interface resolver deploy
 
 on:
   workflow_dispatch:
