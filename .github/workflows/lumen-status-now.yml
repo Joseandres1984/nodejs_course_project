@@ -1,4 +1,5 @@
 name: LUMEN Status Now
+# finance sync verification: 2026-10-07 after explicit-until deploy
 
 on:
   push:
