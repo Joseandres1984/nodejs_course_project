@@ -94,12 +94,14 @@ export function classifyCommercialResponse(responseText, originalMessage = "") {
   const purchase = hasAny(t, PURCHASE);
   if (purchase) return result("PURCHASE_INTENT", { reason:"explicit_purchase_or_payment_language", echoRatio:Number(ratio.toFixed(3)) });
 
-  const question = t.includes("?") || hasAny(t, QUESTION) || /^(how|what|which|when|where|can|could|would|do|does|is|are)\b/.test(t);
+  const explicitCommercialQuestion = hasAny(t, QUESTION);
+  const genericQuestion = t.includes("?") || /^(how|what|which|when|where|who|can|could|would|do|does|is|are)\b/.test(t);
   const interest = hasAny(t, INTEREST);
 
-  if (interest && question) return result("COMMERCIAL_QUESTION", { reason:"commercial_interest_with_question", echoRatio:Number(ratio.toFixed(3)) });
+  if (interest && genericQuestion) return result("COMMERCIAL_QUESTION", { reason:"commercial_interest_with_question", echoRatio:Number(ratio.toFixed(3)) });
   if (interest) return result("COMMERCIAL_INTEREST", { reason:"explicit_interest_language", echoRatio:Number(ratio.toFixed(3)) });
-  if (question) return result("COMMERCIAL_QUESTION", { reason:"commercial_question_signal", echoRatio:Number(ratio.toFixed(3)) });
+  if (explicitCommercialQuestion) return result("COMMERCIAL_QUESTION", { reason:"commercial_question_signal", echoRatio:Number(ratio.toFixed(3)) });
+  if (genericQuestion) return result("GENERIC_RESPONSE", { reason:"question_without_commercial_context", echoRatio:Number(ratio.toFixed(3)) });
 
   const compact = t.replace(/[.!]+$/g, "").trim();
   if (["yes","yes please","interested","proceed","go ahead"].includes(compact)) {
