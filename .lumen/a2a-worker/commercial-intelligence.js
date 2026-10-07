@@ -1,4 +1,4 @@
-const VERSION = "1.1-microbuyer-commercial-intelligence";
+const VERSION = "1.2-unassessed-first-commercial-intelligence";
 
 const HARD_TEST_PHRASES = [
   "paper-only",
@@ -235,27 +235,33 @@ async function ensureSchema(env) {
 
 export async function runCommercialReassessment(env) {
   if (!(await ensureSchema(env))) return { ok: false, error: "persistence_unavailable" };
-  const rows = await env.DB.prepare("SELECT id,name,description,remote_id,endpoint,evidence,score,fit,demand_signal,revenue_offer_id,status,raw_json FROM lumen_opportunities ORDER BY score DESC, updated_at DESC LIMIT 250").all();
+  const rows = await env.DB.prepare("SELECT o.id,o.name,o.description,o.remote_id,o.endpoint,o.evidence,o.score,o.fit,o.demand_signal,o.revenue_offer_id,o.status,o.raw_json,a.assessed_at AS prior_assessed_at FROM lumen_opportunities o LEFT JOIN lumen_opportunity_assessments a ON a.opportunity_id=o.id ORDER BY CASE WHEN a.opportunity_id IS NULL THEN 0 ELSE 1 END,CASE WHEN a.assessed_at IS NULL OR datetime(a.assessed_at)<datetime(o.updated_at) THEN 0 ELSE 1 END,o.updated_at DESC,o.score DESC LIMIT 500").all();
   let assessed = 0;
   let actionable = 0;
   let testOnly = 0;
   let microbuyerFits = 0;
+  let newlyAssessed = 0;
   const now = new Date().toISOString();
+  const writes = [];
 
   for (const row of rows.results || []) {
     const a = assessCommercialOpportunity(row);
-    await env.DB.prepare("INSERT INTO lumen_opportunity_assessments(opportunity_id,assessed_at,commercial_score,commercial_fit,evidence_strength,commercially_actionable,synthetic_or_test_only,reasons_json,engine_version) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(opportunity_id) DO UPDATE SET assessed_at=excluded.assessed_at,commercial_score=excluded.commercial_score,commercial_fit=excluded.commercial_fit,evidence_strength=excluded.evidence_strength,commercially_actionable=excluded.commercially_actionable,synthetic_or_test_only=excluded.synthetic_or_test_only,reasons_json=excluded.reasons_json,engine_version=excluded.engine_version")
-      .bind(row.id, now, a.commercialScore, a.commercialFit, a.evidenceStrength, a.commerciallyActionable ? 1 : 0, a.syntheticOrTestOnly ? 1 : 0, JSON.stringify(a.reasons), VERSION).run();
+    writes.push(env.DB.prepare("INSERT INTO lumen_opportunity_assessments(opportunity_id,assessed_at,commercial_score,commercial_fit,evidence_strength,commercially_actionable,synthetic_or_test_only,reasons_json,engine_version) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(opportunity_id) DO UPDATE SET assessed_at=excluded.assessed_at,commercial_score=excluded.commercial_score,commercial_fit=excluded.commercial_fit,evidence_strength=excluded.evidence_strength,commercially_actionable=excluded.commercially_actionable,synthetic_or_test_only=excluded.synthetic_or_test_only,reasons_json=excluded.reasons_json,engine_version=excluded.engine_version").bind(row.id, now, a.commercialScore, a.commercialFit, a.evidenceStrength, a.commerciallyActionable ? 1 : 0, a.syntheticOrTestOnly ? 1 : 0, JSON.stringify(a.reasons), VERSION));
+    if (!row.prior_assessed_at) newlyAssessed += 1;
     assessed += 1;
     if (a.commerciallyActionable) actionable += 1;
     if (a.syntheticOrTestOnly) testOnly += 1;
     if (a.microbuyerFit) microbuyerFits += 1;
   }
 
+  for (let offset = 0; offset < writes.length; offset += 80) await env.DB.batch(writes.slice(offset, offset + 80));
+
   return {
     ok: true,
     version: VERSION,
     assessed,
+    newlyAssessed,
+    selectionPolicy: "unassessed_then_changed_then_recent_score",
     actionable,
     testOnly,
     microbuyerFits,
