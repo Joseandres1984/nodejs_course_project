@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { diagnoseSettlementBlocker, chooseFirstSettlementMission, FIRST_SETTLEMENT_MISSION_POLICY } from "./first-settlement-mission-v1.js";
 
-assert.equal(FIRST_SETTLEMENT_MISSION_POLICY.version, "1.2-first-settlement-commercial-truth");
+assert.equal(FIRST_SETTLEMENT_MISSION_POLICY.version, "1.3-tender-lead-close-priority");
 assert.equal(FIRST_SETTLEMENT_MISSION_POLICY.autonomousSpendUsd, 0);
 assert.equal(FIRST_SETTLEMENT_MISSION_POLICY.bindingActionsHumanGated, true);
 assert.equal(FIRST_SETTLEMENT_MISSION_POLICY.skipExplicitMoveOn, true);
@@ -95,5 +95,17 @@ const terminalOutreachRotates = chooseFirstSettlementMission([
   { opportunity_id:"sendable", stage:"PROPOSAL_READY", first_cash_score:.2, intent_score:.7, quality_gate_status:"PASS", updated_at:"2026-10-03T11:40:00Z" }
 ], now);
 assert.equal(terminalOutreachRotates.focus.opportunity_id,"sendable","terminal outreach paths must not monopolize First Settlement");
+
+const tenderLeadBeatsBrokenDraft = chooseFirstSettlementMission([
+  { opportunity_id:"broken-old", offer_id:"MP-BUYER-SIGNALS", stage:"PROPOSAL_READY", first_cash_score:1.2, intent_score:.8, quality_gate_status:"NEEDS_REVISION", updated_at:"2026-10-03T11:55:00Z" },
+  { opportunity_id:"tender-ready", offer_id:"MP-TENDER-LEAD", stage:"PROPOSAL_READY", first_cash_score:.12, intent_score:.65, quality_gate_status:"PASS", updated_at:"2026-10-03T11:56:00Z" }
+], now);
+assert.equal(tenderLeadBeatsBrokenDraft.focus.opportunity_id,"tender-ready","quality-passed Tender Hot Lead must outrank broken legacy draft");
+
+const tenderGenericDoesNotBeatPurchase = chooseFirstSettlementMission([
+  { opportunity_id:"tender-generic", offer_id:"MP-TENDER-LEAD", stage:"REPLIED", first_cash_score:.2, intent_score:.7, response_class:"GENERIC_RESPONSE", updated_at:"2026-10-03T11:58:00Z" },
+  { opportunity_id:"real-buyer", offer_id:"MP-SUPPLIER-SNAPSHOT", stage:"NEGOTIATING", first_cash_score:.1, intent_score:.6, response_class:"PURCHASE_INTENT", updated_at:"2026-10-03T11:57:00Z" }
+], now);
+assert.equal(tenderGenericDoesNotBeatPurchase.focus.opportunity_id,"real-buyer","generic Tender Hot Lead response must never outrank explicit purchase intent");
 
 console.log("First Settlement Mission v1 tests passed");
