@@ -47,11 +47,11 @@ jobs:
             local endpoint="$1"
             local body="/tmp/${endpoint//\//-}.json"
             local code
-            code=$(curl --show-error --silent --max-time 90 -o "$body" -w '%{http_code}' \
+            code=$(curl --show-error --silent --connect-timeout 10 --max-time 35 --retry 2 --retry-delay 2 --retry-all-errors -o "$body" -w '%{http_code}' \
               -X POST "$BASE/$endpoint" \
               -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
               -H 'accept: application/json' \
-              -H 'cache-control: no-cache')
+              -H 'cache-control: no-cache' || true)
             echo "===== POST /$endpoint HTTP $code ====="
             cat "$body"; echo
             case "$code" in
@@ -61,10 +61,10 @@ jobs:
           }
 
           post outreach/poll || true
-          post source-intelligence/cycle
-          post market-hunter/run
-          post commercial/reassess
-          post revenue-loop-v5/run
+          post source-intelligence/cycle || true
+          post market-hunter/run || true
+          post commercial/reassess || true
+          post revenue-loop-v5/run || true
 
           consumed=false
           for endpoint in first-cash/run commercial-reply/run followup/run; do
@@ -80,10 +80,10 @@ jobs:
           if [ "$consumed" != 'true' ]; then
             for attempt in 1 2 3 4 5 6 7 8; do
               echo "===== STREET PROSPECT ROTATION $attempt/8 ====="
-              post proposals/prepare-top
-              post quality/review-next
-              post outreach/probe-next
-              post outreach/send-next
+              post proposals/prepare-top || continue
+              post quality/review-next || continue
+              post outreach/probe-next || continue
+              post outreach/send-next || continue
 
               send='/tmp/outreach-send-next.json'
               if jq -e '(.sent == true) or (.externalAttempted == true) or (.status == "SEND_FAILED")' "$send" >/dev/null 2>&1; then
@@ -96,7 +96,7 @@ jobs:
 
           echo "STREET_MODE_EXTERNAL_SLOT_CONSUMED=$consumed"
           post outreach/poll || true
-          post revenue-loop-v5/run
+          post revenue-loop-v5/run || true
 
       - name: Read closing evidence
         shell: bash
