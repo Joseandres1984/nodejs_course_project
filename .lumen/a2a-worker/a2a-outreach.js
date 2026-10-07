@@ -1,5 +1,5 @@
 import { getFirstSettlementMissionStatus } from "./first-settlement-mission-v1.js";
-const VERSION = "2.0-closer-swarm";
+const VERSION = "2.1-transport-fallback-closer-swarm";
 const CARD_TIMEOUT_MS = 8000;
 const SEND_TIMEOUT_MS = 15000;
 const MAX_CLOSERS_PER_CYCLE = 30;
@@ -75,33 +75,41 @@ function hasRequiredAuth(card) {
   return Array.isArray(legacy) && legacy.length > 0;
 }
 
-function selectInterface(card) {
+function selectInterfaces(card) {
+  const selected = [];
+  const seen = new Set();
+  const add = (entry) => {
+    if (!entry?.url || !entry?.binding) return;
+    const key = `${entry.binding}|${entry.url}|${entry.version}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    selected.push(entry);
+  };
   const interfaces = Array.isArray(card?.supportedInterfaces) ? card.supportedInterfaces : [];
   for (const entry of interfaces) {
     const binding = clean(entry?.protocolBinding, 80).toUpperCase();
     if (!isHttps(entry?.url)) continue;
     if (binding === "JSONRPC" || binding === "HTTP+JSON") {
-      return {
+      add({
         url: normalizeBaseUrl(entry.url),
         binding,
         version: clean(entry?.protocolVersion || "1.0", 20),
         tenant: clean(entry?.tenant, 200) || null
-      };
+      });
     }
   }
-
   if (isHttps(card?.url)) {
     const transport = clean(card?.preferredTransport || card?.transport || "JSONRPC", 80).toUpperCase();
     if (["JSONRPC", "JSON-RPC", "HTTP+JSON"].includes(transport)) {
-      return {
+      add({
         url: normalizeBaseUrl(card.url),
         binding: transport === "HTTP+JSON" ? "HTTP+JSON" : "JSONRPC",
         version: clean(card?.protocolVersion || "0.3", 20),
         tenant: null
-      };
+      });
     }
   }
-  return null;
+  return selected;
 }
 
 async function fetchAgentCard(cardUrl) {
@@ -118,9 +126,9 @@ async function fetchAgentCard(cardUrl) {
     let card;
     try { card = JSON.parse(text); } catch { return { ok: false, status: "CARD_FETCH_FAILED", error: "card_invalid_json" }; }
     if (hasRequiredAuth(card)) return { ok: false, status: "AUTH_REQUIRED", error: "agent_requires_authentication", card };
-    const selected = selectInterface(card);
-    if (!selected) return { ok: false, status: "INCOMPATIBLE", error: "no_supported_public_a2a_interface", card };
-    return { ok: true, status: "READY", card, selected };
+    const interfaces = selectInterfaces(card);
+    if (!interfaces.length) return { ok: false, status: "INCOMPATIBLE", error: "no_supported_public_a2a_interface", card };
+    return { ok: true, status: "READY", card, selected: interfaces[0], interfaces };
   } catch (error) {
     return { ok: false, status: "CARD_FETCH_FAILED", error: clean(error?.message || error, 300) };
   } finally {
@@ -326,49 +334,75 @@ async function sendReady(env, row) {
     return { ok: false, sent: false, status: cardProbe.status, error: cardProbe.error };
   }
 
-  const envelope = messageEnvelope(row, cardProbe.selected, env);
-  const timeout = withTimeout(SEND_TIMEOUT_MS);
-  let responseText = "";
-  let responseStatus = 0;
-  try {
-    const response = await fetch(envelope.url, {
-      method: "POST",
-      headers: envelope.headers,
-      body: JSON.stringify(envelope.payload),
-      signal: timeout.signal
-    });
-    responseStatus = response.status;
-    responseText = await response.text();
-    if (!response.ok) throw new Error(`send_http_${response.status}`);
-    let body = {};
-    try { body = JSON.parse(responseText); } catch {}
-    const info = extractTaskInfo(body, cardProbe.selected.binding);
-    const now = new Date().toISOString();
-    const status = info.hasMessage ? "RESPONDED" : info.taskId ? "SENT_TASK" : "SENT";
+  const interfaces = Array.isArray(cardProbe.interfaces) && cardProbe.interfaces.length
+    ? cardProbe.interfaces.slice(0, 3)
+    : [cardProbe.selected];
+  const transportErrors = [];
+  for (let index = 0; index < interfaces.length; index++) {
+    const iface = interfaces[index];
+    const envelope = messageEnvelope(row, iface, env);
+    const timeout = withTimeout(SEND_TIMEOUT_MS);
+    let responseText = "";
+    let responseStatus = 0;
+    try {
+      const response = await fetch(envelope.url, {
+        method: "POST",
+        headers: envelope.headers,
+        body: JSON.stringify(envelope.payload),
+        signal: timeout.signal
+      });
+      responseStatus = response.status;
+      responseText = await response.text();
 
-    await env.DB.prepare("UPDATE lumen_outreach_attempts SET updated_at=?,status=?,agent_url=?,protocol_binding=?,protocol_version=?,task_id=?,context_id=?,response_text=?,request_json=?,response_json=?,error=NULL WHERE proposal_id=?")
-      .bind(now, status, cardProbe.selected.url, cardProbe.selected.binding, cardProbe.selected.version, info.taskId, info.contextId, info.responseText, JSON.stringify(envelope.payload), clean(responseText, 12000), row.proposal_id).run();
-    await env.DB.prepare("UPDATE lumen_proposal_drafts SET status=?,updated_at=? WHERE proposal_id=?")
-      .bind(info.hasMessage ? "RESPONDED" : "SENT", now, row.proposal_id).run();
+      if (!response.ok) {
+        const retryableTransportMismatch = [404,405,415,426].includes(response.status);
+        transportErrors.push(`${iface.binding}@${iface.url}:http_${response.status}`);
+        if (retryableTransportMismatch && index < interfaces.length - 1) continue;
+        throw new Error(`send_http_${response.status}`);
+      }
 
-    return {
-      ok: true,
-      sent: true,
-      proposalId: row.proposal_id,
-      status,
-      taskId: info.taskId,
-      responseText: info.responseText,
-      checkoutReady: Boolean(clean(env?.X402_CHECKOUT_URL, 500))
-    };
-  } catch (error) {
-    const now = new Date().toISOString();
-    const err = clean(error?.message || error, 500);
-    await env.DB.prepare("UPDATE lumen_outreach_attempts SET updated_at=?,status='SEND_FAILED',response_json=?,error=? WHERE proposal_id=?")
-      .bind(now, clean(responseText, 12000), `${err}${responseStatus ? `;http=${responseStatus}` : ""}`, row.proposal_id).run();
-    return { ok: false, sent: false, status: "SEND_FAILED", error: err };
-  } finally {
-    timeout.clear();
+      let body = {};
+      try { body = JSON.parse(responseText); } catch {}
+      const info = extractTaskInfo(body, iface.binding);
+      const now = new Date().toISOString();
+      const status = info.hasMessage ? "RESPONDED" : info.taskId ? "SENT_TASK" : "SENT";
+
+      await env.DB.prepare("UPDATE lumen_outreach_attempts SET updated_at=?,status=?,agent_url=?,protocol_binding=?,protocol_version=?,task_id=?,context_id=?,response_text=?,request_json=?,response_json=?,error=NULL WHERE proposal_id=?")
+        .bind(now, status, iface.url, iface.binding, iface.version, info.taskId, info.contextId, info.responseText, JSON.stringify(envelope.payload), clean(responseText, 12000), row.proposal_id).run();
+      await env.DB.prepare("UPDATE lumen_proposal_drafts SET status=?,updated_at=? WHERE proposal_id=?")
+        .bind(info.hasMessage ? "RESPONDED" : "SENT", now, row.proposal_id).run();
+
+      return {
+        ok: true,
+        sent: true,
+        proposalId: row.proposal_id,
+        status,
+        taskId: info.taskId,
+        responseText: info.responseText,
+        checkoutReady: Boolean(clean(env?.X402_CHECKOUT_URL, 500)),
+        transport: { binding: iface.binding, version: iface.version, fallbackIndex: index }
+      };
+    } catch (error) {
+      const err = clean(error?.message || error, 500);
+      const retryableTransportMismatch = [404,405,415,426].includes(responseStatus);
+      if (retryableTransportMismatch && index < interfaces.length - 1) {
+        transportErrors.push(`${iface.binding}@${iface.url}:${err}`);
+        continue;
+      }
+      const now = new Date().toISOString();
+      const combined = clean([...transportErrors, err].filter(Boolean).join(";"), 1000);
+      await env.DB.prepare("UPDATE lumen_outreach_attempts SET updated_at=?,status='SEND_FAILED',response_json=?,error=? WHERE proposal_id=?")
+        .bind(now, clean(responseText, 12000), combined, row.proposal_id).run();
+      return { ok: false, sent: false, status: "SEND_FAILED", error: combined };
+    } finally {
+      timeout.clear();
+    }
   }
+  const now = new Date().toISOString();
+  const combined = clean(transportErrors.join(";"), 1000) || "no_working_public_a2a_transport";
+  await env.DB.prepare("UPDATE lumen_outreach_attempts SET updated_at=?,status='SEND_FAILED',error=? WHERE proposal_id=?")
+    .bind(now, combined, row.proposal_id).run();
+  return { ok:false, sent:false, status:"SEND_FAILED", error:combined };
 }
 
 export async function sendNextApproved(env, { force = false } = {}) {
