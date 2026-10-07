@@ -10,13 +10,24 @@ on:
 jobs:
   status:
     runs-on: ubuntu-latest
+    env:
+      OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
     steps:
       - name: Read live LUMEN state
         run: |
           set -euo pipefail
           base='https://lumen-zero-a2a.lumen-b2b.workers.dev'
-          for path in health opportunities/stats commercial/stats outreach/stats outreach/next; do
+          for path in health opportunities/stats commercial/stats outreach/stats outreach/next referrals/stats referrals/commissions/stats referrals/commissions/autopilot/stats partners/stats partners/top portfolio-governor/state; do
             echo "===== /$path ====="
             curl --fail --show-error --silent --max-time 30 "$base/$path"
             echo
           done
+
+      - name: Read protected referral ledger
+        run: |
+          set -euo pipefail
+          test -n "${OPPORTUNITY_ADMIN_TOKEN:-}"
+          base='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          echo '===== /referrals/ledger ====='
+          curl --fail --show-error --silent --max-time 30             -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN"             "$base/referrals/ledger"
+          echo
