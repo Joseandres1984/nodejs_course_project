@@ -6,7 +6,7 @@ import { runVentureBuilderV1 } from "./venture-builder-v1.js";
 import { runVentureLauncherV1 } from "./venture-launcher-v1.js";
 import { recomputeRevenueDirector } from "./revenue-director.js";
 
-const VERSION = "1.0-entrepreneur-mode";
+const VERSION = "1.1-entrepreneur-cash-pressure";
 const ROLES = Object.freeze([
   { id:"SCOUT", objective:"find current demand and overlooked zero-capital monetization signals" },
   { id:"FOUNDER", objective:"turn evidence into distinct business models and minimum paid offers" },
@@ -52,6 +52,21 @@ async function revenueTruth(env){
   return {verifiedRevenueUsd:Number(row?.revenue||0),verifiedSettlements:Number(row?.settlements||0)};
 }
 
+async function cashPressureState(env,truth){
+  const r=await env.DB.prepare("SELECT business_model,verified_revenue_usd,verified_settlements FROM lumen_entrepreneur_cycles ORDER BY created_at DESC LIMIT 12").all().catch(()=>({results:[]}));
+  const recent=r?.results||[];
+  let consecutiveZeroCashCycles=0;
+  for(const row of recent){
+    if(Number(row?.verified_settlements||0)>0 || Number(row?.verified_revenue_usd||0)>0) break;
+    consecutiveZeroCashCycles+=1;
+  }
+  const pressure=truth.verifiedSettlements>0?"WINNER":
+    consecutiveZeroCashCycles>=8?"CRITICAL":
+    consecutiveZeroCashCycles>=4?"HIGH":
+    consecutiveZeroCashCycles>=2?"MEDIUM":"NORMAL";
+  return {pressure,consecutiveZeroCashCycles,recentCyclesObserved:recent.length};
+}
+
 export const ENTREPRENEUR_POLICY = Object.freeze({
   version:VERSION,
   identity:"LUMEN Entrepreneur Mode",
@@ -61,6 +76,10 @@ export const ENTREPRENEUR_POLICY = Object.freeze({
   businessModelsOpenEnded:true,
   distinctModelExploration:true,
   zeroCapitalAutonomousExperiments:true,
+  huntBeforeDecision:true,
+  stalledStrategyPivot:true,
+  verifiedWinnerCompounding:true,
+  cashDiscipline:["START_FROM_DEMAND","SELL_BEFORE_BUILD","RUN_SMALLEST_REVERSIBLE_TEST","KILL_STALLED_STRATEGIES","REPEAT_VERIFIED_WINNERS","CASH_IS_TRUTH"],
   externalCommercialExecution:"delegated_to_existing_quality_governor_and_one-message-slot",
   noSyntheticDemand:true,
   noFakeBuyers:true,
@@ -83,15 +102,27 @@ export async function runEntrepreneurMode(env,{trigger="scheduled",scheduledTime
   const cycleKey=String(trigger||"").startsWith("cloudflare_hourly_entrepreneur")
     ? `entrepreneur-${Math.floor(scheduled/3600000)}`
     : `entrepreneur-manual-${scheduled}`;
-  const brain=await runUnifiedEconomicBrain(withBudgetedAi(env),{trigger:`entrepreneur_mode:${trigger}`,scheduledTime,cycleKey});
+  // Entrepreneur order matters: hunt first so the decision is made with the
+  // freshest opportunity set rather than yesterday's idea inventory.
   const hunter=await runVentureHunterV1(env,{limit:80,topK:18,mode:"entrepreneur_zero_capital"});
+  const brain=await runUnifiedEconomicBrain(withBudgetedAi(env),{trigger:`entrepreneur_mode:${trigger}`,scheduledTime,cycleKey});
   const founder=await runVentureFounderV2(env,{limit:10});
   const builder=await runVentureBuilderV1(env,{limit:5});
   const launcher=await runVentureLauncherV1(env,{limit:5});
   const director=await recomputeRevenueDirector(env);
   const truth=await revenueTruth(env);
+  const pressure=await cashPressureState(env,truth);
 
   const mission=brain?.mission||{};
+  const priorAttempts=Number(mission.priorAttempts||0);
+  const priorReward=Number(mission.priorReward||0);
+  const strategyDisposition=truth.verifiedSettlements>0
+    ? "REPEAT_VERIFIED_WINNER"
+    : priorAttempts>=3&&priorReward<=0
+      ? "PIVOT_AWAY_FROM_STALLED_STRATEGY"
+      : pressure.pressure==="CRITICAL"||pressure.pressure==="HIGH"
+        ? "PREFER_FASTEST_EVIDENCE_BACKED_CASH_TEST"
+        : "RUN_SMALLEST_REVERSIBLE_TEST";
   const result={
     ok:true,
     version:VERSION,
@@ -128,11 +159,27 @@ export async function runEntrepreneurMode(env,{trigger="scheduled",scheduledTime
       preferredOffers:director?.preferredOffers||[]
     },
     revenueTruth:truth,
+    cashSprint:{
+      pressure:pressure.pressure,
+      consecutiveZeroCashCycles:pressure.consecutiveZeroCashCycles,
+      strategyDisposition,
+      priorAttempts,
+      priorReward,
+      founderRules:{
+        startFromDemand:true,
+        sellBeforeBuild:true,
+        smallestReversibleTest:true,
+        abandonRepeatedZeroSignalStrategy:true,
+        repeatVerifiedWinner:true,
+        countOnlyVerifiedCash:true
+      }
+    },
     actionBoundary:{
       preparesBusinessesAutonomously:true,
       canResearchAndGenerateIdeas:true,
       canPrepareMvp:true,
       canPrepareLaunchPacket:true,
+      huntRunsBeforeEconomicDecision:true,
       externalMessagesHandledByExistingBoundedCommercialLoop:true,
       maxExternalMessagesAddedByEntrepreneurMode:0,
       autonomousSpendUsd:0,
