@@ -14,6 +14,7 @@ import { handleCommercialReplyEngine, runCommercialReplyEngine, pollCommercialRe
 import { handleFirstCashCloser, runFirstCashCloser } from "./first-cash-closer.js";
 import { handleX402RevenueBridge, syncX402SettlementsToRevenue } from "./x402-revenue-bridge.js";
 import { handleRevenueLoopV5 } from "./revenue-loop-v5.js";
+import { FIRST_SETTLEMENT_MISSION_POLICY, getFirstSettlementMissionStatus } from "./first-settlement-mission-v1.js";
 import { handleRevenueDirector, recomputeRevenueDirector } from "./revenue-director.js";
 import { handlePartnerNetwork, runPartnerDiscovery } from "./partner-network.js";
 import { handlePartnerCouncilQuality, buildQualityPartnerMatches } from "./partner-council-quality.js";
@@ -101,6 +102,15 @@ async function readGrowthCommercialGuidance(env, fallbackAction) {
 
 export default {
   async fetch(request, env, ctx) {
+    const path = new URL(request.url).pathname;
+    if (request.method === "GET" && path === "/first-settlement/policy") return Response.json(FIRST_SETTLEMENT_MISSION_POLICY);
+    if (path === "/first-settlement/status") {
+      const expected = String(env?.OPPORTUNITY_ADMIN_TOKEN || "");
+      const supplied = String(request.headers.get("x-lumen-admin") || "");
+      if (!expected || supplied !== expected) return Response.json({ ok:false, error:"admin_token_required" }, { status:403 });
+      if (request.method === "GET") return Response.json(await getFirstSettlementMissionStatus(env), { headers:{ "cache-control":"no-store" } });
+      return Response.json({ ok:false, error:"method_not_allowed" }, { status:405 });
+    }
     const opportunityResponse = await handleOpportunityEngine(request, env); if (opportunityResponse) return opportunityResponse;
     const factoryResponse = await handleOpportunityFactory(request, env); if (factoryResponse) return factoryResponse;
     const portfolioResponse = await handlePortfolioGovernor(request, env); if (portfolioResponse) return portfolioResponse;
