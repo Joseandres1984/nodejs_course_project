@@ -1,6 +1,7 @@
 const OFFER_SLUGS = {
   "MP-SUPPLIER-SNAPSHOT": "supplier-snapshot",
   "MP-QUOTE-SANITY": "quote-sanity",
+  "MP-TENDER-LEAD": "tender-hot-lead",
   "MP-TENDER-SCAN": "tender-scan",
   "MP-SOURCING-5": "sourcing-5",
   "MP-BUYER-SIGNALS": "buyer-signals",

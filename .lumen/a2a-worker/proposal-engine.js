@@ -1,12 +1,13 @@
 import { classifyCommercialResponse } from "./response-qualification.js";
 
-const VERSION = "2.0-first-dollar-unlock";
+const VERSION = "2.1-tender-hot-lead-first-dollar";
 const PRIORITY_BRIDGE_VERSION = "4.1-sovereign-revenue-priority";
 const EVOLUTION_VERSION = "1.1-conversion-rate-proposal-evolution";
 
 export const OFFERS = {
   "MP-SUPPLIER-SNAPSHOT": { name: "Supplier Snapshot", priceUsd: 1, outcome: "a compact supplier identity and official-channel signal for one named company or domain" },
   "MP-QUOTE-SANITY": { name: "Quote Sanity Check", priceUsd: 7, outcome: "a quick sanity check of pricing and quotation structure" },
+  "MP-TENDER-LEAD": { name: "Tender Hot Lead", priceUsd: 1, outcome: "one current public tender matched to your supplier profile, with official source, deadline and fit summary" },
   "MP-TENDER-SCAN": { name: "Tender Quick Scan", priceUsd: 9, outcome: "a focused scan of tender fit, deadlines and commercial relevance" },
   "MP-SOURCING-5": { name: "Supplier Shortlist 5", priceUsd: 15, outcome: "a shortlist of five relevant suppliers with evidence" },
   "MP-BUYER-SIGNALS": { name: "Buyer Signal Scan", priceUsd: 19, outcome: "an evidence-backed scan of buyer intent and demand signals" },
@@ -182,9 +183,12 @@ async function selectProposalVariant(env, proposalId) {
 
 function buildProposalMessage({ variantId, target, offer, evidence, firstCashMode, microbuyerFit }) {
   const disclosure = "This is a non-binding commercial introduction. No order, payment, contract or commitment is created by this message.";
-  const checkoutHint = firstCashMode
-    ? "If useful, reply with one company or domain you want checked. LUMEN can confirm the exact deliverable and provide the x402 checkout. If this is not relevant, no action is needed."
-    : "If useful, reply with the requirement or scope you want checked. LUMEN can then confirm the exact deliverable and provide the x402 checkout. If this is not relevant, no action is needed.";
+  const tenderLead = offer.name === "Tender Hot Lead";
+  const checkoutHint = firstCashMode && tenderLead
+    ? "If useful, reply \"send it\" and LUMEN will provide the USD 1 x402 checkout for this matched tender lead. If this is not relevant, no action is needed."
+    : firstCashMode
+      ? "If useful, reply with one company or domain you want checked. LUMEN can confirm the exact deliverable and provide the x402 checkout. If this is not relevant, no action is needed."
+      : "If useful, reply with the requirement or scope you want checked. LUMEN can then confirm the exact deliverable and provide the x402 checkout. If this is not relevant, no action is needed.";
   const observed = evidence || (microbuyerFit
     ? "the public signal combines machine-payment compatibility with an information-verification need."
     : "the public signal appears related to an active B2B requirement.");
@@ -228,11 +232,15 @@ function makeDraft(opportunity, env, variantId = "direct_outcome") {
   const firstCashMode = boolVar(env?.LUMEN_FIRST_CASH_MODE, false);
   const microbuyerFit = reasons.includes("microbuyer_fit");
   // First conversion beats basket size: use the lowest-friction paid tripwire for verified buyers.
-  const selectedOfferId = firstCashMode ? "MP-SUPPLIER-SNAPSHOT" : (opportunity.revenue_offer_id || "MP-BUYER-SIGNALS");
+  const selectedOfferId = firstCashMode && opportunity.revenue_offer_id === "MP-TENDER-LEAD"
+    ? "MP-TENDER-LEAD"
+    : firstCashMode
+      ? "MP-SUPPLIER-SNAPSHOT"
+      : (opportunity.revenue_offer_id || "MP-BUYER-SIGNALS");
   const offer = OFFERS[selectedOfferId] || OFFERS["MP-BUYER-SIGNALS"];
   const target = clean(opportunity.name || opportunity.remote_id, 180);
   const evidence = completeExcerpt(opportunity.description, 420);
-  const subjectPrefix = variantId === "scope_first" ? "Quick scope check" : variantId === "evidence_first" ? "Observed fit" : (firstCashMode ? "USD 1 supplier check" : "Possible fit");
+  const subjectPrefix = variantId === "scope_first" ? "Quick scope check" : variantId === "evidence_first" ? "Observed fit" : (firstCashMode && selectedOfferId === "MP-TENDER-LEAD" ? "USD 1 tender match" : (firstCashMode ? "USD 1 supplier check" : "Possible fit"));
   const subject = clean(`${subjectPrefix}: ${offer.name} for ${target}`, 180);
   const message = buildProposalMessage({ variantId, target, offer, evidence, firstCashMode, microbuyerFit });
 
