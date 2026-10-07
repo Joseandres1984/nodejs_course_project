@@ -1,6 +1,6 @@
 import { classifyCommercialResponse } from "./response-qualification.js";
 
-const VERSION = "1.8-cash-selector-quality-aware-recovery";
+const VERSION = "1.9-first-dollar-tripwire";
 const PRIORITY_BRIDGE_VERSION = "4.1-sovereign-revenue-priority";
 const EVOLUTION_VERSION = "1.1-conversion-rate-proposal-evolution";
 
@@ -81,7 +81,8 @@ async function getBestProposalCandidate(env) {
   const conversionRecovery = firstCashMode
     ? " OR (a.commercial_score>=85 AND LOWER(COALESCE(a.evidence_strength,'')) IN ('medium','strong') AND COALESCE(p.metadata_json,'') NOT LIKE '%\"conversion_recovery\":{\"enabled\":true%' AND p.status IN ('DRAFT','APPROVED') AND p.quality_gate_status IN ('NEEDS_REVISION','PASS') AND (x.proposal_id IS NULL OR (x.status IN ('CARD_FETCH_FAILED','SEND_FAILED','INCOMPATIBLE') AND datetime(x.updated_at)<=datetime('now','-6 hours'))))"
     : "";
-  const where = ` WHERE a.commercially_actionable=1 AND a.synthetic_or_test_only=0 AND (p.opportunity_id IS NULL OR (p.status='DRAFT' AND p.quality_gate_status='PENDING_QUALITY_GATE')${oneTimeMicrobuyerRevision}${conversionRecovery})`;
+  const firstCashEvidence = firstCashMode ? " AND LOWER(COALESCE(a.evidence_strength,'')) IN ('medium','strong')" : "";
+  const where = ` WHERE a.commercially_actionable=1 AND a.synthetic_or_test_only=0${firstCashEvidence} AND (p.opportunity_id IS NULL OR (p.status='DRAFT' AND p.quality_gate_status='PENDING_QUALITY_GATE')${oneTimeMicrobuyerRevision}${conversionRecovery})`;
   const firstCashOrder = firstCashMode ? "CASE WHEN a.reasons_json LIKE '%microbuyer_fit%' THEN 0 ELSE 1 END,CASE WHEN p.opportunity_id IS NULL THEN 0 ELSE 1 END," : "";
   let row = null;
   try {
@@ -181,13 +182,13 @@ async function selectProposalVariant(env, proposalId) {
 
 function buildProposalMessage({ variantId, target, offer, evidence, firstCashMode, microbuyerFit }) {
   const disclosure = "This is a non-binding commercial introduction. No order, payment, contract or commitment is created by this message.";
-  const checkoutHint = firstCashMode && microbuyerFit
+  const checkoutHint = firstCashMode
     ? "If useful, reply with one company or domain you want checked. LUMEN can confirm the exact deliverable and provide the x402 checkout. If this is not relevant, no action is needed."
     : "If useful, reply with the requirement or scope you want checked. LUMEN can then confirm the exact deliverable and provide the x402 checkout. If this is not relevant, no action is needed.";
   const observed = evidence || (microbuyerFit
     ? "the public signal combines machine-payment compatibility with an information-verification need."
     : "the public signal appears related to an active B2B requirement.");
-  const price = firstCashMode && microbuyerFit
+  const price = firstCashMode
     ? `FIRST CASH offer: ${offer.name} — ${offer.outcome} — USD ${offer.priceUsd.toFixed(2)} per request via x402 USDC on Base.`
     : `We can provide ${offer.outcome} for USD ${offer.priceUsd}.`;
 
@@ -226,11 +227,12 @@ function makeDraft(opportunity, env, variantId = "direct_outcome") {
   const reasons = Array.isArray(opportunity.reasons) ? opportunity.reasons : [];
   const firstCashMode = boolVar(env?.LUMEN_FIRST_CASH_MODE, false);
   const microbuyerFit = reasons.includes("microbuyer_fit");
-  const selectedOfferId = firstCashMode && microbuyerFit ? "MP-SUPPLIER-SNAPSHOT" : (opportunity.revenue_offer_id || "MP-BUYER-SIGNALS");
+  // First conversion beats basket size: use the lowest-friction paid tripwire for verified buyers.
+  const selectedOfferId = firstCashMode ? "MP-SUPPLIER-SNAPSHOT" : (opportunity.revenue_offer_id || "MP-BUYER-SIGNALS");
   const offer = OFFERS[selectedOfferId] || OFFERS["MP-BUYER-SIGNALS"];
   const target = clean(opportunity.name || opportunity.remote_id, 180);
   const evidence = completeExcerpt(opportunity.description, 420);
-  const subjectPrefix = variantId === "scope_first" ? "Quick scope check" : variantId === "evidence_first" ? "Observed fit" : (firstCashMode && microbuyerFit ? "USD 1 machine-service fit" : "Possible fit");
+  const subjectPrefix = variantId === "scope_first" ? "Quick scope check" : variantId === "evidence_first" ? "Observed fit" : (firstCashMode ? "USD 1 supplier check" : "Possible fit");
   const subject = clean(`${subjectPrefix}: ${offer.name} for ${target}`, 180);
   const message = buildProposalMessage({ variantId, target, offer, evidence, firstCashMode, microbuyerFit });
 
