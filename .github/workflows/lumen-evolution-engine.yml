@@ -235,6 +235,33 @@ jobs:
           get growth-multiplier/status /tmp/multiplier-status.json
           get growth-foundry/status /tmp/foundry-status.json
           get growth/status /tmp/growth-status.json
+          get growth/history?limit=12 /tmp/growth-history.json
+
+          # Evolution truth: a green scheduler is not enough. Prove that LUMEN
+          # retains strategy memory, evaluates mature cycles and exposes the
+          # latest learned outcome/priority used by the next decision.
+          jq -e '
+            .initialized == true and
+            (.memory | type == "array") and
+            (.memory | length) >= 1 and
+            (.memory | any((.evaluated_cycles // 0) >= 1))
+          ' /tmp/growth-status.json >/dev/null
+          jq -e '
+            (.cycles | type == "array") and
+            (.cycles | length) >= 1
+          ' /tmp/growth-history.json >/dev/null
+
+          learned_lane=$(jq -r '[.memory[] | select((.evaluated_cycles // 0) >= 1)] | sort_by(-(.learned_priority // 0)) | .[0].lane // "NONE"' /tmp/growth-status.json)
+          learned_priority=$(jq -r '[.memory[] | select((.evaluated_cycles // 0) >= 1)] | sort_by(-(.learned_priority // 0)) | .[0].learned_priority // 0' /tmp/growth-status.json)
+          learned_outcome=$(jq -r '[.memory[] | select((.evaluated_cycles // 0) >= 1)] | sort_by(-(.learned_priority // 0)) | .[0].last_outcome // "NONE"' /tmp/growth-status.json)
+          current_lane=$(jq -r '.guidance.selected_lane // .latest.selected_lane // "NONE"' /tmp/growth-status.json)
+          current_reason=$(jq -r '.guidance.reason // .latest.decision_reason // "NONE"' /tmp/growth-status.json)
+          echo "LUMEN_EVOLUTION_LEARNED_LANE=$learned_lane"
+          echo "LUMEN_EVOLUTION_LEARNED_PRIORITY=$learned_priority"
+          echo "LUMEN_EVOLUTION_LEARNED_OUTCOME=$learned_outcome"
+          echo "LUMEN_EVOLUTION_CURRENT_LANE=$current_lane"
+          echo "LUMEN_EVOLUTION_CURRENT_REASON=$current_reason"
+          echo 'LUMEN_EVOLUTION_MEMORY_PROOF=green'
 
           jq -e '.ok == true and .initialized == true and (.cycle | tonumber) >= 1' /tmp/multiplier-status.json >/dev/null
           jq -e '.ok == true and .initialized == true and (.cycle | tonumber) >= 1' /tmp/foundry-status.json >/dev/null
@@ -245,7 +272,7 @@ jobs:
           verified_settlements=$(jq -r '.snapshot.B2B.verifiedSettlements30d // 0' /tmp/multiplier-status.json)
           echo "LUMEN_EVOLUTION_VERIFIED_REVENUE_USD_30D=$verified_revenue"
           echo "LUMEN_EVOLUTION_VERIFIED_SETTLEMENTS_30D=$verified_settlements"
-          echo 'LUMEN_EVOLUTION_ENGINE=green'
+          echo 'LUMEN_EVOLUTION_ENGINE=green_with_learning_proof'
           echo "EVOLUTION_TARGET_CYCLES_PER_DAY=$EVOLUTION_CYCLES_PER_DAY_TARGET"
 
       - name: Roll back adaptive plane if activation failed
