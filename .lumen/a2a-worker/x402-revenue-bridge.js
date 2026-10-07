@@ -1,4 +1,4 @@
-const VERSION = "1.1-x402-revenue-bridge-referral-aware";
+const VERSION = "1.2-x402-revenue-bridge-queued-safe";
 
 function json(data, status = 200) {
   return Response.json(data, { status, headers: { "cache-control": "no-store", "x-content-type-options": "nosniff", "access-control-allow-origin": "*" } });
@@ -64,7 +64,7 @@ export async function syncX402SettlementsToRevenue(env) {
   const receipts = await safeAll(env, `SELECT r.id,r.created_at,r.product_id,r.amount_usd,r.status,r.request_metadata
     FROM lumen_x402_receipts r
     LEFT JOIN lumen_x402_revenue_bridge b ON b.receipt_id=r.id
-    WHERE r.status='settled_verified' AND b.receipt_id IS NULL
+    WHERE r.status IN ('settled_verified','redeemed_queued') AND b.receipt_id IS NULL
     ORDER BY r.created_at ASC LIMIT 200`);
   const results = [];
   for (const receipt of receipts) {
@@ -98,7 +98,7 @@ export async function syncX402SettlementsToRevenue(env) {
       .bind(receipt.id,eventId,new Date().toISOString(),ids.proposalId,ids.opportunityId,ids.offerId,Math.max(0,Number(receipt.amount_usd || 0)),ids.bridgeStatus,VERSION).run();
     results.push({ receiptId: receipt.id, revenueEventId: eventId, amountUsd: Number(receipt.amount_usd || 0), proposalId: ids.proposalId, opportunityId: ids.opportunityId, offerId: ids.offerId, referralId: ids.referralId, commissionId: ids.commissionId, itemId: ids.itemId, status: ids.bridgeStatus });
   }
-  return { ok: true, version: VERSION, processed: results.length, attributable: results.filter(x => ["ATTRIBUTABLE","REFERRAL_ATTRIBUTABLE"].includes(x.status)).length, referralAttributable: results.filter(x => x.status === "REFERRAL_ATTRIBUTABLE").length, results: results.slice(0,50), guardrails: { settledVerifiedOnly: true, exactReferralAttribution: true, noUnverifiedRevenue: true, autonomousSpend: false, bindingActionsHumanGated: true } };
+  return { ok: true, version: VERSION, processed: results.length, attributable: results.filter(x => ["ATTRIBUTABLE","REFERRAL_ATTRIBUTABLE"].includes(x.status)).length, referralAttributable: results.filter(x => x.status === "REFERRAL_ATTRIBUTABLE").length, results: results.slice(0,50), guardrails: { settlementProofRequired: true, acceptedReceiptStates: ["settled_verified","redeemed_queued"], exactReferralAttribution: true, noUnverifiedRevenue: true, autonomousSpend: false, bindingActionsHumanGated: true } };
 }
 
 async function statsData(env) {
@@ -109,7 +109,7 @@ async function statsData(env) {
 
 export async function handleX402RevenueBridge(request, env) {
   const url = new URL(request.url);
-  if (request.method === "GET" && url.pathname === "/x402-revenue-bridge/policy") return json({ version: VERSION, truthRule: "only_settled_verified_x402_receipts_become_verified_revenue_events", exactProposalAttributionPreferred: true, exactReferralAttribution: true, referralCommissionProductId: "REFERRAL-COMMISSION", autonomousSpend: false, bindingActionsHumanGated: true });
+  if (request.method === "GET" && url.pathname === "/x402-revenue-bridge/policy") return json({ version: VERSION, truthRule: "only_receipts_with_verified_settlement_proof_become_verified_revenue_events_even_after_fulfillment_queueing", exactProposalAttributionPreferred: true, exactReferralAttribution: true, referralCommissionProductId: "REFERRAL-COMMISSION", autonomousSpend: false, bindingActionsHumanGated: true });
   if (request.method === "GET" && url.pathname === "/x402-revenue-bridge/stats") return json({ version: VERSION, ...await statsData(env) });
   if (request.method === "POST" && url.pathname === "/x402-revenue-bridge/sync") {
     if (!authorized(request, env)) return json({ ok: false, error: "admin_token_required" }, 403);
