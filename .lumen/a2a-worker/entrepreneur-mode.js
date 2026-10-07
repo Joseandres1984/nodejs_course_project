@@ -7,6 +7,7 @@ import { runVentureLauncherV1 } from "./venture-launcher-v1.js";
 import { recomputeRevenueDirector } from "./revenue-director.js";
 
 const VERSION = "1.1-entrepreneur-cash-pressure";
+// live role-council verification 2026-10-07
 const ROLES = Object.freeze([
   { id:"SCOUT", objective:"find current demand and overlooked zero-capital monetization signals" },
   { id:"FOUNDER", objective:"turn evidence into distinct business models and minimum paid offers" },
