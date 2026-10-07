@@ -1,4 +1,4 @@
-const VERSION = "1.0-source-intelligence";
+const VERSION = "1.1-public-demand-activation";
 const FETCH_TIMEOUT_MS = 8000;
 const MAX_SOURCE_SCANS_PER_CYCLE = 2;
 const MAX_RESULTS_PER_SOURCE = 20;
@@ -191,7 +191,13 @@ function normalizeTedItem(item) {
   const contractNature = firstText(item?.["contract-nature"] ?? item?.contractNature);
   const value = valueAmount(item?.["total-value"] ?? item?.totalValue ?? item?.["estimated-value"]);
   const publicationDate = firstText(item?.["publication-date"] ?? item?.publicationDate);
-  const description = clean([buyer ? `Buyer: ${buyer}.` : "", contractNature ? `Nature: ${contractNature}.` : "", deadline ? `Deadline: ${deadline}.` : "", value ? `Published value: ${value}.` : ""].filter(Boolean).join(" "), 1200);
+  const description = clean([
+    "Published public procurement tender. Buyer is actively requesting bids from suppliers.",
+    buyer ? `Buyer: ${buyer}.` : "",
+    contractNature ? `Nature: ${contractNature}.` : "",
+    deadline ? `Bid deadline: ${deadline}.` : "",
+    value ? `Published value: ${value}.` : ""
+  ].filter(Boolean).join(" "), 1400);
   const url = `https://ted.europa.eu/en/notice/-/detail/${encodeURIComponent(remoteId)}`;
   return {
     remoteId,
@@ -200,7 +206,7 @@ function normalizeTedItem(item) {
     description,
     score: procurementScore({ deadline, value, title, description }),
     fit: "PUBLIC_PROCUREMENT",
-    demandSignal: "published_procurement_notice",
+    demandSignal: 1,
     revenueOfferId: "MP-TENDER-SCAN",
     evidence: url,
     raw: { publicationDate, deadline, value, buyer, contractNature }
@@ -219,7 +225,13 @@ function normalizeUkRelease(release) {
   const documents = Array.isArray(tender?.documents) ? tender.documents : [];
   const docUrl = documents.map(d => clean(d?.url, 1000)).find(Boolean);
   const url = clean(docUrl || release?.uri || `https://www.contractsfinder.service.gov.uk/Search/Results?Keywords=${encodeURIComponent(title)}`, 1200);
-  const description = clean([buyer ? `Buyer: ${buyer}.` : "", descriptionText, deadline ? `Deadline: ${deadline}.` : "", value ? `Published value: ${value}.` : ""].filter(Boolean).join(" "), 1600);
+  const description = clean([
+    "Published public procurement tender. Buyer is actively requesting bids from suppliers.",
+    buyer ? `Buyer: ${buyer}.` : "",
+    descriptionText,
+    deadline ? `Bid deadline: ${deadline}.` : "",
+    value ? `Published value: ${value}.` : ""
+  ].filter(Boolean).join(" "), 1800);
   return {
     remoteId,
     name: title,
