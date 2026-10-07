@@ -1,7 +1,8 @@
 import { classifyCommercialResponse } from "./response-qualification.js";
 
-const VERSION = "1.1-qualified-commercial-followup";
+const VERSION = "1.2-bounded-qualified-commercial-followup";
 const SEND_TIMEOUT_MS = 15000;
+const POLL_TIMEOUT_MS = 7000;
 
 function json(data, status = 200) {
   return Response.json(data, { status, headers: { "cache-control": "no-store", "x-content-type-options": "nosniff", "access-control-allow-origin": "*" } });
@@ -214,12 +215,11 @@ async function sendDueFollowup(env) {
 async function pollFollowupTasks(env) {
   if (!(await ensureSchema(env))) return { ok: false, error: "persistence_unavailable" };
   const rows = await env.DB.prepare("SELECT f.id,f.proposal_id,f.task_id,x.agent_url,x.protocol_binding,x.protocol_version FROM lumen_followups f JOIN lumen_outreach_attempts x ON x.proposal_id=f.proposal_id WHERE f.status IN ('SENT_TASK','WORKING') AND f.task_id IS NOT NULL ORDER BY f.updated_at ASC LIMIT 5").all();
-  const results = [];
-  for (const row of rows.results || []) {
-    if (!isHttps(row.agent_url)) continue;
+  const candidates = (rows.results || []).filter(row => isHttps(row.agent_url));
+  const outcomes = await Promise.all(candidates.map(async row => {
     const version = clean(row.protocol_version, 20) || "0.3.0";
     const isV1 = version.startsWith("1.");
-    const timeout = withTimeout(SEND_TIMEOUT_MS);
+    const timeout = withTimeout(POLL_TIMEOUT_MS);
     try {
       let response;
       if (clean(row.protocol_binding, 40).toUpperCase() === "HTTP+JSON") {
@@ -233,15 +233,28 @@ async function pollFollowupTasks(env) {
       const info = extractResponse(body,row.protocol_binding);
       const terminal = ["TASK_STATE_COMPLETED","TASK_STATE_FAILED","TASK_STATE_CANCELED","TASK_STATE_REJECTED","completed","failed","canceled","rejected"].includes(info.state);
       const status = info.responseText ? "RESPONDED" : terminal ? "TASK_TERMINAL" : "WORKING";
-      await env.DB.prepare("UPDATE lumen_followups SET updated_at=?,status=?,response_text=COALESCE(?,response_text),response_json=? WHERE id=?").bind(new Date().toISOString(),status,info.responseText,clean(raw,12000),row.id).run();
-      if (info.responseText) await env.DB.prepare("UPDATE lumen_proposal_drafts SET status='RESPONDED',updated_at=? WHERE proposal_id=?").bind(new Date().toISOString(),row.proposal_id).run();
-      results.push({ proposalId: row.proposal_id, status, responseText: info.responseText || null });
+      return { ok:true,row,status,responseText:info.responseText||null,raw:clean(raw,12000) };
     } catch (error) {
-      results.push({ proposalId: row.proposal_id, status: "POLL_FAILED", error: clean(error?.message || error, 300) });
+      return { ok:false,row,status:"POLL_FAILED",error:clean(error?.message || error,300) };
     } finally { timeout.clear(); }
+  }));
+
+  const writes = [];
+  const results = [];
+  const now = new Date().toISOString();
+  for (const outcome of outcomes) {
+    const row = outcome.row;
+    if (outcome.ok) {
+      writes.push(env.DB.prepare("UPDATE lumen_followups SET updated_at=?,status=?,response_text=COALESCE(?,response_text),response_json=? WHERE id=?").bind(now,outcome.status,outcome.responseText,outcome.raw,row.id));
+      if (outcome.responseText) writes.push(env.DB.prepare("UPDATE lumen_proposal_drafts SET status='RESPONDED',updated_at=? WHERE proposal_id=?").bind(now,row.proposal_id));
+      results.push({ proposalId: row.proposal_id, status: outcome.status, responseText: outcome.responseText });
+    } else {
+      results.push({ proposalId: row.proposal_id, status: "POLL_FAILED", error: outcome.error });
+    }
   }
+  if (writes.length) await env.DB.batch(writes);
   await syncPipeline(env);
-  return { ok: true, polled: results.length, results, version: VERSION };
+  return { ok: true, polled: results.length, results, version: VERSION, concurrentPolling: true, pollTimeoutMs: POLL_TIMEOUT_MS };
 }
 
 export async function processFollowupCycle(env, { pollTasks = true } = {}) {
