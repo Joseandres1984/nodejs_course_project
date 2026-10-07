@@ -79,7 +79,10 @@ export const ENTREPRENEUR_POLICY = Object.freeze({
 
 export async function runEntrepreneurMode(env,{trigger="scheduled",scheduledTime=Date.now()}={}){
   await ensure(env);
-  const cycleKey=`entrepreneur-${Math.floor(Number(scheduledTime||Date.now())/3600000)}`;
+  const scheduled=Number(scheduledTime||Date.now());
+  const cycleKey=String(trigger||"").startsWith("cloudflare_hourly_entrepreneur")
+    ? `entrepreneur-${Math.floor(scheduled/3600000)}`
+    : `entrepreneur-manual-${scheduled}`;
   const brain=await runUnifiedEconomicBrain(withBudgetedAi(env),{trigger:`entrepreneur_mode:${trigger}`,scheduledTime,cycleKey});
   const hunter=await runVentureHunterV1(env,{limit:80,topK:18,mode:"entrepreneur_zero_capital"});
   const founder=await runVentureFounderV2(env,{limit:10});
