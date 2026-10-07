@@ -1,5 +1,5 @@
 name: LUMEN First Cash Kick
-# revenue kick: 2026-10-06 first-cash live v1.3 retry
+# revenue kick: 2026-10-06 final bounded turn toward first checkout
 
 on:
   workflow_dispatch:
