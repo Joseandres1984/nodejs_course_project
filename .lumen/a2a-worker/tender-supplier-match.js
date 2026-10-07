@@ -1,23 +1,39 @@
-const VERSION = "1.0-tender-supplier-match-first-dollar";
+const VERSION = "1.1-domain-verified-tender-match";
 const MAX_TENDERS = 80;
 const MAX_SUPPLIERS = 180;
 const MAX_MATCHES_PER_RUN = 6;
-const MIN_MATCH_SCORE = 72;
+const MIN_MATCH_SCORE = 78;
 
 const STOPWORDS = new Set([
-  "about","after","against","also","and","are","buyer","contract","contracts","deadline","from","have","into",
-  "notice","procurement","public","request","service","services","supplier","tender","that","the","their","this",
-  "with","your","for","our","you","company","business","market","project","published","official"
+  "about","after","against","also","analysis","and","are","areas","buyer","client","company","contract","contracts",
+  "cross","data","deadline","deliver","documents","existing","for","from","have","https","into","market","notice",
+  "official","our","procurement","project","providing","public","recovery","request","required","scheme","service",
+  "services","supplier","tender","that","the","their","this","through","which","will","with","you","your"
 ]);
 
-const SIGNAL_TERMS = new Set([
-  "automation","automotive","cable","cables","chemical","chemicals","compressor","compressors","consulting",
-  "control","controls","data","digital","electrical","electric","electronics","energy","engineering","equipment",
-  "fire","freight","generator","generators","hardware","industrial","instrumentation","laboratory","logistics",
-  "maintenance","manufacturing","mechanical","motor","motors","network","piping","plant","plc","pump","pumps",
-  "safety","scada","security","sensor","sensors","software","switchgear","technology","telecom","transformer",
-  "transformers","transport","valve","valves","water","welding"
+// High-precision capability words only. Generic terms such as data, industrial,
+// consulting, technology and equipment are deliberately excluded because they
+// created false supplier/tender matches in production.
+const HIGH_SIGNAL_TERMS = new Set([
+  "automation","automotive","battery","cable","cables","chemical","chemicals","compressor","compressors",
+  "cybersecurity","electrical","electric","electronics","fire","freight","generator","generators","hardware",
+  "instrumentation","laboratory","logistics","maintenance","mechanical","motor","motors","network","piping",
+  "plc","pump","pumps","safety","scada","security","sensor","sensors","software","switchgear","telecom",
+  "transformer","transformers","transport","valve","valves","water","welding"
 ]);
+
+const DOMAIN_BUCKETS = Object.freeze({
+  AUTOMATION: ["automation","plc","scada","control","controls","sensor","sensors","instrumentation"],
+  ELECTRICAL: ["electrical","electric","electronics","switchgear","transformer","transformers","cable","cables","battery","generator","generators"],
+  MECHANICAL: ["mechanical","pump","pumps","valve","valves","compressor","compressors","motor","motors","piping","welding","spare","parts"],
+  SOFTWARE: ["software","cybersecurity","security","network","cloud","api","database","digital"],
+  LOGISTICS: ["logistics","freight","transport","shipping","warehouse","warehousing"],
+  SAFETY: ["safety","fire","ppe","protection","protective"],
+  LAB: ["laboratory","instrumentation","measurement","calibration","testing"],
+  WATER: ["water","wastewater","sewage","drainage","pump","pumps","piping"],
+  CHEMICAL: ["chemical","chemicals","reagent","reagents","solvent","solvents"],
+  AUTOMOTIVE: ["automotive","vehicle","vehicles","battery","motor","motors"]
+});
 
 function json(data,status=200){return Response.json(data,{status,headers:{"cache-control":"no-store","x-content-type-options":"nosniff","access-control-allow-origin":"*"}});}
 function clean(value,limit=5000){return String(value??"").trim().replace(/\s+/g," ").slice(0,limit);}
@@ -41,26 +57,54 @@ function futureDeadline(raw){
   const days=(ms-Date.now())/86400000;
   return {value,future:days>=0,days:Number(days.toFixed(1))};
 }
+function bucketSet(value){
+  const text=clean(value,16000).toLowerCase();
+  const found=[];
+  for(const [bucket,terms] of Object.entries(DOMAIN_BUCKETS)){
+    if(terms.some(term=>text.includes(term))) found.push(bucket);
+  }
+  return new Set(found);
+}
 function supplierLike(row){
   const text=clean(`${row.name||""} ${row.description||""} ${row.tags_json||""}`,12000).toLowerCase();
-  return /(supplier|vendor|manufacturer|manufacturing|distributor|sourcing|industrial|engineering|automation|equipment|logistics|freight|software|technology|consulting|data)/i.test(text);
+  const commercialRole=/(supplier|vendor|manufacturer|manufacturing|distributor|sourcing|integrator|contractor|provider|solutions|services)/i.test(text);
+  const capabilityBuckets=bucketSet(text);
+  return commercialRole && capabilityBuckets.size>0;
 }
 function matchScore(tender,supplier){
   const tenderRaw=safeParse(tender.raw_json,{});
   const deadline=futureDeadline(tenderRaw);
   if(!deadline.future) return null;
-  const tt=unique(tokens(`${tender.name||""} ${tender.description||""}`));
-  const st=new Set(unique(tokens(`${supplier.name||""} ${supplier.description||""} ${supplier.tags_json||""}`)));
+
+  const tenderText=`${tender.name||""} ${tender.description||""}`;
+  const supplierText=`${supplier.name||""} ${supplier.description||""} ${supplier.tags_json||""}`;
+  const tenderBuckets=bucketSet(tenderText);
+  const supplierBuckets=bucketSet(supplierText);
+  const sharedBuckets=[...tenderBuckets].filter(bucket=>supplierBuckets.has(bucket));
+  if(!sharedBuckets.length) return null;
+
+  const tt=unique(tokens(tenderText));
+  const st=new Set(unique(tokens(supplierText)));
   const overlap=tt.filter(t=>st.has(t));
-  const strong=overlap.filter(t=>SIGNAL_TERMS.has(t));
-  if(strong.length===0 && overlap.length<2) return null;
-  let score=52;
-  score+=Math.min(24,strong.length*8);
-  score+=Math.min(12,Math.max(0,overlap.length-strong.length)*3);
-  score+=Math.min(8,Math.max(0,Number(tender.score||0)-60)*0.25);
-  score+=Math.min(6,Math.max(0,Number(supplier.score||0)-40)*0.12);
-  if(deadline.days!=null&&deadline.days<=30) score+=5;
-  return {score:Math.min(98,Math.round(score)),overlap:overlap.slice(0,8),strong:strong.slice(0,6),deadline};
+  const strong=overlap.filter(t=>HIGH_SIGNAL_TERMS.has(t));
+
+  // A shared broad category is not enough. At least one exact high-signal
+  // capability term must appear in both the tender and supplier profile.
+  if(strong.length===0) return null;
+
+  let score=64;
+  score+=Math.min(20,strong.length*10);
+  score+=Math.min(8,Math.max(0,sharedBuckets.length-1)*4);
+  score+=Math.min(5,Math.max(0,Number(tender.score||0)-60)*0.2);
+  score+=Math.min(4,Math.max(0,Number(supplier.score||0)-40)*0.08);
+  if(deadline.days!=null&&deadline.days<=30) score+=4;
+  return {
+    score:Math.min(98,Math.round(score)),
+    overlap:overlap.slice(0,8),
+    strong:strong.slice(0,6),
+    sharedBuckets:sharedBuckets.slice(0,4),
+    deadline
+  };
 }
 
 async function ensureSchema(env){
@@ -116,7 +160,7 @@ async function runTenderSupplierMatch(env){
     const buyer=clean(tenderRaw?.buyer,240);
     const value=Number(tenderRaw?.value||0);
     const sourceLabel=item.tender.source==="ted_eu_public_procurement"?"TED EU":"UK Contracts Finder";
-    const terms=item.strong.length?item.strong:item.overlap;
+    const terms=item.strong;
     const deadlineText=item.deadline.value?` Bid deadline: ${item.deadline.value}.`:"";
     const buyerText=buyer?` Buyer: ${buyer}.`:"";
     const valueText=value>0?` Published value: ${value}.`:"";
@@ -128,7 +172,7 @@ async function runTenderSupplierMatch(env){
       tender_supplier_match:true,
       tender:{id:item.tender.id,source:item.tender.source,remoteId:item.tender.remote_id,name:item.tender.name,evidence:item.tender.evidence,deadline:item.deadline.value,buyer,value},
       supplier:{id:item.supplier.id,remoteId:item.supplier.remote_id,name:item.supplier.name,endpoint:item.supplier.endpoint},
-      match:{score:item.score,terms},
+      match:{score:item.score,terms,sharedBuckets:item.sharedBuckets},
       engineVersion:VERSION
     };
     await env.DB.batch([
@@ -137,7 +181,7 @@ async function runTenderSupplierMatch(env){
       env.DB.prepare("INSERT INTO lumen_tender_supplier_matches(match_id,created_at,updated_at,tender_opportunity_id,supplier_opportunity_id,match_opportunity_id,match_score,matched_terms_json,status,engine_version) VALUES(?,?,?,?,?,?,?,?,?,?)")
         .bind(matchId,now,now,item.tender.id,item.supplier.id,oppId,item.score,JSON.stringify(terms),"CREATED",VERSION)
     ]);
-    created.push({matchId,opportunityId:oppId,tender:item.tender.name,supplier:item.supplier.name,score:item.score,terms,deadline:item.deadline.value,evidence:item.tender.evidence});
+    created.push({matchId,opportunityId:oppId,tender:item.tender.name,supplier:item.supplier.name,score:item.score,terms,sharedBuckets:item.sharedBuckets,deadline:item.deadline.value,evidence:item.tender.evidence});
   }
 
   return {
@@ -176,6 +220,7 @@ export async function handleTenderSupplierMatch(request,env){
     objective:"turn verified public procurement demand into paid tender-intelligence offers for reachable supplier agents",
     offerId:"MP-TENDER-LEAD",
     priceUsd:1,
+    matchingPolicy:"shared_domain_bucket_plus_exact_high_signal_capability_term",
     maxMatchesPerRun:MAX_MATCHES_PER_RUN,
     sourceEvidence:["ted_eu_public_procurement","uk_contracts_finder"],
     autonomousSpendUsd:0,
@@ -195,4 +240,4 @@ export async function handleTenderSupplierMatch(request,env){
   return null;
 }
 
-export const __test={tokens,supplierLike,matchScore,futureDeadline};
+export const __test={tokens,bucketSet,supplierLike,matchScore,futureDeadline};
