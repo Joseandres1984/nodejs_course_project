@@ -261,7 +261,9 @@ function indexPage(origin) {
   });
 }
 
-function articlePage(article, origin) {\n  const sections = article.sections.map(([heading, text])=>`<section><h2>${esc(heading)}</h2><p>${esc(text)}</p></section>`).join("");\n  const travelCta = article.travelQuery ? `<section class="section"><div class="box"><div class="eyebrow">Explorá opciones reales</div><h2>Ver experiencias disponibles en ${esc(article.travelQuery)}</h2><p class="small">LUMEN Travel compara experiencias del destino y puede mostrar enlaces de afiliado de Viator u otros partners. La reserva y el pago se completan siempre con el proveedor.</p><p><a class="cta" href="/travel?q=${encodeURIComponent(article.travelQuery)}&source=organic" rel="sponsored">Explorar ${esc(article.travelQuery)} →</a></p></div></section>` : "";
+function articlePage(article, origin) {
+  const sections = article.sections.map(([heading, text])=>`<section><h2>${esc(heading)}</h2><p>${esc(text)}</p></section>`).join("");
+  const travelCta = article.travelQuery ? `<section class="section"><div class="box"><div class="eyebrow">Explorá opciones reales</div><h2>Ver experiencias disponibles en ${esc(article.travelQuery)}</h2><p class="small">LUMEN Travel compara experiencias del destino y puede mostrar enlaces de afiliado de Viator u otros partners. La reserva y el pago se completan siempre con el proveedor.</p><p><a class="cta" href="/travel?q=${encodeURIComponent(article.travelQuery)}&source=organic" rel="sponsored">Explorar ${esc(article.travelQuery)} →</a></p></div></section>` : "";
   const canonical = `${origin}/discover/${article.slug}`;
   return layout({
     title:article.title,
