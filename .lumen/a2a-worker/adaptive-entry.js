@@ -12,6 +12,7 @@ import { handleTravelDemandBridge, syncTravelDemandToOpportunities } from "./tra
 import { handleTravelProviderRegistry } from "./travel-provider-registry.js";
 import { handleProviderBackedTravelDiscovery } from "./travel-provider-backed-discovery.js";
 import { handleTravelAffiliateRegistry } from "./travel-affiliate-registry.js";
+import { handleClickRevenue, runClickRevenueEngine, syncClickRevenueSettlementsToRevenue } from "./click-revenue-engine.js";
 import { handleTravelAcquisitionEngine, runTravelAcquisitionEngine } from "./travel-acquisition-engine.js";
 import { handleAutonomousGrowthLoop, runAutonomousGrowthLoop } from "./autonomous-growth-loop-v11.js";
 import { handleGrowthMultiplierV2, runGrowthMultiplierV2Cycle } from "./growth-multiplier-v2.js";
@@ -45,15 +46,17 @@ async function isolated(step) {
 export async function refreshCommercialTruth(env) {
   const x402 = await isolated(() => syncX402SettlementsToRevenue(env));
   const travelpayoutsFinance = await isolated(() => syncTravelpayoutsFinance(env));
+  const clickRevenue = await isolated(() => syncClickRevenueSettlementsToRevenue(env));
   const referralCommissions = await isolated(() => syncReferralCommissionSettlements(env));
   const referrals = await isolated(() => syncReferralSettlements(env));
   const revenueAttribution = await isolated(() => recomputeRevenueAttribution(env));
   const profitFeedback = await isolated(() => recomputeProfitFeedback(env));
 
   return {
-    ok: [x402, travelpayoutsFinance, referralCommissions, referrals, revenueAttribution, profitFeedback].every(result => result?.ok !== false),
+    ok: [x402, travelpayoutsFinance, clickRevenue, referralCommissions, referrals, revenueAttribution, profitFeedback].every(result => result?.ok !== false),
     x402,
     travelpayoutsFinance,
+    clickRevenue,
     referralCommissions,
     referrals,
     revenueAttribution,
@@ -61,6 +64,7 @@ export async function refreshCommercialTruth(env) {
     truthOrder: [
       "verified_x402_settlements",
       "travelpayouts_verified_affiliate_rewards",
+      "provider_verified_cpc_payouts",
       "referral_settlements",
       "revenue_attribution",
       "profit_feedback",
@@ -107,6 +111,9 @@ export default {
 
     const growthResponse = await handleAutonomousGrowthLoop(request, env);
     if (growthResponse) return growthResponse;
+
+    const clickRevenueResponse = await handleClickRevenue(request, env);
+    if (clickRevenueResponse) return clickRevenueResponse;
 
     const travelpayoutsFinanceResponse = await handleTravelpayoutsFinance(request, env);
     if (travelpayoutsFinanceResponse) return travelpayoutsFinanceResponse;
@@ -160,6 +167,7 @@ export default {
   async scheduled(controller, env, ctx) {
     ctx.waitUntil(syncTravelDemandToOpportunities(env).catch(() => ({ ok:false, isolatedFailure:true })));
     ctx.waitUntil(runTravelAffiliateOrchestrator(env).catch(() => ({ ok:false, isolatedFailure:true })));
+    ctx.waitUntil(runClickRevenueEngine(env).catch(() => ({ ok:false, isolatedFailure:true })));
 
     const scheduledAt = new Date(controller?.scheduledTime || Date.now());
     const growthSlot = scheduledAt.getUTCMinutes() === 7;

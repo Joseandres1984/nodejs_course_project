@@ -1,0 +1,46 @@
+name: LUMEN Click Revenue check
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/a2a-worker/click-revenue-engine.js'
+      - '.lumen/a2a-worker/test-click-revenue-engine.mjs'
+      - '.lumen/a2a-worker/adaptive-entry.js'
+      - '.lumen/a2a-worker/unified-economic-brain-v1.js'
+      - '.github/workflows/lumen-click-revenue-check.yml'
+  pull_request:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/a2a-worker/click-revenue-engine.js'
+      - '.lumen/a2a-worker/test-click-revenue-engine.mjs'
+      - '.lumen/a2a-worker/adaptive-entry.js'
+      - '.lumen/a2a-worker/unified-economic-brain-v1.js'
+      - '.github/workflows/lumen-click-revenue-check.yml'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validate click revenue syntax
+        run: |
+          node --check .lumen/a2a-worker/click-revenue-engine.js
+          node --check .lumen/a2a-worker/adaptive-entry.js
+          node --check .lumen/a2a-worker/unified-economic-brain-v1.js
+      - name: Verify CPC policy and safe routing
+        run: node .lumen/a2a-worker/test-click-revenue-engine.mjs
+      - name: Verify unified-brain click truth
+        run: |
+          node --input-type=module - <<'NODE'
+          import { UNIFIED_BRAIN_POLICY } from './.lumen/a2a-worker/unified-economic-brain-v1.js';
+          if (UNIFIED_BRAIN_POLICY.clickRevenueEconomicLearning !== true) throw new Error('click learning disabled');
+          if (UNIFIED_BRAIN_POLICY.verifiedCpcPayoutIsRevenue !== true) throw new Error('verified CPC truth missing');
+          if (UNIFIED_BRAIN_POLICY.syntheticClickRevenueForbidden !== true) throw new Error('invalid traffic guard missing');
+          if (UNIFIED_BRAIN_POLICY.clickIsWeakSignalNotRevenue !== true) throw new Error('click truth regressed');
+          if (UNIFIED_BRAIN_POLICY.targetScaleEvents !== 10000) throw new Error('10k scale target regressed');
+          console.log('CLICK_REVENUE_UNIFIED_BRAIN_TRUTH_OK');
+          NODE
