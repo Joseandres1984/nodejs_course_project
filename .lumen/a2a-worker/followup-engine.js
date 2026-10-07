@@ -244,8 +244,10 @@ async function pollFollowupTasks(env) {
   return { ok: true, polled: results.length, results, version: VERSION };
 }
 
-export async function processFollowupCycle(env) {
-  const poll = await pollFollowupTasks(env);
+export async function processFollowupCycle(env, { pollTasks = true } = {}) {
+  const poll = pollTasks
+    ? await pollFollowupTasks(env)
+    : { ok: true, polled: 0, results: [], skipped: true, reason: "poll_disabled_for_bounded_orchestrator", version: VERSION };
   const sync = await syncPipeline(env);
   const send = await sendDueFollowup(env);
   return { ok: true, version: VERSION, poll, sync, send };
