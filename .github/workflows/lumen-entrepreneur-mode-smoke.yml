@@ -1,0 +1,93 @@
+name: LUMEN Entrepreneur Mode Smoke
+
+on:
+  pull_request:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/a2a-worker/entrepreneur-mode.js'
+      - '.lumen/a2a-worker/opportunity-entry.js'
+      - '.github/workflows/lumen-entrepreneur-mode-smoke.yml'
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/a2a-worker/entrepreneur-mode.js'
+      - '.lumen/a2a-worker/opportunity-entry.js'
+      - '.github/workflows/lumen-entrepreneur-mode-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  source-validation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validate entrepreneur source and wiring
+        run: |
+          set -euo pipefail
+          node --check .lumen/a2a-worker/entrepreneur-mode.js
+          node --check .lumen/a2a-worker/opportunity-entry.js
+          grep -q 'handleEntrepreneurMode' .lumen/a2a-worker/opportunity-entry.js
+          grep -q 'runEntrepreneurMode' .lumen/a2a-worker/opportunity-entry.js
+          grep -q 'getUTCMinutes() === 22' .lumen/a2a-worker/opportunity-entry.js
+          grep -q 'businessModelsOpenEnded:true' .lumen/a2a-worker/entrepreneur-mode.js
+          grep -q 'autonomousSpendUsd:0' .lumen/a2a-worker/entrepreneur-mode.js
+          grep -q 'maxExternalMessagesAddedByEntrepreneurMode:0' .lumen/a2a-worker/entrepreneur-mode.js
+          echo ENTREPRENEUR_MODE_SOURCE_OK
+
+  live-smoke:
+    if: github.event_name != 'pull_request'
+    needs: source-validation
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: https://lumen-zero-a2a.lumen-b2b.workers.dev
+      ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+    steps:
+      - name: Wait for production entrepreneur endpoint
+        run: |
+          set -euo pipefail
+          ok=0
+          for i in $(seq 1 36); do
+            if curl --fail --show-error --silent --max-time 15 "$BASE_URL/entrepreneur/policy" -o /tmp/policy.json; then
+              if jq -e '.version == "1.0-entrepreneur-mode" and .autonomousSpendUsd == 0 and .autonomousExternalPublish == false and .bindingActionsHumanGated == true' /tmp/policy.json >/dev/null; then
+                ok=1
+                break
+              fi
+            fi
+            sleep 5
+          done
+          test "$ok" -eq 1
+          cat /tmp/policy.json
+
+      - name: Run one entrepreneur cycle
+        run: |
+          set -euo pipefail
+          test -n "${ADMIN_TOKEN:-}"
+          code=$(curl --show-error --silent --max-time 90 -o /tmp/run.json -w '%{http_code}'             -X POST "$BASE_URL/entrepreneur/run"             -H "x-lumen-admin: $ADMIN_TOKEN"             -H 'content-type: application/json' -d '{}')
+          echo "ENTREPRENEUR_HTTP=$code"
+          cat /tmp/run.json; echo
+          test "$code" = '202'
+          jq -e '
+            .ok == true and
+            .version == "1.0-entrepreneur-mode" and
+            .mission.businessModel != null and
+            .mission.hypothesis != null and
+            .actionBoundary.maxExternalMessagesAddedByEntrepreneurMode == 0 and
+            .actionBoundary.autonomousSpendUsd == 0 and
+            .actionBoundary.autonomousContract == false and
+            .actionBoundary.autonomousPriceMutation == false and
+            (.revenueTruth.verifiedRevenueUsd | type) == "number"
+          ' /tmp/run.json >/dev/null
+
+      - name: Read persisted entrepreneur state
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --max-time 45             -H "x-lumen-admin: $ADMIN_TOKEN"             "$BASE_URL/entrepreneur/status" -o /tmp/status.json
+          cat /tmp/status.json; echo
+          jq -e '
+            .ok == true and
+            .totals.cycles >= 1 and
+            .latest.selected_lane != null and
+            .policy.verifiedRevenueTruth == "settled_or_provider_verified_payout_only"
+          ' /tmp/status.json >/dev/null
