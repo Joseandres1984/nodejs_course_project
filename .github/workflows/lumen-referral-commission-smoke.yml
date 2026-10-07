@@ -37,6 +37,10 @@ jobs:
           grep -q "a.state='PROPOSAL_READY'" .lumen/a2a-worker/referral-commission-autopilot.js
           grep -q 'LEFT JOIN lumen_partner_trust' .lumen/a2a-worker/referral-commission-autopilot.js
           grep -q 'trust_score=COALESCE(excluded.trust_score' .lumen/a2a-worker/travel-broker.js
+          grep -q 'agentCardAwareProtocolRouting:true' .lumen/a2a-worker/referral-commission-autopilot.js
+          grep -q 'technicalCompatibilityRetryWithoutCooldown:true' .lumen/a2a-worker/referral-commission-autopilot.js
+          grep -q 'method:isV1?"SendMessage":"message/send"' .lumen/a2a-worker/referral-commission-autopilot.js
+          grep -q 'binding==="HTTP+JSON"' .lumen/a2a-worker/referral-commission-autopilot.js
           echo COMMISSION_RETRY_TRAVEL_TRUST_SOURCE_OK
 
   referral-commission-smoke:
