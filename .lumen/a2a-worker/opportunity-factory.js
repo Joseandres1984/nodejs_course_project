@@ -26,6 +26,30 @@ function overdue(dateText) {
   const t = new Date(dateText).getTime();
   return Number.isFinite(t) && t <= Date.now();
 }
+function intVar(value, fallback, min, max) {
+  const n = Number.parseInt(String(value ?? ""), 10);
+  return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : fallback;
+}
+function hoursSince(dateText) {
+  if (!dateText) return Infinity;
+  const t = new Date(dateText).getTime();
+  return Number.isFinite(t) ? Math.max(0, (Date.now() - t) / 3600000) : Infinity;
+}
+function commissionProposalActionable(row, env) {
+  const trust = clean(row.current_trust_level || row.referral_trust_level, 40).toUpperCase();
+  if (!["ALLOW","CAUTION"].includes(trust)) return false;
+  if (Number(row.auth_required || 0) === 1 || Number(row.manipulation_hits || 0) > 0) return false;
+  const state = clean(row.autopilot_state, 60).toUpperCase();
+  if (state && state !== "PROPOSAL_READY") return false;
+  const attempts = Math.max(0, num(row.proposal_attempts));
+  const maxAttempts = intVar(env?.COMMISSION_PROPOSAL_MAX_ATTEMPTS, 3, 1, 6);
+  if (attempts >= maxAttempts) return false;
+  if (attempts === 0) return true;
+  const technicalCompatibilityFailure = /(method not allowed|http[_= ]?405|status.?405)/i.test(String(row.proposal_last_error || ""));
+  if (technicalCompatibilityFailure) return true;
+  const cooldownHours = intVar(env?.COMMISSION_PROPOSAL_RETRY_HOURS, 6, 1, 72);
+  return hoursSince(row.proposal_last_attempt) >= cooldownHours;
+}
 function scoreCandidate({ lane, valueUsd = 0, probability = 0, urgency = 0, evidenceScore = 0, signalScore = 0 }) {
   const laneBase = { COLLECTION: 60, CLOSE: 52, INBOUND: 45, FOLLOW_UP: 38, NEW_BUSINESS: 30, EXPERIMENT: 18 }[lane] || 10;
   const valueBoost = Math.min(12, Math.log10(1 + Math.max(0, valueUsd)) * 3.2);
@@ -69,15 +93,15 @@ async function upsertCandidate(env, c) {
   return { id, ...c, valueUsd, probability, urgency, evidenceScore, signalScore, economicScore };
 }
 
-function commissionCandidate(row) {
+function commissionCandidate(row, env) {
   const status = clean(row.status, 80).toUpperCase();
-  const dealValue = Math.max(0, num(row.deal_value_usd));
-  const rate = Math.max(0, num(row.agreed_rate_pct || row.proposed_rate_pct));
-  const exactAmount = Math.max(0, num(row.agreed_amount_usd || row.proposed_amount_usd));
-  const derived = exactAmount || (dealValue > 0 && rate > 0 ? dealValue * rate / 100 : 0);
   if (status === "PAYMENT_DUE") return { lane: "COLLECTION", probability: 0.96, urgency: 1, evidenceScore: 95, actionKind: "COMMISSION_AUTOPILOT", rationale: "agreed_success_fee_is_due_and_checkout_ready" };
   if (status === "AGREED_PENDING_CLOSE") return { lane: "CLOSE", probability: 0.72, urgency: 0.78, evidenceScore: 85, actionKind: "COMMISSION_AUTOPILOT", rationale: "commission_terms_accepted_waiting_for_explicit_close_and_final_value" };
-  if (status === "PROPOSAL_READY") return { lane: "NEW_BUSINESS", probability: 0.32, urgency: 0.45, evidenceScore: 62, actionKind: "COMMISSION_AUTOPILOT", rationale: "referral_success_fee_proposal_ready_for_explicit_acceptance" };
+  if (status === "PROPOSAL_READY") {
+    if (!commissionProposalActionable(row, env)) return null;
+    const attempts = Math.max(0, num(row.proposal_attempts));
+    return { lane: "NEW_BUSINESS", probability: attempts ? 0.24 : 0.32, urgency: attempts ? 0.35 : 0.45, evidenceScore: attempts ? 56 : 62, actionKind: "COMMISSION_AUTOPILOT", rationale: attempts ? "referral_success_fee_retry_is_due_and_actionable" : "referral_success_fee_proposal_ready_for_explicit_acceptance" };
+  }
   return null;
 }
 
@@ -142,9 +166,21 @@ export async function runOpportunityFactory(env) {
   await env.DB.prepare("UPDATE lumen_opportunity_factory_candidates SET active=0").run();
   const created = [];
 
-  const commissions = await safeAll(env, "SELECT referral_id,status,deal_value_usd,proposed_rate_pct,proposed_amount_usd,agreed_rate_pct,agreed_amount_usd,updated_at FROM lumen_referral_commissions WHERE status IN ('PROPOSAL_READY','AGREED_PENDING_CLOSE','PAYMENT_DUE') ORDER BY updated_at DESC LIMIT 200");
+  const commissions = await safeAll(env, `SELECT c.referral_id,c.status,c.deal_value_usd,c.proposed_rate_pct,c.proposed_amount_usd,c.agreed_rate_pct,c.agreed_amount_usd,c.updated_at,
+    r.direction,r.target_partner_id,r.origin_partner_id,r.trust_level AS referral_trust_level,
+    a.state AS autopilot_state,
+    t.trust_level AS current_trust_level,t.auth_required,t.manipulation_hits,
+    (SELECT COUNT(*) FROM lumen_referral_commission_messages m WHERE m.referral_id=c.referral_id AND m.kind='COMMISSION_PROPOSAL') AS proposal_attempts,
+    (SELECT MAX(m2.created_at) FROM lumen_referral_commission_messages m2 WHERE m2.referral_id=c.referral_id AND m2.kind='COMMISSION_PROPOSAL') AS proposal_last_attempt,
+    (SELECT m3.error FROM lumen_referral_commission_messages m3 WHERE m3.referral_id=c.referral_id AND m3.kind='COMMISSION_PROPOSAL' ORDER BY m3.created_at DESC LIMIT 1) AS proposal_last_error
+    FROM lumen_referral_commissions c
+    JOIN lumen_referrals r ON r.id=c.referral_id
+    LEFT JOIN lumen_referral_commission_autopilot a ON a.referral_id=c.referral_id
+    LEFT JOIN lumen_partner_trust t ON t.partner_id=CASE WHEN r.direction='OUTBOUND' THEN r.target_partner_id ELSE r.origin_partner_id END
+    WHERE c.status IN ('PROPOSAL_READY','AGREED_PENDING_CLOSE','PAYMENT_DUE')
+    ORDER BY c.updated_at DESC LIMIT 200`);
   for (const row of commissions) {
-    const mapped = commissionCandidate(row); if (!mapped) continue;
+    const mapped = commissionCandidate(row, env); if (!mapped) continue;
     created.push(await upsertCandidate(env, { sourceType: "REFERRAL_COMMISSION", sourceId: row.referral_id, stage: row.status, title: `Referral commission ${row.referral_id}`, valueUsd: Math.max(0, num(row.agreed_amount_usd || row.proposed_amount_usd) || (num(row.deal_value_usd) * num(row.agreed_rate_pct || row.proposed_rate_pct) / 100)), signalScore: 80, actionRef: row.referral_id, ...mapped }));
   }
 
