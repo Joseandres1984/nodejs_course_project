@@ -5,7 +5,7 @@ const proposal = await readFile(new URL("./proposal-engine.js", import.meta.url)
 const firstCash = await readFile(new URL("./first-cash-closer.js", import.meta.url), "utf8");
 
 // Preserve public runtime contracts while evolving internals.
-assert.match(proposal, /const VERSION = "1\.6-first-cash-microbuyer-revision"/);
+assert.match(proposal, /const VERSION = "2\.1-tender-hot-lead-first-dollar"/);
 assert.match(firstCash, /const VERSION = "1\.1-shared-response-first-cash-closer"/);
 assert.match(firstCash, /const FAST_LANE_VERSION = "1\.0-first-settlement-fast-lane"/);
 
