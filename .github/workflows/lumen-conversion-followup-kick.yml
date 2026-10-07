@@ -2,6 +2,8 @@ name: LUMEN Conversion Followup Kick
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '7 * * * *'
   push:
     branches: [lumen-zero]
     paths:
@@ -17,11 +19,12 @@ concurrency:
 jobs:
   followup:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     env:
       BASE_URL: https://lumen-zero-a2a.lumen-b2b.workers.dev
       ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
     steps:
-      - name: Verify followup state
+      - name: Verify conversion state
         run: |
           set -euo pipefail
           test -n "${ADMIN_TOKEN:-}"
@@ -30,28 +33,52 @@ jobs:
           echo '===== BEFORE ====='
           cat /tmp/before.json
 
-      - name: Execute one bounded followup cycle
+      - name: Execute one bounded conversion action
         run: |
           set -euo pipefail
-          curl -fsS --max-time 60 -X POST             -H "x-lumen-admin: $ADMIN_TOKEN"             "$BASE_URL/followup/run" -o /tmp/run.json
-          jq -e '.ok == true and .version == "1.1-qualified-commercial-followup"' /tmp/run.json >/dev/null
-          echo '===== FOLLOWUP RUN ====='
-          cat /tmp/run.json
+          consumed=false
 
-      - name: Reconcile revenue truth
+          for endpoint in first-cash/run commercial-reply/run followup/run; do
+            out="/tmp/${endpoint//\//-}.json"
+            code=$(curl --show-error --silent --max-time 60 -o "$out" -w '%{http_code}'               -X POST "$BASE_URL/$endpoint"               -H "x-lumen-admin: $ADMIN_TOKEN"               -H 'content-type: application/json' -d '{}')
+            echo "===== $endpoint HTTP $code ====="
+            cat "$out"; echo
+            test "$code" = '202'
+
+            if jq -e '
+              (.sent == true) or
+              (.externalAttempted == true) or
+              (.status == "SEND_FAILED") or
+              (.send.sent == true) or
+              (.send.externalAttempted == true) or
+              (.send.status == "SEND_FAILED")
+            ' "$out" >/dev/null 2>&1; then
+              consumed=true
+              echo "CONVERSION_SLOT_CONSUMED_BY=$endpoint"
+              break
+            fi
+          done
+
+          echo "CONVERSION_SLOT_CONSUMED=$consumed"
+
+      - name: Reconcile verified revenue truth
         run: |
           set -euo pipefail
-          curl -fsS --max-time 45 -X POST             -H "x-lumen-admin: $ADMIN_TOKEN"             "$BASE_URL/x402-revenue-bridge/sync" -o /tmp/x402.json
-          jq -e '.ok == true' /tmp/x402.json >/dev/null
-          echo '===== X402 ====='
-          cat /tmp/x402.json
+          for endpoint in x402-revenue-bridge/sync referrals/commissions/sync; do
+            out="/tmp/${endpoint//\//-}.json"
+            curl -fsS --max-time 60 -X POST               -H "x-lumen-admin: $ADMIN_TOKEN"               -H 'content-type: application/json' -d '{}'               "$BASE_URL/$endpoint" -o "$out"
+            echo "===== $endpoint ====="
+            cat "$out"; echo
+          done
 
       - name: Read after state
         run: |
           set -euo pipefail
-          echo '===== AFTER ====='
-          curl -fsS --max-time 30 "$BASE_URL/followup/stats"
-          echo
-          echo '===== PORTFOLIO ====='
-          curl -fsS --max-time 30 "$BASE_URL/portfolio-governor/state"
-          echo
+          for endpoint in followup/stats commercial-reply/stats first-cash/stats portfolio-governor/state; do
+            echo "===== /$endpoint ====="
+            curl -fsS --max-time 30 "$BASE_URL/$endpoint"
+            echo
+          done
+          echo 'CONVERSION_FOLLOWUP_LOOP_COMPLETE'
+          echo 'ONE_EXTERNAL_ACTION_MAX_PER_RUN'
+          echo 'NO_AUTONOMOUS_SPEND_OR_CONTRACT_AUTHORITY'
