@@ -38,6 +38,7 @@ jobs:
         run: |
           set -euo pipefail
           node .lumen/a2a-worker/test-first-settlement-mission-v1.mjs
+          node .lumen/a2a-worker/test-tender-supplier-match.mjs
           node .lumen/a2a-worker/test-x402-revenue-bridge-scale.mjs
           node .lumen/a2a-worker/test-unified-economic-brain-v1.mjs
           node .lumen/a2a-worker/venture-hunter-v1.test.mjs
