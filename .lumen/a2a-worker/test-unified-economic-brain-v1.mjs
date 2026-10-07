@@ -10,7 +10,7 @@ import {
   isDemandFocusedHypothesis
 } from "./unified-economic-brain-v1.js";
 
-assert.equal(UNIFIED_BRAIN_POLICY.version,"1.1-demand-conversion-learning");
+assert.equal(UNIFIED_BRAIN_POLICY.version,"1.2-entrepreneurial-adaptation");
 assert.equal(UNIFIED_BRAIN_POLICY.oneGlobalEconomicMission,true);
 assert.equal(UNIFIED_BRAIN_POLICY.openEndedBusinessModels,true);
 assert.equal(UNIFIED_BRAIN_POLICY.autonomousSpendUsd,0);
@@ -24,6 +24,10 @@ assert.deepEqual(UNIFIED_BRAIN_POLICY.qualifiedCommercialResponseClasses,["COMME
 assert.equal(UNIFIED_BRAIN_POLICY.demandFirstWhenBuyerEvidenceZero,true);
 assert.equal(UNIFIED_BRAIN_POLICY.persistentFunnelMemory,true);
 assert.equal(UNIFIED_BRAIN_POLICY.strategyMemoryAffectsSelection,true);
+assert.equal(UNIFIED_BRAIN_POLICY.strategyFatigueAvoidance,true);
+assert.equal(UNIFIED_BRAIN_POLICY.zeroRewardAttemptsTriggerPivot,3);
+assert.equal(UNIFIED_BRAIN_POLICY.verifiedWinnerReplication,true);
+assert.equal(UNIFIED_BRAIN_POLICY.cashPressurePrioritizesFastValidation,true);
 assert.equal(UNIFIED_BRAIN_POLICY.monetizationFrontier,true);
 assert.equal(UNIFIED_BRAIN_POLICY.distinctBusinessModelExploration,true);
 assert.equal(UNIFIED_BRAIN_POLICY.frontierExplorationEscapesCurrentBottleneck,true);
@@ -78,6 +82,37 @@ assert.ok(
   learningAdjustment(demand,{attempts:5,reward:120},{bottleneck:"DEMAND"})
   > learningAdjustment(demand,{attempts:5,reward:-10},{bottleneck:"DEMAND"})
 );
+
+const stalledAdjustment=learningAdjustment(
+  fast,
+  {attempts:5,reward:0,verified_settlements:0,commercial_responses:0},
+  {bottleneck:"OUTBOUND",verifiedSettlements:0}
+);
+const freshAdjustment=learningAdjustment(
+  fast,
+  {attempts:0,reward:0,verified_settlements:0,commercial_responses:0},
+  {bottleneck:"OUTBOUND",verifiedSettlements:0}
+);
+assert.ok(stalledAdjustment<freshAdjustment,"repeated zero-signal strategies must lose priority");
+
+const winnerAdjustment=learningAdjustment(
+  fast,
+  {attempts:4,reward:100,verified_settlements:2,commercial_responses:2},
+  {bottleneck:"REPEAT_WINNER",verifiedSettlements:2}
+);
+assert.ok(winnerAdjustment>freshAdjustment,"verified winners must gain compounding attention");
+
+const fastEvidenceAdjustment=learningAdjustment(
+  fast,
+  {attempts:0,reward:0},
+  {bottleneck:"DEMAND",verifiedSettlements:0}
+);
+const slowEvidenceAdjustment=learningAdjustment(
+  slow,
+  {attempts:0,reward:0},
+  {bottleneck:"DEMAND",verifiedSettlements:0}
+);
+assert.ok(fastEvidenceAdjustment>slowEvidenceAdjustment,"zero-cash pressure should prefer fast evidence-backed validation");
 
 const unsafe=normalizeEconomicHypothesis({
   id:"unsafe",business_model:"buy inventory then resell",hypothesis:"Purchase stock first",execution_lane:"COMMERCE",
