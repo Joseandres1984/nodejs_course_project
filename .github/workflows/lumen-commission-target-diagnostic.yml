@@ -1,0 +1,35 @@
+name: LUMEN Commission Target Diagnostic
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-commission-target-diagnostic.yml'
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Inspect Attestly public Agent Card
+        run: |
+          set -euo pipefail
+          card='https://attestly.co/.well-known/agent-card.json'
+          code=$(curl --show-error --silent --location --max-time 20 -o /tmp/card.json -w '%{http_code}' "$card" || true)
+          echo "CARD_HTTP=$code"
+          if [ "$code" = '200' ]; then
+            jq '{name,url,protocolVersion,preferredTransport,transport,supportedInterfaces,securityRequirements,security,capabilities,skills}' /tmp/card.json
+          else
+            head -c 2000 /tmp/card.json 2>/dev/null || true
+          fi
+
+      - name: Read safe method metadata only
+        run: |
+          set -euo pipefail
+          card='https://attestly.co/.well-known/agent-card.json'
+          curl --fail --show-error --silent --location --max-time 20 "$card" -o /tmp/card.json
+          jq -r '[.url, (.supportedInterfaces[]?.url)] | map(select(type=="string" and startswith("https://"))) | unique[]' /tmp/card.json > /tmp/endpoints.txt
+          while IFS= read -r endpoint; do
+            echo "===== $endpoint ====="
+            curl --show-error --silent --max-time 15 -o /dev/null -D - -X OPTIONS "$endpoint" | grep -Ei '^(HTTP/|allow:|content-type:)' || true
+          done < /tmp/endpoints.txt
