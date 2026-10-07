@@ -15,7 +15,10 @@ function closeCooldownDays(env){return intVar(env?.COMMISSION_CLOSE_CHECK_COOLDO
 function maxCloseChecks(env){return intVar(env?.COMMISSION_CLOSE_CHECK_MAX,6,1,24);}
 function paymentCooldownDays(env){return intVar(env?.COMMISSION_PAYMENT_FOLLOWUP_DAYS,3,1,30);}
 function maxPaymentFollowups(env){return intVar(env?.COMMISSION_PAYMENT_FOLLOWUP_MAX,2,0,6);}
+function proposalRetryCooldownHours(env){return intVar(env?.COMMISSION_PROPOSAL_RETRY_HOURS,6,1,72);}
+function maxProposalAttempts(env){return intVar(env?.COMMISSION_PROPOSAL_MAX_ATTEMPTS,3,1,6);}
 function olderThan(iso,days){if(!iso)return true;const t=new Date(iso).getTime();return Number.isFinite(t)&&Date.now()-t>=days*86400000;}
+function olderThanHours(iso,hours){if(!iso)return true;const t=new Date(iso).getTime();return Number.isFinite(t)&&Date.now()-t>=hours*3600000;}
 
 async function ensure(env){
   if(!env?.DB)return false;
@@ -182,6 +185,10 @@ async function messageSummary(env,referralId,kind){
   const r=await env.DB.prepare("SELECT COUNT(*) n,MAX(sent_at) last_sent FROM lumen_referral_commission_messages WHERE referral_id=? AND kind=? AND status NOT IN ('SEND_FAILED')").bind(referralId,kind).first();
   return{count:Number(r?.n||0),lastSent:r?.last_sent||null};
 }
+async function messageAttemptSummary(env,referralId,kind){
+  const r=await env.DB.prepare("SELECT COUNT(*) n,MAX(created_at) last_attempt FROM lumen_referral_commission_messages WHERE referral_id=? AND kind=?").bind(referralId,kind).first();
+  return{count:Number(r?.n||0),lastAttempt:r?.last_attempt||null};
+}
 async function sendTracked(env,{row,p,kind,sequence,message,state}){
   const send=await sendA2A(p.endpoint,message,row.referral_id,kind);
   const msg=await logMessage(env,{referralId:row.referral_id,kind,sequence,endpoint:p.endpoint,message,send});
@@ -217,11 +224,20 @@ async function chooseCloseAction(env){
   return null;
 }
 async function chooseProposalAction(env){
-  let row=null;
-  try{row=await env.DB.prepare("SELECT r.id referral_id,r.direction,r.target_partner_id,r.origin_partner_id,r.title,r.estimated_value_usd,r.match_score,c.deal_value_usd,c.proposed_rate_pct,c.status commission_status FROM lumen_referrals r JOIN lumen_referral_commissions c ON c.referral_id=r.id LEFT JOIN lumen_referral_commission_autopilot a ON a.referral_id=r.id WHERE r.direction='OUTBOUND' AND c.status='PROPOSAL_READY' AND c.proposed_rate_pct=5 AND a.referral_id IS NULL AND r.trust_level IN ('ALLOW','CAUTION') ORDER BY r.match_score DESC,r.updated_at ASC LIMIT 1").first();}catch{}
-  if(!row)return null;
-  const p=await counterparty(env,row);if(!p)return null;
-  return{row,p,kind:"COMMISSION_PROPOSAL",sequence:1,message:proposalMessage(row),state:"PROPOSAL_SENT"};
+  let rows=[];
+  try{
+    const result=await env.DB.prepare("SELECT r.id referral_id,r.direction,r.target_partner_id,r.origin_partner_id,r.title,r.estimated_value_usd,r.match_score,r.trust_level referral_trust_level,c.deal_value_usd,c.proposed_rate_pct,c.status commission_status,a.state autopilot_state,a.endpoint,a.counterparty_partner_id,a.counterparty_name,t.trust_level current_trust_level,t.auth_required,t.manipulation_hits FROM lumen_referrals r JOIN lumen_referral_commissions c ON c.referral_id=r.id LEFT JOIN lumen_referral_commission_autopilot a ON a.referral_id=r.id LEFT JOIN lumen_partner_trust t ON t.partner_id=r.target_partner_id WHERE r.direction='OUTBOUND' AND c.status='PROPOSAL_READY' AND c.proposed_rate_pct=5 AND (a.referral_id IS NULL OR a.state='PROPOSAL_READY') AND COALESCE(t.trust_level,r.trust_level) IN ('ALLOW','CAUTION') AND COALESCE(t.auth_required,0)=0 AND COALESCE(t.manipulation_hits,0)=0 ORDER BY r.match_score DESC,r.updated_at ASC LIMIT 30").all();
+    rows=result.results||[];
+  }catch{}
+  for(const row of rows){
+    const attempts=await messageAttemptSummary(env,row.referral_id,"COMMISSION_PROPOSAL");
+    if(attempts.count>=maxProposalAttempts(env))continue;
+    if(attempts.count>0&&!olderThanHours(attempts.lastAttempt,proposalRetryCooldownHours(env)))continue;
+    const p=row.endpoint&&safeHttps(row.endpoint)?{id:row.counterparty_partner_id,name:row.counterparty_name,endpoint:row.endpoint}:await counterparty(env,row);
+    if(!p)continue;
+    return{row,p,kind:"COMMISSION_PROPOSAL",sequence:attempts.count+1,message:proposalMessage(row),state:"PROPOSAL_SENT"};
+  }
+  return null;
 }
 
 export async function runReferralCommissionAutopilot(env,{force=false}={}){
@@ -242,7 +258,7 @@ async function stats(env){
 
 export async function handleReferralCommissionAutopilot(request,env){
   const u=new URL(request.url);
-  if(request.method==="GET"&&u.pathname==="/referrals/commissions/autopilot/policy")return json({version:VERSION,standardSuccessFeePct:STANDARD_RATE_PCT,percentageFeeBasis:"final_confirmed_deal_value",estimatedDealValueRequiredForProposal:false,explicitAcceptanceRequired:true,exactAcceptancePhrase:true,closeEvidenceRequired:true,closeReportRequiresFinalValue:true,checkoutRail:"x402",exactAmountCheckout:true,revenueOnlyAfterVerifiedSettlement:true,counteroffersAutoAccepted:false,maxExternalMessagesPerRun:MAX_EXTERNAL_MESSAGES_PER_RUN,closeCheckCooldownDays:closeCooldownDays(env),maxCloseChecks:maxCloseChecks(env),paymentFollowupDays:paymentCooldownDays(env),maxPaymentFollowups:maxPaymentFollowups(env),autonomousSpend:false,automaticContract:false,priority:["PAYMENT_DUE_COLLECTION","CLOSE_TRACKING","NEW_COMMISSION_PROPOSAL"]});
+  if(request.method==="GET"&&u.pathname==="/referrals/commissions/autopilot/policy")return json({version:VERSION,standardSuccessFeePct:STANDARD_RATE_PCT,percentageFeeBasis:"final_confirmed_deal_value",estimatedDealValueRequiredForProposal:false,explicitAcceptanceRequired:true,exactAcceptancePhrase:true,closeEvidenceRequired:true,closeReportRequiresFinalValue:true,checkoutRail:"x402",exactAmountCheckout:true,revenueOnlyAfterVerifiedSettlement:true,counteroffersAutoAccepted:false,maxExternalMessagesPerRun:MAX_EXTERNAL_MESSAGES_PER_RUN,proposalRetryCooldownHours:proposalRetryCooldownHours(env),maxProposalAttempts:maxProposalAttempts(env),failedProposalAttemptsCanRetry:true,closeCheckCooldownDays:closeCooldownDays(env),maxCloseChecks:maxCloseChecks(env),paymentFollowupDays:paymentCooldownDays(env),maxPaymentFollowups:maxPaymentFollowups(env),autonomousSpend:false,automaticContract:false,priority:["PAYMENT_DUE_COLLECTION","CLOSE_TRACKING","NEW_COMMISSION_PROPOSAL"]});
   if(request.method==="GET"&&u.pathname==="/referrals/commissions/autopilot/stats")return json({version:VERSION,...await stats(env),autonomousEnabled:enabled(env)});
   if(request.method==="POST"&&u.pathname==="/referrals/commissions/autopilot/run"){if(!authorized(request,env))return json({ok:false,error:"admin_token_required"},403);return json(await runReferralCommissionAutopilot(env,{force:false}),202);}
   if(request.method==="POST"&&u.pathname==="/referrals/commissions/autopilot/poll"){if(!authorized(request,env))return json({ok:false,error:"admin_token_required"},403);return json(await pollReferralCommissionAutopilot(env),202);}
