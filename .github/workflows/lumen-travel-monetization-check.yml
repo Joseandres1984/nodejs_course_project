@@ -1,0 +1,43 @@
+name: LUMEN Travel Monetization Check
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-travel-monetization-check.yml'
+      - '.lumen/public-worker/travel-storefront.js'
+      - '.lumen/a2a-worker/travel-affiliate-registry.js'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify live monetization surfaces
+        run: |
+          set -euo pipefail
+          BASE='https://lumen-zero-public.lumen-b2b.workers.dev'
+          for attempt in $(seq 1 12); do
+            html_code=$(curl -sS --max-time 30 -o /tmp/travel.html -w '%{http_code}' "$BASE/travel?q=Rio%20de%20Janeiro&source=organic" || true)
+            json_code=$(curl -sS --max-time 30 -o /tmp/travel.json -w '%{http_code}' "$BASE/travel.json?q=Rio%20de%20Janeiro&source=organic" || true)
+            if [ "$html_code" = '200' ] && [ "$json_code" = '200' ]               && grep -q 'Partners útiles para completar el viaje' /tmp/travel.html               && jq -e '
+                .ok == true and
+                (.partnerExtras | type) == "array" and
+                (.partnerExtras | length) >= 3 and
+                ([.partnerExtras[].brand] | index("Airalo")) != null and
+                ([.partnerExtras[].brand] | index("QEEQ")) != null and
+                ([.partnerExtras[].brand] | index("Intui.travel")) != null and
+                ([.partnerExtras[] | select(.enabled == true and (.affiliateUrl | startswith("https://")))] | length) >= 3
+              ' /tmp/travel.json >/dev/null; then
+                echo 'TRAVEL_MULTI_AFFILIATE_LIVE_OK'
+                jq '{version,source,query,partnerExtras:[.partnerExtras[]|{id,brand,category,enabled}]}' /tmp/travel.json
+                exit 0
+            fi
+            sleep 3
+          done
+          echo 'TRAVEL_MULTI_AFFILIATE_LIVE_FAILED'
+          cat /tmp/travel.json || true
+          exit 1
