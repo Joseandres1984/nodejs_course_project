@@ -1,0 +1,65 @@
+name: LUMEN Owner Supplier Expansion
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-owner-supplier-expansion.yml'
+
+jobs:
+  expand:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      BASE: https://lumen-zero-a2a.lumen-b2b.workers.dev
+      OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+    steps:
+      - name: Capture baseline
+        run: |
+          set -euo pipefail
+          test -n "$OPPORTUNITY_ADMIN_TOKEN"
+          curl -fsS --max-time 30 "$BASE/market-hunter/state" -o /tmp/hunter-before.json
+          curl -fsS --max-time 30 -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" "$BASE/tender-match/state" -o /tmp/match-before.json
+          jq '{hunter:{version,totals,lastRun},tenderMatches:{version,total}}'             <(jq -n --slurpfile h /tmp/hunter-before.json --slurpfile m /tmp/match-before.json '{version:$h[0].version,totals:$h[0].totals,lastRun:$h[0].lastRun,tenderVersion:$m[0].version,tenderTotal:$m[0].total}') || true
+          echo "BASELINE_HUNTER_TOTAL=$(jq -r '.totals.attributedOpportunities // 0' /tmp/hunter-before.json)"
+          echo "BASELINE_MATCH_TOTAL=$(jq -r '.total // 0' /tmp/match-before.json)"
+
+      - name: Run two bounded public registry discovery cycles
+        run: |
+          set -euo pipefail
+          for n in 1 2; do
+            curl -fsS --max-time 120 -X POST               -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN"               -H 'cache-control: no-cache'               "$BASE/market-hunter/run" -o "/tmp/hunter-$n.json"
+            echo "===== HUNTER CYCLE $n ====="
+            jq '{ok,version,runId,status,selectedCount:(.selectedStrategies|length),resultCount:(.results|length),accepted:(.results|map(.accepted // 0)|add // 0),generatedStrategy,topLearning:[.topLearning[]|{id,offerId,discoveries,actionable,qualifiedResponses,settlements,revenueUsd,score,evidenceLevel}]}' "/tmp/hunter-$n.json"
+            jq -e '.guardrails.createsExternalMessages==false and .guardrails.autonomousSpend==false and .guardrails.autonomousPurchase==false and .guardrails.autonomousContract==false' "/tmp/hunter-$n.json" >/dev/null
+          done
+
+      - name: Rebuild tender supplier matches
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 120 -X POST             -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN"             -H 'cache-control: no-cache'             "$BASE/tender-match/run" -o /tmp/match.json
+          echo '===== TENDER MATCH ====='
+          jq '{ok,version,tendersConsidered,suppliersConsidered,matchesCreated:(.matches|length),matches:[.matches[]|{opportunityId,supplier,score,terms,deadline,evidence}]}' /tmp/match.json
+
+      - name: Reassess and sync revenue loop without sending
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 90 -X POST -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" "$BASE/commercial/reassess" -o /tmp/reassess.json
+          curl -fsS --max-time 90 -X POST -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" "$BASE/revenue-loop-v5/run" -o /tmp/revenue.json
+          curl -fsS --max-time 30 -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" "$BASE/commercial/actionable?limit=10" -o /tmp/actionable.json
+          curl -fsS --max-time 30 -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" "$BASE/tender-match/state" -o /tmp/match-after.json
+          curl -fsS --max-time 30 -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" "$BASE/first-settlement/status" -o /tmp/settlement.json
+          curl -fsS --max-time 30 "$BASE/portfolio-governor/state" -o /tmp/portfolio.json
+
+          echo '===== REASSESS ====='
+          jq '{ok,version,assessed,actionable,testOnly,selectionPolicy}' /tmp/reassess.json
+          echo '===== ACTIONABLE TOP ====='
+          jq '{rows:[.rows[]|{id,source,name,revenue_offer_id,commercial_score,evidence_strength,proposal_status,quality_gate_status,outreach_status}]}' /tmp/actionable.json
+          echo '===== MATCH TOTAL AFTER ====='
+          jq '{version,total,recent:[.recent[]|select(.status=="CREATED")|{match_opportunity_id,match_score,status,matched_terms}]}' /tmp/match-after.json
+          echo '===== FIRST SETTLEMENT ====='
+          jq '{mission:{status:.mission.status,focus:.mission.focus,diagnosis:.mission.diagnosis},successCriterion}' /tmp/settlement.json
+          echo '===== REVENUE TRUTH ====='
+          jq '{verifiedSettlements:.metrics.verifiedSettlements,verifiedRevenueUsd:.metrics.verifiedRevenueUsd}' /tmp/portfolio.json
+          jq -e '.metrics.verifiedSettlements>=0 and .metrics.verifiedRevenueUsd>=0' /tmp/portfolio.json >/dev/null
