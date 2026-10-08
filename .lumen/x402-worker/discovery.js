@@ -51,6 +51,7 @@ export function buildDiscoveryOpenApi(products,origin){
           serviceId:p.serviceId
         },
         parameters:[
+          {name:"requirement",in:"query",required:false,description:"Nonconfidential buyer task description (12-1200 chars); reviewed through the untrusted-input-firewall and queued only after verified payment. Never include passwords or private company data in URLs.",schema:{type:"string",minLength:12,maxLength:1200}},
           {name:"payment-signature",in:"header",required:false,description:"Official x402 payment signature on a paid retry",schema:{type:"string"}},
           {name:"x-lumen-approval-id",in:"header",required:false,description:"Owner-approved one-use ticket for retry after HTTP 409",schema:{type:"string"}}
         ],
@@ -88,7 +89,7 @@ export function buildDiscoveryLlmsTxt(products,origin){
     "Network: Base mainnet (eip155:8453); asset: USDC",
     "All charges require an individual manual LUMEN owner approval. No payment is executed when approval is pending.",
     "Start with an unsigned GET to the paid URL for the official HTTP 402 challenge. The buyer must provide a signed payment payload. If an approval is pending the response is HTTP 409 with an approvalRequestId. The owner approves the exact request separately. The buyer must retry with a fresh signed payment and x-lumen-approval-id. This is not an instant unattended checkout.",
-    "A verified payment creates a receipt / queued research request; output may require later fulfillment.",
+    "A verified payment with a valid nonconfidential ?requirement=... brief automatically queues the research task; no second redeem call is required. Without a brief, the buyer may POST /redeem after payment. URL query strings are public; do not send secrets, customer records or private business data.",
     "",
     "## Fixed-price endpoints"
   ];
