@@ -1,4 +1,4 @@
-const VERSION = "1.8-distinct-tender-bid-deadline";
+const VERSION = "1.9-legacy-ted-date-quarantine";
 const FETCH_TIMEOUT_MS = 8000;
 const MAX_SOURCE_SCANS_PER_CYCLE = 2;
 const MAX_RESULTS_PER_SOURCE = 20;
@@ -678,8 +678,34 @@ async function refreshAllMetrics(env) {
   return out;
 }
 
+// Backfill historical TED records produced before BT-131 lot deadlines were
+// extracted. The old generic TED BT-13 was the clarification-question deadline,
+// not proof of a bid deadline. Quarantine it; do not infer 09 Nov for other lots.
+export async function quarantineLegacyTedDeadlines(env) {
+  const updated=await env.DB.prepare(`UPDATE lumen_opportunities
+    SET description=REPLACE(
+      COALESCE(description,''),
+      'Bid deadline: ' || json_extract(raw_json,'$.deadline') || '.',
+      'Bid-submission date not yet verified in original TED notice.'
+    ),
+    raw_json=json_set(
+      raw_json,
+      '$.legacyIndexDeadline',json_extract(raw_json,'$.deadline'),
+      '$.deadline',json('null'),
+      '$.deadlineSource','LEGACY_TED_GENERIC_DEADLINE_QUARANTINED',
+      '$.deadlineTimeVerified',json('false')
+    )
+    WHERE source='ted_eu_public_procurement'
+      AND json_valid(raw_json)=1
+      AND json_extract(raw_json,'$.source_intelligence_version') IS NOT NULL
+      AND json_extract(raw_json,'$.deadlineSource') IS NULL
+      AND json_extract(raw_json,'$.deadline') IS NOT NULL`).run();
+  return {quarantined:Number(updated.meta?.changes||0),noNewSenderAuthority:true};
+}
+
 export async function runSourceIntelligence(env) {
   if (!(await ensureSchema(env))) return { ok: false, error: "persistence_unavailable", version: VERSION };
+  const deadlineQuarantine=await quarantineLegacyTedDeadlines(env);
   await refreshAllMetrics(env);
   const selected = await pickSources(env);
   const results = [];
@@ -689,6 +715,7 @@ export async function runSourceIntelligence(env) {
     ok: true,
     version: VERSION,
     selectedSources: selected.map(s => ({ sourceId: s.source_id, selectionScore: s.selectionScore })),
+    deadlineQuarantine,
     results,
     state,
     guardrails: {
