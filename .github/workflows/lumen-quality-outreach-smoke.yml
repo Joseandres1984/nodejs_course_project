@@ -1,5 +1,5 @@
 name: LUMEN Quality + A2A Probe
-# first-settlement-send-sequence: 2
+# first-settlement-send-sequence: 3
 
 on:
   push:
