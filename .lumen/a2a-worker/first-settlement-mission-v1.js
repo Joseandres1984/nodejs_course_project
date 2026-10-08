@@ -1,5 +1,5 @@
 export const FIRST_SETTLEMENT_MISSION_POLICY = Object.freeze({
-  version: "1.4-response-truth-rotation",
+  version: "1.5-noncommercial-reply-rotation",
   objective: "move_the_best_real_opportunity_toward_first_verified_settlement",
   settlementTruth: "verified_x402_receipt_only",
   autonomousSpendUsd: 0,
@@ -13,7 +13,8 @@ export const FIRST_SETTLEMENT_MISSION_POLICY = Object.freeze({
   rotateLowScoreDeadEnds: true,
   rotateTerminalOutreachBlocks: true,
   retryTransientOutreachAfterHours: 6,
-  rotateNonCommercialTransportResponses: true
+  rotateNonCommercialTransportResponses: true,
+  rotateNonCommercialReplies: true
 });
 
 const STALL_HOURS = Object.freeze({
@@ -73,7 +74,19 @@ export function diagnoseSettlementBlocker(row = {}, now = Date.now()) {
     }
   }
   if (stage === "SENT") { blocker = "WAITING_BUYER_RESPONSE"; action ||= "follow_up_when_existing_cooldown_allows"; }
-  if (stage === "REPLIED") { blocker = "RESPONSE_NOT_CLOSED"; action ||= "classify_response_and_prepare_close"; }
+  if (stage === "REPLIED") {
+    const responseClass=String(row.response_class || row.pipeline_response_class || "").toUpperCase();
+    if (["DECLINED","NOT_RELEVANT","TECHNICAL_ACK","ECHO","GENERIC_RESPONSE"].includes(responseClass)) {
+      blocker = "NONCOMMERCIAL_BUYER_RESPONSE";
+      action = "rotate_to_next_opportunity_or_human_review";
+    } else if (["PURCHASE_INTENT","COMMERCIAL_INTEREST","COMMERCIAL_QUESTION"].includes(responseClass)) {
+      blocker = "RESPONSE_NOT_CLOSED";
+      action ||= "classify_response_and_prepare_close";
+    } else {
+      blocker = "RESPONSE_CLASSIFICATION_REQUIRED";
+      action = "classify_response_before_close";
+    }
+  }
   if (stage === "NEGOTIATING") {
     const responseClass=String(row.response_class || row.pipeline_response_class || "").toUpperCase();
     if (["PURCHASE_INTENT","COMMERCIAL_INTEREST"].includes(responseClass)) {
