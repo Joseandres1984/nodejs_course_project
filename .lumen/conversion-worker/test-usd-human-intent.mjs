@@ -65,6 +65,6 @@ assert.match(await consult.text(), /Consulta recibida/);
 
 const health = await worker.fetch(new Request(base + "/health"), env);
 assert.equal(health.status, 200);
-assert.equal((await health.json()).version, "1.2-usd-human-checkout-request");
+assert.equal((await health.json()).version, "1.3-usd-owner-inbox");
 console.log("USD_PAYMENT_REQUEST_REGRESSION_OK");
 console.log("No charge, no payment instructions, no auto invoice, x402 path preserved, CRM inquiry stored");
