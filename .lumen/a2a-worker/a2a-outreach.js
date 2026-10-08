@@ -1,5 +1,5 @@
 import { getFirstSettlementMissionStatus } from "./first-settlement-mission-v1.js";
-const VERSION = "2.2-qualified-durable-endpoints";
+const VERSION = "2.3-qualified-outreach-idle-truth";
 const CARD_TIMEOUT_MS = 8000;
 const SEND_TIMEOUT_MS = 15000;
 const MAX_CLOSERS_PER_CYCLE = 30;
@@ -338,6 +338,7 @@ export async function sendApprovedBatch(env, { force = false, limit = MAX_CLOSER
     sent,
     responded,
     failed,
+    reason: results.length === 0 ? "no_current_eligible_target_after_dedupe_cooldown" : null,
     results
   };
 }
