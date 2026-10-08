@@ -43,6 +43,8 @@ jobs:
           jq '.' /tmp/commercial-stats.json
           echo '===== ACTIONABLE QUEUE ====='
           jq '{version,rows:[.rows[]|{id,source,name,endpoint,revenue_offer_id,status,commercial_score,evidence_strength,commercially_actionable,proposal_id,proposal_status,quality_gate_status,outreach_status,proposal_missing,reasons}]}' /tmp/actionable.json
+          echo '===== ACTIONABLE BOTTLENECK SUMMARY ====='
+          jq '{actionable_count:(.rows|length),missing_proposal:([.rows[]|select(.proposal_id==null)]|length),by_proposal_status:([.rows[].proposal_status]|group_by(.)|map({status:.[0],count:length})),by_outreach_status:([.rows[].outreach_status]|group_by(.)|map({status:.[0],count:length})),blocked_drafts:[.rows[]|select(.proposal_id!=null and .outreach_status==null)|{id,proposal_id,proposal_status,quality_gate_status,commercial_score,evidence_strength}]}' /tmp/actionable.json
           echo '===== PROPOSAL NEXT ====='
           jq '{proposal:(.proposal|if .==null then null else {proposalId,opportunityId,target,endpoint,offerId,amountUsd,status,qualityGateStatus,metadata} end),nextAction}' /tmp/proposal.json
           echo '===== QUALITY STATS ====='
