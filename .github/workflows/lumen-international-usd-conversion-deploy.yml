@@ -27,8 +27,8 @@ jobs:
       - name: Verify human USD conversion path and no-charge truth
         run: |
           set -euo pipefail
-          node --experimental-default-type=module --check .lumen/conversion-worker/worker.js
-          node --experimental-default-type=module .lumen/conversion-worker/test-usd-human-intent.mjs
+          node --check .lumen/conversion-worker/worker.js
+          node .lumen/conversion-worker/test-usd-human-intent.mjs
       - name: Check Cloudflare bundle without deployment
         working-directory: .lumen/conversion-worker
         run: npx --yes wrangler@latest deploy --dry-run --config wrangler.toml
