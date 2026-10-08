@@ -6,7 +6,7 @@ import { createPaywall } from "@x402/paywall";
 import { evmPaywall } from "@x402/paywall/evm";
 
 const SERVICE = "lumen-zero-x402";
-const VERSION = "1.5-x402-native-hono-chain";
+const VERSION = "1.6-x402-human-approval";
 const PAY_TO = "0x04285DE6A083CEb28fb0C254a2ed0F5fdB2eeD28";
 const NETWORK = "eip155:8453";
 const FACILITATOR = "https://facilitator.xpay.sh";
@@ -115,7 +115,7 @@ app.use("*", async (c, next) => {
     return new Response(null, { status:204, headers:{
       "access-control-allow-origin":"*",
       "access-control-allow-methods":"GET,POST,OPTIONS",
-      "access-control-allow-headers":"content-type,payment-signature,x-payment",
+      "access-control-allow-headers":"content-type,payment-signature,x-payment,x-lumen-approval-id",
     }});
   }
   await next();
@@ -219,6 +219,8 @@ function publicCatalog(origin) {
       recipient:PAY_TO,
       facilitator:FACILITATOR,
       outgoingSpendEnabled:false,
+      humanApprovalRequired:true,
+      humanApprovalPath:"/approvals",
       accountingRule:"realized revenue only after PAYMENT-RESPONSE confirms settlement success",
       conversionAttribution:"campaign/session metadata is persisted with the receipt when supplied",
     },
@@ -309,6 +311,7 @@ app.get("/health", async (c) => {
     network:NETWORK, asset:"USDC", facilitator:FACILITATOR,
     recipientConfigured:true, resourceServerInitialized:true, outgoingSpendEnabled:false,
     conversionAttribution:true, humanPaywall:true, briefLinkedFulfillment:true,
+    humanApprovalRequired:true,
   });
 });
 app.get("/catalog", (c) => c.json(publicCatalog(new URL(c.req.url).origin)));
