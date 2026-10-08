@@ -170,6 +170,8 @@ jobs:
         run: node .lumen/a2a-worker/test-procurement-evidence-only-commercial-truth.mjs
       - name: Verify controlled A2A batch limit
         run: node .lumen/a2a-worker/test-controlled-batch-limit.mjs
+      - name: Verify bounded proposal quality copy repair
+        run: node .lumen/a2a-worker/test-quality-copy-repair.mjs
       - name: Run Autonomous Director unit tests
         run: python -m unittest discover -s .lumen/runtime -p 'test_autonomous_director_runtime.py'
       - name: Run Experiment Engine unit tests
