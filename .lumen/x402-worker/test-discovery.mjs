@@ -29,6 +29,7 @@ for(const [slug,product] of Object.entries(products)){
   const url=origin+path;
   assert.ok(well.resources.includes(url));
   const op=api.paths[path].get;
+  assert.equal(op.parameters.find(v=>v.name==="requirement"&&v.in==="query")?.schema?.maxLength,1200);
   assert.deepEqual(op["x-payment-info"].protocols[0],{x402:{}});
   assert.deepEqual(op.security,[]);
   assert.deepEqual(op["x-payment-info"].price,{mode:"fixed",currency:"USD",amount:product.price_usd.toFixed(2)});

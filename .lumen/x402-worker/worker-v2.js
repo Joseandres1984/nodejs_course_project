@@ -6,6 +6,7 @@ import { createPaywall } from "@x402/paywall";
 import { evmPaywall } from "@x402/paywall/evm";
 import { buildWellKnownX402, buildDiscoveryOpenApi, buildDiscoveryLlmsTxt } from "./discovery.js";
 import { declareDiscoveryExtension, bazaarResourceServerExtension } from "@x402/extensions/bazaar";
+import { inspectBuyerBrief, briefFromUrl } from "./buyer-brief.js";
 
 const SERVICE = "lumen-zero-x402";
 const VERSION = "1.6-x402-human-approval";
@@ -101,10 +102,12 @@ for (const [slug, product] of Object.entries(PRODUCTS)) {
     mimeType: "application/json",
     extensions: {
       ...declareDiscoveryExtension({
-        // These GET routes require no query/body. The output is a receipt and
-        // queued-task acknowledgement, NOT the finished research deliverable.
-        input: {},
-        inputSchema: {type:"object",properties:{},required:[],additionalProperties:false},
+        // Query brief is optional; buyers supply nonconfidential requirements.
+        // Output is a receipt, NOT the finished research deliverable.
+        input: {requirement:"Find three publicly listed manufacturers of industrial safety gloves in Argentina."},
+        inputSchema: {type:"object",properties:{
+          requirement:{type:"string",description:"Nonconfidential sourcing brief; 12-1200 characters; queued only after a verified settlement.",minLength:12,maxLength:1200}
+        },required:[],additionalProperties:false},
         output: {
           example: {
             ok:true,paymentAuthorizationVerified:true,
@@ -216,6 +219,18 @@ app.use("/buy/*", async (c, next) => {
               await c.env.DB.prepare("UPDATE lumen_x402_receipts SET request_metadata=? WHERE id=?").bind(JSON.stringify(meta),settledReceipt.id).run();
             }
           }
+          // A buyer who included a nonconfidential requirement in the paid
+          // GET no longer needs an extra POST /redeem. The already-verified
+          // receipt remains the mandatory settlement prerequisite.
+          const machineBrief=briefFromUrl(new URL(c.req.url));
+          if (settledReceipt && machineBrief.ok && !machineBrief.absent && !meta.fulfillment?.auto_queue) {
+            const queued=await queuePaidReceipt(c.env,settledReceipt.id,machineBrief.text,{source:"x402_get_brief"});
+            meta.fulfillment={auto_queue:queued.ok===true,status:queued.status || queued.error || "unknown",
+              task_id:queued.taskId||null,order_id:queued.orderId||null,
+              source:"machine_query_brief",reconciled_at:new Date().toISOString()};
+            await c.env.DB.prepare("UPDATE lumen_x402_receipts SET request_metadata=? WHERE id=?")
+              .bind(JSON.stringify(meta),settledReceipt.id).run();
+          }
         } catch (error) {
           meta.fulfillment={auto_queue:false,status:"queue_error",detail:clean(error?.message || error,300),reconciled_at:new Date().toISOString()};
           await c.env.DB.prepare("UPDATE lumen_x402_receipts SET request_metadata=? WHERE payment_fingerprint=?").bind(JSON.stringify(meta),fingerprint).run();
@@ -263,15 +278,16 @@ function publicCatalog(origin) {
       paidUrl:`${origin}/buy/${slug}`,
     })),
     flow:[
-      "GET paidUrl",
+      "GET paidUrl (optionally add a NONCONFIDENTIAL ?requirement=... brief)",
       "receive HTTP 402 PAYMENT-REQUIRED",
       "buyer signs exact USDC authorization",
-      "retry with PAYMENT-SIGNATURE",
-      "LUMEN verifies authorization",
-      "resource prepares receipt with optional conversion attribution",
-      "facilitator settles Base USDC before response leaves middleware",
-      "LUMEN records realized revenue only after settlement success",
-      "human checkout: linked brief auto-queues only after verified settlement; machine clients may POST /redeem",
+      "signed retry yields HTTP 409 pending individual owner approval; no funds settle",
+      "owner approves exact product, amount, network and recipient using private approval panel",
+      "buyer retries with a fresh signed payment and x-lumen-approval-id",
+      "LUMEN verifies authorization and consumes one-use owner approval",
+      "facilitator settles USDC on Base and response includes x402 receipt",
+      "LUMEN counts revenue only after verified settlement response",
+      "valid query brief or linked human brief queues work AFTER settlement; otherwise clients may POST /redeem",
     ],
   };
 }
@@ -362,8 +378,10 @@ for (const [slug,product] of Object.entries(PRODUCTS)) {
 async function queuePaidReceipt(env, receiptIdRaw, requirementRaw, options={}) {
   await ensureSchema(env);
   const receiptId=clean(receiptIdRaw,80);
-  const requirement=clean(requirementRaw,8000);
-  if (!receiptId || !requirement) return {ok:false,statusCode:400,error:"receiptId and requirement are required"};
+  const inspected=inspectBuyerBrief(requirementRaw);
+  if (!receiptId) return {ok:false,statusCode:400,error:"receiptId is required"};
+  if (!inspected.ok) return {ok:false,statusCode:400,error:inspected.error};
+  const requirement=inspected.text;
   const receipt=await env.DB.prepare("SELECT * FROM lumen_x402_receipts WHERE id=? LIMIT 1").bind(receiptId).first();
   if (!receipt) return {ok:false,statusCode:404,error:"Receipt not found"};
   if (receipt.status !== "settled_verified" && receipt.status !== "redeemed_queued") return {ok:false,statusCode:409,error:"Payment is not yet confirmed as settled",status:receipt.status};
