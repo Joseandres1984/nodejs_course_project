@@ -1,5 +1,5 @@
 import { getFirstSettlementMissionStatus } from "./first-settlement-mission-v1.js";
-const VERSION = "2.0-closer-swarm";
+const VERSION = "2.1-transport-rejection-guard";
 const CARD_TIMEOUT_MS = 8000;
 const SEND_TIMEOUT_MS = 15000;
 const MAX_CLOSERS_PER_CYCLE = 30;
@@ -361,9 +361,13 @@ async function sendReady(env, row) {
       responseText = await response.text();
 
       if (!response.ok) {
-        const retryableTransportMismatch = [404,405,415,426].includes(response.status);
+        // 400 is often a protocol/schema mismatch; only try a DIFFERENT advertised binding.
+        // Never retry a 400 against another URL with the same binding (duplicate risk).
+        const retryableTransportMismatch = [400,404,405,415,426].includes(response.status);
+        const nextInterface = interfaces[index + 1];
+        const safeFallback = Boolean(nextInterface && nextInterface.binding !== iface.binding);
         transportErrors.push(`${iface.binding}@${iface.url}:http_${response.status}`);
-        if (retryableTransportMismatch && index < interfaces.length - 1) continue;
+        if (retryableTransportMismatch && safeFallback) continue;
         throw new Error(`send_http_${response.status}`);
       }
 
@@ -390,13 +394,15 @@ async function sendReady(env, row) {
       };
     } catch (error) {
       const err = clean(error?.message || error, 500);
-      const retryableTransportMismatch = [404,405,415,426].includes(responseStatus);
-      if (retryableTransportMismatch && index < interfaces.length - 1) {
+      const retryableTransportMismatch = [400,404,405,415,426].includes(responseStatus);
+      const nextInterface = interfaces[index + 1];
+      if (retryableTransportMismatch && nextInterface && nextInterface.binding !== iface.binding) {
         transportErrors.push(`${iface.binding}@${iface.url}:${err}`);
         continue;
       }
       const now = new Date().toISOString();
-      const combined = clean([...transportErrors, err].filter(Boolean).join(";"), 1000);
+      const rejection = responseStatus === 400 ? "recipient_rejected_request_schema_or_policy" : err;
+      const combined = clean([...transportErrors, rejection, clean(responseText, 300)].filter(Boolean).join(";"), 1000);
       await env.DB.prepare("UPDATE lumen_outreach_attempts SET updated_at=?,status='SEND_FAILED',response_json=?,error=? WHERE proposal_id=?")
         .bind(now, clean(responseText, 12000), combined, row.proposal_id).run();
       return { ok: false, sent: false, status: "SEND_FAILED", error: combined };
