@@ -1,4 +1,4 @@
-const VERSION = "1.3-official-procurement-network";
+const VERSION = "1.4-official-procurement-coverage";
 const FETCH_TIMEOUT_MS = 8000;
 const MAX_SOURCE_SCANS_PER_CYCLE = 2;
 const MAX_RESULTS_PER_SOURCE = 20;
@@ -338,27 +338,35 @@ async function ensureAwardSchema(env) {
 }
 async function refreshAwardSuppliers(env) {
   if(!(await ensureAwardSchema(env))) return {ok:false,error:"persistence_unavailable",version:VERSION};
-  const state=await env.DB.prepare("SELECT last_scan_at FROM lumen_award_supplier_scan_state WHERE id='ted_awards'").first();
-  if(state?.last_scan_at&&Date.now()-Date.parse(state.last_scan_at)<6*3600000)
+  const state=await env.DB.prepare("SELECT last_scan_at,last_scan_status FROM lumen_award_supplier_scan_state WHERE id='ted_awards'").first();
+  const scanVersion="SUCCESS_320_RESEARCH_POOL";
+  if(state?.last_scan_at && state.last_scan_status===scanVersion && Date.now()-Date.parse(state.last_scan_at)<6*3600000)
     return {ok:true,skipped:true,reason:"six_hour_research_cooldown",version:VERSION,createsExternalMessages:false};
   const now=new Date().toISOString();
-  let candidates=[];
+  let candidates=[],scannedNotices=0,pagesFetched=0;
   try {
-    const data=await fetchJson("https://api.ted.europa.eu/v3/notices/search",{
-      method:"POST",headers:{"content-type":"application/json"},
-      body:JSON.stringify({
-        query:`PD = (${compactDate(isoDaysAgo(14))} <> ${compactDate(now)}) SORT BY publication-date DESC`,
-        fields:["publication-number","notice-title","winner-name","winner-internet-address","winner-touchpoint-internet-address","winner-touchpoint-email"],
-        page:1,limit:60,scope:"ALL",checkQuerySyntax:false,paginationMode:"PAGE_NUMBER"
-      })
-    });
-    const rows=Array.isArray(data?.notices)?data.notices:Array.isArray(data?.results)?data.results:[];
-    candidates=rows.map(normalizeTedAward).filter(Boolean);
+    // Published award documents are a minority of all recent TED notices.
+    // Four bounded pages increase the public evidence pool without creating
+    // emails, A2A calls or any financial commitments.
+    for(let page=1;page<=4;page++){
+      const data=await fetchJson("https://api.ted.europa.eu/v3/notices/search",{
+        method:"POST",headers:{"content-type":"application/json"},
+        body:JSON.stringify({
+          query:`PD = (${compactDate(isoDaysAgo(14))} <> ${compactDate(now)}) SORT BY publication-date DESC`,
+          fields:["publication-number","notice-title","winner-name","winner-internet-address","winner-touchpoint-internet-address","winner-touchpoint-email"],
+          page,limit:80,scope:"ALL",checkQuerySyntax:false,paginationMode:"PAGE_NUMBER"
+        })
+      });
+      const rows=Array.isArray(data?.notices)?data.notices:Array.isArray(data?.results)?data.results:[];
+      scannedNotices+=rows.length;pagesFetched++;
+      candidates.push(...rows.map(normalizeTedAward).filter(Boolean));
+      if(rows.length<80) break;
+    }
   } catch(error) {
     const reason=clean(error?.message||error,160);
     await env.DB.prepare("INSERT INTO lumen_award_supplier_scan_state(id,last_scan_at,last_scan_status,last_error) VALUES('ted_awards',?,'FAILED',?) ON CONFLICT(id) DO UPDATE SET last_scan_at=excluded.last_scan_at,last_scan_status=excluded.last_scan_status,last_error=excluded.last_error")
       .bind(now,reason).run();
-    return {ok:false,version:VERSION,error:reason,createsExternalMessages:false};
+    return {ok:false,version:VERSION,error:reason,pagesFetched,scannedNotices,createsExternalMessages:false};
   }
   let newAwards=0,updatedAwards=0;
   for(const candidate of candidates) {
@@ -367,8 +375,8 @@ async function refreshAwardSuppliers(env) {
       .bind(candidate.awardNoticeId,candidate.supplierName,candidate.supplierWebsite,candidate.supplierDomain,candidate.supplierEmail,candidate.emailDomainVerified?1:0,candidate.awardTitle,candidate.evidenceUrl,now,now).run();
     if(old) updatedAwards++; else newAwards++;
   }
-  await env.DB.prepare("INSERT INTO lumen_award_supplier_scan_state(id,last_scan_at,last_scan_status,last_error) VALUES('ted_awards',?,'SUCCESS',NULL) ON CONFLICT(id) DO UPDATE SET last_scan_at=excluded.last_scan_at,last_scan_status=excluded.last_scan_status,last_error=NULL").bind(now).run();
-  return {ok:true,version:VERSION,acceptedAwardEvidence:candidates.length,newAwards,updatedAwards,createsExternalMessages:false,createsA2AOutreachTargets:false,verifiedEmailDomains:candidates.filter(x=>x.emailDomainVerified).length,source:"TED public contract awards"};
+  await env.DB.prepare("INSERT INTO lumen_award_supplier_scan_state(id,last_scan_at,last_scan_status,last_error) VALUES('ted_awards',?,'SUCCESS_320_RESEARCH_POOL',NULL) ON CONFLICT(id) DO UPDATE SET last_scan_at=excluded.last_scan_at,last_scan_status=excluded.last_scan_status,last_error=NULL").bind(now).run();
+  return {ok:true,version:VERSION,acceptedAwardEvidence:candidates.length,newAwards,updatedAwards,scannedNotices,pagesFetched,createsExternalMessages:false,createsA2AOutreachTargets:false,verifiedEmailDomains:candidates.filter(x=>x.emailDomainVerified).length,source:"TED public contract awards"};
 }
 async function awardSupplierInventory(env,limit=20) {
   await ensureAwardSchema(env);
