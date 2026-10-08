@@ -276,7 +276,15 @@ def contact_tick(state: Dict[str, Any]) -> Dict[str, int]:
     accounts = state.setdefault("candidate_accounts", [])
     fresh = [x for x in accounts if x.get("verified_company") and not x.get("commercial_contact_researched_at")]
     retries = [x for x in accounts if _retry_due(x) and x not in fresh]
-    retries.sort(key=lambda x: (int(x.get("contact_research_attempts") or 0), str(x.get("commercial_contact_researched_at") or "")))
+    priority = lambda x: (
+        1 if x.get("demand_signal") else 0,
+        1 if x.get("high_intent_public_demand") else 0,
+        1 if x.get("public_demand_hint") else 0,
+        int(x.get("demand_score") or x.get("demand_discovery_score") or 0),
+        float(x.get("verification_score") or 0),
+    )
+    fresh.sort(key=priority, reverse=True)
+    retries.sort(key=lambda x: (priority(x), -int(x.get("contact_research_attempts") or 0), str(x.get("commercial_contact_researched_at") or "")), reverse=True)
     queue = (fresh + retries)[:MAX_ACCOUNTS_PER_TICK]
     stats = {
         "attempted": 0,
