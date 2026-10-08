@@ -97,7 +97,7 @@ function selectInterfaces(card) {
   const interfaces = Array.isArray(card?.supportedInterfaces) ? card.supportedInterfaces : [];
   for (const entry of interfaces) {
     const binding = clean(entry?.protocolBinding, 80).toUpperCase();
-    if (!isHttps(entry?.url)) continue;
+    if (!isHttps(entry?.url) || isEphemeralAgentEndpoint(entry.url)) continue;
     if (binding === "JSONRPC" || binding === "HTTP+JSON") {
       add({
         url: normalizeBaseUrl(entry.url),
@@ -107,7 +107,7 @@ function selectInterfaces(card) {
       });
     }
   }
-  if (isHttps(card?.url)) {
+  if (isHttps(card?.url) && !isEphemeralAgentEndpoint(card.url)) {
     const transport = clean(card?.preferredTransport || card?.transport || "JSONRPC", 80).toUpperCase();
     if (["JSONRPC", "JSON-RPC", "HTTP+JSON"].includes(transport)) {
       add({
