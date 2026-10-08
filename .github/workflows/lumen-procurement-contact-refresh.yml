@@ -1,0 +1,57 @@
+name: LUMEN Procurement Contact Refresh
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-procurement-contact-refresh.yml'
+  workflow_dispatch:
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    env:
+      BASE: https://lumen-zero-a2a.lumen-b2b.workers.dev
+      OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+    steps:
+      - name: Verify authority
+        run: |
+          set -euo pipefail
+          test -n "$OPPORTUNITY_ADMIN_TOKEN"
+
+      - name: Refresh protected public-procurement sources
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 90 -X POST             -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN"             -H 'cache-control: no-cache'             "$BASE/source-intelligence/cycle" -o /tmp/source-cycle.json
+          jq '{ok,version,selectedSources,results}' /tmp/source-cycle.json
+
+      - name: Read official buyer-contact inventory
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 45             -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN"             -H 'cache-control: no-cache'             "$BASE/source-intelligence/contact-candidates?limit=30" -o /tmp/contacts.json
+          node - <<'NODE'
+          const fs=require('fs');
+          const p=JSON.parse(fs.readFileSync('/tmp/contacts.json','utf8'));
+          const rows=Array.isArray(p.candidates)?p.candidates:[];
+          const host=v=>{try{return new URL(v).hostname.toLowerCase().replace(/^www\./,'')}catch{return ''}};
+          const ed=v=>{const s=String(v||'').toLowerCase();return s.includes('@')?s.split('@').pop().replace(/^www\./,''):''};
+          const same=(a,b)=>a&&b&&(a===b||a.endsWith('.'+b)||b.endsWith('.'+a));
+          const usable=rows.filter(r=>same(ed(r.buyerEmail),host(r.buyerWebsite)));
+          console.log(JSON.stringify({
+            version:p.version,
+            totalCandidates:rows.length,
+            withPublishedEmail:rows.filter(r=>r.buyerEmail).length,
+            withOfficialWebsite:rows.filter(r=>r.buyerWebsite).length,
+            sameDomainContactReady:usable.length,
+            top:usable.slice(0,5).map(r=>({
+              opportunityId:r.opportunityId,
+              remoteId:r.remoteId,
+              buyer:r.buyer,
+              sourceId:r.sourceId,
+              score:r.score,
+              emailDomain:ed(r.buyerEmail),
+              websiteDomain:host(r.buyerWebsite)
+            })),
+            policy:p.policy
+          },null,2));
+          NODE
