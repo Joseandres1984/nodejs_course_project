@@ -1,4 +1,4 @@
-const VERSION = "1.4-novelty-first-tender-coverage";
+const VERSION = "1.5-no-generic-safety-security-matches";
 const REGISTRY_BASE = "https://api.a2a-registry.org";
 const TARGETED_TENDER_QUERY_LIMIT = 10;
 const TARGETED_RESULTS_PER_QUERY = 8;
@@ -23,7 +23,7 @@ const HIGH_SIGNAL_TERMS = new Set([
   "automation","automotive","battery","cable","cables","chemical","chemicals","compressor","compressors",
   "cybersecurity","electrical","electric","electronics","fire","freight","generator","generators","hardware",
   "instrumentation","laboratory","logistics","maintenance","mechanical","motor","motors","piping",
-  "plc","pump","pumps","safety","scada","security","sensor","sensors","software","switchgear","telecom",
+  "plc","pump","pumps","scada","sensor","sensors","software","switchgear","telecom",
   "transformer","transformers","transport","valve","valves","water","welding"
 ]);
 

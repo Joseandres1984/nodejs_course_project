@@ -82,7 +82,7 @@ const softwareTender = {
 };
 assert.equal(
   targetedSupplierQuery(softwareTender),
-  "software cybersecurity security supplier vendor manufacturer provider",
+  "software cybersecurity supplier vendor manufacturer provider",
   "targeted registry query must be derived from exact high-signal tender capabilities"
 );
 assert.equal(
@@ -113,4 +113,28 @@ assert.equal(registrySupplierRow({
 }),null,"registry result without HTTPS endpoint must be rejected before inventory");
 
 
+// A generic "safety" or "security" overlap is not exact supplier evidence.
+// Production had matched crypto agents to physical guards and AI tools to bus shelters.
+const securityTender = {
+  name:"Physical security guards and reception services",
+  description:"Security and safety services for facilities with on-site guards.",
+  score:90,raw_json:future
+};
+const cryptoSupplier = {
+  name:"Coin Railz",
+  description:"Crypto wallet and blockchain security trading platform and security API provider.",
+  tags_json:'["crypto","security"]',score:80
+};
+assert.equal(matchScore(securityTender,cryptoSupplier),null,"crypto security is not physical guarding");
+const safetyTender = {
+  name:"Bus shelter improvement and safety refurbishment",
+  description:"Supply and installation of public bus shelters with safety regulations.",
+  score:86,raw_json:future
+};
+const softwareSafetySupplier = {
+  name:"Software Safety Agent",
+  description:"AI software services provider with safety protocols and developer APIs.",
+  tags_json:'["software","safety"]',score:78
+};
+assert.equal(matchScore(safetyTender,softwareSafetySupplier),null,"AI safety is not bus shelter installation");
 console.log("TENDER_SUPPLIER_MATCH_QUALITY_OK");
