@@ -25,6 +25,8 @@ const trueMatch=__test.officialTenderAwardFit(cleaning,cleanOpen);
 assert.ok(trueMatch);
 assert.equal(trueMatch.evidenceTier,"CATEGORY_EVIDENCE");
 assert.equal(trueMatch.verifiedBuyerDomainContact,true);
+assert.equal(trueMatch.deadlineEvidence,"SEARCH_INDEX_ONLY");
+assert.equal(trueMatch.deadlineNeedsOriginalNoticeVerification,true);
 assert.equal(trueMatch.outreachPermitted,false);
 assert.equal(trueMatch.commercialInterestVerified,false);
 assert.equal(trueMatch.requiresHumanReview,true);
