@@ -15,6 +15,14 @@ jobs:
       BASE: https://lumen-zero-a2a.lumen-b2b.workers.dev
       OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
     steps:
+      - name: Sync revenue loop without external send
+        run: |
+          set -euo pipefail
+          test -n "$OPPORTUNITY_ADMIN_TOKEN"
+          curl -fsS --max-time 90 -X POST -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" -H 'cache-control: no-cache' "$BASE/revenue-loop-v5/run" -o /tmp/revenue-sync.json
+          jq '{ok,version,proposal,followup,closer,lifecycle,memory,guardrails}' /tmp/revenue-sync.json
+          jq -e '.guardrails.autonomousSpendUsd==0 and .guardrails.createsNewSenderAuthority==false and .guardrails.bindingActionsHumanGated==true' /tmp/revenue-sync.json >/dev/null
+
       - name: Read current commercial control planes
         run: |
           set -euo pipefail
