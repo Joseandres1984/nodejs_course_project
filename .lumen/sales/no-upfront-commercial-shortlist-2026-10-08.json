@@ -1,0 +1,77 @@
+{
+  "version": "1.0-public-leads-only",
+  "date": "2026-10-08",
+  "strategy": "get-first-paying-client-without-upfront-application-funds",
+  "infrastructure": "Cloudflare Workers + GitHub; NOT Railway",
+  "truth": {
+    "applications_submitted": 0,
+    "human_buyer_replies": 0,
+    "contracts_signed": 0,
+    "verified_settlements": 0,
+    "verified_revenue_usd": 0,
+    "verified_revenue_ars": 0
+  },
+  "notices": [
+    "Public hiring requests are NOT direct buying interest in LUMEN.",
+    "Workana free plan applications are category- and achievement-limited and require an approved human account. No platform application executed.",
+    "A client-reported commission and average ticket are not verified revenue.",
+    "No external contact, platform application, contract, payment, or charge created."
+  ],
+  "opportunities": [
+    {
+      "id": "LUMEN-FREE-20261008-001",
+      "priority": 1,
+      "title": "Vendedores comerciales B2B para productos de estética automotriz",
+      "posted": "2026-10-06",
+      "last_checked": "2026-10-08",
+      "platform": "Workana",
+      "url": "https://www.workana.com/job/vendedores-comerciales-b2b-para-productos-de-estetica-automotriz-con-altas-comisiones",
+      "public_state": "Evaluating bids / Open",
+      "public_bids": 0,
+      "client_project_payments_public": 0,
+      "deal_model": "20% commission on actually paid product revenue; possible recurring commissions on assigned reorders",
+      "employer_claimed_average_ticket_ars": 200000,
+      "employer_claimed_commission_per_average_paid_sale_ars": 40000,
+      "guaranteed_income": false,
+      "why_fit": "Argentina, warm buyer inquiries supplied by manufacturer, B2B follow-up, supplier/product knowledge and lead qualification can be organized with LUMEN",
+      "essential_constraints": [
+        "Workana approved account and eligible free proposal credit",
+        "Requires real human or explicitly authorized WhatsApp/phone sales handling, not fully autonomous today",
+        "Agree lead ownership, commission and attributed reorders in writing before taking work",
+        "Client has zero publicly listed completed paid projects"
+      ],
+      "proposed_pilot": "Small, opt-in warm lead batch with clearly scoped qualification/follow-up and client-confirmed order attribution; no unsolicited outbound or autonomous payments",
+      "status": "PUBLIC_OPPORTUNITY_NOT_APPLIED",
+      "application_submitted": false,
+      "contact_sent": false,
+      "payment_verified": false
+    },
+    {
+      "id": "LUMEN-FREE-20261008-002",
+      "priority": 2,
+      "title": "Investigación de mercado de autopartes en Colombia: demanda y precios",
+      "posted": "2026-09-19",
+      "last_checked": "2026-10-08",
+      "platform": "Workana",
+      "url": "https://www.workana.com/job/investigacion-de-mercado-de-autopartes-en-colombia-demanda-y-precios",
+      "public_state": "Evaluating bids / Open",
+      "public_bids": 3,
+      "client_project_payments_public": 0,
+      "deal_model": "fixed-scope research fee to quote; no published budget",
+      "guaranteed_income": false,
+      "why_fit": "Technical procurement comparisons, OEM equivalence and source-cited price benchmarking can be done by LUMEN remotely",
+      "essential_constraints": [
+        "Requires proof of Colombian local availability, aftermarket/OEM part equivalence and two sources per price",
+        "Buyer asks whether sellers can verify current price directly; cannot promise unverified wholesale prices",
+        "Need scope reduction to an agreed paid pilot, not uncompensated full 5 brands x 2 models x 5 parts",
+        "Workana approved account and eligible free proposal credit",
+        "Client has zero publicly listed completed paid projects"
+      ],
+      "proposed_pilot": "One brand, two popular models, five parts per model in a documented spreadsheet; price evidence from published sources and contactable distributors, exceptions clearly stated",
+      "status": "PUBLIC_OPPORTUNITY_NOT_APPLIED",
+      "application_submitted": false,
+      "contact_sent": false,
+      "payment_verified": false
+    }
+  ]
+}
