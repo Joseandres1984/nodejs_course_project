@@ -278,15 +278,16 @@ function publicCatalog(origin) {
       paidUrl:`${origin}/buy/${slug}`,
     })),
     flow:[
-      "GET paidUrl",
+      "GET paidUrl (optionally add a NONCONFIDENTIAL ?requirement=... brief)",
       "receive HTTP 402 PAYMENT-REQUIRED",
       "buyer signs exact USDC authorization",
-      "retry with PAYMENT-SIGNATURE",
-      "LUMEN verifies authorization",
-      "resource prepares receipt with optional conversion attribution",
-      "facilitator settles Base USDC before response leaves middleware",
-      "LUMEN records realized revenue only after settlement success",
-      "human checkout: linked brief auto-queues only after verified settlement; machine clients may POST /redeem",
+      "signed retry yields HTTP 409 pending individual owner approval; no funds settle",
+      "owner approves exact product, amount, network and recipient using private approval panel",
+      "buyer retries with a fresh signed payment and x-lumen-approval-id",
+      "LUMEN verifies authorization and consumes one-use owner approval",
+      "facilitator settles USDC on Base and response includes x402 receipt",
+      "LUMEN counts revenue only after verified settlement response",
+      "valid query brief or linked human brief queues work AFTER settlement; otherwise clients may POST /redeem",
     ],
   };
 }
