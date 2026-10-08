@@ -2,6 +2,11 @@ name: LUMEN x402 deploy
 # Tender Hot Lead deploy trigger 2026-10-07
 
 on:
+  pull_request:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/x402-worker/**'
+      - '.github/workflows/lumen-x402-deploy.yml'
   push:
     branches: [lumen-zero]
     paths:
@@ -10,7 +15,24 @@ on:
   workflow_dispatch:
 
 jobs:
+  validate-approval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Check x402 entrypoints and approval logic
+        run: |
+          node --check .lumen/x402-worker/settlement-approval.js
+          node --check .lumen/x402-worker/entry.js
+          node --check .lumen/x402-worker/worker-v2.js
+          node --check .lumen/x402-worker/commission-checkout.js
+      - name: Test human authorization gates without a blockchain payment
+        run: node .lumen/x402-worker/test-settlement-approval.mjs
   deploy-x402:
+    needs: validate-approval
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -52,4 +74,16 @@ jobs:
           done
           test "$ready" -eq 1
           curl -fsS --max-time 20 "$BASE/catalog" | jq -e '.settlement.outgoingSpendEnabled == false and (.products | length) >= 1' >/dev/null
+          curl -fsS --max-time 20 "$BASE/approvals/policy" | jq -e '
+            .humanApprovalRequired == true and
+            .defaultDeny == true and
+            .oneTime == true and
+            .automaticApproval == false and
+            (.coveredRoutes | index("/buy/*") != null) and
+            (.coveredRoutes | index("/commission/*") != null)
+          ' >/dev/null
+          owner_code="$(curl -sS --max-time 20 -o /tmp/x402-owner-test.json -w '%{http_code}' -X POST "$BASE/approvals/X402A-FAKE/approve")"
+          test "$owner_code" = '403'
+          jq -e '.ok == false' /tmp/x402-owner-test.json >/dev/null
+          echo 'X402_HUMAN_APPROVAL_FAIL_CLOSED_LIVE_OK'
           echo 'X402_SELLER_CHECKOUT_LIVE_OK'
