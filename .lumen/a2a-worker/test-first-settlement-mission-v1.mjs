@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { diagnoseSettlementBlocker, chooseFirstSettlementMission, FIRST_SETTLEMENT_MISSION_POLICY } from "./first-settlement-mission-v1.js";
 
-assert.equal(FIRST_SETTLEMENT_MISSION_POLICY.version, "1.3-tender-lead-close-priority");
+assert.equal(FIRST_SETTLEMENT_MISSION_POLICY.version, "1.4-response-truth-rotation");
+assert.equal(FIRST_SETTLEMENT_MISSION_POLICY.rotateNonCommercialTransportResponses, true);
 assert.equal(FIRST_SETTLEMENT_MISSION_POLICY.autonomousSpendUsd, 0);
 assert.equal(FIRST_SETTLEMENT_MISSION_POLICY.bindingActionsHumanGated, true);
 assert.equal(FIRST_SETTLEMENT_MISSION_POLICY.skipExplicitMoveOn, true);
@@ -57,6 +58,29 @@ const retryDueOutreach = diagnoseSettlementBlocker({
 assert.equal(retryDueOutreach.blocker,"OUTREACH_RETRY_DUE");
 assert.equal(retryDueOutreach.action,"retry_existing_outreach_probe");
 
+const transportOnlyResponse = diagnoseSettlementBlocker({
+  stage:"PROPOSAL_READY",quality_gate_status:"PASS",outreach_status:"RESPONDED",
+  pipeline_response_class:null,commercial_reply_count:0,
+  outreach_updated_at:"2026-10-03T11:30:00Z",updated_at:"2026-10-03T11:30:00Z"
+}, now);
+assert.equal(transportOnlyResponse.blocker,"NONCOMMERCIAL_OUTREACH_RESPONSE");
+assert.equal(transportOnlyResponse.action,"rotate_to_next_opportunity_or_human_review");
+
+const verifiedResponseNeedsSync = diagnoseSettlementBlocker({
+  stage:"PROPOSAL_READY",quality_gate_status:"PASS",outreach_status:"RESPONDED",
+  pipeline_response_class:"COMMERCIAL_INTEREST",commercial_reply_count:1,
+  outreach_updated_at:"2026-10-03T11:30:00Z",updated_at:"2026-10-03T11:30:00Z"
+}, now);
+assert.equal(verifiedResponseNeedsSync.blocker,"RESPONSE_STAGE_SYNC_REQUIRED");
+assert.equal(verifiedResponseNeedsSync.action,"sync_verified_response_to_replied");
+
+const alreadySent = diagnoseSettlementBlocker({
+  stage:"PROPOSAL_READY",quality_gate_status:"PASS",outreach_status:"SENT_TASK",
+  outreach_updated_at:"2026-10-03T11:30:00Z",updated_at:"2026-10-03T11:30:00Z"
+}, now);
+assert.equal(alreadySent.blocker,"OUTREACH_ALREADY_SENT");
+assert.equal(alreadySent.action,"poll_existing_outreach_before_resend");
+
 const negotiatingPurchase = diagnoseSettlementBlocker({ stage:"NEGOTIATING", response_class:"PURCHASE_INTENT", updated_at:"2026-10-03T10:00:00Z" }, now);
 assert.equal(negotiatingPurchase.blocker, "CHECKOUT_OR_SETTLEMENT_PENDING");
 assert.equal(negotiatingPurchase.action, "prepare_existing_checkout_or_close_gate");
@@ -95,6 +119,12 @@ const terminalOutreachRotates = chooseFirstSettlementMission([
   { opportunity_id:"sendable", stage:"PROPOSAL_READY", first_cash_score:.2, intent_score:.7, quality_gate_status:"PASS", updated_at:"2026-10-03T11:40:00Z" }
 ], now);
 assert.equal(terminalOutreachRotates.focus.opportunity_id,"sendable","terminal outreach paths must not monopolize First Settlement");
+
+const transportOnlyRotates = chooseFirstSettlementMission([
+  { opportunity_id:"transport-only", stage:"PROPOSAL_READY", first_cash_score:9, intent_score:.95, quality_gate_status:"PASS", outreach_status:"RESPONDED", pipeline_response_class:null, commercial_reply_count:0, outreach_updated_at:"2026-10-03T11:50:00Z", updated_at:"2026-10-03T11:50:00Z" },
+  { opportunity_id:"sendable-next", stage:"PROPOSAL_READY", first_cash_score:.25, intent_score:.7, quality_gate_status:"PASS", updated_at:"2026-10-03T11:55:00Z" }
+], now);
+assert.equal(transportOnlyRotates.focus.opportunity_id,"sendable-next","transport-only RESPONDED rows must rotate instead of masquerading as awaiting send");
 
 const tenderLeadBeatsBrokenDraft = chooseFirstSettlementMission([
   { opportunity_id:"broken-old", offer_id:"MP-BUYER-SIGNALS", stage:"PROPOSAL_READY", first_cash_score:1.2, intent_score:.8, quality_gate_status:"NEEDS_REVISION", updated_at:"2026-10-03T11:55:00Z" },
