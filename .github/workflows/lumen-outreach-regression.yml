@@ -1,0 +1,34 @@
+name: LUMEN Outbound Quality Regression
+
+on:
+  pull_request:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/a2a-worker/a2a-outreach.js'
+      - '.lumen/a2a-worker/test-outreach-qualified-targets.mjs'
+      - '.github/workflows/lumen-outreach-regression.yml'
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/a2a-worker/a2a-outreach.js'
+      - '.lumen/a2a-worker/test-outreach-qualified-targets.mjs'
+      - '.github/workflows/lumen-outreach-regression.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify-qualified-commercial-targets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validate outbound JS syntax and regression gates
+        run: |
+          set -euo pipefail
+          node --check .lumen/a2a-worker/a2a-outreach.js
+          node --check .lumen/a2a-worker/test-outreach-qualified-targets.mjs
+          node .lumen/a2a-worker/test-outreach-qualified-targets.mjs

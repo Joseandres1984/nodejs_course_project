@@ -1,5 +1,5 @@
 import { getFirstSettlementMissionStatus } from "./first-settlement-mission-v1.js";
-const VERSION = "2.1-transport-rejection-guard";
+const VERSION = "2.2-qualified-durable-endpoints";
 const CARD_TIMEOUT_MS = 8000;
 const SEND_TIMEOUT_MS = 15000;
 const MAX_CLOSERS_PER_CYCLE = 30;
@@ -28,6 +28,15 @@ function safeParse(value, fallback = {}) {
 
 function isHttps(value) {
   try { return new URL(value).protocol === "https:"; } catch { return false; }
+}
+
+// Free temporary tunnels are not durable verified commercial destinations.
+// Do not probe or send to a short-lived tunnel that may belong to someone else later.
+export function isEphemeralAgentEndpoint(value) {
+  try {
+    const host = new URL(value).hostname.toLowerCase();
+    return host === "trycloudflare.com" || host.endsWith(".trycloudflare.com");
+  } catch { return false; }
 }
 
 function normalizeBaseUrl(value) {
@@ -65,7 +74,7 @@ async function preferredOpportunityId(env) {
 
 async function getNextApproved(env) {
   const preferred=await preferredOpportunityId(env);
-  return env.DB.prepare("SELECT p.proposal_id,p.opportunity_id,p.offer_id,p.offer_name,p.amount_usd,p.subject,p.message,p.metadata_json,o.name,o.endpoint FROM lumen_proposal_drafts p JOIN lumen_opportunities o ON o.id=p.opportunity_id LEFT JOIN lumen_outreach_attempts x ON x.proposal_id=p.proposal_id WHERE p.status='APPROVED' AND p.quality_gate_status='PASS' AND (x.proposal_id IS NULL OR (x.status IN ('CARD_FETCH_FAILED','SEND_FAILED') AND datetime(x.updated_at)<=datetime('now','-6 hours'))) ORDER BY CASE WHEN p.opportunity_id=? THEN 0 ELSE 1 END,p.updated_at ASC LIMIT 1").bind(preferred||"").first();
+  return env.DB.prepare("SELECT p.proposal_id,p.opportunity_id,p.offer_id,p.offer_name,p.amount_usd,p.subject,p.message,p.metadata_json,o.name,o.endpoint FROM lumen_proposal_drafts p JOIN lumen_opportunities o ON o.id=p.opportunity_id JOIN lumen_opportunity_assessments a ON a.opportunity_id=p.opportunity_id AND a.commercially_actionable=1 AND a.synthetic_or_test_only=0 AND a.commercial_score>=65 AND LOWER(COALESCE(a.evidence_strength,'')) IN ('medium','strong') LEFT JOIN lumen_outreach_attempts x ON x.proposal_id=p.proposal_id WHERE p.status='APPROVED' AND p.quality_gate_status='PASS' AND (x.proposal_id IS NULL OR (x.status IN ('CARD_FETCH_FAILED','SEND_FAILED') AND datetime(x.updated_at)<=datetime('now','-6 hours'))) ORDER BY CASE WHEN p.opportunity_id=? THEN 0 ELSE 1 END,p.updated_at ASC LIMIT 1").bind(preferred||"").first();
 }
 
 function hasRequiredAuth(card) {
@@ -88,7 +97,7 @@ function selectInterfaces(card) {
   const interfaces = Array.isArray(card?.supportedInterfaces) ? card.supportedInterfaces : [];
   for (const entry of interfaces) {
     const binding = clean(entry?.protocolBinding, 80).toUpperCase();
-    if (!isHttps(entry?.url)) continue;
+    if (!isHttps(entry?.url) || isEphemeralAgentEndpoint(entry.url)) continue;
     if (binding === "JSONRPC" || binding === "HTTP+JSON") {
       add({
         url: normalizeBaseUrl(entry.url),
@@ -98,7 +107,7 @@ function selectInterfaces(card) {
       });
     }
   }
-  if (isHttps(card?.url)) {
+  if (isHttps(card?.url) && !isEphemeralAgentEndpoint(card.url)) {
     const transport = clean(card?.preferredTransport || card?.transport || "JSONRPC", 80).toUpperCase();
     if (["JSONRPC", "JSON-RPC", "HTTP+JSON"].includes(transport)) {
       add({
@@ -114,6 +123,7 @@ function selectInterfaces(card) {
 
 async function fetchAgentCard(cardUrl) {
   if (!isHttps(cardUrl)) return { ok: false, status: "INCOMPATIBLE", error: "card_url_not_https" };
+  if (isEphemeralAgentEndpoint(cardUrl)) return { ok: false, status: "INCOMPATIBLE", error: "ephemeral_tunnel_not_verified_commercial_endpoint" };
   const timeout = withTimeout(CARD_TIMEOUT_MS);
   try {
     const response = await fetch(cardUrl, {
@@ -122,9 +132,9 @@ async function fetchAgentCard(cardUrl) {
       signal: timeout.signal
     });
     const text = await response.text();
-    if (!response.ok) return { ok: false, status: "CARD_FETCH_FAILED", error: `card_http_${response.status}`, raw: clean(text, 2000) };
+    if (!response.ok) return { ok: false, status: [400,404,410].includes(response.status) ? "INCOMPATIBLE" : "CARD_FETCH_FAILED", error: `card_http_${response.status}`, raw: clean(text, 2000) };
     let card;
-    try { card = JSON.parse(text); } catch { return { ok: false, status: "CARD_FETCH_FAILED", error: "card_invalid_json" }; }
+    try { card = JSON.parse(text); } catch { return { ok: false, status: "INCOMPATIBLE", error: "card_invalid_json" }; }
     if (hasRequiredAuth(card)) return { ok: false, status: "AUTH_REQUIRED", error: "agent_requires_authentication", card };
     const interfaces = selectInterfaces(card);
     if (!interfaces.length) return { ok: false, status: "INCOMPATIBLE", error: "no_supported_public_a2a_interface", card };
@@ -238,12 +248,12 @@ export async function probeNextApproved(env) {
 async function getReadyAttempt(env) {
   const preferred=await preferredOpportunityId(env);
   if(preferred){
-    const priorityReady=await env.DB.prepare("SELECT x.proposal_id,x.opportunity_id,x.card_url,x.agent_url,x.protocol_binding,x.protocol_version,p.offer_id,p.offer_name,p.amount_usd,p.subject,p.message,p.metadata_json,o.name FROM lumen_outreach_attempts x JOIN lumen_proposal_drafts p ON p.proposal_id=x.proposal_id JOIN lumen_opportunities o ON o.id=p.opportunity_id WHERE x.status='READY' AND p.status='APPROVED' AND p.quality_gate_status='PASS' AND p.opportunity_id=? ORDER BY x.updated_at ASC LIMIT 1").bind(preferred).first();
+    const priorityReady=await env.DB.prepare("SELECT x.proposal_id,x.opportunity_id,x.card_url,x.agent_url,x.protocol_binding,x.protocol_version,p.offer_id,p.offer_name,p.amount_usd,p.subject,p.message,p.metadata_json,o.name FROM lumen_outreach_attempts x JOIN lumen_proposal_drafts p ON p.proposal_id=x.proposal_id JOIN lumen_opportunities o ON o.id=p.opportunity_id JOIN lumen_opportunity_assessments a ON a.opportunity_id=p.opportunity_id AND a.commercially_actionable=1 AND a.synthetic_or_test_only=0 AND a.commercial_score>=65 AND LOWER(COALESCE(a.evidence_strength,'')) IN ('medium','strong') WHERE x.status='READY' AND p.status='APPROVED' AND p.quality_gate_status='PASS' AND p.opportunity_id=? ORDER BY x.updated_at ASC LIMIT 1").bind(preferred).first();
     if(priorityReady) return priorityReady;
-    const priorityPending=await env.DB.prepare("SELECT p.proposal_id FROM lumen_proposal_drafts p LEFT JOIN lumen_outreach_attempts x ON x.proposal_id=p.proposal_id WHERE p.status='APPROVED' AND p.quality_gate_status='PASS' AND p.opportunity_id=? AND (x.proposal_id IS NULL OR (x.status IN ('CARD_FETCH_FAILED','SEND_FAILED') AND datetime(x.updated_at)<=datetime('now','-6 hours'))) LIMIT 1").bind(preferred).first();
+    const priorityPending=await env.DB.prepare("SELECT p.proposal_id FROM lumen_proposal_drafts p JOIN lumen_opportunity_assessments a ON a.opportunity_id=p.opportunity_id AND a.commercially_actionable=1 AND a.synthetic_or_test_only=0 AND a.commercial_score>=65 AND LOWER(COALESCE(a.evidence_strength,'')) IN ('medium','strong') LEFT JOIN lumen_outreach_attempts x ON x.proposal_id=p.proposal_id WHERE p.status='APPROVED' AND p.quality_gate_status='PASS' AND p.opportunity_id=? AND (x.proposal_id IS NULL OR (x.status IN ('CARD_FETCH_FAILED','SEND_FAILED') AND datetime(x.updated_at)<=datetime('now','-6 hours'))) LIMIT 1").bind(preferred).first();
     if(priorityPending) return null;
   }
-  return env.DB.prepare("SELECT x.proposal_id,x.opportunity_id,x.card_url,x.agent_url,x.protocol_binding,x.protocol_version,p.offer_id,p.offer_name,p.amount_usd,p.subject,p.message,p.metadata_json,o.name FROM lumen_outreach_attempts x JOIN lumen_proposal_drafts p ON p.proposal_id=x.proposal_id JOIN lumen_opportunities o ON o.id=p.opportunity_id WHERE x.status='READY' AND p.status='APPROVED' AND p.quality_gate_status='PASS' ORDER BY x.updated_at ASC LIMIT 1").first();
+  return env.DB.prepare("SELECT x.proposal_id,x.opportunity_id,x.card_url,x.agent_url,x.protocol_binding,x.protocol_version,p.offer_id,p.offer_name,p.amount_usd,p.subject,p.message,p.metadata_json,o.name FROM lumen_outreach_attempts x JOIN lumen_proposal_drafts p ON p.proposal_id=x.proposal_id JOIN lumen_opportunities o ON o.id=p.opportunity_id JOIN lumen_opportunity_assessments a ON a.opportunity_id=p.opportunity_id AND a.commercially_actionable=1 AND a.synthetic_or_test_only=0 AND a.commercial_score>=65 AND LOWER(COALESCE(a.evidence_strength,'')) IN ('medium','strong') WHERE x.status='READY' AND p.status='APPROVED' AND p.quality_gate_status='PASS' ORDER BY x.updated_at ASC LIMIT 1").first();
 }
 
 async function sentLast24h(env) {
@@ -259,7 +269,7 @@ async function getReadyAttempts(env, limit = MAX_CLOSERS_PER_CYCLE) {
     if (origin) blockedOrigins.add(origin);
   }
 
-  const candidates = await env.DB.prepare("SELECT x.proposal_id,x.opportunity_id,x.card_url,x.agent_url,x.protocol_binding,x.protocol_version,p.offer_id,p.offer_name,p.amount_usd,p.subject,p.message,p.metadata_json,o.name FROM lumen_outreach_attempts x JOIN lumen_proposal_drafts p ON p.proposal_id=x.proposal_id JOIN lumen_opportunities o ON o.id=p.opportunity_id WHERE x.status='READY' AND p.status='APPROVED' AND p.quality_gate_status='PASS' ORDER BY x.updated_at ASC LIMIT 240").all();
+  const candidates = await env.DB.prepare("SELECT x.proposal_id,x.opportunity_id,x.card_url,x.agent_url,x.protocol_binding,x.protocol_version,p.offer_id,p.offer_name,p.amount_usd,p.subject,p.message,p.metadata_json,o.name FROM lumen_outreach_attempts x JOIN lumen_proposal_drafts p ON p.proposal_id=x.proposal_id JOIN lumen_opportunities o ON o.id=p.opportunity_id JOIN lumen_opportunity_assessments a ON a.opportunity_id=p.opportunity_id AND a.commercially_actionable=1 AND a.synthetic_or_test_only=0 AND a.commercial_score>=65 AND LOWER(COALESCE(a.evidence_strength,'')) IN ('medium','strong') WHERE x.status='READY' AND p.status='APPROVED' AND p.quality_gate_status='PASS' ORDER BY x.updated_at ASC LIMIT 240").all();
   const selected = [];
   const seenOrigins = new Set();
   const seenOpportunities = new Set();
