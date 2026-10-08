@@ -1,0 +1,39 @@
+name: LUMEN x402 Owner Approval Readiness
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/lumen-x402-owner-approval-readiness.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-readiness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Verify individual owner approval is configured in production
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://lumen-zero-x402.lumen-b2b.workers.dev'
+          curl --fail --silent --show-error --max-time 20 "$base/approvals/policy" > /tmp/policy.json
+          jq -e '
+            .humanApprovalRequired == true and
+            .defaultDeny == true and
+            .oneTime == true and
+            .automaticApproval == false
+          ' /tmp/policy.json >/dev/null
+          if jq -e '.ownerCredentialConfigured == true' /tmp/policy.json >/dev/null; then
+            echo 'OWNER_APPROVAL_SECRET_PRESENT=yes'
+          else
+            echo '::error::X402_HUMAN_APPROVAL_TOKEN not configured or too short in deployed Worker'
+            exit 1
+          fi
+          code=$(curl --silent --show-error --max-time 20 -o /tmp/no-owner.json -w '%{http_code}' -X POST "$base/approvals/X402A-FAKE/approve")
+          test "$code" = '403'
+          jq -e '.ok == false' /tmp/no-owner.json >/dev/null
+          echo 'X402_APPROVAL_CONFIGURED_AND_UNAUTHORIZED_ACTION_DENIED_OK'
