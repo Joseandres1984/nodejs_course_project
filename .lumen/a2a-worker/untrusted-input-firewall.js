@@ -4,6 +4,28 @@ function clean(v,n=16000){return String(v??"").trim().replace(/\s+/g," ").slice(
 function authorized(r,e){const a=clean(e?.OPPORTUNITY_ADMIN_TOKEN,500),b=clean(r.headers.get("x-lumen-admin"),500);return Boolean(a&&b&&a===b);}
 const RULES=[['ignore_instructions',/ignore (all|any|the)? ?(previous|prior|system|developer|user) (instruction|message|prompt)/i],['system_prompt',/system prompt/i],['secret_exfiltration',/(reveal|show|send|return|print).{0,40}(secret|token|credential|api key|admin token|private key|seed phrase)/i],['disable_guardrail',/(disable|remove|ignore|bypass|override).{0,30}(security|safety|guardrail|approval|authorization|policy)/i],['hidden_action',/do not tell (the )?(user|human|operator)/i],['wallet_secret',/(wallet seed|seed phrase|private key)/i],['privilege_claim',/(you are now|act as).{0,40}(system|administrator|root|owner)/i]];
 function scan(text){const t=clean(text,24000),hits=RULES.filter(([,r])=>r.test(t)).map(([n])=>n);return{hits,count:hits.length,severe:hits.some(x=>['secret_exfiltration','disable_guardrail','wallet_secret','privilege_claim'].includes(x))||hits.length>=2};}
+// Reusable ingress gate for external A2A task results. Pure inspection never
+// treats external text as a command; suspicious or oversized input is quarantined.
+export function inspectUntrustedExternalText(value) {
+  const raw = String(value ?? "");
+  if (raw.length > 24000) return { allowed:false, hits:["oversized_external_input"], severe:true };
+  const result = scan(raw);
+  return { allowed:result.count === 0, hits:result.hits, severe:result.severe };
+}
+
+export async function guardExternalA2AResult(env, proposalId, value) {
+  const verdict = inspectUntrustedExternalText(value);
+  if (verdict.allowed) return verdict;
+  try {
+    if (!(await ensure(env))) return { ...verdict, audited:false };
+    await log(env, "UNTRUSTED_A2A_POLL", "A2A_POLL", clean(proposalId,200), null,
+      verdict.severe ? "HIGH" : "MEDIUM", "QUARANTINED_BEFORE_COMMERCIAL_PIPELINE", verdict.hits);
+    return { ...verdict, audited:true };
+  } catch {
+    return { ...verdict, audited:false };
+  }
+}
+
 async function ensure(env){if(!env?.DB)return false;await env.DB.batch([env.DB.prepare("CREATE TABLE IF NOT EXISTS lumen_security_events (id TEXT PRIMARY KEY,created_at TEXT NOT NULL,event_type TEXT NOT NULL,source_type TEXT NOT NULL,source_id TEXT NOT NULL,partner_id TEXT,severity TEXT NOT NULL,action_taken TEXT NOT NULL,signals_json TEXT NOT NULL,engine_version TEXT NOT NULL)"),env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_lumen_security_events ON lumen_security_events(severity,created_at DESC)")]);return true;}
 async function log(env,type,sourceType,sourceId,partnerId,severity,action,signals){const id=`SEC-${crypto.randomUUID().replaceAll('-','').slice(0,20).toUpperCase()}`;await env.DB.prepare("INSERT INTO lumen_security_events(id,created_at,event_type,source_type,source_id,partner_id,severity,action_taken,signals_json,engine_version) VALUES(?,?,?,?,?,?,?,?,?,?)").bind(id,new Date().toISOString(),type,sourceType,sourceId,partnerId||null,severity,action,JSON.stringify(signals||[]),VERSION).run();}
 function reasons(v){try{const x=JSON.parse(v||'[]');return Array.isArray(x)?x:[];}catch{return[];}}

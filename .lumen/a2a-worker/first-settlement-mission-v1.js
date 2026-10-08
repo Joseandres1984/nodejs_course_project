@@ -2,6 +2,9 @@ export const FIRST_SETTLEMENT_MISSION_POLICY = Object.freeze({
   version: "1.9-tracking-recovery",
   objective: "move_the_best_real_opportunity_toward_first_verified_settlement",
   settlementTruth: "verified_x402_receipt_only",
+  campaignTargetVerifiedSettlements: 3,
+  manualAuthorizationForAnyCharge: true,
+  countsOnlyDeduplicatedProviderVerifiedReceipts: true,
   autonomousSpendUsd: 0,
   autonomousPurchase: false,
   autonomousContract: false,
@@ -65,7 +68,7 @@ export function diagnoseSettlementBlocker(row = {}, now = Date.now()) {
     } else if (["SENT","SENT_TASK","WORKING"].includes(outreachStatus)) {
       blocker = "OUTREACH_ALREADY_SENT";
       action = "poll_existing_outreach_before_resend";
-    } else if (["AUTH_REQUIRED","INCOMPATIBLE","TASK_TERMINAL"].includes(outreachStatus)) {
+    } else if (["AUTH_REQUIRED","INCOMPATIBLE","TASK_TERMINAL","INPUT_REJECTED"].includes(outreachStatus)) {
       blocker = "OUTREACH_PATH_TERMINAL";
       action = "rotate_to_next_opportunity_or_human_review";
     } else if (["CARD_FETCH_FAILED","SEND_FAILED"].includes(outreachStatus) && outreachAge < 6) {
@@ -188,6 +191,45 @@ export function chooseFirstSettlementMission(rows = [], now = Date.now()) {
   return { status: "ACTIVE", focus: selected.row, diagnosis: selected.diagnosis, selectionPriority:selected.priority };
 }
 
+
+/**
+ * Strict read-only 3-settlement campaign counter.
+ * x402-revenue-bridge inserts an idempotent, evidence-keyed event only after
+ * the facilitator reports settlement.success === true. Unverified 402s, clicks,
+ * unredeemed requests and ordinary replies are excluded.
+ */
+export async function getThreeSettlementProgress(env) {
+  const target = FIRST_SETTLEMENT_MISSION_POLICY.campaignTargetVerifiedSettlements;
+  if (!env?.DB) return { target, status: "EVIDENCE_UNAVAILABLE", verifiedSettlements: null, verifiedRevenueUsd: null, remaining: null, complete: false };
+  try {
+    const row = await env.DB.prepare(`SELECT COUNT(*) AS verified_settlements,
+      COALESCE(SUM(amount),0) AS verified_revenue_usd
+      FROM (
+        SELECT evidence, MAX(amount_usd) AS amount
+        FROM lumen_revenue_events
+        WHERE event_type='payment_settled'
+          AND source='x402'
+          AND status='verified'
+          AND evidence LIKE 'x402_receipt:%'
+        GROUP BY evidence
+      )`).first();
+    const count = Math.max(0, Number(row?.verified_settlements || 0));
+    const usd = Math.max(0, Number(row?.verified_revenue_usd || 0));
+    return {
+      target,
+      status: count >= target ? "TARGET_VERIFIED" : "IN_PROGRESS",
+      verifiedSettlements: count,
+      verifiedRevenueUsd: Number(usd.toFixed(2)),
+      remaining: Math.max(0, target - count),
+      complete: count >= target,
+      proof: "distinct_verified_x402_receipt_evidence",
+      noChargesExecutedByThisCheck: true
+    };
+  } catch {
+    return { target, status: "EVIDENCE_UNAVAILABLE", verifiedSettlements: null, verifiedRevenueUsd: null, remaining: null, complete: false };
+  }
+}
+
 export async function getFirstSettlementMissionStatus(env) {
   if (!env?.DB) throw new Error("first_settlement_mission_persistence_required");
   const result = await env.DB.prepare(`SELECT r.*, p.quality_gate_status,
@@ -260,6 +302,7 @@ export async function getFirstSettlementMissionStatus(env) {
   return {
     ok: true,
     policy: FIRST_SETTLEMENT_MISSION_POLICY,
+    campaign: await getThreeSettlementProgress(env),
     mission,
     recoverySource,
     recoveryCount,

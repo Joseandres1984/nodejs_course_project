@@ -18,6 +18,9 @@ jobs:
         run: node .lumen/a2a-worker/test-sovereign-revenue.mjs
       - name: Existing runtime regression tests
         run: |
+          node .lumen/a2a-worker/test-first-settlement-mission-v1.mjs
+          node .lumen/a2a-worker/test-first-settlement-tracking-recovery.mjs
+          node .lumen/a2a-worker/test-outreach-qualified-targets.mjs
           node .lumen/a2a-worker/test-paid-boost.mjs
           node .lumen/a2a-worker/test-discovery.mjs
           node .lumen/a2a-worker/test-superautonomy-v3.mjs

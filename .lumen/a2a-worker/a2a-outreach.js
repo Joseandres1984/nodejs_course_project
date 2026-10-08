@@ -1,4 +1,5 @@
 import { getFirstSettlementMissionStatus } from "./first-settlement-mission-v1.js";
+import { guardExternalA2AResult } from "./untrusted-input-firewall.js";
 const VERSION = "2.3-qualified-outreach-idle-truth";
 const CARD_TIMEOUT_MS = 8000;
 const SEND_TIMEOUT_MS = 15000;
@@ -458,33 +459,53 @@ function responseState(body, binding) {
   return { ...info, terminal };
 }
 
+// Task GET/GetTask is read-only: retry a single transient 429/502/503/504 once.
+// Never use this retry for commercial SEND or any payment/contract operation.
+export async function retryReadOnlyTaskPoll(makeRequest, pause = ms => new Promise(resolve => setTimeout(resolve, ms))) {
+  let response;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    response = await makeRequest();
+    if (![429,502,503,504].includes(response?.status) || attempt === 1) return response;
+    try { await response.body?.cancel?.(); } catch { /* response already consumed */ }
+    await pause(350);
+  }
+  return response;
+}
+
 async function pollOne(env, row) {
   if (!row.task_id || !row.agent_url) return { polled: false };
   const isV1 = String(row.protocol_version || "").startsWith("1.");
   const timeout = withTimeout(SEND_TIMEOUT_MS);
   try {
-    let response;
-    if (row.protocol_binding === "HTTP+JSON") {
-      response = await fetch(`${normalizeBaseUrl(row.agent_url)}/tasks/${encodeURIComponent(row.task_id)}`, {
-        method: "GET",
-        headers: { "accept": "application/a2a+json, application/json", "a2a-version": row.protocol_version || "1.0" },
-        signal: timeout.signal
+    const response = await retryReadOnlyTaskPoll(async () => {
+      if (row.protocol_binding === "HTTP+JSON") {
+        return await fetch(`${normalizeBaseUrl(row.agent_url)}/tasks/${encodeURIComponent(row.task_id)}`, {
+          method: "GET",
+          headers: { "accept": "application/a2a+json, application/json", "a2a-version": row.protocol_version || "1.0" },
+          signal: timeout.signal
+        });
+      } else {
+        return await fetch(row.agent_url, {
+          method: "POST",
+          headers: { "content-type": "application/json", "accept": "application/json", "a2a-version": row.protocol_version || (isV1 ? "1.0" : "0.3") },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: `poll-${crypto.randomUUID()}`,
+            method: isV1 ? "GetTask" : "tasks/get",
+            params: isV1 ? { id: row.task_id, historyLength: 5 } : { id: row.task_id, historyLength: 5 }
+          }),
+          signal: timeout.signal
+        });
+      }
       });
-    } else {
-      response = await fetch(row.agent_url, {
-        method: "POST",
-        headers: { "content-type": "application/json", "accept": "application/json", "a2a-version": row.protocol_version || (isV1 ? "1.0" : "0.3") },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: `poll-${crypto.randomUUID()}`,
-          method: isV1 ? "GetTask" : "tasks/get",
-          params: isV1 ? { id: row.task_id, historyLength: 5 } : { id: row.task_id, historyLength: 5 }
-        }),
-        signal: timeout.signal
-      });
-    }
     const text = await response.text();
     if (!response.ok) throw new Error(`poll_http_${response.status}`);
+    const ingress = await guardExternalA2AResult(env, row.proposal_id, text);
+    if (!ingress.allowed) {
+      await env.DB.prepare("UPDATE lumen_outreach_attempts SET updated_at=?,status='INPUT_REJECTED',response_text=NULL,response_json=NULL,error=? WHERE proposal_id=?")
+        .bind(new Date().toISOString(), "untrusted_input_firewall", row.proposal_id).run();
+      return { polled:true, proposalId:row.proposal_id, status:"INPUT_REJECTED", securitySignals:ingress.hits, audited:ingress.audited };
+    }
     let body = {};
     try { body = JSON.parse(text); } catch {}
     const state = responseState(body, row.protocol_binding);
