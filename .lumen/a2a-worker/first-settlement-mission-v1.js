@@ -1,5 +1,5 @@
 export const FIRST_SETTLEMENT_MISSION_POLICY = Object.freeze({
-  version: "1.6-actionable-focus-truth",
+  version: "1.7-verified-intent-focus-truth",
   objective: "move_the_best_real_opportunity_toward_first_verified_settlement",
   settlementTruth: "verified_x402_receipt_only",
   autonomousSpendUsd: 0,
@@ -15,7 +15,8 @@ export const FIRST_SETTLEMENT_MISSION_POLICY = Object.freeze({
   retryTransientOutreachAfterHours: 6,
   rotateNonCommercialTransportResponses: true,
   rotateNonCommercialReplies: true,
-  requiresCurrentCommercialActionability: true
+  requiresCurrentCommercialActionability: true,
+  nonActionableInventoryRequiresVerifiedCommercialIntentToOwnMission: true
 });
 
 const STALL_HOURS = Object.freeze({
@@ -162,12 +163,11 @@ export function chooseFirstSettlementMission(rows = [], now = Date.now()) {
       const stage=String(r.stage || "").toUpperCase();
       if(r.verified_receipt_id || ["PAID","DELIVERED"].includes(stage)) return false;
       const actionable=Number(r.commercially_actionable);
-      const outreach=String(r.outreach_status || "").toUpperCase();
       const responseClass=String(r.pipeline_response_class || r.response_class || "").toUpperCase();
-      const externalConversationStarted=["SENT","REPLIED","NEGOTIATING"].includes(stage) ||
-        ["SENT","SENT_TASK","WORKING","RESPONDED"].includes(outreach) ||
-        ["COMMERCIAL_QUESTION","COMMERCIAL_INTEREST","PURCHASE_INTENT"].includes(responseClass);
-      return actionable!==0 || externalConversationStarted;
+      const verifiedCommercialIntent=["COMMERCIAL_QUESTION","COMMERCIAL_INTEREST","PURCHASE_INTENT"].includes(responseClass);
+      // Preserve non-actionable conversations in lifecycle/audit, but do not let them own
+      // the First Settlement mission unless the buyer has produced verified commercial intent.
+      return actionable!==0 || verifiedCommercialIntent;
     })
     .map(r => ({ row:r, diagnosis:diagnoseSettlementBlocker(r, now), priority:missionPriority(r, now) }))
     .filter(x => Number.isFinite(x.priority));
