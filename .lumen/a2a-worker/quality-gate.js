@@ -219,22 +219,23 @@ async function getFocusedProposalForRepair(env) {
       AND NOT EXISTS (SELECT 1 FROM lumen_outreach_attempts x WHERE x.proposal_id=p.proposal_id)
     ORDER BY CASE WHEN p.proposal_id=? THEN 0 ELSE 1 END,
       a.commercial_score DESC,p.updated_at ASC LIMIT 25`).bind(String(focus?.proposal_id || "")).all();
+  const skipped=[];
   for (const candidate of rows.results || []) {
     const row = {...candidate,metadata:safeParse(candidate.metadata_json,{}),review:safeParse(candidate.review_reasons_json,{})};
-    if (row.metadata?.quality_repair?.attempted === true) continue;
+    if (row.metadata?.quality_repair?.attempted === true) { skipped.push({proposalId:row.proposal_id,reason:"already_repaired_once"}); continue; }
     const quality = evaluateProposalQuality(row);
     const split = splitQualityBlockers(quality.blockers);
-    if (split.structural.length || !split.repairable.length) continue;
+    if (split.structural.length || !split.repairable.length) { skipped.push({proposalId:row.proposal_id,reason:split.structural.length ? "structural_quality_blockers" : "no_copy_defect",blockers:split.structural}); continue; }
     return { status, focus, diagnosis, row, selection:"current_actionable_unexposed_copy_repair" };
   }
-  return { status, focus, diagnosis, row:null,reason:"no_safe_unexposed_copy_repair_candidate" };
+  return { status, focus, diagnosis, row:null,reason:"no_safe_unexposed_copy_repair_candidate",skipped:skipped.slice(0,10) };
 }
 
 export async function repairFocusedProposalQuality(env) {
   if (!(await ensureSchema(env))) return { ok:false, repaired:false, error:"persistence_unavailable", version:VERSION };
   const current = await getFocusedProposalForRepair(env);
   const row = current.row;
-  if (!row) return { ok:true, repaired:false, reason:current.reason || "no_safe_unexposed_copy_repair_candidate", version:VERSION };
+  if (!row) return { ok:true, repaired:false, reason:current.reason || "no_safe_unexposed_copy_repair_candidate", skipped:current.skipped || [],version:VERSION };
   if (Number(row.commercially_actionable || 0) !== 1) {
     return { ok:true, repaired:false, reason:"focused_opportunity_not_commercially_actionable", proposalId:row.proposal_id, version:VERSION };
   }
