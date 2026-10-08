@@ -68,7 +68,7 @@ export function diagnoseSettlementBlocker(row = {}, now = Date.now()) {
     } else if (["SENT","SENT_TASK","WORKING"].includes(outreachStatus)) {
       blocker = "OUTREACH_ALREADY_SENT";
       action = "poll_existing_outreach_before_resend";
-    } else if (["AUTH_REQUIRED","INCOMPATIBLE","TASK_TERMINAL"].includes(outreachStatus)) {
+    } else if (["AUTH_REQUIRED","INCOMPATIBLE","TASK_TERMINAL","INPUT_REJECTED"].includes(outreachStatus)) {
       blocker = "OUTREACH_PATH_TERMINAL";
       action = "rotate_to_next_opportunity_or_human_review";
     } else if (["CARD_FETCH_FAILED","SEND_FAILED"].includes(outreachStatus) && outreachAge < 6) {
