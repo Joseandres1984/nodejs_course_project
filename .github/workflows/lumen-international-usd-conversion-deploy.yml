@@ -28,6 +28,7 @@ jobs:
         run: |
           set -euo pipefail
           node --check .lumen/conversion-worker/worker.js
+          node --check .lumen/public-worker/revenue-storefront.js
           node .lumen/conversion-worker/test-usd-human-intent.mjs
           node .lumen/conversion-worker/test-usd-owner-inbox.mjs
           node .lumen/conversion-worker/test-english-b2b-buyer.mjs
@@ -78,10 +79,15 @@ jobs:
             if curl -fsS --max-time 20 "$BASE/health" -o health.json \
               && curl -fsS --max-time 20 "$BASE/offer/sourcing-5" -o offer.html \
               && curl -fsS --max-time 20 "$BASE/catalog.json" -o catalog.json \
+              && curl -fsS --max-time 20 "$BASE/en" -o english-catalog.html \
+              && curl -fsS --max-time 20 "$BASE/en/offer/sourcing-5" -o english-offer.html \
               && jq -e '.ok == true and .version == "1.4-international-buyer-sales" and .paidSpend == false and .crmBridge == true' health.json >/dev/null \
               && grep -q 'Solicitar pago en USD (sin compromiso)' offer.html \
               && grep -q 'Pagar con USDC (x402)' offer.html \
               && grep -q 'no genera una factura automática, un cargo' offer.html \
+              && grep -q 'Find better suppliers. Check quotes. Move faster.' english-catalog.html \
+              && grep -q 'Request USD payment details (no charge)' english-offer.html \
+              && grep -q 'USD 15 / report' english-offer.html \
               && jq -e '.ok == true and (.products|length) == 6' catalog.json >/dev/null; then
                 ready=1
                 break
