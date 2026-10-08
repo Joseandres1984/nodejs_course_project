@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { __test } from "./tender-supplier-match.js";
 
-const { matchScore, supplierLike, bucketSet } = __test;
+const { matchScore, supplierLike, bucketSet, targetedSupplierQuery, registrySupplierRow } = __test;
 
 const future = JSON.stringify({ deadline:"2099-12-31T12:00:00Z" });
 
@@ -73,5 +73,44 @@ assert.equal(supplierLike({
 
 assert.ok(bucketSet("PLC SCADA automation integrator").has("AUTOMATION"));
 assert.ok(bucketSet("industrial control valve pump piping supplier").has("MECHANICAL"));
+
+const softwareTender = {
+  name:"Software support and cybersecurity services",
+  description:"Public tender requires software security support.",
+  score:90,
+  raw_json:future
+};
+assert.equal(
+  targetedSupplierQuery(softwareTender),
+  "software cybersecurity security supplier vendor manufacturer provider",
+  "targeted registry query must be derived from exact high-signal tender capabilities"
+);
+assert.equal(
+  targetedSupplierQuery({name:"General administrative framework",description:"Professional services",raw_json:future}),
+  null,
+  "generic tender language must not trigger broad supplier discovery"
+);
+
+const registrySupplier = registrySupplierRow({
+  id:"verified-software-provider",
+  name:"SecureSoft Supplier",
+  description:"Verified software cybersecurity services provider and vendor.",
+  endpoint:"https://securesoft.example/.well-known/agent-card.json",
+  tags:["software","cybersecurity","security"],
+  verified:true
+});
+assert.ok(registrySupplier);
+assert.equal(registrySupplier.score,78);
+assert.equal(registrySupplier.endpoint,"https://securesoft.example/.well-known/agent-card.json");
+assert.ok(supplierLike(registrySupplier));
+assert.ok(matchScore(softwareTender,registrySupplier)?.score >= 78);
+
+assert.equal(registrySupplierRow({
+  id:"no-endpoint",
+  name:"Software Supplier",
+  description:"software supplier",
+  tags:["software"]
+}),null,"registry result without HTTPS endpoint must be rejected before inventory");
+
 
 console.log("TENDER_SUPPLIER_MATCH_QUALITY_OK");
