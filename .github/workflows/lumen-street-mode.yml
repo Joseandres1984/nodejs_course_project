@@ -73,7 +73,7 @@ jobs:
           hot_consumed=false
           for endpoint in first-cash/run commercial-reply/run followup/run; do
             body="/tmp/${endpoint//\//-}.json"
-            post "$endpoint"
+            post "$endpoint" || continue
             if jq -e '(.sent == true) or (.externalAttempted == true) or (.attempted == true) or (.status == "SEND_FAILED") or (.send.sent == true) or (.send.externalAttempted == true) or (.send.status == "SEND_FAILED")' "$body" >/dev/null 2>&1; then
               consumed=true
               hot_consumed=true
@@ -107,6 +107,7 @@ jobs:
           if [ "$hot_consumed" = 'true' ]; then
             batch_limit=8
           fi
+          rm -f /tmp/outreach-send-batch.json
           post "outreach/send-batch?limit=$batch_limit" || true
           batch='/tmp/outreach-send-batch.json'
           batch_attempted=$(jq -r '.attempted // 0' "$batch" 2>/dev/null || echo 0)
