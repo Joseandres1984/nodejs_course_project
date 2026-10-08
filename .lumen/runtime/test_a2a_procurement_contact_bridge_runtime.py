@@ -69,6 +69,12 @@ class ProcurementContactBridgeTests(unittest.TestCase):
         bridge.import_procurement_contacts(state, [self.row()])
         with patch.object(outbound, "MIN_SCORE", 0):
             prospects = outbound._eligible(state)
+        self.assertEqual(prospects, [], "official procurement contact must not be used as direct marketing consent")
+
+        account = state["candidate_accounts"][0]
+        account["controlled_outbound_approved_fit"] = True
+        with patch.object(outbound, "MIN_SCORE", 0):
+            prospects = outbound._eligible(state)
         self.assertEqual(len(prospects), 1)
         self.assertTrue(prospects[0]["explicit_demand_fallback"])
         self.assertEqual(prospects[0]["controlled_approval_id"], outbound.CONTROLLED_EXPLICIT_DEMAND_APPROVAL_ID)
