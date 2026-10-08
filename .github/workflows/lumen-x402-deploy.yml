@@ -89,9 +89,19 @@ jobs:
           test "$owner_code" = '403'
           jq -e '.ok == false' /tmp/x402-owner-test.json >/dev/null
           echo 'X402_HUMAN_APPROVAL_FAIL_CLOSED_LIVE_OK'
-          curl --fail --silent --show-error --max-time 20 "$BASE/openapi.json" > /tmp/x402-openapi.json
-          curl --fail --silent --show-error --max-time 20 "$BASE/.well-known/x402" > /tmp/x402-discovery.json
-          curl --fail --silent --show-error --max-time 20 "$BASE/llms.txt" > /tmp/x402-llms.txt
+          discovery_ready=0
+          for n in $(seq 1 18); do
+            openapi_code=$(curl --silent --show-error --max-time 20 -o /tmp/x402-openapi.json -w '%{http_code}' "$BASE/openapi.json" || true)
+            wellknown_code=$(curl --silent --show-error --max-time 20 -o /tmp/x402-discovery.json -w '%{http_code}' "$BASE/.well-known/x402" || true)
+            llms_code=$(curl --silent --show-error --max-time 20 -o /tmp/x402-llms.txt -w '%{http_code}' "$BASE/llms.txt" || true)
+            echo "DISCOVERY_PROBE attempt=$n openapi=$openapi_code wellknown=$wellknown_code llms=$llms_code"
+            if [ "$openapi_code" = '200' ] && [ "$wellknown_code" = '200' ] && [ "$llms_code" = '200' ]; then
+              discovery_ready=1
+              break
+            fi
+            sleep 3
+          done
+          test "$discovery_ready" -eq 1
           jq -e '
             .openapi == "3.1.0" and
             (.paths | length) == 7 and
