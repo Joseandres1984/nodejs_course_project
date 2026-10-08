@@ -29,6 +29,7 @@ jobs:
           set -euo pipefail
           node --check .lumen/conversion-worker/worker.js
           node .lumen/conversion-worker/test-usd-human-intent.mjs
+          node .lumen/conversion-worker/test-usd-owner-inbox.mjs
       - name: Check Cloudflare bundle without deployment
         working-directory: .lumen/conversion-worker
         run: npx --yes wrangler@latest deploy --dry-run --config wrangler.toml
@@ -55,7 +56,19 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx --yes wrangler@latest deploy --config wrangler.toml
+      - name: Bind existing owner-only admin secret to conversion Worker
+        working-directory: .lumen/conversion-worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$OPPORTUNITY_ADMIN_TOKEN"
+          printf '%s' "$OPPORTUNITY_ADMIN_TOKEN" | npx --yes wrangler@latest secret put OPPORTUNITY_ADMIN_TOKEN --config wrangler.toml
       - name: Verify international USD inquiry option is live
+        env:
+          OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
         run: |
           set -euo pipefail
           BASE='https://lumen-zero-conversion.lumen-b2b.workers.dev'
@@ -64,7 +77,7 @@ jobs:
             if curl -fsS --max-time 20 "$BASE/health" -o health.json \
               && curl -fsS --max-time 20 "$BASE/offer/sourcing-5" -o offer.html \
               && curl -fsS --max-time 20 "$BASE/catalog.json" -o catalog.json \
-              && jq -e '.ok == true and .version == "1.2-usd-human-checkout-request" and .paidSpend == false and .crmBridge == true' health.json >/dev/null \
+              && jq -e '.ok == true and .version == "1.3-usd-owner-inbox" and .paidSpend == false and .crmBridge == true' health.json >/dev/null \
               && grep -q 'Solicitar pago en USD (sin compromiso)' offer.html \
               && grep -q 'Pagar con USDC (x402)' offer.html \
               && grep -q 'no genera una factura automática, un cargo' offer.html \
@@ -79,4 +92,10 @@ jobs:
             cat health.json || true
             exit 1
           fi
+          UNAUTH_CODE="$(curl -sS --max-time 20 -o unauth.json -w '%{http_code}' "$BASE/sales/pending-usd")"
+          test "$UNAUTH_CODE" = '403'
+          AUTH_CODE="$(curl -sS --max-time 20 -o private.json -w '%{http_code}' "$BASE/sales/pending-usd" -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN")"
+          test "$AUTH_CODE" = '200'
+          jq -e '.ok == true and (.ownerOnly == true) and (.chargeCreated == false) and (.pending | type == "boolean")' private.json >/dev/null
+          rm -f private.json unauth.json
           echo 'LIVE_USD_INVOICE_INQUIRY_READY_NO_AUTONOMOUS_CHARGES'

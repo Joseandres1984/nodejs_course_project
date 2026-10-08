@@ -1,5 +1,5 @@
 const SERVICE = "lumen-zero-conversion";
-const VERSION = "1.2-usd-human-checkout-request";
+const VERSION = "1.3-usd-owner-inbox";
 const X402_BASE = "https://lumen-zero-x402.lumen-b2b.workers.dev";
 
 const PRODUCT_CONTRACT_VERSION = "2026-09-21-v1";
@@ -39,6 +39,7 @@ async function ensureSchema(env) {
     env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_lumen_conversion_leads_status_created ON lumen_conversion_leads(status,created_at)"),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS lumen_public_inquiries (id TEXT PRIMARY KEY, created_at TEXT NOT NULL, service_id TEXT NOT NULL, email TEXT NOT NULL, company TEXT, name TEXT, need TEXT NOT NULL, source TEXT NOT NULL, processed INTEGER NOT NULL DEFAULT 0, processed_at TEXT)"),
     env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_lumen_public_inquiries_pending ON lumen_public_inquiries(processed,created_at)"),
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS lumen_sales_inbox_alerts (lead_id TEXT PRIMARY KEY, notified_at TEXT NOT NULL, channel TEXT NOT NULL)"),
   ]);
 }
 async function recordEvent(env, eventType, sessionId, slug, attr, metadata={}) {
@@ -59,6 +60,23 @@ async function syncLeadToCrm(env, {leadId, p, slug, email, company, details, att
     .bind(inquiryId,new Date().toISOString(),p.service_id,email,company,"",need,source).run();
   await env.DB.prepare("UPDATE lumen_conversion_leads SET status='crm_synced' WHERE id=?").bind(leadId).run();
   return {synced:true,inquiry_id:inquiryId,service_id:p.service_id,product_slug:slug};
+}
+function adminAuthorized(req, env) {
+  const expected = clean(env?.OPPORTUNITY_ADMIN_TOKEN, 500);
+  const provided = clean(req.headers.get("x-lumen-admin"), 500);
+  return Boolean(expected && provided && expected === provided);
+}
+async function nextUsdOwnerAlert(env) {
+  await ensureSchema(env);
+  return env.DB.prepare(`SELECT l.id AS lead_id,l.created_at,l.email,l.company,l.details,l.product_id,l.product_slug,
+    e.created_at AS requested_at FROM lumen_conversion_events e
+    JOIN lumen_conversion_leads l ON json_extract(e.metadata,'$.lead_id')=l.id
+    LEFT JOIN lumen_sales_inbox_alerts a ON a.lead_id=l.id
+    WHERE e.event_type='usd_payment_request' AND e.technical_canary=0 AND l.technical_canary=0 AND a.lead_id IS NULL
+    ORDER BY e.created_at ASC LIMIT 1`).first();
+}
+function ownerJson(data, status=200) {
+  return Response.json(data,{status,headers:{"cache-control":"no-store","x-content-type-options":"nosniff"}});
 }
 function session(req) {
   return clean(cookieValue(req,"lumen_sid"),80) || `SID-${crypto.randomUUID().replaceAll("-","").slice(0,20).toUpperCase()}`;
@@ -146,6 +164,24 @@ export default {
       }
       if (request.method === "GET" && path === "/stats") {
         return Response.json(await stats(env),{headers});
+      }
+      if (path === "/sales/pending-usd" && request.method === "GET") {
+        if (!adminAuthorized(request,env)) return ownerJson({ok:false,error:"admin_token_required"},403);
+        const lead=await nextUsdOwnerAlert(env);
+        return ownerJson({ok:true,pending:Boolean(lead),lead:lead || null,chargeCreated:false,ownerOnly:true});
+      }
+      if (path === "/sales/ack-usd-alert" && request.method === "POST") {
+        if (!adminAuthorized(request,env)) return ownerJson({ok:false,error:"admin_token_required"},403);
+        let body; try { body=await request.json(); } catch { return ownerJson({ok:false,error:"invalid_json"},400); }
+        const leadId=clean(body?.lead_id,80);
+        if (!/^CL-[A-F0-9]{20}$/.test(leadId)) return ownerJson({ok:false,error:"invalid_lead_id"},400);
+        await ensureSchema(env);
+        const result=await env.DB.prepare(`INSERT OR IGNORE INTO lumen_sales_inbox_alerts(lead_id,notified_at,channel)
+          SELECT ?,?,'owner_smtp' WHERE EXISTS
+          (SELECT 1 FROM lumen_conversion_events e WHERE e.event_type='usd_payment_request'
+            AND e.technical_canary=0 AND json_extract(e.metadata,'$.lead_id')=?)`)
+          .bind(leadId,new Date().toISOString(),leadId).run();
+        return ownerJson({ok:true,acknowledged:Boolean(result?.meta?.changes || result?.changes),leadId,notAPayment:true});
       }
       const offerMatch = path.match(/^\/offer\/([a-z0-9-]+)$/);
       if (request.method === "GET" && offerMatch) {
