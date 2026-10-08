@@ -1,5 +1,5 @@
 const SERVICE = "lumen-zero-conversion";
-const VERSION = "1.3-usd-owner-inbox";
+const VERSION = "1.4-international-buyer-sales";
 const X402_BASE = "https://lumen-zero-x402.lumen-b2b.workers.dev";
 
 const PRODUCT_CONTRACT_VERSION = "2026-09-21-v1";
@@ -27,6 +27,7 @@ function attribution(url) {
     campaign: clean(q.get("campaign") || "", 120),
     creative: clean(q.get("creative") || "", 120),
     offer: clean(q.get("offer") || "", 120),
+    lang: q.get("lang") === "en" ? "en" : "es",
     technical_canary: ["1","true","yes"].includes(String(q.get("technical_canary") || "").toLowerCase()) ? 1 : 0,
   };
 }
@@ -92,11 +93,12 @@ function qs(attr) {
   if (attr.campaign) u.set("campaign",attr.campaign);
   if (attr.creative) u.set("creative",attr.creative);
   if (attr.offer) u.set("offer",attr.offer);
+  if (attr.lang==="en") u.set("lang","en");
   if (attr.technical_canary) u.set("technical_canary","1");
   return u.toString();
 }
-function page(title, body) {
-  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${html(title)} · LUMEN</title><style>
+function page(title, body, lang="es") {
+  return `<!doctype html><html lang="${lang === "en" ? "en" : "es"}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="${lang === "en" ? "B2B sourcing, supplier research, quote review and market intelligence with clear USD pricing. Request a scoped report without crypto." : "LUMEN inteligencia comercial B2B y búsqueda de proveedores."}"><title>${html(title)} · LUMEN</title><style>
   :root{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#f5f7fb;background:#080b12}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 80% 0,#15233f 0,transparent 36%),#080b12;color:#f5f7fb}.wrap{max-width:920px;margin:auto;padding:28px 20px 64px}.brand{font-size:14px;letter-spacing:.18em;font-weight:800;color:#a8b7d8;margin-bottom:54px}.card{background:rgba(17,23,36,.88);border:1px solid #27334b;border-radius:24px;padding:clamp(24px,5vw,48px);box-shadow:0 28px 90px rgba(0,0,0,.28)}h1{font-size:clamp(38px,7vw,72px);line-height:.98;margin:0 0 22px;letter-spacing:-.045em}.sub{font-size:19px;line-height:1.55;color:#bdc7d9;max-width:720px}.price{font-size:30px;font-weight:800;margin:30px 0 22px}.btn{display:inline-block;background:#f5f7fb;color:#0b1020;text-decoration:none;border:0;border-radius:999px;padding:15px 22px;font-weight:800;cursor:pointer}.secondary{background:transparent;color:#dfe6f3;border:1px solid #44516a}.actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:26px}.truth{margin-top:34px;padding-top:22px;border-top:1px solid #27334b;color:#8f9bb1;font-size:13px;line-height:1.6}form{margin-top:24px;display:grid;gap:12px}input,textarea{width:100%;border-radius:12px;border:1px solid #33405a;background:#0c111c;color:#fff;padding:13px 14px;font:inherit}textarea{min-height:110px;resize:vertical}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px}.product{padding:22px;border:1px solid #27334b;border-radius:18px;background:#0d121d}.product h2{margin:0 0 9px}.product p{color:#aeb9cd;min-height:70px}.product .price{font-size:22px;margin:14px 0}</style></head><body><div class="wrap"><div class="brand">LUMEN · B2B INTELLIGENCE</div>${body}</div></body></html>`;
 }
 function offerHtml(slug, p, attr) {
@@ -104,6 +106,35 @@ function offerHtml(slug, p, attr) {
   const intent = `/intent/${encodeURIComponent(slug)}${query?`?${query}`:""}`;
   const li = (items) => `<ul>${items.map((x)=>`<li>${html(x)}</li>`).join("")}</ul>`;
   return page(p.name,`<main class="card"><div style="color:#8ea1c7;font-weight:700;margin-bottom:14px">MICROSERVICIO · ALCANCE DEFINIDO</div><h1>${html(p.name)}</h1><p class="sub">${html(p.promise)}</p><div class="price">USD ${p.price_usd}</div><h2>Qué necesitamos</h2>${li(p.requires)}<h2>Qué recibís</h2>${li(p.deliverables)}<h2>No incluye</h2>${li(p.not_included)}<div id="consulta" style="margin-top:28px"><h2>Contanos qué necesitás</h2><p class="sub">Para clientes internacionales podés solicitar una forma de pago en USD sin criptomonedas. LUMEN deberá verificar el medio y confirmar las instrucciones antes de cobrar. El pago x402 con USDC continúa disponible.</p><form method="post" action="${html(intent)}"><input name="email" type="email" required maxlength="180" placeholder="Email para recibir el resultado"><input name="company" maxlength="180" placeholder="Empresa (opcional)"><textarea name="details" maxlength="1800" minlength="8" required placeholder="${html(p.details_placeholder)}"></textarea><div class="actions"><button class="btn" type="submit" name="next" value="invoice_usd">Solicitar pago en USD (sin compromiso)</button><button class="btn secondary" type="submit" name="next" value="checkout">Pagar con USDC (x402)</button><button class="btn secondary" type="submit" name="next" value="consult">Sólo consultar</button></div></form></div><div class="truth">Solicitar cobro en USD no genera una factura automática, un cargo ni una reserva confirmada. Los medios internacionales se validan antes de facilitar instrucciones de pago. El checkout con USDC usa x402 sobre Base. Sólo los pagos confirmados se registran como ingreso.</div></main>`);
+}
+const PRODUCT_EN = {"supplier-snapshot":{"intro":"Check public supplier identity, official channels, and visible commercial signals before deciding whether to proceed.","inputs":["Supplier name or website","Country and product category","What should be checked"],"output":["Public identity and website signals","Visible risks and questions","Concise recommendation with source links"],"excludes":["Credit report","Legal certification","Physical factory inspection"],"placeholder":"Supplier name or URL, country, product, and what you need verified."},"quote-sanity":{"intro":"Spot inconsistencies in a supplier quote and identify price or commercial terms that deserve a closer look.","inputs":["Quotation price and terms","Item specification and quantity","Currency and market"],"output":["Price and terms sanity check","Key concerns and follow-up questions","Public reference signals when available"],"excludes":["Certified valuation","Guaranteed best market price"],"placeholder":"Describe the offer, price, quantity, specifications and commercial conditions."},"tender-scan":{"intro":"Find relevant public tender signals for a specific company, product or service.","inputs":["What you sell","Target region or country","Sector and search terms"],"output":["Up to 5 potential public tender matches","Official notice and visible deadline","Brief fit assessment"],"excludes":["Submitting tenders on your behalf","Guarantee of contract award"],"placeholder":"What you sell, target regions, and keywords."},"sourcing-5":{"intro":"A focused shortlist of up to five potential suppliers for your exact product requirements.","inputs":["Product and required specifications","Approximate quantity","Delivery country and mandatory constraints"],"output":["Up to five supplier candidates","Official websites and public evidence links","Fit gaps and suggested next contacts"],"excludes":["Guaranteed prices or current stock","Purchase orders or binding negotiations","Physical factory audits"],"placeholder":"Product, technical specifications, expected quantity, delivery country, and required certifications."},"buyer-signals":{"intro":"Find public signals of companies that could plausibly need your B2B product or service.","inputs":["What your business sells","Ideal customer profile","Target geography"],"output":["Up to ten publicly evidenced buyer candidates","Reason each might be relevant","Public corporate channels where available"],"excludes":["Guaranteed buyer interest","Private personal contact databases","Automated mass outreach"],"placeholder":"Your product, ideal buyer type, countries and exclusions."},"export-pulse":{"intro":"Explore export markets and publicly observable demand signals before committing to a larger research project.","inputs":["Product and country of origin","Target destinations or buyer types","Known capacity or certifications"],"output":["Up to three priority market signals","Visible sector actors and public sources","Risks and recommended next research step"],"excludes":["Legal or customs advice","Guaranteed market access"],"placeholder":"Product, origin country, capacity, and target markets."}};
+function englishOfferHtml(slug, p, attr) {
+  const info = PRODUCT_EN[slug];
+  const query = qs({...attr,lang:"en"});
+  const formAction = "/intent/"+encodeURIComponent(slug)+(query?"?"+query:"");
+  const li = items => "<ul>"+items.map(x=>"<li>"+html(x)+"</li>").join("")+"</ul>";
+  const content = '<main class="card"><div style="color:#8ea1c7;font-weight:700;margin-bottom:14px">B2B RESEARCH · FIXED SCOPE · REMOTE DELIVERY</div>'
+   +'<h1>'+html(p.name)+'</h1><p class="sub">'+html(info.intro)+'</p><div class="price">USD '+p.price_usd+' / report</div>'
+   +'<h2>What we need</h2>'+li(info.inputs)+'<h2>What you receive</h2>'+li(info.output)+'<h2>Not included</h2>'+li(info.excludes)
+   +'<div id="request" style="margin-top:28px"><h2>Describe your requirement</h2>'
+   +'<p class="sub">Request USD payment arrangements without cryptocurrency. We will confirm the scope and a supported payment method before any invoice or charge. USDC/x402 is also available.</p>'
+   +'<form method="post" action="'+html(formAction)+'">'
+   +'<input name="email" type="email" required maxlength="180" autocomplete="email" placeholder="Your business email">'
+   +'<input name="company" maxlength="180" autocomplete="organization" placeholder="Company (optional)">'
+   +'<textarea name="details" maxlength="1800" minlength="8" required placeholder="'+html(info.placeholder)+'"></textarea>'
+   +'<div class="actions"><button class="btn" type="submit" name="next" value="invoice_usd">Request USD payment details (no charge)</button>'
+   +'<button class="btn secondary" type="submit" name="next" value="consult">Ask a question first</button>'
+   +'<button class="btn secondary" type="submit" name="next" value="checkout">Pay with USDC (x402)</button></div></form></div>'
+   +'<div class="truth">Submitting this form does not create an invoice, contract or payment. Supplier suitability is assessed from verifiable public evidence; no guaranteed stock, pricing or commercial response. Revenue is recognized only after payment is independently confirmed.</div>'
+   +'<div class="actions"><a class="btn secondary" href="/en">All services</a><a class="btn secondary" href="/offer/'+slug+'">Español</a></div></main>';
+  return page(p.name, content, "en");
+}
+function englishCatalogHtml(attr) {
+  const cards = Object.entries(PRODUCTS).map(([slug,p])=>{
+    const q=qs({...attr,lang:"en",campaign:attr.campaign||"english-"+slug});
+    return '<article class="product"><h2>'+html(p.name)+'</h2><p>'+html(PRODUCT_EN[slug].intro)+'</p><div class="price">USD '+p.price_usd+'</div><a class="btn" href="/en/offer/'+slug+(q?'?'+q:'')+'">See scope & request quote</a></article>';
+  }).join('');
+  return page('B2B research and supplier sourcing in USD','<main><h1>Find better suppliers. Check quotes. Move faster.</h1><p class="sub">Scope-first remote B2B research with documented public evidence. Simple fixed USD prices, no credit card or cryptocurrency required just to request an invoice. We confirm delivery scope and payment route before any commitment.</p><div class="grid" style="margin-top:34px">'+cards+'</div><div class="truth">No autonomous purchasing. No guaranteed supplier stock or prices. No charges from submitting a request. Human approval for binding commercial commitments.</div><div class="actions"><a class="btn secondary" href="/catalog">Ver catálogo en español</a></div></main>', 'en');
 }
 function catalogHtml(attr) {
   const cards = Object.entries(PRODUCTS).map(([slug,p]) => {
@@ -147,12 +178,18 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname.replace(/\/+$/,"") || "/";
     const attr = attribution(url);
+    if (path === "/en" || path.startsWith("/en/")) attr.lang = "en";
     const sid = session(request);
     const headers = withSession(new Headers({"cache-control":"no-store","x-content-type-options":"nosniff"}),sid);
     try {
       if (request.method === "GET" && path === "/health") {
         await ensureSchema(env);
         return Response.json({ok:true,service:SERVICE,version:VERSION,x402:X402_BASE,paidSpend:false,crmBridge:true,productContractVersion:PRODUCT_CONTRACT_VERSION,requirementsBeforeHumanCheckout:true,briefLinkedCheckout:true},{headers});
+      }
+      if (request.method === "GET" && (path === "/en" || path === "/en/catalog")) {
+        await recordEvent(env,"catalog_visit",sid,null,attr);
+        headers.set("content-type","text/html; charset=utf-8");
+        return new Response(englishCatalogHtml(attr),{status:200,headers});
       }
       if (request.method === "GET" && (path === "/" || path === "/catalog")) {
         if (path === "/catalog") await recordEvent(env,"catalog_visit",sid,null,attr);
@@ -183,13 +220,13 @@ export default {
           .bind(leadId,new Date().toISOString(),leadId).run();
         return ownerJson({ok:true,acknowledged:Boolean(result?.meta?.changes || result?.changes),leadId,notAPayment:true});
       }
-      const offerMatch = path.match(/^\/offer\/([a-z0-9-]+)$/);
+      const offerMatch = path.match(/^\/(?:en\/)?offer\/([a-z0-9-]+)$/);
       if (request.method === "GET" && offerMatch) {
         const slug = offerMatch[1]; const p = PRODUCTS[slug];
         if (!p) return new Response("Not found",{status:404,headers});
         await recordEvent(env,"visit",sid,slug,attr,{path});
         headers.set("content-type","text/html; charset=utf-8");
-        return new Response(offerHtml(slug,p,attr),{status:200,headers});
+        return new Response(attr.lang === "en" ? englishOfferHtml(slug,p,attr) : offerHtml(slug,p,attr),{status:200,headers});
       }
       const goMatch = path.match(/^\/go\/([a-z0-9-]+)$/);
       if (request.method === "GET" && goMatch) {
@@ -243,10 +280,12 @@ export default {
         if (next === "invoice_usd") {
           await recordEvent(env,"usd_payment_request",sid,slug,attr,{lead_id:leadId,paymentPreference,charged:false,invoiceCreated:false});
           headers.set("content-type","text/html; charset=utf-8");
-          return new Response(page("Solicitud de pago USD registrada",`<main class="card"><h1>Solicitud recibida</h1><p class="sub">LUMEN registró el requerimiento de ${html(p.name)} y tu preferencia por pagar en USD. Referencia: ${html(leadId)}. El equipo debe comprobar el medio de cobro internacional y acordar los detalles antes de facilitar instrucciones o generar una factura. Todavía no se realizó ningún pago.</p><div class="actions"><a class="btn secondary" href="/catalog">Volver al catálogo</a></div></main>`),{status:200,headers});
+          const thankYou = attr.lang === "en" ? `<main class="card"><h1>Request received</h1><p class="sub">We recorded your ${html(p.name)} research request and preference for USD billing. Reference: ${html(leadId)}. We must confirm the scope, availability, and supported payment method before issuing any invoice or payment instructions. No payment has been made.</p><div class="actions"><a class="btn secondary" href="/en">All services</a></div></main>` : `<main class="card"><h1>Solicitud recibida</h1><p class="sub">LUMEN registró el requerimiento de ${html(p.name)} y tu preferencia por pagar en USD. Referencia: ${html(leadId)}. El equipo debe comprobar el medio de cobro internacional y acordar los detalles antes de facilitar instrucciones o generar una factura. Todavía no se realizó ningún pago.</p><div class="actions"><a class="btn secondary" href="/catalog">Volver al catálogo</a></div></main>`;
+          return new Response(page(attr.lang === "en" ? "USD payment request received" : "Solicitud de pago USD registrada",thankYou,attr.lang),{status:200,headers});
         }
         headers.set("content-type","text/html; charset=utf-8");
-        return new Response(page("Consulta recibida",`<main class="card"><h1>Consulta recibida.</h1><p class="sub">LUMEN guardó el requerimiento de ${html(p.name)}. No se realizó ningún cargo.</p><div class="actions"><a class="btn" href="${html(go)}">Continuar al pago · USD ${p.price_usd}</a><a class="btn secondary" href="/catalog">Ver catálogo</a></div></main>`),{status:200,headers});
+        const consultBody=attr.lang === "en" ? `<main class="card"><h1>Question received</h1><p class="sub">LUMEN saved your request for ${html(p.name)}. No charge was created.</p><div class="actions"><a class="btn secondary" href="/en">Back to services</a></div></main>` : `<main class="card"><h1>Consulta recibida.</h1><p class="sub">LUMEN guardó el requerimiento de ${html(p.name)}. No se realizó ningún cargo.</p><div class="actions"><a class="btn" href="${html(go)}">Continuar al pago · USD ${p.price_usd}</a><a class="btn secondary" href="/catalog">Ver catálogo</a></div></main>`;
+        return new Response(page(attr.lang === "en" ? "Question received" : "Consulta recibida",consultBody,attr.lang),{status:200,headers});
       }
       return new Response("Not found",{status:404,headers});
     } catch (error) {
