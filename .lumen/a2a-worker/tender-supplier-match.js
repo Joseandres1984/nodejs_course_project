@@ -1,9 +1,10 @@
-const VERSION = "1.3-tender-driven-supplier-discovery";
+const VERSION = "1.4-novelty-first-tender-coverage";
 const REGISTRY_BASE = "https://api.a2a-registry.org";
 const TARGETED_TENDER_QUERY_LIMIT = 10;
 const TARGETED_RESULTS_PER_QUERY = 8;
 const TARGETED_FETCH_TIMEOUT_MS = 8000;
 const MAX_TENDERS = 80;
+const TENDER_SCAN_POOL = 900;
 const MAX_SUPPLIERS = 180;
 const MAX_MATCHES_PER_RUN = 6;
 const MIN_MATCH_SCORE = 78;
@@ -122,6 +123,34 @@ async function upsertTargetedSupplier(env,item,supplier,query,evidenceUrl){
     .bind(id,now,now,"global_a2a_registry",rid,supplier.name,supplier.endpoint,supplier.description,supplier.tags_json,supplier.score,supplier.score>=75?"A":"B",0,"MP-SUPPLIER-SNAPSHOT","watching",clean(evidenceUrl,1600),JSON.stringify(raw).slice(0,12000)).run();
   return id;
 }
+// Coverage is independent of match creation: a tender that yielded no suitable
+// supplier should not monopolize the ten registry queries every future cycle.
+async function recordTenderDiscoveryAttempt(env,tenderId,query){
+  await env.DB.prepare("INSERT INTO lumen_tender_discovery_coverage(tender_opportunity_id,probe_count,last_probed_at,last_query) VALUES(?,1,?,?) ON CONFLICT(tender_opportunity_id) DO UPDATE SET probe_count=lumen_tender_discovery_coverage.probe_count+1,last_probed_at=excluded.last_probed_at,last_query=excluded.last_query")
+    .bind(tenderId,new Date().toISOString(),clean(query,400)).run();
+}
+
+// Prefer unmatched, previously unsearched, still-current tenders with an exact
+// capability query. Filtering broad/expired tenders before the 80-row cap avoids
+// repeatedly examining the same unproductive notices.
+async function selectNovelTenders(env){
+  const found=await env.DB.prepare(`SELECT o.id,o.source,o.remote_id,o.name,o.endpoint,o.description,o.score,o.evidence,o.raw_json,o.updated_at,
+      COALESCE(c.probe_count,0) AS supplier_discovery_probes
+    FROM lumen_opportunities o
+    LEFT JOIN lumen_tender_discovery_coverage c ON c.tender_opportunity_id=o.id
+    WHERE o.source IN ('ted_eu_public_procurement','uk_contracts_finder')
+    ORDER BY CASE WHEN EXISTS (
+      SELECT 1 FROM lumen_tender_supplier_matches m
+      WHERE m.tender_opportunity_id=o.id AND m.status='CREATED'
+    ) THEN 1 ELSE 0 END ASC,
+    COALESCE(c.probe_count,0) ASC,
+    COALESCE(c.last_probed_at,'') ASC,
+    o.updated_at DESC,o.score DESC LIMIT ${TENDER_SCAN_POOL}`).all();
+  return (found.results||[]).filter(tender =>
+    futureDeadline(safeParse(tender.raw_json,{})).future && Boolean(targetedSupplierQuery(tender))
+  ).slice(0,MAX_TENDERS);
+}
+
 async function targetedSupplierDiscovery(env,tenders){
   const ranked=[];
   const seenQueries=new Set();
@@ -158,6 +187,9 @@ async function targetedSupplierDiscovery(env,tenders){
       errors.push({query,error:clean(error?.message||error,180)});
       queries.push({query,tenderId:tender.id,items:0,accepted:0});
     }
+    // Track failed and successful attempts to diversify future read-only research.
+    try { await recordTenderDiscoveryAttempt(env,tender.id,query); }
+    catch(error) { errors.push({query,error:`coverage_write_failed:${clean(error?.message||error,140)}`}); }
   }
   return {
     version:VERSION,
@@ -249,7 +281,9 @@ async function ensureSchema(env){
   await env.DB.batch([
     env.DB.prepare("CREATE TABLE IF NOT EXISTS lumen_tender_supplier_matches (match_id TEXT PRIMARY KEY,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,tender_opportunity_id TEXT NOT NULL,supplier_opportunity_id TEXT NOT NULL,match_opportunity_id TEXT NOT NULL UNIQUE,match_score INTEGER NOT NULL,matched_terms_json TEXT NOT NULL,status TEXT NOT NULL,engine_version TEXT NOT NULL)"),
     env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_lumen_tender_supplier_pair ON lumen_tender_supplier_matches(tender_opportunity_id,supplier_opportunity_id)"),
-    env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_lumen_tender_supplier_rank ON lumen_tender_supplier_matches(status,match_score DESC,updated_at DESC)")
+    env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_lumen_tender_supplier_rank ON lumen_tender_supplier_matches(status,match_score DESC,updated_at DESC)"),
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS lumen_tender_discovery_coverage(tender_opportunity_id TEXT PRIMARY KEY,probe_count INTEGER NOT NULL DEFAULT 0,last_probed_at TEXT,last_query TEXT)"),
+    env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_lumen_tender_discovery_coverage ON lumen_tender_discovery_coverage(probe_count,last_probed_at)")
   ]);
   return true;
 }
@@ -288,10 +322,7 @@ async function revalidateExistingMatches(env){
 async function runTenderSupplierMatch(env){
   if(!(await ensureSchema(env))) return {ok:false,error:"persistence_unavailable",version:VERSION};
   const revalidation=await revalidateExistingMatches(env);
-  const tenders=await safeAll(env,`SELECT id,source,remote_id,name,endpoint,description,score,evidence,raw_json,updated_at
-    FROM lumen_opportunities
-    WHERE source IN ('ted_eu_public_procurement','uk_contracts_finder')
-    ORDER BY updated_at DESC,score DESC LIMIT ${MAX_TENDERS}`);
+  const tenders=await selectNovelTenders(env);
   const targetedDiscovery=await targetedSupplierDiscovery(env,tenders);
   const suppliers=(await safeAll(env,`SELECT id,remote_id,name,endpoint,description,tags_json,score,raw_json,updated_at
     FROM lumen_opportunities
@@ -358,6 +389,7 @@ async function runTenderSupplierMatch(env){
     ok:true,
     version:VERSION,
     tendersConsidered:tenders.length,
+    tenderSelectionPolicy:"unmatched_then_least_probed_exact_capability_future_deadline",
     suppliersConsidered:suppliers.length,
     candidatePairs:candidates.length,
     revalidation,
@@ -416,4 +448,4 @@ export async function handleTenderSupplierMatch(request,env){
   return null;
 }
 
-export const __test={tokens,bucketSet,supplierLike,matchScore,futureDeadline,targetedSupplierQuery,registrySupplierRow};
+export const __test={tokens,bucketSet,supplierLike,matchScore,futureDeadline,targetedSupplierQuery,registrySupplierRow,selectNovelTenders,recordTenderDiscoveryAttempt,ensureSchema};
