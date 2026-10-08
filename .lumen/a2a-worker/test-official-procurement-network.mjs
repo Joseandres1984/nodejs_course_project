@@ -59,19 +59,23 @@ globalThis.fetch=async (_url,opts)=>{
   assert.equal(opts.method,"POST");
   const payload=JSON.parse(opts.body);
   assert.ok(payload.fields.includes("winner-name"));
-  return Response.json({notices:[award,{...award,"publication-number":"666556-2026","winner-name":["Company Without Site"],"winner-internet-address":[]}]});
+  if(payload.page===1) return Response.json({notices:[award,...Array.from({length:79},(_,i)=>({"publication-number":"generic-"+i}))]});
+  if(payload.page===2) return Response.json({notices:[{...award,"publication-number":"666557-2026","winner-name":["Second Valve Supplier"],"winner-internet-address":["https://secondvalves.example"],"winner-touchpoint-email":["bids@secondvalves.example"]},...Array.from({length:79},(_,i)=>({"publication-number":"generic-b-"+i}))]});
+  return Response.json({notices:[{...award,"publication-number":"666556-2026","winner-name":["Company Without Site"],"winner-internet-address":[]}]});
 };
 try{
   const request=()=>new Request("https://worker.example/source-intelligence/supplier-refresh",{method:"POST",headers:{"x-lumen-admin":"test-admin-key"}});
   const first=await (await handleSourceIntelligence(request(),env)).json();
   assert.equal(first.ok,true,JSON.stringify(first));
-  assert.equal(first.newAwards,1);
-  assert.equal(first.verifiedEmailDomains,1);
+  assert.equal(first.newAwards,2);
+  assert.equal(first.pagesFetched,3);
+  assert.equal(first.scannedNotices,161);
+  assert.equal(first.verifiedEmailDomains,2);
   const repeat=await (await handleSourceIntelligence(request(),env)).json();
   assert.equal(repeat.skipped,true,"six-hour cooldown avoids repeat API calls");
-  assert.equal(queries,1);
+  assert.equal(queries,3);
   const inventory=await (await handleSourceIntelligence(new Request("https://worker.example/source-intelligence/suppliers?limit=5",{headers:{"x-lumen-admin":"test-admin-key"}}),env)).json();
-  assert.equal(inventory.distinctSupplierDomains,1);
+  assert.equal(inventory.distinctSupplierDomains,2);
   assert.equal(inventory.candidates[0].requiresHumanApproval,true);
   assert.equal(inventory.candidates[0].commercialInterestVerified,false);
   const anonymous=await handleSourceIntelligence(new Request("https://worker.example/source-intelligence/suppliers"),env);
