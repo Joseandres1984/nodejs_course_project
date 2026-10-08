@@ -64,6 +64,8 @@ jobs:
 
           post outreach/poll || true
           post source-intelligence/cycle || true
+          # Read-only supplier evidence from official TED award notices; cooldown 6h.
+          post source-intelligence/supplier-refresh || true
           post market-hunter/run || true
           post tender-match/run || true
           post commercial/reassess || true
@@ -167,6 +169,7 @@ jobs:
           get outreach/next
           get commercial/stats
           get tender-match/state
+          get source-intelligence/suppliers
           get commercial/next
           get first-cash/stats
           get followup/stats
