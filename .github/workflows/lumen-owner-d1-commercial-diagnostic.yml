@@ -21,6 +21,7 @@ jobs:
           test -n "$OPPORTUNITY_ADMIN_TOKEN"
           curl -fsS --max-time 30 -H 'cache-control: no-cache' "$BASE/commercial/next" -o /tmp/commercial.json
           curl -fsS --max-time 30 -H 'cache-control: no-cache' "$BASE/commercial/stats" -o /tmp/commercial-stats.json
+          curl -fsS --max-time 30 -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" -H 'cache-control: no-cache' "$BASE/commercial/actionable?limit=10" -o /tmp/actionable.json
           curl -fsS --max-time 30 -H 'cache-control: no-cache' "$BASE/proposals/next" -o /tmp/proposal.json
           curl -fsS --max-time 30 -H 'cache-control: no-cache' "$BASE/quality/stats" -o /tmp/quality.json
           curl -fsS --max-time 30 -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" -H 'cache-control: no-cache' "$BASE/tender-match/state" -o /tmp/matches.json
@@ -31,6 +32,8 @@ jobs:
           jq '{version,opportunity:(.opportunity|if .==null then null else {id,name,endpoint,revenue_offer_id,status,discovery_score,commercial_score,commercial_fit,evidence_strength,commercially_actionable,reasons} end),nextAction}' /tmp/commercial.json
           echo '===== COMMERCIAL STATS ====='
           jq '.' /tmp/commercial-stats.json
+          echo '===== ACTIONABLE QUEUE ====='
+          jq '{version,rows:[.rows[]|{id,source,name,endpoint,revenue_offer_id,status,commercial_score,evidence_strength,commercially_actionable,proposal_id,proposal_status,quality_gate_status,outreach_status,proposal_missing,reasons}]}' /tmp/actionable.json
           echo '===== PROPOSAL NEXT ====='
           jq '{proposal:(.proposal|if .==null then null else {proposalId,opportunityId,target,endpoint,offerId,amountUsd,status,qualityGateStatus,metadata} end),nextAction}' /tmp/proposal.json
           echo '===== QUALITY STATS ====='
