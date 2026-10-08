@@ -1,17 +1,21 @@
 import assert from "node:assert/strict";
 import { scoreBuyerIntent, deriveLifecycleStage, paymentProbability, firstCashScore, REVENUE_LOOP_V5_POLICY } from "./revenue-loop-v5.js";
 
+assert.equal(REVENUE_LOOP_V5_POLICY.version,"5.3-commercial-truth-correction");
+assert.equal(REVENUE_LOOP_V5_POLICY.currentCommercialActionabilityCanDowngradeStalePreSendState,true);
 assert.equal(REVENUE_LOOP_V5_POLICY.autonomousSpendUsd,0);
 assert.equal(REVENUE_LOOP_V5_POLICY.autonomousContract,false);
 assert.equal(REVENUE_LOOP_V5_POLICY.changesPrices,false);
 assert.equal(REVENUE_LOOP_V5_POLICY.createsNewSenderAuthority,false);
 assert.equal(deriveLifecycleStage({commercially_actionable:0}),"DISCOVERED");
 assert.equal(deriveLifecycleStage({commercially_actionable:1,synthetic_or_test_only:0}),"QUALIFIED");
-assert.equal(deriveLifecycleStage({proposal_id:"P1"}),"PROPOSAL_READY");
-assert.equal(deriveLifecycleStage({proposal_id:"P1",proposal_status:"SENT"}),"SENT");
-assert.equal(deriveLifecycleStage({proposal_id:"P1",response_text:"yes"}),"REPLIED");
-assert.equal(deriveLifecycleStage({proposal_id:"P1",response_class:"PURCHASE_INTENT",response_text:"Ready to buy"}),"NEGOTIATING");
-assert.equal(deriveLifecycleStage({proposal_id:"P1",response_class:"PURCHASE_INTENT",response_text:""}),"PROPOSAL_READY");
+assert.equal(deriveLifecycleStage({commercially_actionable:1,proposal_id:"P1"}),"PROPOSAL_READY");
+assert.equal(deriveLifecycleStage({commercially_actionable:0,proposal_id:"STALE"}),"DISCOVERED","stale unsent proposal must obey current commercial truth");
+assert.equal(deriveLifecycleStage({commercially_actionable:0,proposal_id:"P1",outreach_status:"SENT_TASK"}),"SENT","real external conversation must be preserved");
+assert.equal(deriveLifecycleStage({commercially_actionable:1,proposal_id:"P1",proposal_status:"SENT"}),"SENT");
+assert.equal(deriveLifecycleStage({commercially_actionable:1,proposal_id:"P1",response_text:"yes"}),"REPLIED");
+assert.equal(deriveLifecycleStage({commercially_actionable:1,proposal_id:"P1",response_class:"PURCHASE_INTENT",response_text:"Ready to buy"}),"NEGOTIATING");
+assert.equal(deriveLifecycleStage({commercially_actionable:1,proposal_id:"P1",response_class:"PURCHASE_INTENT",response_text:""}),"PROPOSAL_READY");
 assert.equal(deriveLifecycleStage({verified_receipt_id:"R1",delivery_status:"ready_for_delivery"}),"PAID");
 assert.equal(deriveLifecycleStage({verified_receipt_id:"R1",delivery_status:"delivered"}),"DELIVERED");
 assert.ok(scoreBuyerIntent({commercial_score:90,evidence_strength:"strong",response_class:"PURCHASE_INTENT"}) <= 1);
