@@ -1,0 +1,111 @@
+name: LUMEN USD Inbound Owner Alert
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '3,33 * * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lumen-usd-inbound-owner-alert
+  cancel-in-progress: false
+
+jobs:
+  notify-owner:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    env:
+      OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+      LUMEN_SMTP_HOST: ${{ secrets.LUMEN_SMTP_HOST }}
+      LUMEN_SMTP_PORT: ${{ secrets.LUMEN_SMTP_PORT }}
+      LUMEN_SMTP_USER: ${{ secrets.LUMEN_SMTP_USER }}
+      LUMEN_SMTP_PASSWORD: ${{ secrets.LUMEN_SMTP_PASSWORD }}
+      LUMEN_SMTP_FROM: ${{ secrets.LUMEN_SMTP_FROM }}
+      LUMEN_SMTP_SSL: ${{ secrets.LUMEN_SMTP_SSL }}
+    steps:
+      - name: Check protected USD buyer inbox and send one owner-only alert if needed
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, smtplib, ssl, urllib.request
+          from email.message import EmailMessage
+          from urllib.error import HTTPError
+          
+          base = "https://lumen-zero-conversion.lumen-b2b.workers.dev"
+          token = os.getenv("OPPORTUNITY_ADMIN_TOKEN", "").strip()
+          if not token:
+              raise SystemExit("USD_OWNER_ALERT_ADMIN_TOKEN_MISSING")
+          req = urllib.request.Request(
+              f"{base}/sales/pending-usd",
+              headers={"x-lumen-admin": token, "accept": "application/json"}
+          )
+          with urllib.request.urlopen(req, timeout=25) as response:
+              state = json.load(response)
+          if state.get("ok") is not True or state.get("ownerOnly") is not True:
+              raise SystemExit("USD_OWNER_ALERT_PROTECTED_INBOX_UNAVAILABLE")
+          if not state.get("pending"):
+              print("USD_OWNER_ALERT_NO_PENDING_REAL_REQUEST")
+              raise SystemExit(0)
+
+          lead = state.get("lead") or {}
+          lead_id = str(lead.get("lead_id") or "")
+          if not lead_id.startswith("CL-") or len(lead_id) != 23:
+              raise SystemExit("USD_OWNER_ALERT_UNEXPECTED_LEAD")
+          host = os.getenv("LUMEN_SMTP_HOST", "").strip()
+          user = os.getenv("LUMEN_SMTP_USER", "").strip()
+          password = os.getenv("LUMEN_SMTP_PASSWORD", "")
+          sender = os.getenv("LUMEN_SMTP_FROM", "").strip() or user
+          if not all((host, user, password)):
+              raise SystemExit("USD_OWNER_ALERT_SMTP_NOT_CONFIGURED")
+          port = int(os.getenv("LUMEN_SMTP_PORT", "") or 587)
+          if port not in (465, 587):
+              raise SystemExit("USD_OWNER_ALERT_UNSUPPORTED_SMTP_PORT")
+          use_ssl = port == 465 or os.getenv("LUMEN_SMTP_SSL", "").lower() == "true"
+          message = EmailMessage()
+          message["From"] = sender
+          message["To"] = user
+          message["Subject"] = "LUMEN | Nueva solicitud real de pago en USD para revisar"
+          message.set_content(
+              "Ingresó una solicitud humana de pago en USD en LUMEN.\n\n"
+              f"ID de solicitud: {lead_id}\n"
+              f"Producto: {str(lead.get('product_slug') or '')[:100]}\n"
+              f"Empresa: {str(lead.get('company') or '')[:160]}\n"
+              f"Contacto: {str(lead.get('email') or '')[:180]}\n"
+              f"Requerimiento: {str(lead.get('details') or '')[:1600]}\n\n"
+              "Acción: verificar el alcance y la empresa; acordar vía de cobro internacional en USD; "
+              "responder personalmente antes de cualquier compromiso.\n"
+              "Esto NO es un pago, una factura, ni un settlement.\n"
+              "No enviar múltiples mensajes ni instrucciones financieras sin verificación.\n"
+          )
+
+          context = ssl.create_default_context()
+          if use_ssl:
+              smtp = smtplib.SMTP_SSL(host, port, timeout=25, context=context)
+          else:
+              smtp = smtplib.SMTP(host, port, timeout=25)
+          try:
+              if not use_ssl:
+                  smtp.ehlo()
+                  smtp.starttls(context=context)
+                  smtp.ehlo()
+              smtp.login(user, password)
+              smtp.send_message(message)
+          finally:
+              smtp.quit()
+
+          ack = urllib.request.Request(
+              f"{base}/sales/ack-usd-alert",
+              data=json.dumps({"lead_id": lead_id}).encode("utf-8"),
+              headers={"x-lumen-admin":token,"content-type":"application/json","accept":"application/json"},
+              method="POST"
+          )
+          with urllib.request.urlopen(ack, timeout=25) as response:
+              confirmation = json.load(response)
+          if confirmation.get("ok") is not True:
+              raise SystemExit("USD_OWNER_ALERT_SENT_BUT_NOT_ACKED")
+          print("USD_OWNER_ALERT_SENT_TO_CONFIGURED_OWNER_MAILBOX")
+          print("USD_OWNER_ALERT_PAYMENT_VERIFIED=FALSE")
+          PY
