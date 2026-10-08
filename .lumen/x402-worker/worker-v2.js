@@ -11,7 +11,7 @@ const PAY_TO = "0x04285DE6A083CEb28fb0C254a2ed0F5fdB2eeD28";
 const NETWORK = "eip155:8453";
 const FACILITATOR = "https://facilitator.xpay.sh";
 
-const PRODUCTS = {
+export const PRODUCTS = {
   "supplier-snapshot": { id:"MP-SUPPLIER-SNAPSHOT", name:"Supplier Snapshot", price_usd:1, service_id:"SRV-SUPPLIERCHECK" },
   "quote-sanity": { id:"MP-QUOTE-SANITY", name:"Quote Sanity Check", price_usd:7, service_id:"SRV-QUOTECHECK" },
   "tender-hot-lead": { id:"MP-TENDER-LEAD", name:"Tender Hot Lead", price_usd:1, service_id:"SRV-TENDER-LEAD" },
