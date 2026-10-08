@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { diagnoseSettlementBlocker, chooseFirstSettlementMission, FIRST_SETTLEMENT_MISSION_POLICY } from "./first-settlement-mission-v1.js";
 
-assert.equal(FIRST_SETTLEMENT_MISSION_POLICY.version, "1.8-quality-consistent-actionability");
+assert.equal(FIRST_SETTLEMENT_MISSION_POLICY.version, "1.9-tracking-recovery");
+assert.equal(FIRST_SETTLEMENT_MISSION_POLICY.prefilterCommercialTruthBeforeLimit,true);
+assert.equal(FIRST_SETTLEMENT_MISSION_POLICY.readOnlyRecoveryForUntrackedOpportunities,true);
+assert.equal(FIRST_SETTLEMENT_MISSION_POLICY.recoverySendsMessages,false);
 assert.equal(FIRST_SETTLEMENT_MISSION_POLICY.actionabilityMustMatchQualityThresholds, true);
 assert.equal(FIRST_SETTLEMENT_MISSION_POLICY.nonActionableInventoryRequiresVerifiedCommercialIntentToOwnMission, true);
 assert.equal(FIRST_SETTLEMENT_MISSION_POLICY.requiresCurrentCommercialActionability, true);
