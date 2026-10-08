@@ -45,6 +45,10 @@ function clean(value, limit = 5000) {
   return String(value ?? "").trim().replace(/\s+/g, " ").slice(0, limit);
 }
 
+function safeParse(value, fallback = {}) {
+  try { return JSON.parse(String(value || "")); } catch { return fallback; }
+}
+
 function authorized(request, env) {
   const configured = clean(env?.OPPORTUNITY_ADMIN_TOKEN, 500);
   const provided = clean(request.headers.get("x-lumen-admin"), 500);
@@ -473,7 +477,7 @@ export async function handleSourceIntelligence(request, env) {
     const limit = Math.max(1, Math.min(50, Number(url.searchParams.get("limit") || 20)));
     const rows = await safeAll(env, "SELECT a.source_id,a.opportunity_id,a.remote_id,a.evidence_url,o.name,o.description,o.score,o.fit,o.demand_signal,o.status,o.raw_json FROM lumen_source_signal_attribution a JOIN lumen_opportunities o ON o.id=a.opportunity_id WHERE a.source_id IN ('ted_eu_public_procurement','uk_contracts_finder') AND o.demand_signal=1 ORDER BY o.score DESC,a.last_seen_at DESC LIMIT ?", [limit]);
     const candidates = rows.map(row => {
-      const raw = parse(row.raw_json, {});
+      const raw = safeParse(row.raw_json, {});
       return {
         sourceId: row.source_id,
         opportunityId: row.opportunity_id,
@@ -509,6 +513,7 @@ export async function handleSourceIntelligence(request, env) {
 
 export const __test = {
   firstText,
+  safeParse,
   normalizeTedItem,
   normalizeUkRelease,
   procurementScore,
