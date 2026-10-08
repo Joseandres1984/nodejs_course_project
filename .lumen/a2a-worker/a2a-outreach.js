@@ -1,5 +1,5 @@
 import { getFirstSettlementMissionStatus } from "./first-settlement-mission-v1.js";
-const VERSION = "2.0-closer-swarm";
+const VERSION = "2.1-focused-send-antispam";
 const CARD_TIMEOUT_MS = 8000;
 const SEND_TIMEOUT_MS = 15000;
 const MAX_CLOSERS_PER_CYCLE = 30;
@@ -411,6 +411,28 @@ async function sendReady(env, row) {
   return { ok:false, sent:false, status:"SEND_FAILED", error:combined };
 }
 
+export function focusedOriginCoolingDown(row = {}, recentRows = []) {
+  const targetOrigin = outreachOrigin(row.agent_url || row.card_url);
+  if (!targetOrigin) return false;
+  return (Array.isArray(recentRows) ? recentRows : []).some(other => {
+    if (String(other?.proposal_id || "") === String(row?.proposal_id || "")) return false;
+    return outreachOrigin(other?.agent_url || other?.card_url) === targetOrigin;
+  });
+}
+
+async function focusedSendGuard(env, row) {
+  const dailyUsed = await sentLast24h(env);
+  if (dailyUsed >= MAX_NEW_OUTREACH_24H) {
+    return { allowed:false, reason:"daily_new_outreach_cap_reached", dailyUsed, dailyRemaining:0 };
+  }
+  const modifier = `-${DOMAIN_COOLDOWN_HOURS} hours`;
+  const recent = await env.DB.prepare("SELECT proposal_id,card_url,agent_url FROM lumen_outreach_attempts WHERE status IN ('SENT','SENT_TASK','WORKING','RESPONDED','TASK_TERMINAL') AND datetime(updated_at)>=datetime('now',?) ORDER BY updated_at DESC LIMIT 500").bind(modifier).all();
+  if (focusedOriginCoolingDown(row, recent.results || [])) {
+    return { allowed:false, reason:"origin_cooldown_active", dailyUsed, dailyRemaining:Math.max(0,MAX_NEW_OUTREACH_24H-dailyUsed), domainCooldownHours:DOMAIN_COOLDOWN_HOURS };
+  }
+  return { allowed:true, dailyUsed, dailyRemaining:Math.max(0,MAX_NEW_OUTREACH_24H-dailyUsed), domainCooldownHours:DOMAIN_COOLDOWN_HOURS };
+}
+
 export async function sendNextApproved(env, { force = false } = {}) {
   if (!(await ensureSchema(env))) return { ok: false, error: "persistence_unavailable" };
   let row = await getReadyAttempt(env);
@@ -420,6 +442,9 @@ export async function sendNextApproved(env, { force = false } = {}) {
     row = await getReadyAttempt(env);
   }
   if (!row) return { ok: true, sent: false, reason: "no_ready_proposal", version: VERSION };
+
+  const guard = await focusedSendGuard(env, row);
+  if (!guard.allowed) return { ok:true, sent:false, proposalId:row.proposal_id, version:VERSION, ...guard };
 
   const autoEnabled = String(env?.A2A_AUTONOMOUS_OUTREACH || "false").toLowerCase() === "true";
   if (!force && !autoEnabled) {

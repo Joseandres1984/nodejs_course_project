@@ -170,6 +170,8 @@ jobs:
         run: node .lumen/a2a-worker/test-procurement-evidence-only-commercial-truth.mjs
       - name: Verify controlled A2A batch limit
         run: node .lumen/a2a-worker/test-controlled-batch-limit.mjs
+      - name: Verify focused send anti-spam guard
+        run: node .lumen/a2a-worker/test-focused-send-antispam.mjs
       - name: Verify bounded proposal quality copy repair
         run: node .lumen/a2a-worker/test-quality-copy-repair.mjs
       - name: Run Autonomous Director unit tests
