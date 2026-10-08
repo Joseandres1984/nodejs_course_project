@@ -166,6 +166,8 @@ jobs:
         run: python -m unittest discover -s .lumen/runtime -p 'test_a2a_procurement_contact_bridge_runtime.py'
       - name: Verify procurement buyer-contact capture
         run: node .lumen/a2a-worker/test-procurement-buyer-contact-bridge.mjs
+      - name: Verify procurement evidence-only commercial truth
+        run: node .lumen/a2a-worker/test-procurement-evidence-only-commercial-truth.mjs
       - name: Verify controlled A2A batch limit
         run: node .lumen/a2a-worker/test-controlled-batch-limit.mjs
       - name: Run Autonomous Director unit tests
