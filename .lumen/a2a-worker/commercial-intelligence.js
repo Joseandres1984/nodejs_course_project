@@ -1,4 +1,4 @@
-const VERSION = "1.3-explicit-buyer-truth";
+const VERSION = "1.4-stale-assessment-refresh-priority";
 
 const HARD_TEST_PHRASES = [
   "paper-only",
@@ -243,7 +243,20 @@ async function ensureSchema(env) {
 
 export async function runCommercialReassessment(env) {
   if (!(await ensureSchema(env))) return { ok: false, error: "persistence_unavailable" };
-  const rows = await env.DB.prepare("SELECT o.id,o.source,o.name,o.description,o.remote_id,o.endpoint,o.evidence,o.score,o.fit,o.demand_signal,o.revenue_offer_id,o.status,o.raw_json,a.assessed_at AS prior_assessed_at FROM lumen_opportunities o LEFT JOIN lumen_opportunity_assessments a ON a.opportunity_id=o.id ORDER BY CASE WHEN a.opportunity_id IS NULL THEN 0 ELSE 1 END,CASE WHEN a.assessed_at IS NULL OR datetime(a.assessed_at)<datetime(o.updated_at) THEN 0 ELSE 1 END,o.updated_at DESC,o.score DESC LIMIT 500").all();
+  const rows = await env.DB.prepare(`SELECT o.id,o.source,o.name,o.description,o.remote_id,o.endpoint,o.evidence,o.score,o.fit,o.demand_signal,o.revenue_offer_id,o.status,o.raw_json,
+    a.assessed_at AS prior_assessed_at,a.engine_version AS prior_engine_version
+    FROM lumen_opportunities o
+    LEFT JOIN lumen_opportunity_assessments a ON a.opportunity_id=o.id
+    ORDER BY
+      CASE WHEN a.opportunity_id IS NULL OR COALESCE(a.engine_version,'')<>? THEN 0 ELSE 1 END,
+      CASE WHEN EXISTS (
+        SELECT 1 FROM lumen_proposal_drafts p
+        WHERE p.opportunity_id=o.id AND p.status IN ('DRAFT','APPROVED','SENT')
+      ) THEN 0 ELSE 1 END,
+      CASE WHEN o.source='tender_supplier_match' THEN 0 ELSE 1 END,
+      CASE WHEN a.assessed_at IS NULL OR datetime(a.assessed_at)<datetime(o.updated_at) THEN 0 ELSE 1 END,
+      o.updated_at DESC,o.score DESC
+    LIMIT 500`).bind(VERSION).all();
   let assessed = 0;
   let actionable = 0;
   let testOnly = 0;
@@ -269,7 +282,10 @@ export async function runCommercialReassessment(env) {
     version: VERSION,
     assessed,
     newlyAssessed,
-    selectionPolicy: "unassessed_then_changed_then_recent_score",
+    selectionPolicy: "stale_engine_then_active_proposal_then_tender_match_then_changed_then_recent_score",
+    staleEngineRefreshPriority: true,
+    activeProposalRefreshPriority: true,
+    tenderSupplierMatchRefreshPriority: true,
     actionable,
     testOnly,
     microbuyerFits,
