@@ -1,0 +1,56 @@
+name: LUMEN Procurement Fit Diagnostic
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-procurement-fit-diagnostic.yml'
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    env:
+      BASE: https://lumen-zero-a2a.lumen-b2b.workers.dev
+      OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+    steps:
+      - name: Score contact-ready procurement demand against LUMEN services
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 45             -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN"             -H 'cache-control: no-cache'             "$BASE/source-intelligence/contact-candidates?limit=50" -o /tmp/contacts.json
+          node - <<'NODE'
+          const fs=require('fs');
+          const p=JSON.parse(fs.readFileSync('/tmp/contacts.json','utf8'));
+          const host=v=>{try{return new URL(v).hostname.toLowerCase().replace(/^www\./,'')}catch{return ''}};
+          const ed=v=>{const s=String(v||'').toLowerCase();return s.includes('@')?s.split('@').pop().replace(/^www\./,''):''};
+          const same=(a,b)=>a&&b&&(a===b||a.endsWith('.'+b)||b.endsWith('.'+a));
+          const groups={
+            quote_review:["quotation","quote","rfq","pricing","framework agreement","supplier quote"],
+            tender_intelligence:["tender","procurement","public procurement","bid","contract notice"],
+            supplier_research:["supplier","vendor","due diligence","market consultation","market research","sourcing"],
+            digital_research:["software","data","digital","information system","ict","technology","consulting","consultancy","research","analysis","cyber","cloud","artificial intelligence","ai"]
+          };
+          const rows=(p.candidates||[]).filter(r=>same(ed(r.buyerEmail),host(r.buyerWebsite))).map(r=>{
+            const text=(String(r.name||"")+" "+String(r.description||"")).toLowerCase();
+            const hits={};
+            for(const [g,terms] of Object.entries(groups)) hits[g]=terms.filter(t=>text.includes(t));
+            const specific=[...hits.supplier_research,...hits.digital_research,...hits.quote_review];
+            const serviceFit=specific.length>0;
+            return {
+              opportunityId:r.opportunityId,
+              remoteId:r.remoteId,
+              buyer:r.buyer,
+              notice:r.name,
+              score:r.score,
+              emailDomain:ed(r.buyerEmail),
+              websiteDomain:host(r.buyerWebsite),
+              serviceFit,
+              fitSignals:[...new Set(specific)].slice(0,12)
+            };
+          });
+          console.log(JSON.stringify({
+            contactReady:rows.length,
+            serviceFit:rows.filter(r=>r.serviceFit).length,
+            candidates:rows
+          },null,2));
+          NODE
