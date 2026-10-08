@@ -65,7 +65,7 @@ export function buildDiscoveryOpenApi(products,origin){
   }
   return {
     openapi:"3.1.0",
-    info:{title:"LUMEN B2B x402 Pay-per-Request Services",version:"1.0.0",description:"Real B2B sourcing and procurement research. Seven paid endpoints on Base mainnet. Payment settlement requires individual human approval by LUMEN. No autonomous purchases."},
+    info:{title:"LUMEN B2B x402 Pay-per-Request Services",version:"1.0.1",description:"Real B2B sourcing and procurement research. Seven paid endpoints on Base mainnet. Payment settlement requires individual human approval by LUMEN. No autonomous purchases.",contact:{url:host+"/catalog"},"x-guidance":"Choose a B2B service and inspect its unsigned GET HTTP 402 challenge. A signed authorization requires separate one-use human owner approval before settlement. Pending requests return 409 with approvalRequestId and are not paid. After the owner approves the exact request, the buyer retries with a fresh signed authorization and the x-lumen-approval-id header. HTTP 200 is a paid receipt for queued research, not an instantly delivered report."},
     servers:[{url:host}],
     paths,
     "x-payment-policy":{
