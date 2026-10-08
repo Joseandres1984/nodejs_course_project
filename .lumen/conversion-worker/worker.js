@@ -1,5 +1,5 @@
 const SERVICE = "lumen-zero-conversion";
-const VERSION = "1.1-conversion-loop-crm";
+const VERSION = "1.2-usd-human-checkout-request";
 const X402_BASE = "https://lumen-zero-x402.lumen-b2b.workers.dev";
 
 const PRODUCT_CONTRACT_VERSION = "2026-09-21-v1";
@@ -85,7 +85,7 @@ function offerHtml(slug, p, attr) {
   const query = qs(attr);
   const intent = `/intent/${encodeURIComponent(slug)}${query?`?${query}`:""}`;
   const li = (items) => `<ul>${items.map((x)=>`<li>${html(x)}</li>`).join("")}</ul>`;
-  return page(p.name,`<main class="card"><div style="color:#8ea1c7;font-weight:700;margin-bottom:14px">MICROSERVICIO · ALCANCE DEFINIDO</div><h1>${html(p.name)}</h1><p class="sub">${html(p.promise)}</p><div class="price">USD ${p.price_usd}</div><h2>Qué necesitamos</h2>${li(p.requires)}<h2>Qué recibís</h2>${li(p.deliverables)}<h2>No incluye</h2>${li(p.not_included)}<div id="consulta" style="margin-top:28px"><h2>Antes de pagar</h2><p class="sub">Necesitamos el requerimiento para poder ejecutar el trabajo. El checkout se habilita después de guardar estos datos.</p><form method="post" action="${html(intent)}"><input name="email" type="email" required maxlength="180" placeholder="Email para recibir el resultado"><input name="company" maxlength="180" placeholder="Empresa (opcional)"><textarea name="details" maxlength="1800" minlength="8" required placeholder="${html(p.details_placeholder)}"></textarea><div class="actions"><button class="btn" type="submit" name="next" value="checkout">Guardar y continuar al pago</button><button class="btn secondary" type="submit" name="next" value="consult">Sólo consultar</button></div></form></div><div class="truth">El checkout usa USDC sobre Base mediante x402. Completar el requerimiento no genera un cargo. LUMEN registra ingreso solamente después de settlement exitoso.</div></main>`);
+  return page(p.name,`<main class="card"><div style="color:#8ea1c7;font-weight:700;margin-bottom:14px">MICROSERVICIO · ALCANCE DEFINIDO</div><h1>${html(p.name)}</h1><p class="sub">${html(p.promise)}</p><div class="price">USD ${p.price_usd}</div><h2>Qué necesitamos</h2>${li(p.requires)}<h2>Qué recibís</h2>${li(p.deliverables)}<h2>No incluye</h2>${li(p.not_included)}<div id="consulta" style="margin-top:28px"><h2>Contanos qué necesitás</h2><p class="sub">Para clientes internacionales podés solicitar una forma de pago en USD sin criptomonedas. LUMEN deberá verificar el medio y confirmar las instrucciones antes de cobrar. El pago x402 con USDC continúa disponible.</p><form method="post" action="${html(intent)}"><input name="email" type="email" required maxlength="180" placeholder="Email para recibir el resultado"><input name="company" maxlength="180" placeholder="Empresa (opcional)"><textarea name="details" maxlength="1800" minlength="8" required placeholder="${html(p.details_placeholder)}"></textarea><div class="actions"><button class="btn" type="submit" name="next" value="invoice_usd">Solicitar pago en USD (sin compromiso)</button><button class="btn secondary" type="submit" name="next" value="checkout">Pagar con USDC (x402)</button><button class="btn secondary" type="submit" name="next" value="consult">Sólo consultar</button></div></form></div><div class="truth">Solicitar cobro en USD no genera una factura automática, un cargo ni una reserva confirmada. Los medios internacionales se validan antes de facilitar instrucciones de pago. El checkout con USDC usa x402 sobre Base. Sólo los pagos confirmados se registran como ingreso.</div></main>`);
 }
 function catalogHtml(attr) {
   const cards = Object.entries(PRODUCTS).map(([slug,p]) => {
@@ -189,18 +189,26 @@ export default {
         const email=clean(form.get("email"),180).toLowerCase();
         const company=clean(form.get("company"),180);
         const details=clean(form.get("details"),1800);
-        const next=clean(form.get("next"),20) === "checkout" ? "checkout" : "consult";
+        const requestedNext=clean(form.get("next"),20);
+        const next=["checkout","consult","invoice_usd"].includes(requestedNext) ? requestedNext : "consult";
+        const paymentPreference=next === "invoice_usd" ? "USD_MANUAL_REVIEW" : next === "checkout" ? "X402_USDC" : "CONTACT_ONLY";
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || details.length < 8) return new Response("Necesitamos un email válido y un requerimiento claro.",{status:400,headers});
         await ensureSchema(env);
         const leadId=`CL-${crypto.randomUUID().replaceAll("-","").slice(0,20).toUpperCase()}`;
         await env.DB.prepare("INSERT INTO lumen_conversion_leads (id,created_at,session_id,product_id,product_slug,email,company,details,source,medium,campaign,creative,status,technical_canary) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
           .bind(leadId,new Date().toISOString(),sid,p.id,slug,email,company,details,attr.source,attr.medium,attr.campaign,attr.creative,"new",attr.technical_canary).run();
-        const crm=await syncLeadToCrm(env,{leadId,p,slug,email,company,details,attr});
-        await recordEvent(env,"qualified_intent",sid,slug,attr,{lead_id:leadId,crm,next});
+        const crmDetails=next === "invoice_usd" ? `${details}\n[El comprador solicita instrucciones de pago en USD. Revisar disponibilidad y confirmar el medio antes de enviar enlace o factura. Ningún pago realizado.]` : details;
+        const crm=await syncLeadToCrm(env,{leadId,p,slug,email,company,details:crmDetails,attr});
+        await recordEvent(env,"qualified_intent",sid,slug,attr,{lead_id:leadId,crm,next,paymentPreference});
         const qparams=new URLSearchParams(qs(attr));
         qparams.set("brief_id",leadId);
         const go=`/go/${slug}?${qparams.toString()}`;
         if (next === "checkout") { await recordEvent(env,"requirements_captured",sid,slug,attr,{lead_id:leadId,brief_id:leadId}); headers.set("location",go); return new Response(null,{status:303,headers}); }
+        if (next === "invoice_usd") {
+          await recordEvent(env,"usd_payment_request",sid,slug,attr,{lead_id:leadId,paymentPreference,charged:false,invoiceCreated:false});
+          headers.set("content-type","text/html; charset=utf-8");
+          return new Response(page("Solicitud de pago USD registrada",`<main class="card"><h1>Solicitud recibida</h1><p class="sub">LUMEN registró el requerimiento de ${html(p.name)} y tu preferencia por pagar en USD. Referencia: ${html(leadId)}. El equipo debe comprobar el medio de cobro internacional y acordar los detalles antes de facilitar instrucciones o generar una factura. Todavía no se realizó ningún pago.</p><div class="actions"><a class="btn secondary" href="/catalog">Volver al catálogo</a></div></main>`),{status:200,headers});
+        }
         headers.set("content-type","text/html; charset=utf-8");
         return new Response(page("Consulta recibida",`<main class="card"><h1>Consulta recibida.</h1><p class="sub">LUMEN guardó el requerimiento de ${html(p.name)}. No se realizó ningún cargo.</p><div class="actions"><a class="btn" href="${html(go)}">Continuar al pago · USD ${p.price_usd}</a><a class="btn secondary" href="/catalog">Ver catálogo</a></div></main>`),{status:200,headers});
       }
