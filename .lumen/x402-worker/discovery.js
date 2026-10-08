@@ -36,11 +36,12 @@ export function buildDiscoveryOpenApi(products,origin){
     paths["/buy/"+p.slug]={
       get:{
         operationId:"buy_"+p.slug.replaceAll("-","_"),
+        security:[],
         summary:p.name+" | x402 | $"+p.amountUsd.toFixed(2)+" USDC",
         description:"Paid B2B research request. Send unsigned GET to inspect the official HTTP 402 quote. To settle, buyer sends a valid x402 signed payment authorization; an exact-scope human approval by the LUMEN owner is required before the facilitator can execute. The owner approval request may yield 409; after owner approval retry with x-lumen-approval-id and a fresh signed x402 authorization. No automatic or self-approved charge. Paid requests queue research for later delivery; the 200 response is not the finished research report.",
         tags:["B2B sourcing","x402","agent services"],
         "x-payment-info":{
-          protocols:["x402"],
+          protocols:[{x402:{}}],
           price:{mode:"fixed",currency:"USD",amount:p.amountUsd.toFixed(2)},
           network:BASE_NETWORK,
           asset:"USDC",
@@ -64,7 +65,7 @@ export function buildDiscoveryOpenApi(products,origin){
   }
   return {
     openapi:"3.1.0",
-    info:{title:"LUMEN B2B x402 Pay-per-Request Services",version:"1.0.0",description:"Real B2B sourcing and procurement research. Seven paid endpoints on Base mainnet. Payment settlement requires individual human approval by LUMEN. No autonomous purchases."},
+    info:{title:"LUMEN B2B x402 Pay-per-Request Services",version:"1.0.1",description:"Real B2B sourcing and procurement research. Seven paid endpoints on Base mainnet. Payment settlement requires individual human approval by LUMEN. No autonomous purchases.",contact:{url:host+"/catalog"},"x-guidance":"Choose a B2B service and inspect its unsigned GET HTTP 402 challenge. A signed authorization requires separate one-use human owner approval before settlement. Pending requests return 409 with approvalRequestId and are not paid. After the owner approves the exact request, the buyer retries with a fresh signed authorization and the x-lumen-approval-id header. HTTP 200 is a paid receipt for queued research, not an instantly delivered report."},
     servers:[{url:host}],
     paths,
     "x-payment-policy":{

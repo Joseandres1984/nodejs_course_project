@@ -19,6 +19,8 @@ assert.equal(well.resources.length,7);
 assert.equal(new Set(well.resources).size,7);
 assert.equal(api.openapi,"3.1.0");
 assert.equal(api.servers[0].url,origin);
+assert.ok(api.info["x-guidance"].includes("human owner approval"));
+assert.equal(api.info.contact.url,origin+"/catalog");
 assert.equal(Object.keys(api.paths).length,7);
 assert.equal(api["x-payment-policy"].ownerApprovalRequired,true);
 assert.equal(api["x-payment-policy"].noAutonomousApproval,true);
@@ -27,7 +29,8 @@ for(const [slug,product] of Object.entries(products)){
   const url=origin+path;
   assert.ok(well.resources.includes(url));
   const op=api.paths[path].get;
-  assert.equal(op["x-payment-info"].protocols[0],"x402");
+  assert.deepEqual(op["x-payment-info"].protocols[0],{x402:{}});
+  assert.deepEqual(op.security,[]);
   assert.deepEqual(op["x-payment-info"].price,{mode:"fixed",currency:"USD",amount:product.price_usd.toFixed(2)});
   assert.equal(op["x-payment-info"].recipientApprovalRequired,true);
   assert.equal(op["x-payment-info"].productId,product.id);
