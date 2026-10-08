@@ -1,5 +1,5 @@
 export const FIRST_SETTLEMENT_MISSION_POLICY = Object.freeze({
-  version: "1.7-verified-intent-focus-truth",
+  version: "1.8-quality-consistent-actionability",
   objective: "move_the_best_real_opportunity_toward_first_verified_settlement",
   settlementTruth: "verified_x402_receipt_only",
   autonomousSpendUsd: 0,
@@ -16,7 +16,8 @@ export const FIRST_SETTLEMENT_MISSION_POLICY = Object.freeze({
   rotateNonCommercialTransportResponses: true,
   rotateNonCommercialReplies: true,
   requiresCurrentCommercialActionability: true,
-  nonActionableInventoryRequiresVerifiedCommercialIntentToOwnMission: true
+  nonActionableInventoryRequiresVerifiedCommercialIntentToOwnMission: true,
+  actionabilityMustMatchQualityThresholds: true
 });
 
 const STALL_HOURS = Object.freeze({
@@ -162,12 +163,19 @@ export function chooseFirstSettlementMission(rows = [], now = Date.now()) {
     .filter(r => {
       const stage=String(r.stage || "").toUpperCase();
       if(r.verified_receipt_id || ["PAID","DELIVERED"].includes(stage)) return false;
-      const actionable=Number(r.commercially_actionable);
       const responseClass=String(r.pipeline_response_class || r.response_class || "").toUpperCase();
       const verifiedCommercialIntent=["COMMERCIAL_QUESTION","COMMERCIAL_INTEREST","PURCHASE_INTENT"].includes(responseClass);
-      // Preserve non-actionable conversations in lifecycle/audit, but do not let them own
-      // the First Settlement mission unless the buyer has produced verified commercial intent.
-      return actionable!==0 || verifiedCommercialIntent;
+      const actionabilityKnown=r.commercially_actionable!==undefined&&r.commercially_actionable!==null;
+      const scoreKnown=r.commercial_score!==undefined&&r.commercial_score!==null;
+      const evidenceKnown=r.evidence_strength!==undefined&&r.evidence_strength!==null&&String(r.evidence_strength).length>0;
+      const qualityConsistentActionable=
+        (!actionabilityKnown || Number(r.commercially_actionable)===1) &&
+        (!scoreKnown || Number(r.commercial_score)>=65) &&
+        (!evidenceKnown || ["MEDIUM","STRONG"].includes(String(r.evidence_strength).toUpperCase())) &&
+        Number(r.synthetic_or_test_only || 0)!==1;
+      // Old rows can carry a stale commercially_actionable=1. Current score/evidence truth wins.
+      // A real verified commercial response remains eligible even if later reassessment changes.
+      return qualityConsistentActionable || verifiedCommercialIntent;
     })
     .map(r => ({ row:r, diagnosis:diagnoseSettlementBlocker(r, now), priority:missionPriority(r, now) }))
     .filter(x => Number.isFinite(x.priority));
@@ -188,7 +196,10 @@ export async function getFirstSettlementMissionStatus(env) {
     x.updated_at AS outreach_updated_at,
     o.status AS opportunity_status,
     a.commercially_actionable,
-    a.synthetic_or_test_only
+    a.commercial_score,
+    a.evidence_strength,
+    a.synthetic_or_test_only,
+    a.engine_version AS assessment_engine_version
     FROM lumen_revenue_loop_v5 r
     LEFT JOIN lumen_proposal_drafts p ON p.proposal_id=r.proposal_id
     LEFT JOIN lumen_sales_pipeline s ON s.proposal_id=r.proposal_id
