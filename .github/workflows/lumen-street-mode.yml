@@ -181,16 +181,16 @@ jobs:
         run: |
           set -euo pipefail
           if [ "${BATCH_FAILED:-0}" -gt 0 ] && [ "${BATCH_SENT:-0}" -eq 0 ]; then
-            echo "::warning::External attempts occurred but all batch deliveries failed; investigate endpoint compatibility and prospect validation."
+            echo "::error::All batch delivery attempts failed. External attempts are not successful outreach."
             echo "LUMEN_STREET_MODE_EFFECTIVENESS=degraded_delivery_failed"
-            exit 0
+            exit 1
           fi
           if [ "${EXTERNAL_SLOT_CONSUMED:-false}" = 'true' ]; then
-            echo 'LUMEN_STREET_MODE_EFFECTIVENESS=green_active_commercial_attempt'
+            echo 'LUMEN_STREET_MODE_EFFECTIVENESS=external_attempt_unverified_revenue'
             exit 0
           fi
           if [ "${SAFE_IDLE:-false}" = 'true' ]; then
-            echo 'LUMEN_STREET_MODE_EFFECTIVENESS=green_no_eligible_target'
+            echo 'LUMEN_STREET_MODE_EFFECTIVENESS=safe_idle_no_eligible_target'
             echo 'LUMEN_STREET_MODE_ANTI_SPAM=protected'
             exit 0
           fi
