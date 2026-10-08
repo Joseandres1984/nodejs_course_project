@@ -32,6 +32,7 @@ jobs:
           curl -fsS --max-time 30 -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" -H 'cache-control: no-cache' "$BASE/commercial/actionable?limit=10" -o /tmp/actionable.json
           curl -fsS --max-time 30 -H 'cache-control: no-cache' "$BASE/proposals/next" -o /tmp/proposal.json
           curl -fsS --max-time 30 -H 'cache-control: no-cache' "$BASE/quality/stats" -o /tmp/quality.json
+          curl -fsS --max-time 30 -H 'cache-control: no-cache' "$BASE/followup/pipeline" -o /tmp/pipeline.json
           curl -fsS --max-time 30 -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" -H 'cache-control: no-cache' "$BASE/tender-match/state" -o /tmp/matches.json
           curl -fsS --max-time 30 -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" -H 'cache-control: no-cache' "$BASE/revenue-loop-v5/status" -o /tmp/revenue.json
           curl -fsS --max-time 30 -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" -H 'cache-control: no-cache' "$BASE/first-settlement/status" -o /tmp/settlement.json
@@ -46,6 +47,8 @@ jobs:
           jq '{proposal:(.proposal|if .==null then null else {proposalId,opportunityId,target,endpoint,offerId,amountUsd,status,qualityGateStatus,metadata} end),nextAction}' /tmp/proposal.json
           echo '===== QUALITY STATS ====='
           jq '.' /tmp/quality.json
+          echo '===== ACTIVE FOLLOWUP PIPELINE ====='
+          jq '{selected:[.pipeline[]|select(.proposal_id=="PROP-57C73BDF2827" or .proposal_id=="PROP-E8AE31983347" or .proposal_id=="PROP-69A9A1A91E7B")|{proposal_id,opportunity_id,target,stage,response_class,last_contact_at,next_action,next_action_at,followup_count,updated_at,notes}]}' /tmp/pipeline.json
           echo '===== TENDER MATCH STATE ====='
           jq '{version,total,recent:[.recent[]|{match_id,match_opportunity_id,match_score,status,matched_terms}]}' /tmp/matches.json
           echo '===== REVENUE LOOP ====='
