@@ -191,7 +191,11 @@ export function assessCommercialOpportunity(row) {
   }
 
   const explicitNoCommerce = hardTestHits > 0;
+  const procurementEvidenceOnly =
+    ["ted_eu_public_procurement","uk_contracts_finder"].includes(clean(row?.source, 120)) ||
+    (clean(row?.fit, 120) === "PUBLIC_PROCUREMENT" && !row?.endpoint);
   if (explicitNoCommerce) score = Math.min(score, 24);
+  if (procurementEvidenceOnly) reasons.push("procurement_evidence_only_requires_supplier_match");
 
   score = Math.max(0, Math.min(100, Math.round(score)));
   const fit = score >= 80 ? "A" : score >= 65 ? "B" : score >= 45 ? "C" : "D";
@@ -205,6 +209,7 @@ export function assessCommercialOpportunity(row) {
   // FIRST CASH buyer truth: compatibility/payment language is not demand.
   // An opportunity is actionable only when explicit buyer-intent evidence exists.
   const commerciallyActionable = !explicitNoCommerce &&
+    !procurementEvidenceOnly &&
     Number(row?.demand_signal || 0) === 1 &&
     intentHits >= 1 &&
     ["medium","strong"].includes(evidenceStrength) &&
@@ -238,7 +243,7 @@ async function ensureSchema(env) {
 
 export async function runCommercialReassessment(env) {
   if (!(await ensureSchema(env))) return { ok: false, error: "persistence_unavailable" };
-  const rows = await env.DB.prepare("SELECT o.id,o.name,o.description,o.remote_id,o.endpoint,o.evidence,o.score,o.fit,o.demand_signal,o.revenue_offer_id,o.status,o.raw_json,a.assessed_at AS prior_assessed_at FROM lumen_opportunities o LEFT JOIN lumen_opportunity_assessments a ON a.opportunity_id=o.id ORDER BY CASE WHEN a.opportunity_id IS NULL THEN 0 ELSE 1 END,CASE WHEN a.assessed_at IS NULL OR datetime(a.assessed_at)<datetime(o.updated_at) THEN 0 ELSE 1 END,o.updated_at DESC,o.score DESC LIMIT 500").all();
+  const rows = await env.DB.prepare("SELECT o.id,o.source,o.name,o.description,o.remote_id,o.endpoint,o.evidence,o.score,o.fit,o.demand_signal,o.revenue_offer_id,o.status,o.raw_json,a.assessed_at AS prior_assessed_at FROM lumen_opportunities o LEFT JOIN lumen_opportunity_assessments a ON a.opportunity_id=o.id ORDER BY CASE WHEN a.opportunity_id IS NULL THEN 0 ELSE 1 END,CASE WHEN a.assessed_at IS NULL OR datetime(a.assessed_at)<datetime(o.updated_at) THEN 0 ELSE 1 END,o.updated_at DESC,o.score DESC LIMIT 500").all();
   let assessed = 0;
   let actionable = 0;
   let testOnly = 0;
