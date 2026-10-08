@@ -46,6 +46,8 @@ const DB={
  async batch(queries){const out=[];for(const q of queries)out.push(await q.run());return out}
 };
 const env={DB,OPPORTUNITY_ADMIN_TOKEN:"test-secret"};
+sqlite.exec(`CREATE TABLE lumen_opportunities(
+ id TEXT PRIMARY KEY,source TEXT,remote_id TEXT,name TEXT,raw_json TEXT,evidence TEXT,demand_signal INTEGER,updated_at TEXT)`);
 // Pure research matches: no external network calls, no outreach draft table,
 // and no payments table in the test database.
 const unauth=await handleSourceIntelligence(new Request("https://worker.example/source-intelligence/award-demand-matches"),env);
@@ -53,8 +55,7 @@ assert.equal(unauth.status,403);
 const auth={headers:{"x-lumen-admin":"test-secret"}};
 const empty=await(await handleSourceIntelligence(new Request("https://worker.example/source-intelligence/award-demand-matches",auth),env)).json();
 assert.equal(empty.candidatesForHumanReview,0);
-sqlite.exec(`CREATE TABLE lumen_opportunities(
- id TEXT PRIMARY KEY,source TEXT,remote_id TEXT,name TEXT,raw_json TEXT,evidence TEXT,demand_signal INTEGER,updated_at TEXT)`);
+
 const now=new Date().toISOString();
 for(const a of [cleaning,travel,securityAward]){
  sqlite.prepare("INSERT INTO lumen_official_award_suppliers(award_notice_id,supplier_name,supplier_website,supplier_domain,supplier_email,domain_verified,award_title,evidence_url,first_seen_at,last_seen_at) VALUES(?,?,?,?,?,?,?,?,?,?)")
