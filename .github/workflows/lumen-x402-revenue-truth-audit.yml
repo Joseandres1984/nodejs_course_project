@@ -16,53 +16,38 @@ jobs:
   read-only-accounting:
     runs-on: ubuntu-latest
     timeout-minutes: 4
-    env:
-      CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      X402_D1_ID: e872694a-ed14-4a7f-b2c3-38b8e1bb498b
     steps:
-      - name: Count live unique settlements and approval requests without moving funds
+      - name: Verify official seller receipt totals without accessing private buyer or owner data
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import json, os, sys, urllib.request, urllib.error
-          token=os.environ.get("CF_TOKEN","")
-          account=os.environ.get("CF_ACCOUNT","")
-          db_id=os.environ.get("X402_D1_ID","")
-          if not token or not account: raise SystemExit("X402_ACCOUNT_AUDIT_CREDENTIALS_MISSING")
-          url=f"https://api.cloudflare.com/client/v4/accounts/{account}/d1/database/{db_id}/query"
-          def query(sql):
-              req=urllib.request.Request(url,data=json.dumps({"sql":sql}).encode(),method="POST",
-                  headers={"authorization":f"Bearer {token}","content-type":"application/json","accept":"application/json"})
+          import json,urllib.request,urllib.error
+          base="https://lumen-zero-x402.lumen-b2b.workers.dev"
+          def get(path):
+              req=urllib.request.Request(base+path,
+                  headers={"accept":"application/json","cache-control":"no-store",
+                           "user-agent":"LUMEN-ReadOnly-Revenue-Audit/1.0"})
               try:
-                  with urllib.request.urlopen(req,timeout=20) as res: body=json.load(res)
+                  with urllib.request.urlopen(req,timeout=20) as res:
+                      return json.load(res)
               except urllib.error.HTTPError as exc:
-                  print("X402_D1_HTTP_ERROR",exc.code)
+                  print("X402_PUBLIC_STATS_HTTP_ERROR",exc.code)
                   raise SystemExit(2)
-              if body.get("success") is not True:
-                  errors=body.get("errors",[])
-                  if any("no such table" in str(x).lower() for x in errors): return None
-                  print("X402_D1_QUERY_DENIED_OR_FAILED")
-                  raise SystemExit(2)
-              result=(body.get("result") or [{}])[0]
-              if result.get("success") is False:
-                  if "no such table" in str(result.get("error") or "").lower(): return None
-                  print("X402_D1_SQL_FAILED")
-                  raise SystemExit(2)
-              return (result.get("results") or [{}])[0]
-          sqls={
-             "settlements":"SELECT COUNT(*) AS n,COALESCE(SUM(amount_usd),0) AS usd FROM lumen_x402_receipts WHERE status IN ('settled_verified','redeemed_queued')",
-             "pending_approvals":"SELECT COUNT(*) AS n FROM lumen_x402_human_approvals WHERE status='PENDING' AND expires_at > datetime('now')",
-             "approval_outcomes":"SELECT status,COUNT(*) AS n FROM lumen_x402_human_approvals GROUP BY status"
-          }
-          main=query(sqls["settlements"])
-          if main is None: raise SystemExit("X402_RECEIPT_TABLE_MISSING_UNVERIFIABLE")
-          print("X402_SETTLEMENTS_UNIQUE_VERIFIED",int(main.get("n") or 0))
-          print("X402_VERIFIED_REVENUE_USD",round(float(main.get("usd") or 0),6))
-          pending=query(sqls["pending_approvals"])
-          print("X402_APPROVAL_REQUESTS_PENDING",int((pending or {}).get("n") or 0))
-          # Only aggregate statuses are public in logs. No buyer data, wallet
-          # secrets, fingerprints, signatures or notification tokens.
-          print("X402_TRUTH_AUDIT_READ_ONLY_NO_PAYMENTS_OK")
+          stats=get("/stats")
+          policy=get("/approvals/policy")
+          if policy.get("humanApprovalRequired") is not True or policy.get("defaultDeny") is not True or policy.get("oneTime") is not True:
+              raise SystemExit("X402_HUMAN_APPROVAL_GUARDRAIL_MISSING")
+          if policy.get("ownerCredentialConfigured") is not True:
+              raise SystemExit("X402_OWNER_CREDENTIAL_NOT_CONFIGURED")
+          if not isinstance(stats.get("payments"),int) or not isinstance(stats.get("realizedRevenueUsd"),(int,float)):
+              raise SystemExit("X402_REVENUE_UNVERIFIABLE")
+          if "Only settled_verified or redeemed_queued" not in str(stats.get("revenueRule")):
+              raise SystemExit("X402_REVENUE_RULE_CHANGED_REVIEW_REQUIRED")
+          print("X402_SETTLEMENTS_UNIQUE_VERIFIED",stats["payments"])
+          print("X402_VERIFIED_REVENUE_USD",stats["realizedRevenueUsd"])
+          print("X402_PENDING_PAYMENT_AUTHORIZATIONS",stats.get("pendingAuthorizations","not_available"))
+          print("X402_PENDING_HUMAN_APPROVALS","NOT_ACCESSIBLE_WITH_CURRENT_PERMISSIONS")
+          print("X402_OWNER_APPROVAL_REQUIRED_TRUE")
+          print("X402_TRUTH_AUDIT_PUBLIC_READ_ONLY_NO_PAYMENTS_OK")
           PY
