@@ -90,6 +90,10 @@ try {
     "https://supplier.example/a2a"
   ]);
   assert.equal(sqlite.prepare("SELECT status FROM lumen_outreach_attempts WHERE proposal_id='prop-ephemeral-supplier'").get().status, "INCOMPATIBLE");
+  const safeIdle=await sendApprovedBatch(env,{force:true,limit:10});
+  assert.equal(safeIdle.attempted,0);
+  assert.equal(safeIdle.reason,"no_current_eligible_target_after_dedupe_cooldown");
+  assert.equal(safeIdle.sent,0);
   for (const id of ["old-raw-tender","synthetic-target","weak-target","low-score-target"]) {
     assert.equal(sqlite.prepare("SELECT status FROM lumen_outreach_attempts WHERE proposal_id=?").get(`prop-${id}`).status, "READY", `must not touch ${id}`);
   }
