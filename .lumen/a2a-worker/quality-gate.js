@@ -1,5 +1,5 @@
 import { getFirstSettlementMissionStatus } from "./first-settlement-mission-v1.js";
-const VERSION = "1.1-bounded-copy-repair";
+const VERSION = "1.2-backlog-copy-repair";
 
 const BLOCKED_PHRASES = [
   "guaranteed return",
@@ -92,10 +92,10 @@ async function preferredOpportunityId(env) {
   } catch { return null; }
 }
 
-async function getNextDraft(env) {
+async function getNextDraft(env, proposalId = null) {
   const preferred=await preferredOpportunityId(env);
-  const stmt=env.DB.prepare("SELECT p.proposal_id,p.opportunity_id,p.created_at,p.updated_at,p.status,p.offer_id,p.offer_name,p.amount_usd,p.subject,p.message,p.quality_gate_status,p.metadata_json,o.name,o.endpoint,o.description,a.commercial_score,a.commercial_fit,a.evidence_strength,a.synthetic_or_test_only FROM lumen_proposal_drafts p JOIN lumen_opportunities o ON o.id=p.opportunity_id LEFT JOIN lumen_opportunity_assessments a ON a.opportunity_id=p.opportunity_id WHERE p.status='DRAFT' AND p.quality_gate_status='PENDING_QUALITY_GATE' ORDER BY CASE WHEN p.opportunity_id=? THEN 0 ELSE 1 END,COALESCE(a.commercial_score,0) DESC,p.created_at ASC LIMIT 1");
-  const row = await stmt.bind(preferred||"").first();
+  const stmt=env.DB.prepare("SELECT p.proposal_id,p.opportunity_id,p.created_at,p.updated_at,p.status,p.offer_id,p.offer_name,p.amount_usd,p.subject,p.message,p.quality_gate_status,p.metadata_json,o.name,o.endpoint,o.description,a.commercial_score,a.commercial_fit,a.evidence_strength,a.synthetic_or_test_only FROM lumen_proposal_drafts p JOIN lumen_opportunities o ON o.id=p.opportunity_id LEFT JOIN lumen_opportunity_assessments a ON a.opportunity_id=p.opportunity_id WHERE p.status='DRAFT' AND p.quality_gate_status='PENDING_QUALITY_GATE' ORDER BY CASE WHEN p.proposal_id=? THEN 0 ELSE 1 END,CASE WHEN p.opportunity_id=? THEN 0 ELSE 1 END,COALESCE(a.commercial_score,0) DESC,p.created_at ASC LIMIT 1");
+  const row = await stmt.bind(String(proposalId || ""),preferred||"").first();
   if (!row) return null;
   return { ...row, metadata: safeParse(row.metadata_json, {}) };
 }
@@ -158,9 +158,9 @@ export function evaluateProposalQuality(row) {
   return { pass, qualityScore: score, blockers, reasons };
 }
 
-export async function reviewNextProposal(env) {
+export async function reviewNextProposal(env, { proposalId = null } = {}) {
   if (!(await ensureSchema(env))) return { ok: false, error: "persistence_unavailable" };
-  const row = await getNextDraft(env);
+  const row = await getNextDraft(env, proposalId);
   if (!row) return { ok: true, reviewed: false, reason: "no_pending_proposal", version: VERSION };
 
   const result = evaluateProposalQuality(row);
@@ -198,28 +198,44 @@ export async function reviewNextProposal(env) {
   };
 }
 
+// Select copy-only repairs from the entire currently actionable, never-contacted
+// backlog. A live SENT/WAITING First Settlement focus must not starve other drafts.
 async function getFocusedProposalForRepair(env) {
-  const status = await getFirstSettlementMissionStatus(env);
+  let status = null;
+  try { status = await getFirstSettlementMissionStatus(env); } catch {}
   const focus = status?.mission?.focus || null;
   const diagnosis = status?.mission?.diagnosis || null;
-  if (!focus?.proposal_id) return { status, focus, diagnosis, row: null };
-  const row = await env.DB.prepare(`SELECT p.proposal_id,p.opportunity_id,p.created_at,p.updated_at,p.status,p.offer_id,p.offer_name,p.amount_usd,p.subject,p.message,p.quality_gate_status,p.metadata_json,
+  const rows = await env.DB.prepare(`SELECT p.proposal_id,p.opportunity_id,p.created_at,p.updated_at,p.status,p.offer_id,p.offer_name,p.amount_usd,p.subject,p.message,p.quality_gate_status,p.metadata_json,
     o.name,o.endpoint,o.description,o.evidence,
     a.commercial_score,a.commercial_fit,a.evidence_strength,a.commercially_actionable,a.synthetic_or_test_only,
     q.status AS review_status,q.quality_score,q.reasons_json AS review_reasons_json
     FROM lumen_proposal_drafts p
     JOIN lumen_opportunities o ON o.id=p.opportunity_id
-    LEFT JOIN lumen_opportunity_assessments a ON a.opportunity_id=p.opportunity_id
+    JOIN lumen_opportunity_assessments a ON a.opportunity_id=p.opportunity_id
     LEFT JOIN lumen_quality_reviews q ON q.proposal_id=p.proposal_id
-    WHERE p.proposal_id=? LIMIT 1`).bind(focus.proposal_id).first();
-  return { status, focus, diagnosis, row: row ? { ...row, metadata:safeParse(row.metadata_json,{}), review:safeParse(row.review_reasons_json,{}) } : null };
+    WHERE p.status='DRAFT' AND p.quality_gate_status='NEEDS_REVISION'
+      AND a.commercially_actionable=1 AND a.synthetic_or_test_only=0
+      AND a.commercial_score>=65 AND LOWER(COALESCE(a.evidence_strength,'')) IN ('medium','strong')
+      AND NOT EXISTS (SELECT 1 FROM lumen_outreach_attempts x WHERE x.proposal_id=p.proposal_id)
+    ORDER BY CASE WHEN p.proposal_id=? THEN 0 ELSE 1 END,
+      a.commercial_score DESC,p.updated_at ASC LIMIT 25`).bind(String(focus?.proposal_id || "")).all();
+  const skipped=[];
+  for (const candidate of rows.results || []) {
+    const row = {...candidate,metadata:safeParse(candidate.metadata_json,{}),review:safeParse(candidate.review_reasons_json,{})};
+    if (row.metadata?.quality_repair?.attempted === true) { skipped.push({proposalId:row.proposal_id,reason:"already_repaired_once"}); continue; }
+    const quality = evaluateProposalQuality(row);
+    const split = splitQualityBlockers(quality.blockers);
+    if (split.structural.length || !split.repairable.length) { skipped.push({proposalId:row.proposal_id,reason:split.structural.length ? "structural_quality_blockers" : "no_copy_defect",blockers:split.structural}); continue; }
+    return { status, focus, diagnosis, row, selection:"current_actionable_unexposed_copy_repair" };
+  }
+  return { status, focus, diagnosis, row:null,reason:"no_safe_unexposed_copy_repair_candidate",skipped:skipped.slice(0,10) };
 }
 
 export async function repairFocusedProposalQuality(env) {
   if (!(await ensureSchema(env))) return { ok:false, repaired:false, error:"persistence_unavailable", version:VERSION };
   const current = await getFocusedProposalForRepair(env);
   const row = current.row;
-  if (!row) return { ok:true, repaired:false, reason:"no_focused_proposal", version:VERSION };
+  if (!row) return { ok:true, repaired:false, reason:current.reason || "no_safe_unexposed_copy_repair_candidate", skipped:current.skipped || [],version:VERSION };
   if (Number(row.commercially_actionable || 0) !== 1) {
     return { ok:true, repaired:false, reason:"focused_opportunity_not_commercially_actionable", proposalId:row.proposal_id, version:VERSION };
   }
@@ -273,7 +289,7 @@ export async function repairFocusedProposalQuality(env) {
   await env.DB.prepare("UPDATE lumen_proposal_drafts SET subject=?,message=?,status='DRAFT',quality_gate_status='PENDING_QUALITY_GATE',metadata_json=?,updated_at=? WHERE proposal_id=?")
     .bind(repaired.subject,repaired.message,JSON.stringify(metadata),now,row.proposal_id).run();
 
-  const review = await reviewNextProposal(env);
+  const review = await reviewNextProposal(env, { proposalId:row.proposal_id });
   const sameProposal = String(review?.proposalId || "") === String(row.proposal_id || "");
   return {
     ok:true,
