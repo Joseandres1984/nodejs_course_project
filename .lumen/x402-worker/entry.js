@@ -1,12 +1,23 @@
 import app, { PRODUCTS } from "./worker-v2.js";
 import { handleCommissionCheckout } from "./commission-checkout.js";
 import { handleApprovalManagement, preflightX402Settlement, finalizeX402Settlement } from "./settlement-approval.js";
+import { briefFromUrl } from "./buyer-brief.js";
 
 export default {
   async fetch(request, env, ctx) {
     let claimId = null;
     let response = null;
     try {
+      // A malformed or malicious machine brief is blocked BEFORE any payment
+      // signature can reach the facilitator, even if the owner approved.
+      const requestUrl = new URL(request.url);
+      if (request.method === "GET" && requestUrl.pathname.startsWith("/buy/")) {
+        const brief = briefFromUrl(requestUrl);
+        if (!brief.ok) return Response.json({
+          ok:false, error:brief.error, paymentAttempted:false,
+          noCharge:true, ownerApprovalStillRequired:true
+        }, {status:400,headers:{"cache-control":"no-store"}});
+      }
       // Owner decisions are explicit, separate and never automated.
       const management = await handleApprovalManagement(request, env);
       if (management) return management;
