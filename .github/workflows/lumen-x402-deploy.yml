@@ -29,10 +29,14 @@ jobs:
           node --check .lumen/x402-worker/worker-v2.js
           node --check .lumen/x402-worker/discovery.js
           node --check .lumen/x402-worker/commission-checkout.js
-      - name: Test human authorization gates without a blockchain payment
+      - name: Install x402 Bazaar dependencies for regression
+        working-directory: .lumen/x402-worker
+        run: npm install --no-audit --no-fund
+      - name: Test human authorization and Bazaar discovery (no payments)
         run: |
           node .lumen/x402-worker/test-settlement-approval.mjs
           node .lumen/x402-worker/test-discovery.mjs
+          node .lumen/x402-worker/test-bazaar-discovery.mjs
   deploy-x402:
     needs: validate-approval
     if: github.event_name != 'pull_request'
