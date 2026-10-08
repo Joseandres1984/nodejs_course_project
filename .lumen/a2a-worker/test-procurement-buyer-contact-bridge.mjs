@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { __test } from "./source-intelligence.js";
 
+assert.deepEqual(__test.safeParse('{"a":1}', {}), {a:1});
+assert.deepEqual(__test.safeParse("not-json", {fallback:true}), {fallback:true});
+
 const normalized = __test.normalizeTedItem({
   "publication-number": "694245-2026",
   "notice-title": "Example procurement",
