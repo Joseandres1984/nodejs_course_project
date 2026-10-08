@@ -1,4 +1,5 @@
 name: LUMEN Owner Tender-to-Cash Cycle
+# owner-run-sequence: 2
 
 on:
   push:
