@@ -219,6 +219,18 @@ app.use("/buy/*", async (c, next) => {
               await c.env.DB.prepare("UPDATE lumen_x402_receipts SET request_metadata=? WHERE id=?").bind(JSON.stringify(meta),settledReceipt.id).run();
             }
           }
+          // A buyer who included a nonconfidential requirement in the paid
+          // GET no longer needs an extra POST /redeem. The already-verified
+          // receipt remains the mandatory settlement prerequisite.
+          const machineBrief=briefFromUrl(new URL(c.req.url));
+          if (settledReceipt && machineBrief.ok && !machineBrief.absent && !meta.fulfillment?.auto_queue) {
+            const queued=await queuePaidReceipt(c.env,settledReceipt.id,machineBrief.text,{source:"x402_get_brief"});
+            meta.fulfillment={auto_queue:queued.ok===true,status:queued.status || queued.error || "unknown",
+              task_id:queued.taskId||null,order_id:queued.orderId||null,
+              source:"machine_query_brief",reconciled_at:new Date().toISOString()};
+            await c.env.DB.prepare("UPDATE lumen_x402_receipts SET request_metadata=? WHERE id=?")
+              .bind(JSON.stringify(meta),settledReceipt.id).run();
+          }
         } catch (error) {
           meta.fulfillment={auto_queue:false,status:"queue_error",detail:clean(error?.message || error,300),reconciled_at:new Date().toISOString()};
           await c.env.DB.prepare("UPDATE lumen_x402_receipts SET request_metadata=? WHERE payment_fingerprint=?").bind(JSON.stringify(meta),fingerprint).run();
@@ -365,8 +377,10 @@ for (const [slug,product] of Object.entries(PRODUCTS)) {
 async function queuePaidReceipt(env, receiptIdRaw, requirementRaw, options={}) {
   await ensureSchema(env);
   const receiptId=clean(receiptIdRaw,80);
-  const requirement=clean(requirementRaw,8000);
-  if (!receiptId || !requirement) return {ok:false,statusCode:400,error:"receiptId and requirement are required"};
+  const inspected=inspectBuyerBrief(requirementRaw);
+  if (!receiptId) return {ok:false,statusCode:400,error:"receiptId is required"};
+  if (!inspected.ok) return {ok:false,statusCode:400,error:inspected.error};
+  const requirement=inspected.text;
   const receipt=await env.DB.prepare("SELECT * FROM lumen_x402_receipts WHERE id=? LIMIT 1").bind(receiptId).first();
   if (!receipt) return {ok:false,statusCode:404,error:"Receipt not found"};
   if (receipt.status !== "settled_verified" && receipt.status !== "redeemed_queued") return {ok:false,statusCode:409,error:"Payment is not yet confirmed as settled",status:receipt.status};
