@@ -36,11 +36,12 @@ export function buildDiscoveryOpenApi(products,origin){
     paths["/buy/"+p.slug]={
       get:{
         operationId:"buy_"+p.slug.replaceAll("-","_"),
+        security:[],
         summary:p.name+" | x402 | $"+p.amountUsd.toFixed(2)+" USDC",
         description:"Paid B2B research request. Send unsigned GET to inspect the official HTTP 402 quote. To settle, buyer sends a valid x402 signed payment authorization; an exact-scope human approval by the LUMEN owner is required before the facilitator can execute. The owner approval request may yield 409; after owner approval retry with x-lumen-approval-id and a fresh signed x402 authorization. No automatic or self-approved charge. Paid requests queue research for later delivery; the 200 response is not the finished research report.",
         tags:["B2B sourcing","x402","agent services"],
         "x-payment-info":{
-          protocols:["x402"],
+          protocols:[{x402:{}}],
           price:{mode:"fixed",currency:"USD",amount:p.amountUsd.toFixed(2)},
           network:BASE_NETWORK,
           asset:"USDC",
