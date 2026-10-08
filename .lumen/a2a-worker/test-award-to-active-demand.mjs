@@ -33,6 +33,15 @@ assert.equal(__test.officialTenderAwardFit(cleaning,expired),null);
 assert.equal(__test.officialTenderAwardFit(cleaning,unrelated),null);
 assert.equal(__test.officialTenderAwardFit(cleaning,nondeadline),null);
 assert.equal(__test.officialTenderAwardFit(securityAward,cyberTender),null,"security-only similarities are not proven matches");
+const soilCleaning=award("Soil Treatment Company","Netherlands – Cleaning and treatment of soil – industrial remediation","soil.example","award-soil");
+const sewageCleaning=award("Water Utility Ltd","Slovenia – Sewage, refuse, cleaning and environmental services – wastewater","water.example","award-sewage");
+const buildingCleaning=tender("berlin-cleaning","Germany – Building-cleaning services – public building interiors");
+const busTransport=tender("bus-transport","Finland – Public road transport services – scheduled bus operations");
+assert.equal(__test.officialTenderAwardFit(cleaning,buildingCleaning)?.evidenceTier,"CATEGORY_EVIDENCE","equivalent building cleaning and general cleaning categories need manual shortlist");
+assert.equal(__test.officialTenderAwardFit(soilCleaning,buildingCleaning),null,"soil remediation is not building cleaning");
+assert.equal(__test.officialTenderAwardFit(sewageCleaning,buildingCleaning),null,"sewage sanitation is not building cleaning");
+assert.equal(__test.officialTenderAwardFit(travel,busTransport),null,"travel agency is not road passenger transport");
+
 assert.equal(__test.officialTenderAwardFit({...cleaning,supplier_website:"http://unsafe.example/"},cleanOpen),null);
 
 const sqlite=new DatabaseSync(":memory:");
