@@ -1,4 +1,4 @@
-const VERSION = "1.5-award-to-live-tender-research";
+const VERSION = "1.6-precise-award-demand-fit";
 const FETCH_TIMEOUT_MS = 8000;
 const MAX_SOURCE_SCANS_PER_CYCLE = 2;
 const MAX_RESULTS_PER_SOURCE = 20;
@@ -432,9 +432,14 @@ function officialTenderAwardFit(award,tender,now=Date.now()){
   // provides stronger evidence than a single loose industry word.
   const categoryExact=awardCategory.trim().toLowerCase()===tenderCategory.trim().toLowerCase();
   const specific=shared.filter(w=>SPECIFIC_CATEGORY_WORDS.has(w));
+  const equivalentCategory=at.length>0 && at.length===tt.length &&
+    shared.length===at.length && at.some(w=>SPECIFIC_CATEGORY_WORDS.has(w));
   const strong=shared.length>=2 && (specific.length>=1||shared.length>=3);
-  if(!strong && !categoryExact && !specific.length) return null;
-  const evidenceTier=(strong||categoryExact)?"CATEGORY_EVIDENCE":"RESEARCH_ONLY_SINGLE_TOKEN";
+  // Exact/equivalent procurement categories or multiple specific terms only.
+  // Generic single-word overlaps like soil-cleaning vs building-cleaning,
+  // or travel-agency vs bus transit, are NOT sufficient business evidence.
+  if(!strong && !categoryExact && !equivalentCategory) return null;
+  const evidenceTier="CATEGORY_EVIDENCE";
   const score=Math.min(96,55+shared.length*12+(strong?12:0)+(categoryExact?15:0));
   return {
     opportunityId:tender.id,
