@@ -68,6 +68,8 @@ jobs:
           post tender-match/run || true
           post commercial/reassess || true
           post revenue-loop-v5/run || true
+          # Copy-only rescue of a current actionable draft. No sending, price changes, or bypassed gates.
+          post quality/repair-focused || true
 
           consumed=false
           hot_consumed=false
