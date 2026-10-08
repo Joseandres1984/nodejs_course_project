@@ -1,4 +1,4 @@
-const VERSION = "1.1-public-demand-activation";
+const VERSION = "1.2-procurement-buyer-contact-bridge";
 const FETCH_TIMEOUT_MS = 8000;
 const MAX_SOURCE_SCANS_PER_CYCLE = 2;
 const MAX_RESULTS_PER_SOURCE = 20;
@@ -187,6 +187,11 @@ function normalizeTedItem(item) {
   if (!remoteId) return null;
   const title = firstText(item?.["notice-title"] ?? item?.noticeTitle) || `TED notice ${remoteId}`;
   const buyer = firstText(item?.["buyer-name"] ?? item?.buyerName);
+  const buyerEmail = firstText(item?.["buyer-touchpoint-email"] ?? item?.["buyer-email"] ?? item?.buyerEmail);
+  const buyerWebsite = firstText(item?.["buyer-touchpoint-internet-address"] ?? item?.["buyer-internet-address"] ?? item?.buyerInternetAddress);
+  const buyerContactPoint = firstText(item?.["buyer-touchpoint-contact-point"] ?? item?.["buyer-contact-point"] ?? item?.buyerContactPoint);
+  const buyerIdentifier = firstText(item?.["buyer-identifier"] ?? item?.buyerIdentifier);
+  const buyerCountry = firstText(item?.["buyer-country"] ?? item?.buyerCountry);
   const deadline = firstText(item?.deadline ?? item?.["deadline-receipt-tender"] ?? item?.["deadline-receipt-request"]);
   const contractNature = firstText(item?.["contract-nature"] ?? item?.contractNature);
   const value = valueAmount(item?.["total-value"] ?? item?.totalValue ?? item?.["estimated-value"]);
@@ -202,14 +207,23 @@ function normalizeTedItem(item) {
   return {
     remoteId,
     name: clean(title, 260),
-    endpoint: url,
+    // A procurement notice is evidence, not an A2A Agent Card. Keep it out of JSON-RPC probing.
+    endpoint: null,
     description,
     score: procurementScore({ deadline, value, title, description }),
     fit: "PUBLIC_PROCUREMENT",
     demandSignal: 1,
     revenueOfferId: "MP-TENDER-SCAN",
     evidence: url,
-    raw: { publicationDate, deadline, value, buyer, contractNature }
+    raw: {
+      publicationDate, deadline, value, buyer, contractNature,
+      buyerEmail: clean(buyerEmail, 320) || null,
+      buyerWebsite: clean(buyerWebsite, 1000) || null,
+      buyerContactPoint: clean(buyerContactPoint, 320) || null,
+      buyerIdentifier: clean(buyerIdentifier, 320) || null,
+      buyerCountry: clean(buyerCountry, 80) || null,
+      contactSource: "official_ted_notice"
+    }
   };
 }
 
@@ -254,7 +268,7 @@ async function scanTed() {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       query: `PD = (${from} <> ${to}) SORT BY publication-date DESC`,
-      fields: ["publication-number", "notice-title", "buyer-name", "publication-date", "deadline", "contract-nature", "total-value", "buyer-country"],
+      fields: ["publication-number", "notice-title", "buyer-name", "buyer-identifier", "buyer-email", "buyer-internet-address", "buyer-contact-point", "buyer-touchpoint-email", "buyer-touchpoint-internet-address", "buyer-touchpoint-contact-point", "publication-date", "deadline", "contract-nature", "total-value", "buyer-country"],
       page: 1,
       limit: MAX_RESULTS_PER_SOURCE,
       scope: "ACTIVE",
@@ -450,8 +464,45 @@ export async function handleSourceIntelligence(request, env) {
   if (request.method === "GET" && url.pathname === "/source-intelligence/signals") {
     if (!authorized(request, env)) return json({ ok: false, error: "admin_token_required" }, 403);
     await ensureSchema(env);
-    const signals = await safeAll(env, "SELECT a.source_id,a.opportunity_id,a.remote_id,a.first_seen_at,a.last_seen_at,a.evidence_url,o.name,o.score,o.fit,o.demand_signal,o.revenue_offer_id,o.status FROM lumen_source_signal_attribution a JOIN lumen_opportunities o ON o.id=a.opportunity_id ORDER BY a.last_seen_at DESC LIMIT 200");
+    const signals = await safeAll(env, "SELECT a.source_id,a.opportunity_id,a.remote_id,a.first_seen_at,a.last_seen_at,a.evidence_url,o.name,o.description,o.endpoint,o.score,o.fit,o.demand_signal,o.revenue_offer_id,o.status,o.raw_json FROM lumen_source_signal_attribution a JOIN lumen_opportunities o ON o.id=a.opportunity_id ORDER BY a.last_seen_at DESC LIMIT 200");
     return json({ version: VERSION, signals });
+  }
+  if (request.method === "GET" && url.pathname === "/source-intelligence/contact-candidates") {
+    if (!authorized(request, env)) return json({ ok: false, error: "admin_token_required" }, 403);
+    await ensureSchema(env);
+    const limit = Math.max(1, Math.min(50, Number(url.searchParams.get("limit") || 20)));
+    const rows = await safeAll(env, "SELECT a.source_id,a.opportunity_id,a.remote_id,a.evidence_url,o.name,o.description,o.score,o.fit,o.demand_signal,o.status,o.raw_json FROM lumen_source_signal_attribution a JOIN lumen_opportunities o ON o.id=a.opportunity_id WHERE a.source_id IN ('ted_eu_public_procurement','uk_contracts_finder') AND o.demand_signal=1 ORDER BY o.score DESC,a.last_seen_at DESC LIMIT ?", [limit]);
+    const candidates = rows.map(row => {
+      const raw = parse(row.raw_json, {});
+      return {
+        sourceId: row.source_id,
+        opportunityId: row.opportunity_id,
+        remoteId: row.remote_id,
+        evidenceUrl: row.evidence_url,
+        name: row.name,
+        description: row.description,
+        score: Number(row.score || 0),
+        fit: row.fit,
+        demandSignal: Number(row.demand_signal || 0),
+        buyer: clean(raw?.buyer, 320) || null,
+        buyerEmail: clean(raw?.buyerEmail, 320) || null,
+        buyerWebsite: clean(raw?.buyerWebsite, 1000) || null,
+        buyerContactPoint: clean(raw?.buyerContactPoint, 320) || null,
+        buyerIdentifier: clean(raw?.buyerIdentifier, 320) || null,
+        buyerCountry: clean(raw?.buyerCountry, 80) || null,
+        contactSource: clean(raw?.contactSource, 120) || null
+      };
+    }).filter(row => row.demandSignal === 1 && row.buyer && (row.buyerEmail || row.buyerWebsite));
+    return json({
+      version: VERSION,
+      candidates,
+      policy: {
+        officialPublishedProcurementContactsOnly: true,
+        procurementEvidenceIsNotA2AEndpoint: true,
+        createsExternalMessages: false,
+        bindingActionsHumanGated: true
+      }
+    });
   }
   return null;
 }
