@@ -170,6 +170,8 @@ jobs:
           get commercial/stats
           get tender-match/state
           get source-intelligence/suppliers
+          # Research-only. Cross referenced past awards and current tenders require human review.
+          get 'source-intelligence/award-demand-matches?limit=10'
           get commercial/next
           get first-cash/stats
           get followup/stats
