@@ -1,0 +1,35 @@
+name: LUMEN x402 Marketplace Compatibility Audit
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/lumen-x402-marketplace-audit.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit-agentcash-read-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validate marketplace discovery with no purchase or wallet
+        shell: bash
+        run: |
+          set -euo pipefail
+          TARGET='https://lumen-zero-x402.lumen-b2b.workers.dev'
+          curl --fail --silent --show-error --max-time 20 "$TARGET/openapi.json" | jq -e '.openapi == "3.1.0" and (.paths | length) == 7' >/dev/null
+          curl --fail --silent --show-error --max-time 20 "$TARGET/approvals/policy" | jq -e '.humanApprovalRequired == true and .defaultDeny == true' >/dev/null
+          set +e
+          timeout 180s npx --yes @agentcash/discovery@latest check "$TARGET" >/tmp/agentcash-audit.out 2>&1
+          code=$?
+          set -e
+          echo "AGENTCASH_READ_ONLY_CHECK_EXIT=$code"
+          sed -E 's/(0x[a-fA-F0-9]{40})/[wallet-redacted]/g' /tmp/agentcash-audit.out | tail -180
+          if [ "$code" -eq 124 ]; then
+            echo "::error::AgentCash discovery audit timeout"
+            exit 124
+          fi
+          echo 'MARKETPLACE_AUDIT_NO_SIGNATURE_NO_WALLET_NO_PAYMENT'
