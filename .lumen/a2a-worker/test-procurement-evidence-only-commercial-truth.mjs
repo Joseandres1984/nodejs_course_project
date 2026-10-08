@@ -29,6 +29,8 @@ const matchedSupplier = assessCommercialOpportunity({
   raw_json:JSON.stringify({tender_supplier_match:true})
 });
 assert.equal(matchedSupplier.commerciallyActionable,true);
+assert.ok(matchedSupplier.commercialScore >= 65, "matched supplier must clear current commercial score gate");
+assert.ok(["medium","strong"].includes(matchedSupplier.evidenceStrength), "matched supplier must carry usable demand evidence");
 assert.ok(!matchedSupplier.reasons.includes("procurement_evidence_only_requires_supplier_match"));
 
 console.log("PROCUREMENT_EVIDENCE_ONLY_COMMERCIAL_TRUTH_OK");
