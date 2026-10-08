@@ -1,19 +1,33 @@
-import app from "./worker-v2.js";
+import app, { PRODUCTS } from "./worker-v2.js";
 import { handleCommissionCheckout } from "./commission-checkout.js";
+import { handleApprovalManagement, preflightX402Settlement, finalizeX402Settlement } from "./settlement-approval.js";
 
 export default {
   async fetch(request, env, ctx) {
+    let claimId = null;
+    let response = null;
     try {
+      // Owner decisions are explicit, separate and never automated.
+      const management = await handleApprovalManagement(request, env);
+      if (management) return management;
+
+      // This MUST run before either paymentMiddleware implementation. Neither
+      // the normal product checkout nor the referral commission path may settle
+      // a signed payment without a one-time, scope-bound human approval.
+      const preflight = await preflightX402Settlement(request, env, PRODUCTS);
+      if (preflight.response) return preflight.response;
+      claimId = preflight.claimedId;
+
       const commissionResponse = await handleCommissionCheckout(request, env);
-      if (commissionResponse) return commissionResponse;
-      return await app.fetch(request, env, ctx);
+      response = commissionResponse || await app.fetch(request, env, ctx);
+      return response;
     } catch (error) {
       const url = new URL(request.url);
       const diagnostic = url.searchParams.get("technical_canary") === "1" && Boolean(request.headers.get("x-lumen-public-origin"));
       const payload = diagnostic
         ? { ok:false, error:"x402_internal_error", detail:String(error?.message || error || "unknown").slice(0,500), name:String(error?.name || "Error").slice(0,80) }
         : { ok:false, error:"x402_internal_error" };
-      return Response.json(payload, {
+      response = Response.json(payload, {
         status:500,
         headers:{
           "cache-control":"no-store",
@@ -21,6 +35,11 @@ export default {
           "access-control-allow-origin":"*"
         }
       });
+      return response;
+    } finally {
+      // An uncertain outcome stays locked for manual investigation; never
+      // reopen an approval automatically after a settlement attempt.
+      if (claimId) await finalizeX402Settlement(env, claimId, response);
     }
   }
 };
