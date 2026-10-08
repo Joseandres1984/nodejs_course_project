@@ -353,6 +353,37 @@ export async function handleCommercialIntelligence(request, env) {
   const url = new URL(request.url);
   if (request.method === "GET" && url.pathname === "/commercial/stats") return commercialStats(env);
   if (request.method === "GET" && url.pathname === "/commercial/next") return commercialNext(env);
+  if (request.method === "GET" && url.pathname === "/commercial/actionable") {
+    const configured = clean(env?.OPPORTUNITY_ADMIN_TOKEN, 500);
+    const provided = clean(request.headers.get("x-lumen-admin"), 500);
+    if (!configured || provided !== configured) return json({ ok:false,error:"admin_token_required" },403);
+    await ensureSchema(env);
+    const limit = Math.max(1, Math.min(25, Number(url.searchParams.get("limit") || 10)));
+    const result = await env.DB.prepare(`SELECT
+      o.id,o.source,o.name,o.endpoint,o.revenue_offer_id,o.status,
+      a.commercial_score,a.commercial_fit,a.evidence_strength,a.commercially_actionable,a.reasons_json,
+      p.proposal_id,p.status AS proposal_status,p.quality_gate_status,p.updated_at AS proposal_updated_at,
+      x.status AS outreach_status,x.updated_at AS outreach_updated_at,
+      CASE WHEN p.proposal_id IS NULL THEN 1 ELSE 0 END AS proposal_missing
+      FROM lumen_opportunities o
+      JOIN lumen_opportunity_assessments a ON a.opportunity_id=o.id
+      LEFT JOIN lumen_proposal_drafts p ON p.opportunity_id=o.id
+      LEFT JOIN lumen_outreach_attempts x ON x.proposal_id=p.proposal_id
+      WHERE a.commercially_actionable=1 AND a.synthetic_or_test_only=0
+      ORDER BY a.commercial_score DESC,o.score DESC,o.updated_at DESC
+      LIMIT ?`).bind(limit).all();
+    const rows=(result.results||[]).map(row=>({...row,reasons:safeParse(row.reasons_json,[])}));
+    return json({
+      version:VERSION,
+      rows,
+      policy:{
+        readOnly:true,
+        noMessageContent:true,
+        noSecrets:true,
+        bindingActionsHumanGated:true
+      }
+    });
+  }
   if (request.method === "POST" && url.pathname === "/commercial/reassess") return manualReassess(request, env);
   return null;
 }
