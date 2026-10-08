@@ -1,0 +1,35 @@
+name: LUMEN Commercial Repair Regression
+
+on:
+  pull_request:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/a2a-worker/quality-gate.js'
+      - '.lumen/a2a-worker/test-backlog-copy-repair.mjs'
+      - '.github/workflows/lumen-commercial-repair-regression.yml'
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/a2a-worker/quality-gate.js'
+      - '.lumen/a2a-worker/test-backlog-copy-repair.mjs'
+      - '.github/workflows/lumen-commercial-repair-regression.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  safe-recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Syntax, focused quality and never-contacted backlog recovery tests
+        run: |
+          set -euo pipefail
+          node --check .lumen/a2a-worker/quality-gate.js
+          node .lumen/a2a-worker/test-quality-copy-repair.mjs
+          node .lumen/a2a-worker/test-backlog-copy-repair.mjs
+          node .lumen/a2a-worker/test-outreach-qualified-targets.mjs
