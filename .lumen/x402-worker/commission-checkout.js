@@ -103,7 +103,7 @@ async function reconcileSettlement(env, request, response) {
 export async function handleCommissionCheckout(request, env) {
   const url = new URL(request.url);
   if (!url.pathname.startsWith("/commission/")) return null;
-  if (request.method === "OPTIONS") return new Response(null, { status:204, headers:{ "access-control-allow-origin":"*", "access-control-allow-methods":"GET,OPTIONS", "access-control-allow-headers":"content-type,payment-signature,x-payment" } });
+  if (request.method === "OPTIONS") return new Response(null, { status:204, headers:{ "access-control-allow-origin":"*", "access-control-allow-methods":"GET,OPTIONS", "access-control-allow-headers":"content-type,payment-signature,x-payment,x-lumen-approval-id" } });
   if (request.method !== "GET") return Response.json({ ok:false, error:"method_not_allowed" }, { status:405, headers:{"cache-control":"no-store","access-control-allow-origin":"*"} });
   if (!(await ensureSchema(env))) return Response.json({ ok:false, error:"persistence_unavailable" }, { status:503 });
 
