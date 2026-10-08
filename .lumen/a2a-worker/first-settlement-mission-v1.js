@@ -1,5 +1,5 @@
 export const FIRST_SETTLEMENT_MISSION_POLICY = Object.freeze({
-  version: "1.3-tender-lead-close-priority",
+  version: "1.4-response-truth-rotation",
   objective: "move_the_best_real_opportunity_toward_first_verified_settlement",
   settlementTruth: "verified_x402_receipt_only",
   autonomousSpendUsd: 0,
@@ -12,7 +12,8 @@ export const FIRST_SETTLEMENT_MISSION_POLICY = Object.freeze({
   penalizeWaitingSent: true,
   rotateLowScoreDeadEnds: true,
   rotateTerminalOutreachBlocks: true,
-  retryTransientOutreachAfterHours: 6
+  retryTransientOutreachAfterHours: 6,
+  rotateNonCommercialTransportResponses: true
 });
 
 const STALL_HOURS = Object.freeze({
@@ -41,9 +42,22 @@ export function diagnoseSettlementBlocker(row = {}, now = Date.now()) {
   if (stage === "PROPOSAL_READY") {
     const outreachStatus=String(row.outreach_status || "").toUpperCase();
     const outreachAge=hoursSince(row.outreach_updated_at || row.stage_updated_at || row.updated_at, now);
+    const responseClass=String(row.response_class || row.pipeline_response_class || "").toUpperCase();
+    const verifiedCommercialResponse=["COMMERCIAL_QUESTION","COMMERCIAL_INTEREST","PURCHASE_INTENT"].includes(responseClass);
     if (row.quality_gate_status === "FAIL" || row.quality_gate_status === "NEEDS_REVISION") {
       blocker = "QUALITY_GATE_FAIL";
       action = "repair_proposal_quality_without_price_mutation";
+    } else if (outreachStatus === "RESPONDED" && !verifiedCommercialResponse) {
+      // Transport-level response is not buyer intent. Do not keep a stale proposal
+      // in the send gate forever and do not resend it as if it were unsent.
+      blocker = "NONCOMMERCIAL_OUTREACH_RESPONSE";
+      action = "rotate_to_next_opportunity_or_human_review";
+    } else if (outreachStatus === "RESPONDED" && verifiedCommercialResponse) {
+      blocker = "RESPONSE_STAGE_SYNC_REQUIRED";
+      action = "sync_verified_response_to_replied";
+    } else if (["SENT","SENT_TASK","WORKING"].includes(outreachStatus)) {
+      blocker = "OUTREACH_ALREADY_SENT";
+      action = "poll_existing_outreach_before_resend";
     } else if (["AUTH_REQUIRED","INCOMPATIBLE","TASK_TERMINAL"].includes(outreachStatus)) {
       blocker = "OUTREACH_PATH_TERMINAL";
       action = "rotate_to_next_opportunity_or_human_review";
