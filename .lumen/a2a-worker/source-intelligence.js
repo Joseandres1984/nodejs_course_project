@@ -398,11 +398,11 @@ const CATEGORY_STOPWORDS=new Set([
   "required","requiring","project","projects","maintenance","products","product"
 ]);
 const SPECIFIC_CATEGORY_WORDS=new Set([
-  "cleaning","sewage","wastewater","refuse","waste","soil","containers",
+  "cleaning","sewage","wastewater","refuse","waste","soil","container",
   "electricity","electrical","power","credit","lending","construction",
-  "travel","tourism","transport","pumps","valves","cables","cable",
+  "travel","tourism","transport","pump","valve","cable",
   "software","instrumentation","laboratory","recycling","medical",
-  "logistics","telecom","firefighting","drainage","freight","security",
+  "logistics","telecom","firefighting","drainage","freight",
   "heating","ventilation","chemicals","chemical","water","shipping"
 ]);
 function tedEnglishCategory(title){
