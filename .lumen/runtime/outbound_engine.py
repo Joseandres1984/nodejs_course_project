@@ -27,7 +27,7 @@ MAX_SEND_RETRIES = max(0, min(3, int(os.getenv("LUMEN_OUTBOUND_SEND_RETRIES", "2
 RESEND_API_KEY = os.getenv("LUMEN_RESEND_API_KEY", "").strip()
 AR_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
 FREE_DOMAINS = {"gmail.com", "hotmail.com", "outlook.com", "yahoo.com", "icloud.com", "live.com", "proton.me", "protonmail.com"}
-CONTROLLED_EXPLICIT_DEMAND_APPROVAL_ID = "owner-20261007-explicit-demand-batch-01"
+CONTROLLED_EXPLICIT_DEMAND_APPROVAL_ID = "owner-20261008-procurement-contact-batch-02"
 CONTROLLED_EXPLICIT_DEMAND_MAX_CONTACTS = 1
 
 _ORIGINAL_COMMERCIAL_EXECUTION = commercial_execution.commercial_execution_tick
@@ -215,6 +215,10 @@ def _eligible(state: Dict[str, Any]) -> List[Dict[str, Any]]:
     prospects: List[Dict[str, Any]] = []
     for account in state.get("candidate_accounts", []) or []:
         if str(account.get("type") or "") not in {"buyer", "supplier"}:
+            continue
+        # Official procurement contacts imported by the bridge must consume the one-time
+        # owner-approved fallback instead of entering normal cold outbound throughput.
+        if account.get("controlled_outbound_only"):
             continue
         if not account.get("verified_company") or not account.get("verified_contact"):
             continue
