@@ -168,6 +168,10 @@ def _explicit_demand_fallback(state: Dict[str, Any]) -> List[Dict[str, Any]]:
     for account in state.get("candidate_accounts", []) or []:
         if str(account.get("type") or "") != "buyer":
             continue
+        # Public-procurement contact details are evidence channels, not blanket marketing consent.
+        # They may enter direct buyer outreach only after a separate exact commercial-fit approval.
+        if account.get("controlled_outbound_only") and not account.get("controlled_outbound_approved_fit"):
+            continue
         if not (account.get("direct_inbound_demand") or account.get("demand_signal")):
             continue
         if not account.get("verified_contact"):
