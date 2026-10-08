@@ -5,6 +5,7 @@ import { ExactEvmScheme } from "@x402/evm/exact/server";
 import { createPaywall } from "@x402/paywall";
 import { evmPaywall } from "@x402/paywall/evm";
 import { buildWellKnownX402, buildDiscoveryOpenApi, buildDiscoveryLlmsTxt } from "./discovery.js";
+import { declareDiscoveryExtension, bazaarResourceServerExtension } from "@x402/extensions/bazaar";
 
 const SERVICE = "lumen-zero-x402";
 const VERSION = "1.6-x402-human-approval";
@@ -72,7 +73,8 @@ async function ensureSchema(env) {
 
 const facilitatorClient = new HTTPFacilitatorClient({ url: FACILITATOR });
 const resourceServer = new x402ResourceServer(facilitatorClient)
-  .register(NETWORK, new ExactEvmScheme());
+  .register(NETWORK, new ExactEvmScheme())
+  .registerExtension(bazaarResourceServerExtension);
 
 let initializationPromise = null;
 async function ensurePaymentServerInitialized() {
@@ -95,8 +97,37 @@ for (const [slug, product] of Object.entries(PRODUCTS)) {
       payTo: PAY_TO,
       extra: { assetTransferMethod: "eip3009" },
     }],
-    description: `LUMEN ${product.name} machine-intelligence purchase`,
+    description: `LUMEN ${product.name} paid research request; owner approval required before settlement`,
     mimeType: "application/json",
+    extensions: {
+      ...declareDiscoveryExtension({
+        // These GET routes require no query/body. The output is a receipt and
+        // queued-task acknowledgement, NOT the finished research deliverable.
+        input: {},
+        inputSchema: {type:"object",properties:{},required:[],additionalProperties:false},
+        output: {
+          example: {
+            ok:true,paymentAuthorizationVerified:true,
+            productId:product.id,amountUsd:product.price_usd,
+            status:"settlement_before_response",
+            nextAction:"Research request queues for fulfillment after verified payment."
+          },
+          schema: {
+            type:"object",
+            properties:{
+              ok:{type:"boolean"},
+              paymentAuthorizationVerified:{type:"boolean"},
+              productId:{type:"string"},
+              amountUsd:{type:"number"},
+              status:{type:"string"},
+              receiptId:{type:"string"},
+              nextAction:{type:"string"}
+            },
+            required:["ok","productId","amountUsd"]
+          }
+        }
+      })
+    },
   };
 }
 const humanPaywall = createPaywall()
