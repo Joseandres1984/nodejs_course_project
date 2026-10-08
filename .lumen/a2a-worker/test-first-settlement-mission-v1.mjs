@@ -62,6 +62,13 @@ const terminalOutreach = diagnoseSettlementBlocker({
 assert.equal(terminalOutreach.blocker,"OUTREACH_PATH_TERMINAL");
 assert.equal(terminalOutreach.action,"rotate_to_next_opportunity_or_human_review");
 
+const quarantinedA2A = diagnoseSettlementBlocker({
+  stage:"PROPOSAL_READY",quality_gate_status:"PASS",outreach_status:"INPUT_REJECTED",
+  outreach_updated_at:"2026-10-03T11:00:00Z",updated_at:"2026-10-03T11:00:00Z"
+}, now);
+assert.equal(quarantinedA2A.blocker,"OUTREACH_PATH_TERMINAL");
+assert.equal(quarantinedA2A.action,"rotate_to_next_opportunity_or_human_review");
+
 const coolingOutreach = diagnoseSettlementBlocker({
   stage:"PROPOSAL_READY",quality_gate_status:"PASS",outreach_status:"CARD_FETCH_FAILED",
   outreach_updated_at:"2026-10-03T10:00:00Z",updated_at:"2026-10-03T10:00:00Z"
