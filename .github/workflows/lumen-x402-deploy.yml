@@ -27,9 +27,12 @@ jobs:
           node --check .lumen/x402-worker/settlement-approval.js
           node --check .lumen/x402-worker/entry.js
           node --check .lumen/x402-worker/worker-v2.js
+          node --check .lumen/x402-worker/discovery.js
           node --check .lumen/x402-worker/commission-checkout.js
       - name: Test human authorization gates without a blockchain payment
-        run: node .lumen/x402-worker/test-settlement-approval.mjs
+        run: |
+          node .lumen/x402-worker/test-settlement-approval.mjs
+          node .lumen/x402-worker/test-discovery.mjs
   deploy-x402:
     needs: validate-approval
     if: github.event_name != 'pull_request'
@@ -86,4 +89,18 @@ jobs:
           test "$owner_code" = '403'
           jq -e '.ok == false' /tmp/x402-owner-test.json >/dev/null
           echo 'X402_HUMAN_APPROVAL_FAIL_CLOSED_LIVE_OK'
+          curl --fail --silent --show-error --max-time 20 "$BASE/openapi.json" > /tmp/x402-openapi.json
+          curl --fail --silent --show-error --max-time 20 "$BASE/.well-known/x402" > /tmp/x402-discovery.json
+          curl --fail --silent --show-error --max-time 20 "$BASE/llms.txt" > /tmp/x402-llms.txt
+          jq -e '
+            .openapi == "3.1.0" and
+            (.paths | length) == 7 and
+            (.["x-payment-policy"].ownerApprovalRequired == true) and
+            ( [.paths[]?.get["x-payment-info"] | select(.protocols | index("x402") != null)] | length == 7)
+          ' /tmp/x402-openapi.json >/dev/null
+          jq -e '.version == 1 and .ownerApprovalRequired == true and (.resources | length) == 7' /tmp/x402-discovery.json >/dev/null
+          grep -F -q 'owner must' /tmp/x402-llms.txt || grep -F -q 'owner approval' /tmp/x402-llms.txt
+          unsigned_status=$(curl --silent --show-error --max-time 20 -o /tmp/x402-unsigned.json -w '%{http_code}' "$BASE/buy/supplier-snapshot")
+          test "$unsigned_status" = '402'
+          echo 'LUMEN_X402_DISCOVERY_SEVEN_ROUTES_LIVE_OK'
           echo 'X402_SELLER_CHECKOUT_LIVE_OK'
