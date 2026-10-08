@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { diagnoseSettlementBlocker, chooseFirstSettlementMission, FIRST_SETTLEMENT_MISSION_POLICY } from "./first-settlement-mission-v1.js";
 
-assert.equal(FIRST_SETTLEMENT_MISSION_POLICY.version, "1.6-actionable-focus-truth");
+assert.equal(FIRST_SETTLEMENT_MISSION_POLICY.version, "1.7-verified-intent-focus-truth");
+assert.equal(FIRST_SETTLEMENT_MISSION_POLICY.nonActionableInventoryRequiresVerifiedCommercialIntentToOwnMission, true);
 assert.equal(FIRST_SETTLEMENT_MISSION_POLICY.requiresCurrentCommercialActionability, true);
 assert.equal(FIRST_SETTLEMENT_MISSION_POLICY.rotateNonCommercialTransportResponses, true);
 assert.equal(FIRST_SETTLEMENT_MISSION_POLICY.rotateNonCommercialReplies, true);
@@ -163,9 +164,21 @@ const rawProcurementCannotOwnMission = chooseFirstSettlementMission([
 ], now);
 assert.equal(rawProcurementCannotOwnMission.focus.opportunity_id,"matched-supplier","raw procurement evidence must never monopolize First Settlement");
 
-const startedConversationSurvivesReassessment = chooseFirstSettlementMission([
-  { opportunity_id:"sent-before-reassess", commercially_actionable:0, stage:"SENT", outreach_status:"SENT_TASK", first_cash_score:.4, intent_score:.5, updated_at:"2026-10-03T11:58:00Z" }
+const nonActionableSentCannotOwnMission = chooseFirstSettlementMission([
+  { opportunity_id:"sent-before-reassess", commercially_actionable:0, stage:"SENT", outreach_status:"SENT_TASK", first_cash_score:9, intent_score:.9, updated_at:"2026-10-03T11:58:00Z" },
+  { opportunity_id:"actionable-next", commercially_actionable:1, stage:"QUALIFIED", first_cash_score:.05, intent_score:.5, updated_at:"2026-10-03T11:57:00Z" }
 ], now);
-assert.equal(startedConversationSurvivesReassessment.focus.opportunity_id,"sent-before-reassess","real external conversations must not be dropped by later reassessment");
+assert.equal(nonActionableSentCannotOwnMission.focus.opportunity_id,"actionable-next","non-actionable sent inventory may remain auditable but must not own First Settlement without verified commercial intent");
+
+const nonActionableVerifiedInterestMayOwnMission = chooseFirstSettlementMission([
+  { opportunity_id:"verified-interest", commercially_actionable:0, stage:"NEGOTIATING", response_class:"COMMERCIAL_INTEREST", first_cash_score:.2, intent_score:.7, updated_at:"2026-10-03T11:58:00Z" }
+], now);
+assert.equal(nonActionableVerifiedInterestMayOwnMission.focus.opportunity_id,"verified-interest","verified buyer commercial intent remains eligible even after later reassessment");
+
+const phantomNonActionableNegotiatingRotates = chooseFirstSettlementMission([
+  { opportunity_id:"phantom-nonactionable", commercially_actionable:0, stage:"NEGOTIATING", response_class:"GENERIC_RESPONSE", first_cash_score:99, intent_score:.99, updated_at:"2026-10-03T11:59:00Z" },
+  { opportunity_id:"real-actionable", commercially_actionable:1, stage:"QUALIFIED", first_cash_score:.01, intent_score:.4, updated_at:"2026-10-03T11:58:00Z" }
+], now);
+assert.equal(phantomNonActionableNegotiatingRotates.focus.opportunity_id,"real-actionable","non-actionable phantom negotiation must not monopolize First Settlement");
 
 console.log("First Settlement Mission v1 tests passed");
