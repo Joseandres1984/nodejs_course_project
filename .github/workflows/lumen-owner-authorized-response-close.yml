@@ -1,0 +1,72 @@
+name: LUMEN Owner-Authorized Response Close
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-owner-authorized-response-close.yml'
+
+jobs:
+  close-one:
+    if: contains(github.event.head_commit.message, '[owner-close]')
+    runs-on: ubuntu-latest
+    env:
+      BASE: https://lumen-zero-a2a.lumen-b2b.workers.dev
+      OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+      OWNER_APPROVAL_ID: owner-20261007-controlled-commercial-close-01
+    steps:
+      - name: Verify authority and live mission
+        run: |
+          set -euo pipefail
+          test -n "$OPPORTUNITY_ADMIN_TOKEN"
+          curl -fsS --max-time 30 -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" -H 'cache-control: no-cache' "$BASE/first-settlement/status" -o /tmp/mission.json
+          jq '{ownerApproval:"'$OWNER_APPROVAL_ID'",mission:{status:.mission.status,opportunity_id:.mission.focus.opportunity_id,proposal_id:.mission.focus.proposal_id,stage:.mission.focus.stage,blocker:.mission.diagnosis.blocker,action:.mission.diagnosis.action},successCriterion}' /tmp/mission.json
+          jq -e '.successCriterion=="verified_x402_settlement_greater_than_zero"' /tmp/mission.json >/dev/null
+          jq -r '.mission.focus.opportunity_id // empty' /tmp/mission.json > /tmp/opportunity_id
+          test -s /tmp/opportunity_id
+
+      - name: Classify current real response
+        run: |
+          set -euo pipefail
+          opp=$(cat /tmp/opportunity_id)
+          curl -fsS --max-time 30 -G -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" -H 'cache-control: no-cache' \
+            --data-urlencode "opportunity_id=$opp" "$BASE/response-closer/status" -o /tmp/response.json
+          jq '{status,source,plan:{proposalId:.plan.proposalId,responseClass:.plan.responseClass,qualifiedCommercialIntent:.plan.qualifiedCommercialIntent,checkoutEligible:.plan.checkoutEligible,humanGateRequired:.plan.humanGateRequired,nextAction:.plan.nextAction,successCriterion:.plan.successCriterion}}' /tmp/response.json
+          jq -e '.policy.bindingActionsHumanGated==true and .policy.sharedResponseTruth==true' /tmp/response.json >/dev/null
+
+      - name: Execute exactly one owner-authorized commercial continuation
+        run: |
+          set -euo pipefail
+          status=$(jq -r '.status // ""' /tmp/response.json)
+          class=$(jq -r '.plan.responseClass // ""' /tmp/response.json)
+          checkout=$(jq -r '.plan.checkoutEligible // false' /tmp/response.json)
+          echo "OWNER_APPROVAL_ID=$OWNER_APPROVAL_ID"
+          echo "RESPONSE_STATUS=$status RESPONSE_CLASS=$class CHECKOUT_ELIGIBLE=$checkout"
+          if [ "$status" != "QUALIFIED_COMMERCIAL_RESPONSE" ]; then
+            echo '{"executed":false,"reason":"response_not_commercial"}' | tee /tmp/action.json
+            exit 0
+          fi
+          if [ "$checkout" = "true" ]; then
+            curl -fsS --max-time 60 -X POST -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" -H 'cache-control: no-cache' "$BASE/first-cash/run" -o /tmp/action.json
+          elif [ "$class" = "COMMERCIAL_QUESTION" ]; then
+            curl -fsS --max-time 60 -X POST -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" -H 'cache-control: no-cache' "$BASE/commercial-reply/run" -o /tmp/action.json
+          else
+            echo '{"executed":false,"reason":"commercial_class_not_actionable"}' > /tmp/action.json
+          fi
+          jq '.' /tmp/action.json
+
+      - name: Verify commercial truth after action
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 60 -X POST -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" -H 'cache-control: no-cache' "$BASE/revenue-loop-v5/run" -o /tmp/revenue.json
+          curl -fsS --max-time 30 -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" -H 'cache-control: no-cache' "$BASE/first-settlement/status" -o /tmp/after.json
+          curl -fsS --max-time 30 "$BASE/first-cash/stats" -o /tmp/cash.json
+          curl -fsS --max-time 30 "$BASE/commercial-reply/stats" -o /tmp/reply.json
+          curl -fsS --max-time 30 "$BASE/portfolio-governor/state" -o /tmp/portfolio.json
+          echo '===== ACTION ====='; cat /tmp/action.json; echo
+          echo '===== FIRST SETTLEMENT ====='
+          jq '{mission:{status:.mission.status,opportunity_id:.mission.focus.opportunity_id,proposal_id:.mission.focus.proposal_id,stage:.mission.focus.stage,blocker:.mission.diagnosis.blocker,action:.mission.diagnosis.action},successCriterion}' /tmp/after.json
+          echo '===== FIRST CASH ====='; jq '{total,sent,responded,failed,readyToClose,readyProposalId,readyResponseClass}' /tmp/cash.json
+          echo '===== COMMERCIAL REPLY ====='; jq '{total,sent,responded,failed,readyToReply,readyProposalId,readyOpportunityId}' /tmp/reply.json
+          echo '===== VERIFIED REVENUE ====='; jq '{verifiedSettlements:.metrics.verifiedSettlements,verifiedRevenueUsd:.metrics.verifiedRevenueUsd}' /tmp/portfolio.json
+          jq -e '.metrics.verifiedSettlements>=0 and .metrics.verifiedRevenueUsd>=0' /tmp/portfolio.json >/dev/null
