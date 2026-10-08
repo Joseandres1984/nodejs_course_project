@@ -2,6 +2,10 @@ name: LUMEN USD Inbound Owner Alert
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/lumen-usd-inbound-owner-alert.yml'
   schedule:
     - cron: '3,33 * * * *'
 
