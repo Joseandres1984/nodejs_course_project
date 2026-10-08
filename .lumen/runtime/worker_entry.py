@@ -8,6 +8,7 @@ import growth_prospector  # noqa: F401
 import demand_hunter_runtime  # noqa: F401
 import supreme_autonomy_runtime  # noqa: F401
 import public_procurement_runtime  # noqa: F401
+import a2a_procurement_contact_bridge_runtime  # noqa: F401
 import adaptive_procurement_runtime  # noqa: F401
 import operational_health_runtime  # noqa: F401
 import https_mail_transport  # noqa: F401
