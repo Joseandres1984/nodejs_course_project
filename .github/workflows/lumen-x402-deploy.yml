@@ -110,7 +110,7 @@ jobs:
             .openapi == "3.1.0" and
             (.paths | length) == 7 and
             (.["x-payment-policy"].ownerApprovalRequired == true) and
-            ( [.paths[]?.get["x-payment-info"] | select(.protocols | index("x402") != null)] | length == 7)
+            ( [.paths[]?.get["x-payment-info"] | select(.protocols | any(. == "x402" or (type == "object" and has("x402"))))] | length == 7)
           ' /tmp/x402-openapi.json >/dev/null
           jq -e '.version == 1 and .ownerApprovalRequired == true and (.resources | length) == 7' /tmp/x402-discovery.json >/dev/null
           grep -F -q 'owner must' /tmp/x402-llms.txt || grep -F -q 'owner approval' /tmp/x402-llms.txt
