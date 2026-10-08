@@ -1,4 +1,8 @@
-const VERSION = "1.2-semantic-cleanup-tender-match";
+const VERSION = "1.3-tender-driven-supplier-discovery";
+const REGISTRY_BASE = "https://api.a2a-registry.org";
+const TARGETED_TENDER_QUERY_LIMIT = 10;
+const TARGETED_RESULTS_PER_QUERY = 8;
+const TARGETED_FETCH_TIMEOUT_MS = 8000;
 const MAX_TENDERS = 80;
 const MAX_SUPPLIERS = 180;
 const MAX_MATCHES_PER_RUN = 6;
@@ -42,6 +46,139 @@ function isHttps(value){try{return new URL(value).protocol==="https:";}catch{ret
 function safeParse(value,fallback={}){try{return JSON.parse(value||"");}catch{return fallback;}}
 async function sha256(text){const bytes=new TextEncoder().encode(String(text));const digest=await crypto.subtle.digest("SHA-256",bytes);return [...new Uint8Array(digest)].map(b=>b.toString(16).padStart(2,"0")).join("");}
 async function safeAll(env,sql,bind=[]){try{const q=env.DB.prepare(sql);const r=bind.length?await q.bind(...bind).all():await q.all();return r.results||[];}catch{return [];}}
+
+function arr(value){return Array.isArray(value)?value:value==null?[]:[value];}
+function registryItems(payload){
+  if(Array.isArray(payload)) return payload;
+  for(const value of [payload?.agents,payload?.data?.agents,payload?.data,payload?.results,payload?.items]){
+    if(Array.isArray(value)) return value;
+  }
+  return [];
+}
+function registryTags(item){
+  const skills=arr(item?.skills).flatMap(s=>arr(s?.tags));
+  return unique([...arr(item?.tags),...skills].map(x=>clean(typeof x==="string"?x:x?.name||x?.id,100)).filter(Boolean));
+}
+function registryName(item){return clean(item?.displayName||item?.display_name||item?.name||item?.id||item?.agent_id,300);}
+function registryRemoteId(item){return clean(item?.package_name||item?.packageName||item?.id||item?.agent_id||item?.agentId||item?.name,300);}
+function registryDescription(item){
+  const skills=arr(item?.skills).flatMap(s=>[s?.name,s?.description,...arr(s?.tags)]);
+  return clean([item?.description,item?.summary,item?.message,item?.text,...skills].filter(Boolean).join(" "),3000);
+}
+function registryEndpoint(item){
+  const direct=[item?.url,item?.endpoint,item?.a2a_url,item?.a2aUrl,item?.manifest_url,item?.manifestUrl];
+  const interfaces=arr(item?.supportedInterfaces||item?.supported_interfaces||item?.interfaces);
+  for(const candidate of [...direct,...interfaces.map(x=>x?.url)]){
+    const value=clean(candidate,1000);
+    if(isHttps(value)) return value;
+  }
+  return "";
+}
+function registrySelf(item){
+  const text=clean(`${registryRemoteId(item)} ${registryName(item)} ${registryDescription(item)}`,6000).toLowerCase();
+  return text.includes("joseandres1984")||text.includes("lumen_b2b")||text.includes("lumen b2b agent");
+}
+async function fetchRegistry(query){
+  const controller=new AbortController();
+  const timer=setTimeout(()=>controller.abort("timeout"),TARGETED_FETCH_TIMEOUT_MS);
+  try{
+    const url=`${REGISTRY_BASE}/public/agents?q=${encodeURIComponent(query)}`;
+    const response=await fetch(url,{signal:controller.signal,headers:{"accept":"application/json","user-agent":`LUMEN-TenderSupplierMatch/${VERSION}`}});
+    if(!response.ok) throw new Error(`registry_http_${response.status}`);
+    return {url,payload:await response.json()};
+  } finally { clearTimeout(timer); }
+}
+function targetedSupplierQuery(tender){
+  const text=`${tender?.name||""} ${tender?.description||""}`;
+  const strong=unique(tokens(text).filter(t=>HIGH_SIGNAL_TERMS.has(t))).slice(0,3);
+  if(!strong.length) return null;
+  return `${strong.join(" ")} supplier vendor manufacturer provider`;
+}
+function registrySupplierRow(item){
+  const endpoint=registryEndpoint(item);
+  if(!endpoint||registrySelf(item)) return null;
+  const name=registryName(item);
+  const description=registryDescription(item);
+  const tags=registryTags(item);
+  const verified=item?.verified===true||String(item?.status||"").toLowerCase().includes("verified");
+  return {
+    name,
+    endpoint,
+    description,
+    tags_json:JSON.stringify(tags),
+    score:verified?78:70,
+    remote_id:registryRemoteId(item),
+    raw_json:JSON.stringify(item).slice(0,12000)
+  };
+}
+async function upsertTargetedSupplier(env,item,supplier,query,evidenceUrl){
+  const rid=supplier.remote_id;
+  if(!rid) return null;
+  const id=`OPP-${(await sha256(`global_a2a_registry|${rid}`)).slice(0,20).toUpperCase()}`;
+  const now=new Date().toISOString();
+  const raw=safeParse(supplier.raw_json,{});
+  raw.lumen_targeted_tender_supplier_discovery={query,version:VERSION,publicRegistry:true};
+  await env.DB.prepare("INSERT INTO lumen_opportunities(id,discovered_at,updated_at,source,remote_id,name,endpoint,description,tags_json,score,fit,demand_signal,revenue_offer_id,status,evidence,raw_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET updated_at=excluded.updated_at,name=excluded.name,endpoint=CASE WHEN excluded.endpoint<>'' THEN excluded.endpoint ELSE lumen_opportunities.endpoint END,description=CASE WHEN excluded.description<>'' THEN excluded.description ELSE lumen_opportunities.description END,tags_json=excluded.tags_json,score=MAX(lumen_opportunities.score,excluded.score),fit=CASE WHEN excluded.score>lumen_opportunities.score THEN excluded.fit ELSE lumen_opportunities.fit END,evidence=excluded.evidence,raw_json=excluded.raw_json")
+    .bind(id,now,now,"global_a2a_registry",rid,supplier.name,supplier.endpoint,supplier.description,supplier.tags_json,supplier.score,supplier.score>=75?"A":"B",0,"MP-SUPPLIER-SNAPSHOT","watching",clean(evidenceUrl,1600),JSON.stringify(raw).slice(0,12000)).run();
+  return id;
+}
+async function targetedSupplierDiscovery(env,tenders){
+  const ranked=[];
+  const seenQueries=new Set();
+  for(const tender of tenders){
+    const deadline=futureDeadline(safeParse(tender.raw_json,{}));
+    if(!deadline.future) continue;
+    const query=targetedSupplierQuery(tender);
+    if(!query||seenQueries.has(query)) continue;
+    seenQueries.add(query);
+    ranked.push({tender,query});
+    if(ranked.length>=TARGETED_TENDER_QUERY_LIMIT) break;
+  }
+  let fetchedItems=0,httpsCandidates=0,prequalified=0,upserted=0;
+  const errors=[],queries=[];
+  for(const {tender,query} of ranked){
+    try{
+      const {url,payload}=await fetchRegistry(query);
+      const items=registryItems(payload).slice(0,TARGETED_RESULTS_PER_QUERY);
+      fetchedItems+=items.length;
+      let acceptedForQuery=0;
+      for(const item of items){
+        const supplier=registrySupplierRow(item);
+        if(!supplier) continue;
+        httpsCandidates++;
+        if(!supplierLike(supplier)) continue;
+        const matched=matchScore(tender,supplier);
+        if(!matched||matched.score<MIN_MATCH_SCORE) continue;
+        prequalified++;
+        const id=await upsertTargetedSupplier(env,item,supplier,query,url);
+        if(id){upserted++;acceptedForQuery++;}
+      }
+      queries.push({query,tenderId:tender.id,items:items.length,accepted:acceptedForQuery});
+    }catch(error){
+      errors.push({query,error:clean(error?.message||error,180)});
+      queries.push({query,tenderId:tender.id,items:0,accepted:0});
+    }
+  }
+  return {
+    version:VERSION,
+    queriesAttempted:ranked.length,
+    fetchedItems,
+    httpsCandidates,
+    prequalified,
+    upserted,
+    errors,
+    queries,
+    guardrails:{
+      publicRegistryReadOnly:true,
+      prequalifiesWithExistingMatchScore:true,
+      minMatchScore:MIN_MATCH_SCORE,
+      createsExternalMessages:false,
+      autonomousSpendUsd:0,
+      autonomousPurchase:false,
+      autonomousContract:false
+    }
+  };
+}
 
 function tokens(value){
   return clean(value,12000).toLowerCase().split(/[^a-z0-9áéíóúñü-]+/i)
@@ -155,6 +292,7 @@ async function runTenderSupplierMatch(env){
     FROM lumen_opportunities
     WHERE source IN ('ted_eu_public_procurement','uk_contracts_finder')
     ORDER BY updated_at DESC,score DESC LIMIT ${MAX_TENDERS}`);
+  const targetedDiscovery=await targetedSupplierDiscovery(env,tenders);
   const suppliers=(await safeAll(env,`SELECT id,remote_id,name,endpoint,description,tags_json,score,raw_json,updated_at
     FROM lumen_opportunities
     WHERE source='global_a2a_registry' AND endpoint IS NOT NULL AND endpoint LIKE 'https://%'
@@ -223,6 +361,7 @@ async function runTenderSupplierMatch(env){
     suppliersConsidered:suppliers.length,
     candidatePairs:candidates.length,
     revalidation,
+    targetedDiscovery,
     created:created.length,
     matches:created,
     guardrails:{
@@ -254,6 +393,10 @@ export async function handleTenderSupplierMatch(request,env){
     offerId:"MP-TENDER-LEAD",
     priceUsd:1,
     matchingPolicy:"shared_domain_bucket_plus_exact_high_signal_capability_term; ambiguous_network_token_not_sufficient; prior_matches_revalidated_each_run",
+    targetedSupplierDiscovery:"active_tender_high_signal_terms_to_public_a2a_registry_then_existing_match_score_prequalification",
+    targetedTenderQueryLimit:TARGETED_TENDER_QUERY_LIMIT,
+    targetedResultsPerQuery:TARGETED_RESULTS_PER_QUERY,
+    minMatchScore:MIN_MATCH_SCORE,
     maxMatchesPerRun:MAX_MATCHES_PER_RUN,
     sourceEvidence:["ted_eu_public_procurement","uk_contracts_finder"],
     autonomousSpendUsd:0,
@@ -273,4 +416,4 @@ export async function handleTenderSupplierMatch(request,env){
   return null;
 }
 
-export const __test={tokens,bucketSet,supplierLike,matchScore,futureDeadline};
+export const __test={tokens,bucketSet,supplierLike,matchScore,futureDeadline,targetedSupplierQuery,registrySupplierRow};
