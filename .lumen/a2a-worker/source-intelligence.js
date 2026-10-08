@@ -1,4 +1,4 @@
-const VERSION = "1.4-official-procurement-coverage";
+const VERSION = "1.5-award-to-live-tender-research";
 const FETCH_TIMEOUT_MS = 8000;
 const MAX_SOURCE_SCANS_PER_CYCLE = 2;
 const MAX_RESULTS_PER_SOURCE = 20;
@@ -245,7 +245,8 @@ function normalizeUkRelease(release) {
   const buyerEmail = clean(contact?.email, 320) || null;
   const buyerWebsite = clean(contact?.url || contact?.website || buyerParty?.url || release?.buyer?.url, 1000) || null;
   const descriptionText = firstText(tender?.description);
-  const deadline = clean(tender?.tenderPeriod?.endDate || tender?.contractPeriod?.startDate, 100);
+  // Only the published tender submission deadline is a bid deadline, never the contract start.
+  const deadline = clean(tender?.tenderPeriod?.endDate, 100);
   const value = valueAmount(tender?.value);
   const documents = Array.isArray(tender?.documents) ? tender.documents : [];
   const docUrl = documents.map(d => clean(d?.url, 1000)).find(Boolean);
@@ -383,6 +384,112 @@ async function awardSupplierInventory(env,limit=20) {
   const total=await env.DB.prepare("SELECT COUNT(DISTINCT supplier_domain) AS n FROM lumen_official_award_suppliers").first();
   const rows=await env.DB.prepare("SELECT supplier_name,supplier_website,supplier_domain,domain_verified,award_title,evidence_url,MAX(last_seen_at) AS last_seen_at FROM lumen_official_award_suppliers GROUP BY supplier_domain ORDER BY MAX(last_seen_at) DESC LIMIT ?").bind(limit).all();
   return {ok:true,version:VERSION,distinctSupplierDomains:Number(total?.n||0),candidates:(rows.results||[]).map(x=>({...x,requiresHumanApproval:true,commercialInterestVerified:false})),policy:{officialAwardEvidence:true,doesNotVerifyCurrentSellingCapacity:true,doesNotVerifyBuyingIntent:true,createsExternalMessages:false,noAutomaticOutreach:true,bindingActionsHumanGated:true}};
+}
+
+// Match documented past delivery to current public procurement, without
+// turning a supplier record into a buyer, agent endpoint, or contact authorization.
+// Specificity is explicit; loose one-word similarity is always review-only.
+const CATEGORY_STOPWORDS=new Set([
+  "and","for","the","with","from","this","that","about","supply","supplies",
+  "service","services","contract","contracts","procurement","tender","tenders",
+  "works","work","provision","various","other","related","miscellaneous",
+  "public","support","office","building","materials","equipment",
+  "acquisition","agreement","framework","general","development","installation",
+  "required","requiring","project","projects","maintenance","products","product"
+]);
+const SPECIFIC_CATEGORY_WORDS=new Set([
+  "cleaning","sewage","wastewater","refuse","waste","soil","containers",
+  "electricity","electrical","power","credit","lending","construction",
+  "travel","tourism","transport","pumps","valves","cables","cable",
+  "software","instrumentation","laboratory","recycling","medical",
+  "logistics","telecom","firefighting","drainage","freight","security",
+  "heating","ventilation","chemicals","chemical","water","shipping"
+]);
+function tedEnglishCategory(title){
+  const sections=clean(title,1000).split(/\s+[–—]\s+/);
+  return clean(sections.length>=3?sections[1]:title,450);
+}
+function categoryTokens(text){
+  const normalized=clean(text,1000).normalize("NFKD").toLowerCase().replace(/[\u0300-\u036f]/g,"");
+  return [...new Set(normalized.split(/[^a-z0-9]+/).filter(w=>w.length>=4&&!CATEGORY_STOPWORDS.has(w))
+    .map(w=>w.endsWith("ies")?w.slice(0,-3)+"y":w.endsWith("s")&&!w.endsWith("ss")?w.slice(0,-1):w))];
+}
+function officialTenderAwardFit(award,tender,now=Date.now()){
+  const deadline=clean(safeParse(tender?.raw_json,{}).deadline,100);
+  const until=Date.parse(deadline);
+  if(!Number.isFinite(until) || until<=now+3600000) return null;
+  const raw=safeParse(tender?.raw_json,{});
+  if(/cancel|withdraw|award|complete|unsuccessful|closed|terminated/i.test(clean(raw?.tenderStatus,80)))return null;
+  if(!["ted_eu_public_procurement","uk_contracts_finder"].includes(tender?.source))return null;
+  if(!hostFromHttps(award?.supplier_website) || !clean(award?.evidence_url,300).startsWith("https://ted.europa.eu/")) return null;
+  if(award?.evidence_url===tender?.evidence) return null;
+  const awardCategory=tedEnglishCategory(award?.award_title);
+  const tenderCategory=tedEnglishCategory(tender?.name);
+  const at=categoryTokens(awardCategory),tt=categoryTokens(tenderCategory);
+  const shared=at.filter(w=>tt.includes(w));
+  if(!shared.length)return null;
+  // Two precise category nouns, or exactly the same non-generic category,
+  // provides stronger evidence than a single loose industry word.
+  const categoryExact=awardCategory.trim().toLowerCase()===tenderCategory.trim().toLowerCase();
+  const specific=shared.filter(w=>SPECIFIC_CATEGORY_WORDS.has(w));
+  const strong=shared.length>=2 && (specific.length>=1||shared.length>=3);
+  if(!strong && !categoryExact && !specific.length) return null;
+  const evidenceTier=(strong||categoryExact)?"CATEGORY_EVIDENCE":"RESEARCH_ONLY_SINGLE_TOKEN";
+  const score=Math.min(96,55+shared.length*12+(strong?12:0)+(categoryExact?15:0));
+  return {
+    opportunityId:tender.id,
+    tenderTitle:clean(tender.name,500),
+    tenderEvidenceUrl:clean(tender.evidence,1200),
+    tenderSource:tender.source,
+    tenderDeadline:new Date(until).toISOString(),
+    supplierName:clean(award.supplier_name,240),
+    supplierDomain:clean(award.supplier_domain,260),
+    supplierWebsite:clean(award.supplier_website,1000),
+    supplierAwardTitle:clean(award.award_title,450),
+    supplierAwardEvidenceUrl:clean(award.evidence_url,1200),
+    matchingCategoryTerms:shared.slice(0,8),
+    evidenceTier,score,
+    verifiedBuyerDomainContact:domainMatches(corporateEmailDomain(raw.buyerEmail),hostFromHttps(raw.buyerWebsite)),
+    buyer:clean(raw.buyer,260)||null,
+    commercialInterestVerified:false,
+    supplierCapacityVerified:false,
+    outreachPermitted:false,
+    requiresHumanReview:true
+  };
+}
+async function awardToOpenTenderResearch(env,limit=20) {
+  await ensureAwardSchema(env);
+  const awards=await env.DB.prepare("SELECT supplier_name,supplier_domain,supplier_website,award_title,evidence_url FROM lumen_official_award_suppliers ORDER BY last_seen_at DESC LIMIT 150").all();
+  const tenders=await env.DB.prepare("SELECT id,source,remote_id,name,raw_json,evidence FROM lumen_opportunities WHERE source IN ('ted_eu_public_procurement','uk_contracts_finder') AND demand_signal=1 ORDER BY updated_at DESC LIMIT 750").all();
+  const all=[],dedupe=new Set();
+  for(const award of awards.results||[]){
+    for(const tender of tenders.results||[]){
+      const match=officialTenderAwardFit(award,tender);
+      if(!match)continue;
+      const key=match.supplierDomain+"|"+match.opportunityId;
+      if(dedupe.has(key))continue;
+      dedupe.add(key);all.push(match);
+    }
+  }
+  all.sort((a,b)=>(b.evidenceTier==="CATEGORY_EVIDENCE")-(a.evidenceTier==="CATEGORY_EVIDENCE")
+    ||b.score-a.score||a.tenderDeadline.localeCompare(b.tenderDeadline));
+  const featured=all.slice(0,limit);
+  return {
+    ok:true,version:VERSION,awardDocumentsConsidered:awards.results?.length||0,
+    openTenderRecordsConsidered:tenders.results?.length||0,
+    candidatesForHumanReview:all.length,
+    strongerCategoryEvidence:all.filter(x=>x.evidenceTier==="CATEGORY_EVIDENCE").length,
+    weakerCategoryOverlap:all.filter(x=>x.evidenceTier!=="CATEGORY_EVIDENCE").length,
+    candidates:featured,
+    policy:{
+      publicAwardAndActiveTenderEvidenceRequired:true,
+      missingOrExpiredDeadlineRejected:true,
+      historicalSupplyDoesNotVerifyCurrentCapacity:true,
+      procurementDemandIsNotLumenServiceDemand:true,
+      createsExternalMessages:false,createsA2AOutreachTargets:false,
+      automaticSpendingEnabled:false,bindingActionsHumanGated:true
+    }
+  };
 }
 
 async function scanTed() {
@@ -601,6 +708,11 @@ export async function handleSourceIntelligence(request, env) {
     const limit=Math.max(1,Math.min(50,Number(url.searchParams.get("limit")||20)));
     return json(await awardSupplierInventory(env,limit));
   }
+  if(request.method==="GET" && url.pathname==="/source-intelligence/award-demand-matches"){
+    if(!authorized(request,env)) return json({ok:false,error:"admin_token_required"},403);
+    const limit=Math.max(1,Math.min(30,Number(url.searchParams.get("limit")||10)));
+    return json(await awardToOpenTenderResearch(env,limit));
+  }
   if (request.method === "GET" && url.pathname === "/source-intelligence/contact-candidates") {
     if (!authorized(request, env)) return json({ ok: false, error: "admin_token_required" }, 403);
     await ensureSchema(env);
@@ -650,6 +762,10 @@ export const __test = {
   hostFromHttps,
   corporateEmailDomain,
   domainMatches,
+  tedEnglishCategory,
+  categoryTokens,
+  officialTenderAwardFit,
+  awardToOpenTenderResearch,
   procurementScore,
   selectionScore,
   compactDate
