@@ -1,4 +1,4 @@
-const VERSION = "1.7-indexed-deadline-caution";
+const VERSION = "1.8-distinct-tender-bid-deadline";
 const FETCH_TIMEOUT_MS = 8000;
 const MAX_SOURCE_SCANS_PER_CYCLE = 2;
 const MAX_RESULTS_PER_SOURCE = 20;
@@ -186,6 +186,27 @@ function opportunityId(sourceId, remoteId) {
   return `SRC-${sourceId.replace(/[^a-z0-9]+/gi, "-").toUpperCase().slice(0, 24)}-${String(remoteId).replace(/[^a-z0-9]+/gi, "").toUpperCase().slice(0, 30)}`;
 }
 
+// TED `deadline` is BT-13(d), the deadline for asking for information.
+// Never mistake it for BT-131(d), the deadline to submit a bid.
+function tedLotDateValues(value) {
+  if (Array.isArray(value)) return [...new Set(value.flatMap(tedLotDateValues))];
+  if (value && typeof value === "object") return [...new Set(Object.values(value).flatMap(tedLotDateValues))];
+  const raw=String(value||"").trim();
+  const match=raw.match(/\b\d{4}-\d{2}-\d{2}\b/g)||[];
+  return [...new Set(match.filter(date=>Number.isFinite(Date.parse(date))))];
+}
+function tedSubmissionDeadline(item) {
+  const dates=tedLotDateValues(item?.["deadline-receipt-tender-date-lot"]);
+  // Only one distinct date across the published lots is unambiguous.
+  // Time and time zone may still differ: require original notice validation.
+  return {
+    bidDate:dates.length===1?dates[0]:null,
+    lotSubmissionDates:dates.sort(),
+    deadlineSource:dates.length===1?"TED_BT_131_LOT_BID_DATE":"NO_UNAMBIGUOUS_BID_DATE",
+    informationDeadline:firstText(item?.deadline??item?.["deadline-date-lot"])||null
+  };
+}
+
 function normalizeTedItem(item) {
   const remoteId = clean(item?.["publication-number"] ?? item?.publicationNumber ?? item?.id, 180);
   if (!remoteId) return null;
@@ -196,7 +217,8 @@ function normalizeTedItem(item) {
   const buyerContactPoint = firstText(item?.["buyer-touchpoint-contact-point"] ?? item?.["buyer-contact-point"] ?? item?.buyerContactPoint);
   const buyerIdentifier = firstText(item?.["buyer-identifier"] ?? item?.buyerIdentifier);
   const buyerCountry = firstText(item?.["buyer-country"] ?? item?.buyerCountry);
-  const deadline = firstText(item?.deadline ?? item?.["deadline-receipt-tender"] ?? item?.["deadline-receipt-request"]);
+  const deadlines=tedSubmissionDeadline(item);
+  const deadline=deadlines.bidDate;
   const contractNature = firstText(item?.["contract-nature"] ?? item?.contractNature);
   const value = valueAmount(item?.["total-value"] ?? item?.totalValue ?? item?.["estimated-value"]);
   const publicationDate = firstText(item?.["publication-date"] ?? item?.publicationDate);
@@ -204,7 +226,7 @@ function normalizeTedItem(item) {
     "Published public procurement tender. Buyer is actively requesting bids from suppliers.",
     buyer ? `Buyer: ${buyer}.` : "",
     contractNature ? `Nature: ${contractNature}.` : "",
-    deadline ? `Bid deadline: ${deadline}.` : "",
+    deadline ? `Published bid-submission date (verify exact time and lot): ${deadline}.` : "Bid-submission date not reliably indexed: verify original notice.",
     value ? `Published value: ${value}.` : ""
   ].filter(Boolean).join(" "), 1400);
   const url = `https://ted.europa.eu/en/notice/-/detail/${encodeURIComponent(remoteId)}`;
@@ -221,6 +243,10 @@ function normalizeTedItem(item) {
     evidence: url,
     raw: {
       publicationDate, deadline, value, buyer, contractNature,
+      informationDeadline:deadlines.informationDeadline,
+      lotSubmissionDates:deadlines.lotSubmissionDates,
+      deadlineSource:deadlines.deadlineSource,
+      deadlineTimeVerified:false,
       buyerEmail: clean(buyerEmail, 320) || null,
       buyerWebsite: clean(buyerWebsite, 1000) || null,
       buyerContactPoint: clean(buyerContactPoint, 320) || null,
@@ -510,7 +536,7 @@ async function scanTed() {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       query: `PD = (${from} <> ${to}) SORT BY publication-date DESC`,
-      fields: ["publication-number", "notice-title", "buyer-name", "buyer-identifier", "buyer-email", "buyer-internet-address", "buyer-contact-point", "buyer-touchpoint-email", "buyer-touchpoint-internet-address", "buyer-touchpoint-contact-point", "publication-date", "deadline", "contract-nature", "total-value", "buyer-country"],
+      fields: ["publication-number", "notice-title", "buyer-name", "buyer-identifier", "buyer-email", "buyer-internet-address", "buyer-contact-point", "buyer-touchpoint-email", "buyer-touchpoint-internet-address", "buyer-touchpoint-contact-point", "publication-date", "deadline", "deadline-receipt-tender-date-lot", "deadline-receipt-tender-time-lot", "contract-nature", "total-value", "buyer-country"],
       page: 1,
       limit: MAX_RESULTS_PER_SOURCE,
       scope: "ACTIVE",
@@ -767,6 +793,8 @@ export const __test = {
   firstText,
   safeParse,
   normalizeTedItem,
+  tedLotDateValues,
+  tedSubmissionDeadline,
   normalizeUkRelease,
   normalizeTedAward,
   hostFromHttps,
