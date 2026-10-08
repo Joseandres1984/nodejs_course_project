@@ -1,5 +1,5 @@
 export const FIRST_SETTLEMENT_MISSION_POLICY = Object.freeze({
-  version: "1.5-noncommercial-reply-rotation",
+  version: "1.6-actionable-focus-truth",
   objective: "move_the_best_real_opportunity_toward_first_verified_settlement",
   settlementTruth: "verified_x402_receipt_only",
   autonomousSpendUsd: 0,
@@ -14,7 +14,8 @@ export const FIRST_SETTLEMENT_MISSION_POLICY = Object.freeze({
   rotateTerminalOutreachBlocks: true,
   retryTransientOutreachAfterHours: 6,
   rotateNonCommercialTransportResponses: true,
-  rotateNonCommercialReplies: true
+  rotateNonCommercialReplies: true,
+  requiresCurrentCommercialActionability: true
 });
 
 const STALL_HOURS = Object.freeze({
@@ -157,7 +158,17 @@ function missionPriority(row = {}, now = Date.now()) {
 
 export function chooseFirstSettlementMission(rows = [], now = Date.now()) {
   const candidates = rows
-    .filter(r => !r.verified_receipt_id && !["PAID", "DELIVERED"].includes(String(r.stage || "").toUpperCase()))
+    .filter(r => {
+      const stage=String(r.stage || "").toUpperCase();
+      if(r.verified_receipt_id || ["PAID","DELIVERED"].includes(stage)) return false;
+      const actionable=Number(r.commercially_actionable);
+      const outreach=String(r.outreach_status || "").toUpperCase();
+      const responseClass=String(r.pipeline_response_class || r.response_class || "").toUpperCase();
+      const externalConversationStarted=["SENT","REPLIED","NEGOTIATING"].includes(stage) ||
+        ["SENT","SENT_TASK","WORKING","RESPONDED"].includes(outreach) ||
+        ["COMMERCIAL_QUESTION","COMMERCIAL_INTEREST","PURCHASE_INTENT"].includes(responseClass);
+      return actionable!==0 || externalConversationStarted;
+    })
     .map(r => ({ row:r, diagnosis:diagnoseSettlementBlocker(r, now), priority:missionPriority(r, now) }))
     .filter(x => Number.isFinite(x.priority));
   candidates.sort((a,b) => b.priority-a.priority || Number(b.row.intent_score || 0)-Number(a.row.intent_score || 0) || Number(b.row.first_cash_score || 0)-Number(a.row.first_cash_score || 0));
@@ -175,7 +186,9 @@ export async function getFirstSettlementMissionStatus(env) {
     x.status AS outreach_status,
     x.error AS outreach_error,
     x.updated_at AS outreach_updated_at,
-    o.status AS opportunity_status
+    o.status AS opportunity_status,
+    a.commercially_actionable,
+    a.synthetic_or_test_only
     FROM lumen_revenue_loop_v5 r
     LEFT JOIN lumen_proposal_drafts p ON p.proposal_id=r.proposal_id
     LEFT JOIN lumen_sales_pipeline s ON s.proposal_id=r.proposal_id
@@ -183,7 +196,8 @@ export async function getFirstSettlementMissionStatus(env) {
     LEFT JOIN lumen_commercial_replies cr ON cr.proposal_id=r.proposal_id
     LEFT JOIN lumen_outreach_attempts x ON x.proposal_id=r.proposal_id
     LEFT JOIN lumen_opportunities o ON o.id=r.opportunity_id
-    WHERE r.stage NOT IN ('PAID','DELIVERED') AND COALESCE(o.status,'')<>'SUPERSEDED_MATCH'
+    LEFT JOIN lumen_opportunity_assessments a ON a.opportunity_id=r.opportunity_id
+    WHERE r.stage NOT IN ('PAID','DELIVERED') AND COALESCE(o.status,'')<>'SUPERSEDED_MATCH' AND COALESCE(a.synthetic_or_test_only,0)=0
     ORDER BY r.first_cash_score DESC,r.intent_score DESC,r.updated_at DESC LIMIT 100`).all();
   const rows = (result.results || []).map(r => ({ ...r, stage_updated_at: r.updated_at }));
   const mission = chooseFirstSettlementMission(rows);
