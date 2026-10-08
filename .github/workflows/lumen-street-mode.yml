@@ -113,6 +113,7 @@ jobs:
           post "outreach/send-batch?limit=$batch_limit" || true
           batch='/tmp/outreach-send-batch.json'
           batch_attempted=$(jq -r '.attempted // 0' "$batch" 2>/dev/null || echo 0)
+          batch_reason=$(jq -r '.reason // ""' "$batch" 2>/dev/null || echo "")
           batch_sent=$(jq -r '.sent // 0' "$batch" 2>/dev/null || echo 0)
           batch_failed=$(jq -r '.failed // 0' "$batch" 2>/dev/null || echo 0)
           if [ "$batch_attempted" -gt 0 ]; then
@@ -127,10 +128,11 @@ jobs:
             echo "STREET_MODE_DELIVERY=no_batch_send"
           fi
           safe_idle=false
-          if [ "$consumed" != 'true' ] && [ "$batch_attempted" -eq 0 ] && [ "$ready_probes" -eq 0 ]; then
+          if [ "$consumed" != 'true' ] && [ "$batch_attempted" -eq 0 ] && [ "$batch_reason" = 'no_current_eligible_target_after_dedupe_cooldown' ]; then
             safe_idle=true
           fi
           echo "CLOSER_SWARM_BATCH attempted=$batch_attempted sent=$batch_sent failed=$batch_failed ready_probes=$ready_probes"
+          echo "CLOSER_SWARM_ELIGIBILITY_REASON=$batch_reason"
           echo "HOT_LANE_CONSUMED=$hot_consumed"
           echo "STREET_MODE_EXTERNAL_SLOT_CONSUMED=$consumed"
           echo "batch_sent=$batch_sent" >> "$GITHUB_OUTPUT"
