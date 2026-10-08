@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { diagnoseSettlementBlocker, chooseFirstSettlementMission, FIRST_SETTLEMENT_MISSION_POLICY } from "./first-settlement-mission-v1.js";
 
-assert.equal(FIRST_SETTLEMENT_MISSION_POLICY.version, "1.4-response-truth-rotation");
+assert.equal(FIRST_SETTLEMENT_MISSION_POLICY.version, "1.5-noncommercial-reply-rotation");
 assert.equal(FIRST_SETTLEMENT_MISSION_POLICY.rotateNonCommercialTransportResponses, true);
+assert.equal(FIRST_SETTLEMENT_MISSION_POLICY.rotateNonCommercialReplies, true);
 assert.equal(FIRST_SETTLEMENT_MISSION_POLICY.autonomousSpendUsd, 0);
 assert.equal(FIRST_SETTLEMENT_MISSION_POLICY.bindingActionsHumanGated, true);
 assert.equal(FIRST_SETTLEMENT_MISSION_POLICY.skipExplicitMoveOn, true);
@@ -23,6 +24,17 @@ assert.equal(mission.diagnosis.stalled, true);
 const sent = diagnoseSettlementBlocker({ stage:"SENT", updated_at:"2026-09-29T00:00:00Z" }, now);
 assert.equal(sent.blocker, "WAITING_BUYER_RESPONSE");
 assert.equal(sent.stalled, true);
+
+const notRelevantReply = diagnoseSettlementBlocker({ stage:"REPLIED", pipeline_response_class:"NOT_RELEVANT", updated_at:"2026-10-03T11:55:00Z" }, now);
+assert.equal(notRelevantReply.blocker, "NONCOMMERCIAL_BUYER_RESPONSE");
+assert.equal(notRelevantReply.action, "rotate_to_next_opportunity_or_human_review");
+
+const purchaseReply = diagnoseSettlementBlocker({ stage:"REPLIED", pipeline_response_class:"PURCHASE_INTENT", updated_at:"2026-10-03T11:55:00Z" }, now);
+assert.equal(purchaseReply.blocker, "RESPONSE_NOT_CLOSED");
+
+const unclassifiedReply = diagnoseSettlementBlocker({ stage:"REPLIED", updated_at:"2026-10-03T11:55:00Z" }, now);
+assert.equal(unclassifiedReply.blocker, "RESPONSE_CLASSIFICATION_REQUIRED");
+assert.equal(unclassifiedReply.action, "classify_response_before_close");
 
 const negotiatingUnknown = diagnoseSettlementBlocker({ stage:"NEGOTIATING", updated_at:"2026-10-03T10:00:00Z" }, now);
 assert.equal(negotiatingUnknown.blocker, "NEGOTIATING_WITHOUT_VERIFIED_COMMERCIAL_INTENT");
@@ -101,6 +113,12 @@ const sentVsReplied = chooseFirstSettlementMission([
   { opportunity_id:"replied", stage:"REPLIED", first_cash_score:.15, intent_score:.6, response_class:"COMMERCIAL_INTEREST", updated_at:"2026-10-03T11:45:00Z" }
 ], now);
 assert.equal(sentVsReplied.focus.opportunity_id,"replied","verified buyer response must outrank waiting SENT inventory");
+
+const notRelevantRotates = chooseFirstSettlementMission([
+  { opportunity_id:"nope", stage:"REPLIED", first_cash_score:20, intent_score:.9, pipeline_response_class:"NOT_RELEVANT", updated_at:"2026-10-03T11:58:00Z" },
+  { opportunity_id:"real-next", stage:"PROPOSAL_READY", first_cash_score:.2, intent_score:.7, quality_gate_status:"PASS", updated_at:"2026-10-03T11:57:00Z" }
+], now);
+assert.equal(notRelevantRotates.focus.opportunity_id,"real-next","NOT_RELEVANT reply must rotate out of First Settlement");
 
 const verifiedCloseBeatsPhantomNegotiating = chooseFirstSettlementMission([
   { opportunity_id:"phantom", stage:"NEGOTIATING", first_cash_score:5, intent_score:.9, response_class:"GENERIC_RESPONSE", updated_at:"2026-10-03T11:50:00Z" },
