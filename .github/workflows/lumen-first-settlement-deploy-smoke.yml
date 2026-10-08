@@ -44,6 +44,7 @@ jobs:
           node .lumen/a2a-worker/test-tender-supplier-match.mjs
           node .lumen/a2a-worker/test-procurement-buyer-contact-bridge.mjs
           node .lumen/a2a-worker/test-official-procurement-network.mjs
+          node .lumen/a2a-worker/test-award-to-active-demand.mjs
           node .lumen/a2a-worker/test-tender-discovery-rotation.mjs
           node .lumen/a2a-worker/test-x402-revenue-bridge-scale.mjs
           node .lumen/a2a-worker/test-unified-economic-brain-v1.mjs
