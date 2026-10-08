@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { scoreBuyerIntent, deriveLifecycleStage, paymentProbability, firstCashScore, REVENUE_LOOP_V5_POLICY } from "./revenue-loop-v5.js";
 
-assert.equal(REVENUE_LOOP_V5_POLICY.version,"5.3-commercial-truth-correction");
+assert.equal(REVENUE_LOOP_V5_POLICY.version,"5.4-active-commercial-priority");
+assert.equal(REVENUE_LOOP_V5_POLICY.prioritizeActionableActiveInventoryBeforeRecentHistory,true);
 assert.equal(REVENUE_LOOP_V5_POLICY.currentCommercialActionabilityCanDowngradeStalePreSendState,true);
 assert.equal(REVENUE_LOOP_V5_POLICY.autonomousSpendUsd,0);
 assert.equal(REVENUE_LOOP_V5_POLICY.autonomousContract,false);
