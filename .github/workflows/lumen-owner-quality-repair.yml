@@ -1,0 +1,43 @@
+name: LUMEN Owner Quality Repair
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-owner-quality-repair.yml'
+
+jobs:
+  repair-one:
+    if: contains(github.event.head_commit.message, '[owner-quality-repair]')
+    runs-on: ubuntu-latest
+    env:
+      BASE: https://lumen-zero-a2a.lumen-b2b.workers.dev
+      OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+      OWNER_APPROVAL_ID: owner-20261008-quality-copy-repair-01
+    steps:
+      - name: Capture focused proposal before repair
+        run: |
+          set -euo pipefail
+          test -n "$OPPORTUNITY_ADMIN_TOKEN"
+          curl -fsS --max-time 30 -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" -H 'cache-control: no-cache' "$BASE/first-settlement/status" -o /tmp/before.json
+          jq '{ownerApproval:"'$OWNER_APPROVAL_ID'",mission:{status:.mission.status,opportunityId:.mission.focus.opportunity_id,proposalId:.mission.focus.proposal_id,offerId:.mission.focus.offer_id,stage:.mission.focus.stage,commerciallyActionable:.mission.focus.commercially_actionable,qualityGate:.mission.focus.quality_gate_status,blocker:.mission.diagnosis.blocker,action:.mission.diagnosis.action}}' /tmp/before.json
+          jq -r '.mission.focus.proposal_id // empty' /tmp/before.json > /tmp/target
+          test -s /tmp/target
+
+      - name: Run one bounded copy-only repair
+        run: |
+          set -euo pipefail
+          target=$(cat /tmp/target)
+          curl -fsS --max-time 60 -X POST -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" -H 'cache-control: no-cache' "$BASE/quality/repair-focused" -o /tmp/repair.json
+          jq '{ok,repaired,reason,proposalId,opportunityId,offerId,amountUsd,beforeQualityScore,repairedBlockers,repairableBlockers,structuralBlockers,afterBlockers,passed,review,guardrails}' /tmp/repair.json
+          got=$(jq -r '.proposalId // empty' /tmp/repair.json)
+          if [ -n "$got" ]; then test "$got" = "$target"; fi
+
+      - name: Verify mission after repair
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 90 -X POST -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" -H 'cache-control: no-cache' "$BASE/revenue-loop-v5/run" -o /tmp/revenue.json
+          curl -fsS --max-time 30 -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" -H 'cache-control: no-cache' "$BASE/first-settlement/status" -o /tmp/after.json
+          echo '===== REPAIR ====='; cat /tmp/repair.json; echo
+          echo '===== MISSION AFTER ====='
+          jq '{mission:{status:.mission.status,opportunityId:.mission.focus.opportunity_id,proposalId:.mission.focus.proposal_id,offerId:.mission.focus.offer_id,stage:.mission.focus.stage,commerciallyActionable:.mission.focus.commercially_actionable,qualityGate:.mission.focus.quality_gate_status,blocker:.mission.diagnosis.blocker,action:.mission.diagnosis.action},successCriterion}' /tmp/after.json
