@@ -1,0 +1,116 @@
+name: LUMEN Owner Tender-to-Cash Cycle
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-owner-tender-to-cash-cycle.yml'
+
+concurrency:
+  group: lumen-owner-tender-to-cash-cycle
+  cancel-in-progress: false
+
+jobs:
+  execute-one:
+    if: contains(github.event.head_commit.message, '[owner-tender-close]')
+    runs-on: ubuntu-latest
+    env:
+      BASE: https://lumen-zero-a2a.lumen-b2b.workers.dev
+      OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+      OWNER_APPROVAL_ID: owner-20261008-tender-supplier-close-01
+    steps:
+      - name: Verify authority and baseline
+        run: |
+          set -euo pipefail
+          test -n "$OPPORTUNITY_ADMIN_TOKEN"
+          curl -fsS --max-time 30 "$BASE/portfolio-governor/state" -o /tmp/portfolio-before.json
+          curl -fsS --max-time 30 "$BASE/outreach/stats" -o /tmp/outreach-before.json
+          echo "OWNER_APPROVAL_ID=$OWNER_APPROVAL_ID"
+          jq '{verifiedSettlements:.metrics.verifiedSettlements,verifiedRevenueUsd:.metrics.verifiedRevenueUsd,activeCandidates:.metrics.activeCandidates}' /tmp/portfolio-before.json
+          jq '{sent,responded,ready,totalAttempts}' /tmp/outreach-before.json
+
+      - name: Build current tender supplier matches
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 90 -X POST -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" -H 'cache-control: no-cache' "$BASE/tender-match/run" -o /tmp/match.json
+          jq '{ok,version,tendersConsidered,suppliersConsidered,matchesCreated:(.matches|length),matches:[.matches[]|{opportunityId,supplier,score,terms,deadline}]}' /tmp/match.json
+
+      - name: Reassess current commercial truth
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 90 -X POST -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" -H 'cache-control: no-cache' "$BASE/commercial/reassess" -o /tmp/reassess.json
+          jq '{ok,assessed,actionable,testOnly}' /tmp/reassess.json
+
+      - name: Prepare only the best actionable proposal
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 90 -X POST -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" -H 'cache-control: no-cache' "$BASE/revenue-loop-v5/run" -o /tmp/revenue1.json
+          jq '{ok,version,proposal,lifecycle:{tracked:.lifecycle.tracked,commercialTruthCorrections:.lifecycle.commercialTruthCorrections,focus:.lifecycle.focus}}' /tmp/revenue1.json
+
+      - name: Quality review preferred First Settlement draft
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 60 -X POST -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" -H 'cache-control: no-cache' "$BASE/quality/review-next" -o /tmp/quality.json
+          jq '{ok,reviewed,proposalId,opportunityId,status,qualityScore,blockers,nextAction}' /tmp/quality.json
+
+      - name: Sync mission and require actionable Tender Hot Lead
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 90 -X POST -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" -H 'cache-control: no-cache' "$BASE/revenue-loop-v5/run" -o /tmp/revenue2.json
+          curl -fsS --max-time 30 -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" -H 'cache-control: no-cache' "$BASE/first-settlement/status" -o /tmp/mission.json
+          jq '{mission:{status:.mission.status,opportunityId:.mission.focus.opportunity_id,proposalId:.mission.focus.proposal_id,offerId:.mission.focus.offer_id,stage:.mission.focus.stage,commerciallyActionable:.mission.focus.commercially_actionable,qualityGate:.mission.focus.quality_gate_status,blocker:.mission.diagnosis.blocker,action:.mission.diagnosis.action},successCriterion}' /tmp/mission.json
+          jq -e '.mission.status=="ACTIVE" and .mission.focus.offer_id=="MP-TENDER-LEAD" and .mission.focus.commercially_actionable==1 and .mission.focus.stage=="PROPOSAL_READY" and .mission.focus.quality_gate_status=="PASS"' /tmp/mission.json >/dev/null
+          jq -r '.mission.focus.proposal_id' /tmp/mission.json > /tmp/target_proposal
+          test -s /tmp/target_proposal
+
+      - name: Probe exact focused supplier endpoint
+        run: |
+          set -euo pipefail
+          target=$(cat /tmp/target_proposal)
+          curl -fsS --max-time 60 -X POST -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" -H 'cache-control: no-cache' "$BASE/outreach/probe-next" -o /tmp/probe.json
+          jq '{ok,probed,proposalId,target,status,protocol,error,nextAction}' /tmp/probe.json
+          jq -e --arg target "$target" '.ok==true and .probed==true and .proposalId==$target and .status=="READY"' /tmp/probe.json >/dev/null
+
+      - name: Send exactly one owner-authorized proposal
+        run: |
+          set -euo pipefail
+          target=$(cat /tmp/target_proposal)
+          curl -fsS --max-time 90 -X POST -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" -H 'cache-control: no-cache' "$BASE/outreach/send-next" -o /tmp/send.json
+          jq '{ok,sent,proposalId,status,taskId,responseText,error,checkoutReady,transport}' /tmp/send.json
+          jq -e --arg target "$target" '(.proposalId==$target) and ((.sent==true) or (.ok==false))' /tmp/send.json >/dev/null
+
+      - name: Poll and verify commercial truth
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 90 -X POST -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" -H 'cache-control: no-cache' "$BASE/outreach/poll" -o /tmp/poll.json || true
+          curl -fsS --max-time 90 -X POST -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" -H 'cache-control: no-cache' "$BASE/revenue-loop-v5/run" -o /tmp/revenue3.json
+          curl -fsS --max-time 30 -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" -H 'cache-control: no-cache' "$BASE/first-settlement/status" -o /tmp/mission-after.json
+          curl -fsS --max-time 30 "$BASE/portfolio-governor/state" -o /tmp/portfolio-after.json
+          curl -fsS --max-time 30 "$BASE/outreach/stats" -o /tmp/outreach-after.json
+          echo '===== SEND ====='; cat /tmp/send.json; echo
+          echo '===== POLL ====='; cat /tmp/poll.json || true; echo
+          echo '===== MISSION AFTER ====='
+          jq '{mission:{status:.mission.status,opportunityId:.mission.focus.opportunity_id,proposalId:.mission.focus.proposal_id,offerId:.mission.focus.offer_id,stage:.mission.focus.stage,blocker:.mission.diagnosis.blocker,action:.mission.diagnosis.action},successCriterion}' /tmp/mission-after.json
+          echo '===== COMMERCIAL DELTAS ====='
+          node - <<'NODE'
+          const fs=require('fs');
+          const before=JSON.parse(fs.readFileSync('/tmp/portfolio-before.json','utf8'));
+          const after=JSON.parse(fs.readFileSync('/tmp/portfolio-after.json','utf8'));
+          const ob=JSON.parse(fs.readFileSync('/tmp/outreach-before.json','utf8'));
+          const oa=JSON.parse(fs.readFileSync('/tmp/outreach-after.json','utf8'));
+          const bm=before.metrics||{}, am=after.metrics||{};
+          console.log(JSON.stringify({
+            settlementsBefore:Number(bm.verifiedSettlements||0),
+            settlementsAfter:Number(am.verifiedSettlements||0),
+            settlementDelta:Number(am.verifiedSettlements||0)-Number(bm.verifiedSettlements||0),
+            revenueBeforeUsd:Number(bm.verifiedRevenueUsd||0),
+            revenueAfterUsd:Number(am.verifiedRevenueUsd||0),
+            revenueDeltaUsd:Number(am.verifiedRevenueUsd||0)-Number(bm.verifiedRevenueUsd||0),
+            outreachSentBefore:Number(ob.sent||0),
+            outreachSentAfter:Number(oa.sent||0),
+            outreachSentDelta:Number(oa.sent||0)-Number(ob.sent||0),
+            outreachRespondedBefore:Number(ob.responded||0),
+            outreachRespondedAfter:Number(oa.responded||0),
+            outreachRespondedDelta:Number(oa.responded||0)-Number(ob.responded||0)
+          },null,2));
+          NODE
