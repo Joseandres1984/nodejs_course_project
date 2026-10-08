@@ -6,6 +6,7 @@ import { createPaywall } from "@x402/paywall";
 import { evmPaywall } from "@x402/paywall/evm";
 import { buildWellKnownX402, buildDiscoveryOpenApi, buildDiscoveryLlmsTxt } from "./discovery.js";
 import { declareDiscoveryExtension, bazaarResourceServerExtension } from "@x402/extensions/bazaar";
+import { inspectBuyerBrief, briefFromUrl } from "./buyer-brief.js";
 
 const SERVICE = "lumen-zero-x402";
 const VERSION = "1.6-x402-human-approval";
@@ -101,10 +102,12 @@ for (const [slug, product] of Object.entries(PRODUCTS)) {
     mimeType: "application/json",
     extensions: {
       ...declareDiscoveryExtension({
-        // These GET routes require no query/body. The output is a receipt and
-        // queued-task acknowledgement, NOT the finished research deliverable.
-        input: {},
-        inputSchema: {type:"object",properties:{},required:[],additionalProperties:false},
+        // Query brief is optional; buyers supply nonconfidential requirements.
+        // Output is a receipt, NOT the finished research deliverable.
+        input: {requirement:"Find three publicly listed manufacturers of industrial safety gloves in Argentina."},
+        inputSchema: {type:"object",properties:{
+          requirement:{type:"string",description:"Nonconfidential sourcing brief; 12-1200 characters; queued only after a verified settlement.",minLength:12,maxLength:1200}
+        },required:[],additionalProperties:false},
         output: {
           example: {
             ok:true,paymentAuthorizationVerified:true,
