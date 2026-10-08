@@ -4,6 +4,7 @@ import { x402ResourceServer, HTTPFacilitatorClient } from "@x402/core/server";
 import { ExactEvmScheme } from "@x402/evm/exact/server";
 import { createPaywall } from "@x402/paywall";
 import { evmPaywall } from "@x402/paywall/evm";
+import { buildWellKnownX402, buildDiscoveryOpenApi, buildDiscoveryLlmsTxt } from "./discovery.js";
 
 const SERVICE = "lumen-zero-x402";
 const VERSION = "1.6-x402-human-approval";
@@ -315,6 +316,13 @@ app.get("/health", async (c) => {
   });
 });
 app.get("/catalog", (c) => c.json(publicCatalog(new URL(c.req.url).origin)));
+app.get("/openapi.json", (c) => c.json(buildDiscoveryOpenApi(PRODUCTS, new URL(c.req.url).origin)));
+app.get("/.well-known/x402", (c) => c.json(buildWellKnownX402(PRODUCTS, new URL(c.req.url).origin)));
+app.get("/.well-known/x402-catalog.json", (c) => c.json(publicCatalog(new URL(c.req.url).origin)));
+app.get("/llms.txt", (c) => new Response(buildDiscoveryLlmsTxt(PRODUCTS,new URL(c.req.url).origin),{
+  headers:{"content-type":"text/plain;charset=utf-8","cache-control":"public,max-age=300","x-content-type-options":"nosniff"}
+}));
+
 
 for (const [slug,product] of Object.entries(PRODUCTS)) {
   app.get(`/buy/${slug}`, (c) => createVerifiedPendingReceipt(c,product));
