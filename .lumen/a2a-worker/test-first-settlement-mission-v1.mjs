@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { diagnoseSettlementBlocker, chooseFirstSettlementMission, FIRST_SETTLEMENT_MISSION_POLICY } from "./first-settlement-mission-v1.js";
 
-assert.equal(FIRST_SETTLEMENT_MISSION_POLICY.version, "1.7-verified-intent-focus-truth");
+assert.equal(FIRST_SETTLEMENT_MISSION_POLICY.version, "1.8-quality-consistent-actionability");
+assert.equal(FIRST_SETTLEMENT_MISSION_POLICY.actionabilityMustMatchQualityThresholds, true);
 assert.equal(FIRST_SETTLEMENT_MISSION_POLICY.nonActionableInventoryRequiresVerifiedCommercialIntentToOwnMission, true);
 assert.equal(FIRST_SETTLEMENT_MISSION_POLICY.requiresCurrentCommercialActionability, true);
 assert.equal(FIRST_SETTLEMENT_MISSION_POLICY.rotateNonCommercialTransportResponses, true);
@@ -180,5 +181,16 @@ const phantomNonActionableNegotiatingRotates = chooseFirstSettlementMission([
   { opportunity_id:"real-actionable", commercially_actionable:1, stage:"QUALIFIED", first_cash_score:.01, intent_score:.4, updated_at:"2026-10-03T11:58:00Z" }
 ], now);
 assert.equal(phantomNonActionableNegotiatingRotates.focus.opportunity_id,"real-actionable","non-actionable phantom negotiation must not monopolize First Settlement");
+
+const staleActionableFlagRotates = chooseFirstSettlementMission([
+  { opportunity_id:"stale-actionable", commercially_actionable:1, commercial_score:50, evidence_strength:"weak", stage:"PROPOSAL_READY", first_cash_score:99, intent_score:.99, quality_gate_status:"NEEDS_REVISION", updated_at:"2026-10-03T11:59:00Z" },
+  { opportunity_id:"consistent-actionable", commercially_actionable:1, commercial_score:72, evidence_strength:"medium", stage:"QUALIFIED", first_cash_score:.01, intent_score:.4, updated_at:"2026-10-03T11:58:00Z" }
+], now);
+assert.equal(staleActionableFlagRotates.focus.opportunity_id,"consistent-actionable","stale actionable flag that contradicts score/evidence must not own First Settlement");
+
+const staleButVerifiedIntentRemains = chooseFirstSettlementMission([
+  { opportunity_id:"verified-intent-stale-score", commercially_actionable:1, commercial_score:50, evidence_strength:"weak", stage:"NEGOTIATING", response_class:"PURCHASE_INTENT", first_cash_score:.2, intent_score:.7, updated_at:"2026-10-03T11:58:00Z" }
+], now);
+assert.equal(staleButVerifiedIntentRemains.focus.opportunity_id,"verified-intent-stale-score","verified buyer purchase intent remains eligible despite later assessment inconsistency");
 
 console.log("First Settlement Mission v1 tests passed");
