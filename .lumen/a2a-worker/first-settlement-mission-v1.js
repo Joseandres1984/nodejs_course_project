@@ -1,5 +1,5 @@
 export const FIRST_SETTLEMENT_MISSION_POLICY = Object.freeze({
-  version: "1.8-quality-consistent-actionability",
+  version: "1.9-tracking-recovery",
   objective: "move_the_best_real_opportunity_toward_first_verified_settlement",
   settlementTruth: "verified_x402_receipt_only",
   autonomousSpendUsd: 0,
@@ -17,7 +17,10 @@ export const FIRST_SETTLEMENT_MISSION_POLICY = Object.freeze({
   rotateNonCommercialReplies: true,
   requiresCurrentCommercialActionability: true,
   nonActionableInventoryRequiresVerifiedCommercialIntentToOwnMission: true,
-  actionabilityMustMatchQualityThresholds: true
+  actionabilityMustMatchQualityThresholds: true,
+  prefilterCommercialTruthBeforeLimit: true,
+  readOnlyRecoveryForUntrackedOpportunities: true,
+  recoverySendsMessages: false
 });
 
 const STALL_HOURS = Object.freeze({
@@ -209,14 +212,58 @@ export async function getFirstSettlementMissionStatus(env) {
     LEFT JOIN lumen_opportunities o ON o.id=r.opportunity_id
     LEFT JOIN lumen_opportunity_assessments a ON a.opportunity_id=r.opportunity_id
     WHERE r.stage NOT IN ('PAID','DELIVERED') AND COALESCE(o.status,'')<>'SUPERSEDED_MATCH' AND COALESCE(a.synthetic_or_test_only,0)=0
+      AND ((a.commercially_actionable=1 AND a.commercial_score>=65 AND LOWER(a.evidence_strength) IN ('medium','strong'))
+        OR UPPER(COALESCE(s.response_class,'')) IN ('PURCHASE_INTENT','COMMERCIAL_INTEREST','COMMERCIAL_QUESTION'))
     ORDER BY r.first_cash_score DESC,r.intent_score DESC,r.updated_at DESC LIMIT 100`).all();
   const rows = (result.results || []).map(r => ({ ...r, stage_updated_at: r.updated_at }));
-  const mission = chooseFirstSettlementMission(rows);
+  let mission = chooseFirstSettlementMission(rows);
+  let recoverySource = "revenue_loop";
+  let recoveryCount = 0;
+  if (mission.status === "NO_OPEN_MISSION") {
+    // Read only: recover existing proposals and qualified buyers skipped by stale lifecycle indexing.
+    // Do not create messages, proposals, transactions, invoices or buyer-intent evidence here.
+    const rescue = await env.DB.prepare(`SELECT
+      o.id AS opportunity_id,p.proposal_id,
+      COALESCE(p.offer_id,o.revenue_offer_id) AS offer_id,
+      COALESCE(r.stage,CASE WHEN p.status='SENT' OR x.status IN ('SENT','SENT_TASK','WORKING','RESPONDED') THEN 'SENT'
+        WHEN p.proposal_id IS NOT NULL THEN 'PROPOSAL_READY' ELSE 'QUALIFIED' END) AS stage,
+      COALESCE(r.intent_score,a.commercial_score/100.0) AS intent_score,
+      COALESCE(r.first_cash_score,0) AS first_cash_score,
+      r.next_action, COALESCE(r.updated_at,p.updated_at,o.updated_at) AS updated_at,
+      p.quality_gate_status,s.response_class AS pipeline_response_class,
+      x.status AS outreach_status,x.updated_at AS outreach_updated_at,
+      b.receipt_id AS verified_receipt_id,o.status AS opportunity_status,
+      a.commercially_actionable,a.commercial_score,a.evidence_strength,
+      a.synthetic_or_test_only
+      FROM lumen_opportunities o
+      JOIN lumen_opportunity_assessments a ON a.opportunity_id=o.id
+      LEFT JOIN lumen_revenue_loop_v5 r ON r.opportunity_id=o.id
+      LEFT JOIN lumen_proposal_drafts p ON p.opportunity_id=o.id
+      LEFT JOIN lumen_sales_pipeline s ON s.proposal_id=p.proposal_id
+      LEFT JOIN lumen_outreach_attempts x ON x.proposal_id=p.proposal_id
+      LEFT JOIN lumen_x402_revenue_bridge b ON b.proposal_id=p.proposal_id AND b.bridge_status='ATTRIBUTABLE'
+      WHERE a.commercially_actionable=1 AND a.commercial_score>=65
+        AND LOWER(a.evidence_strength) IN ('medium','strong')
+        AND COALESCE(a.synthetic_or_test_only,0)=0
+        AND COALESCE(o.status,'')<>'SUPERSEDED_MATCH'
+        AND (r.stage IS NULL OR r.stage NOT IN ('PAID','DELIVERED'))
+        AND b.receipt_id IS NULL
+      ORDER BY CASE WHEN x.status IN ('SENT','SENT_TASK','WORKING') THEN 0
+        WHEN p.quality_gate_status='PASS' THEN 1 ELSE 2 END,
+        a.commercial_score DESC,o.updated_at DESC LIMIT 40`).all();
+    const recovered = (rescue.results || []).map(r => ({ ...r, stage_updated_at:r.updated_at }));
+    recoveryCount = recovered.length;
+    mission = chooseFirstSettlementMission(recovered);
+    if (mission.status === "ACTIVE") recoverySource = "verified_opportunity_recovery";
+  }
   const stalled = rows.map(r => ({ opportunity_id:r.opportunity_id, proposal_id:r.proposal_id, stage:r.stage, first_cash_score:r.first_cash_score, ...diagnoseSettlementBlocker(r) })).filter(r => r.stalled);
   return {
     ok: true,
     policy: FIRST_SETTLEMENT_MISSION_POLICY,
     mission,
+    recoverySource,
+    recoveryCount,
+    trackedCandidates: rows.length,
     stalledCount: stalled.length,
     stalled: stalled.slice(0,10),
     successCriterion: "verified_x402_settlement_greater_than_zero"

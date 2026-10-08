@@ -168,6 +168,10 @@ jobs:
         run: node .lumen/a2a-worker/test-procurement-buyer-contact-bridge.mjs
       - name: Verify procurement evidence-only commercial truth
         run: node .lumen/a2a-worker/test-procurement-evidence-only-commercial-truth.mjs
+      - name: Verify tracking recovery and GPT-6 default-off gate
+        run: |
+          node .lumen/a2a-worker/test-first-settlement-tracking-recovery.mjs
+          node .lumen/a2a-worker/test-gpt6-cognitive-bridge.mjs
       - name: Verify controlled A2A batch limit
         run: node .lumen/a2a-worker/test-controlled-batch-limit.mjs
       - name: Verify bounded proposal quality copy repair

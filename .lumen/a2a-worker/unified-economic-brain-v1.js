@@ -1,3 +1,4 @@
+import { invokeGpt6, getGpt6BridgeStatus } from "./gpt6-cognitive-bridge.js";
 const VERSION = "1.2-entrepreneurial-adaptation";
 const MODEL = "@cf/google/gemma-4-26b-a4b-it";
 const EXPLORATION_RATE = 0.20;
@@ -547,10 +548,31 @@ function extractText(r){ if(typeof r==="string")return r; if(typeof r?.response=
 function parseJson(text){ const s=String(text||"").replace(/^```(?:json)?\s*/i,"").replace(/\s*```$/,""); const a=s.indexOf("{"); const b=s.lastIndexOf("}"); if(a<0||b<=a) throw new Error("brain_model_json_missing"); return JSON.parse(s.slice(a,b+1)); }
 
 async function aiHypotheses(env, obs) {
-  if (!env?.AI?.run) return [];
+  const gptEnabled=getGpt6BridgeStatus(env).enabled;
+  if (!env?.AI?.run && !gptEnabled) return [];
   const prompt = `You are LUMEN's single economic strategy brain. Current commercial funnel bottleneck: ${obs?.funnel?.bottleneck || "UNKNOWN"}. Generate up to ${MAX_AI_HYPOTHESES} concrete monetization hypotheses from the supplied evidence and currently available capabilities. Attack the current bottleneck first unless stronger downstream evidence already exists. Sending or preparing a message alone is NOT economic progress: prefer verified demand, verified delivery, buyer response, quote/order intent and verified settlement. When evidence permits, produce materially different monetization mechanisms rather than near-duplicates: pay-per-use/API, subscription, fixed-fee service, success fee/brokerage, referral/affiliate, paid data/intelligence, digital product, automation/SaaS, or a genuinely new zero-capital model. Prefer models where one paid event can be repeated cheaply and distributed automatically, but NEVER treat a 10,000-event scenario or unit revenue target as realized revenue. Scale potential must be justified by current evidence. BUSINESS MODEL IS OPEN ENDED: do not limit yourself to the existing catalog or named archetypes. You may combine demand, information, brokerage, commerce, APIs, x402, services, referrals or genuinely new patterns when evidence supports them. Do not invent evidence, buyers, settlements, prices or capabilities. Every autonomous test must require zero outgoing capital, be reversible, non-binding and legal. Never propose purchases, payments, debt, contracts, secret access or price mutation. execution_lane is only the existing specialist tool family that can validate the hypothesis: REVENUE|VENTURE|COMMERCE|TRAVEL|DISCOVERY|EXPLORE|HOLD. Return ONLY JSON {"hypotheses":[{business_model,hypothesis,target,execution_lane,source_ref,expected_profit_usd,probability_of_sale,time_to_cash_hours,capital_required_usd,risk,reversibility,evidence_strength,confidence,novelty,monetizable_event,unit_revenue_target_usd,scale_potential,repeatability,distribution_leverage,marginal_cost_efficiency,target_scale_events,projected_scale_revenue_usd,rationale_summary,next_step}]}. Do not output chain-of-thought; rationale_summary must be one evidence-based sentence.`;
   try {
-    const r=await env.AI.run(MODEL,{messages:[{role:"system",content:prompt},{role:"user",content:JSON.stringify(obs).slice(0,18000)}],temperature:.35,max_completion_tokens:580,chat_template_kwargs:{enable_thinking:false}});
+    let r=null;
+    if (gptEnabled) {
+      // Send only aggregated, non-identifying funnel data; never raw prospect/PII records.
+      const safeObservation={
+        funnel:obs?.funnel,
+        verifiedSettlementCount:obs?.verifiedSettlementCount,
+        proposalCount:obs?.proposals?.length||0,
+        ventureIdeaCount:obs?.ventureIdeas?.length||0,
+        supplierCandidateCount:obs?.supplierQueue?.length||0,
+        recentStrategies:(obs?.learningMemory||[]).slice(0,8).map(x=>({
+          attempts:Number(x.attempts||0),
+          reward:Number(x.reward||0),
+          verified_settlements:Number(x.verified_settlements||0),
+          commercial_responses:Number(x.commercial_responses||0)
+        }))
+      };
+      try {r=await invokeGpt6(env,{role:"strategy",instructions:prompt,input:JSON.stringify(safeObservation)});}
+      catch {r=null;} // Existing Cloudflare AI remains the zero-additional-API-cost fallback.
+    }
+    if(!r && env?.AI?.run)r=await env.AI.run(MODEL,{messages:[{role:"system",content:prompt},{role:"user",content:JSON.stringify(obs).slice(0,18000)}],temperature:.35,max_completion_tokens:580,chat_template_kwargs:{enable_thinking:false}});
+    if(!r)return [];
     const data=parseJson(extractText(r));
     return (Array.isArray(data?.hypotheses)?data.hypotheses:[]).slice(0,MAX_AI_HYPOTHESES).map((x,i)=>normalizeEconomicHypothesis({...x,id:`ai-${Date.now()}-${i}`}));
   } catch { return []; }
