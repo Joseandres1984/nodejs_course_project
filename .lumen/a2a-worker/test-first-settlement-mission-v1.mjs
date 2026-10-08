@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { diagnoseSettlementBlocker, chooseFirstSettlementMission, FIRST_SETTLEMENT_MISSION_POLICY } from "./first-settlement-mission-v1.js";
 
-assert.equal(FIRST_SETTLEMENT_MISSION_POLICY.version, "1.5-noncommercial-reply-rotation");
+assert.equal(FIRST_SETTLEMENT_MISSION_POLICY.version, "1.6-actionable-focus-truth");
+assert.equal(FIRST_SETTLEMENT_MISSION_POLICY.requiresCurrentCommercialActionability, true);
 assert.equal(FIRST_SETTLEMENT_MISSION_POLICY.rotateNonCommercialTransportResponses, true);
 assert.equal(FIRST_SETTLEMENT_MISSION_POLICY.rotateNonCommercialReplies, true);
 assert.equal(FIRST_SETTLEMENT_MISSION_POLICY.autonomousSpendUsd, 0);
@@ -155,5 +156,16 @@ const tenderGenericDoesNotBeatPurchase = chooseFirstSettlementMission([
   { opportunity_id:"real-buyer", offer_id:"MP-SUPPLIER-SNAPSHOT", stage:"NEGOTIATING", first_cash_score:.1, intent_score:.6, response_class:"PURCHASE_INTENT", updated_at:"2026-10-03T11:57:00Z" }
 ], now);
 assert.equal(tenderGenericDoesNotBeatPurchase.focus.opportunity_id,"real-buyer","generic Tender Hot Lead response must never outrank explicit purchase intent");
+
+const rawProcurementCannotOwnMission = chooseFirstSettlementMission([
+  { opportunity_id:"raw-ted", offer_id:"MP-TENDER-SCAN", commercially_actionable:0, stage:"PROPOSAL_READY", first_cash_score:99, intent_score:.99, quality_gate_status:"PASS", updated_at:"2026-10-03T11:59:00Z" },
+  { opportunity_id:"matched-supplier", offer_id:"MP-TENDER-LEAD", commercially_actionable:1, stage:"QUALIFIED", first_cash_score:.05, intent_score:.55, updated_at:"2026-10-03T11:58:00Z" }
+], now);
+assert.equal(rawProcurementCannotOwnMission.focus.opportunity_id,"matched-supplier","raw procurement evidence must never monopolize First Settlement");
+
+const startedConversationSurvivesReassessment = chooseFirstSettlementMission([
+  { opportunity_id:"sent-before-reassess", commercially_actionable:0, stage:"SENT", outreach_status:"SENT_TASK", first_cash_score:.4, intent_score:.5, updated_at:"2026-10-03T11:58:00Z" }
+], now);
+assert.equal(startedConversationSurvivesReassessment.focus.opportunity_id,"sent-before-reassess","real external conversations must not be dropped by later reassessment");
 
 console.log("First Settlement Mission v1 tests passed");
