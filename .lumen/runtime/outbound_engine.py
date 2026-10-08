@@ -27,6 +27,8 @@ MAX_SEND_RETRIES = max(0, min(3, int(os.getenv("LUMEN_OUTBOUND_SEND_RETRIES", "2
 RESEND_API_KEY = os.getenv("LUMEN_RESEND_API_KEY", "").strip()
 AR_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
 FREE_DOMAINS = {"gmail.com", "hotmail.com", "outlook.com", "yahoo.com", "icloud.com", "live.com", "proton.me", "protonmail.com"}
+CONTROLLED_EXPLICIT_DEMAND_APPROVAL_ID = "owner-20261007-explicit-demand-batch-01"
+CONTROLLED_EXPLICIT_DEMAND_MAX_CONTACTS = 1
 
 _ORIGINAL_COMMERCIAL_EXECUTION = commercial_execution.commercial_execution_tick
 
@@ -146,6 +148,69 @@ def _recently_contacted(state: Dict[str, Any], email: str) -> bool:
     return False
 
 
+def _controlled_approval_consumed(state: Dict[str, Any]) -> bool:
+    return CONTROLLED_EXPLICIT_DEMAND_APPROVAL_ID in {
+        str(x) for x in state.get("controlled_outbound_approvals_consumed", []) or []
+    }
+
+
+def _explicit_demand_fallback(state: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Rescue at most one buyer with explicit demand and a verified corporate channel.
+
+    This is a one-time, owner-authorized commercial intervention. It does not bypass
+    suppression, opt-out/cooldown, risk, corporate-domain matching, verified contact,
+    recontact windows, or downstream Communication Director / Quality Gate checks.
+    """
+    if _controlled_approval_consumed(state):
+        return []
+
+    candidates: List[Dict[str, Any]] = []
+    for account in state.get("candidate_accounts", []) or []:
+        if str(account.get("type") or "") != "buyer":
+            continue
+        if not (account.get("direct_inbound_demand") or account.get("demand_signal")):
+            continue
+        if not account.get("verified_contact"):
+            continue
+        email = str(account.get("commercial_email") or "").strip().lower()
+        domain = _email_domain(email)
+        official = str(account.get("domain") or account.get("official_domain") or "").strip().lower().removeprefix("www.")
+        if not domain or domain in FREE_DOMAINS:
+            continue
+        # A non-verified company is only recoverable when the verified corporate channel
+        # itself matches a known official domain. Unknown-domain cold contacts stay blocked.
+        if not official and not account.get("verified_company"):
+            continue
+        if official and domain != official and not domain.endswith("." + official):
+            continue
+        if str(account.get("contact_policy") or "public_corporate_channels_only") != "public_corporate_channels_only":
+            continue
+        if _suppressed(state, email) or not _risk_allows(state, account):
+            continue
+        relation = _relationship(state, account, email)
+        if relation.get("opted_out") or relation.get("relationship_state") in {"do_not_contact", "cooldown"}:
+            continue
+        if _recently_contacted(state, email):
+            continue
+        score, reasons = _score(state, account)
+        candidates.append({
+            "account": account,
+            "score": score,
+            "reasons": (["demanda explícita + canal corporativo verificado; rescate controlado aprobado por propietario"] + reasons)[:8],
+            "email": email,
+            "explicit_demand_fallback": True,
+            "controlled_approval_id": CONTROLLED_EXPLICIT_DEMAND_APPROVAL_ID,
+        })
+
+    candidates.sort(key=lambda x: (
+        0 if x["account"].get("direct_inbound_demand") else 1,
+        0 if x["account"].get("verified_company") else 1,
+        -float(x["score"]),
+        str(x["account"].get("id") or ""),
+    ))
+    return candidates[:CONTROLLED_EXPLICIT_DEMAND_MAX_CONTACTS]
+
+
 def _eligible(state: Dict[str, Any]) -> List[Dict[str, Any]]:
     prospects: List[Dict[str, Any]] = []
     for account in state.get("candidate_accounts", []) or []:
@@ -174,7 +239,9 @@ def _eligible(state: Dict[str, Any]) -> List[Dict[str, Any]]:
             continue
         prospects.append({"account": account, "score": score, "reasons": reasons, "email": email})
     prospects.sort(key=lambda x: (-float(x["score"]), 0 if x["account"].get("direct_inbound_demand") else 1, str(x["account"].get("id") or "")))
-    return prospects
+    if prospects:
+        return prospects
+    return _explicit_demand_fallback(state)
 
 
 def _campaign_variant(state: Dict[str, Any], audience: str, account_id: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
@@ -279,6 +346,9 @@ def _queue_new(state: Dict[str, Any], prospects: List[Dict[str, Any]]) -> int:
             "target_reasons": prospect["reasons"][:8],
             "outbound_local_day": local_day(),
             "created_at": utcnow(),
+            "explicit_demand_fallback": bool(prospect.get("explicit_demand_fallback")),
+            "controlled_owner_approval_id": prospect.get("controlled_approval_id"),
+            "human_approved_controlled_batch": bool(prospect.get("explicit_demand_fallback")),
         }
         outbox.append(row)
         sequences.append({
@@ -296,19 +366,34 @@ def _queue_new(state: Dict[str, Any], prospects: List[Dict[str, Any]]) -> int:
             "message_ids": [message_id],
             "created_at": utcnow(),
             "updated_at": utcnow(),
+            "explicit_demand_fallback": bool(prospect.get("explicit_demand_fallback")),
+            "controlled_owner_approval_id": prospect.get("controlled_approval_id"),
         })
         sequence_ids.add(seq_id)
         queued += 1
+        if prospect.get("explicit_demand_fallback"):
+            consumed = state.setdefault("controlled_outbound_approvals_consumed", [])
+            approval_id = str(prospect.get("controlled_approval_id") or CONTROLLED_EXPLICIT_DEMAND_APPROVAL_ID)
+            if approval_id not in {str(x) for x in consumed}:
+                consumed.append(approval_id)
         record_decision(
             state,
             engine="Outbound Engine",
             object_type="account",
             object_id=aid,
             decision="governed_outreach_queued",
-            reason=f"Prospecto corporativo verificado con score {prospect['score']}; contacto público, riesgo habilitado y sin contacto reciente.",
+            reason=(
+                f"Rescate comercial controlado {prospect.get('controlled_approval_id')}: demanda explícita y canal corporativo verificado; "
+                "suppression, riesgo, opt-out/cooldown y recontacto respetados."
+                if prospect.get("explicit_demand_fallback") else
+                f"Prospecto corporativo verificado con score {prospect['score']}; contacto público, riesgo habilitado y sin contacto reciente."
+            ),
             action="prepare_outreach",
             confidence=min(0.99, max(0.55, float(prospect["score"]) / 100.0)),
-            evidence_refs=list(account.get("commercial_contact_evidence") or [])[:5],
+            evidence_refs=(
+                [str(prospect.get("controlled_approval_id"))] + list(account.get("commercial_contact_evidence") or [])[:4]
+                if prospect.get("explicit_demand_fallback") else list(account.get("commercial_contact_evidence") or [])[:5]
+            ),
         )
     return queued
 
