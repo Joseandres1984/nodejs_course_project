@@ -1,4 +1,4 @@
-const VERSION = "1.2-procurement-buyer-contact-bridge";
+const VERSION = "1.3-official-procurement-network";
 const FETCH_TIMEOUT_MS = 8000;
 const MAX_SOURCE_SCANS_PER_CYCLE = 2;
 const MAX_RESULTS_PER_SOURCE = 20;
@@ -237,6 +237,13 @@ function normalizeUkRelease(release) {
   const tender = release?.tender || {};
   const title = clean(tender?.title || release?.buyer?.name || release?.procuringEntity?.name || `UK procurement ${remoteId}`, 260);
   const buyer = clean(release?.buyer?.name || release?.procuringEntity?.name, 240);
+  const buyerParty = (Array.isArray(release?.parties) ? release.parties : []).find(p =>
+    (release?.buyer?.id && p?.id === release.buyer.id) ||
+    (Array.isArray(p?.roles) && p.roles.includes("buyer") && p?.name === buyer)
+  ) || null;
+  const contact = buyerParty?.contactPoint || release?.buyer?.contactPoint || release?.procuringEntity?.contactPoint || {};
+  const buyerEmail = clean(contact?.email, 320) || null;
+  const buyerWebsite = clean(contact?.url || contact?.website || buyerParty?.url || release?.buyer?.url, 1000) || null;
   const descriptionText = firstText(tender?.description);
   const deadline = clean(tender?.tenderPeriod?.endDate || tender?.contractPeriod?.startDate, 100);
   const value = valueAmount(tender?.value);
@@ -253,15 +260,121 @@ function normalizeUkRelease(release) {
   return {
     remoteId,
     name: title,
-    endpoint: url,
+    // OCDS publication URL is not an A2A Agent Card.
+    endpoint: null,
     description,
     score: procurementScore({ deadline, value, title, description }),
     fit: "PUBLIC_PROCUREMENT",
-    demandSignal: "published_procurement_notice",
+    demandSignal: 1,
     revenueOfferId: "MP-TENDER-SCAN",
     evidence: url,
-    raw: { deadline, value, buyer, tenderStatus: clean(tender?.status, 100) || null }
+    raw: { deadline, value, buyer, tenderStatus: clean(tender?.status, 100) || null,
+      buyerEmail,buyerWebsite,buyerContactPoint:clean(contact?.name,320)||null,
+      buyerCountry:clean(buyerParty?.address?.countryName||buyerParty?.address?.country||"",80)||null,
+      contactSource:"official_uk_contracts_finder" }
   };
+}
+
+// Official contract award notices give independent evidence that a company has
+// supplied a product/service before. They are NOT evidence of current buying
+// intent, nor permission to send unsolicited messages. All candidates stay
+// in a separate research-only inventory, never in the A2A outreach table.
+function hostFromHttps(value) {
+  try {
+    const url=new URL(String(value||""));
+    if(url.protocol!=="https:" || url.username || url.password) return "";
+    return url.hostname.toLowerCase().replace(/^www\./,"");
+  } catch { return ""; }
+}
+function corporateEmailDomain(value) {
+  const email=clean(value,320).toLowerCase();
+  if(!/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/.test(email)) return "";
+  const domain=email.split("@")[1];
+  if(["gmail.com","outlook.com","hotmail.com","yahoo.com","proton.me","icloud.com","aol.com"].includes(domain)) return "";
+  return domain;
+}
+function domainMatches(domain,host) {
+  return Boolean(domain&&host&&(domain===host||host.endsWith("."+domain)||domain.endsWith("."+host)));
+}
+function normalizeTedAward(item) {
+  const awardNoticeId=firstText(item?.["publication-number"]??item?.publicationNumber??item?.id);
+  const winners=item?.["winner-name"]??item?.winnerName;
+  // Multiple awardees cannot be mapped safely to individual websites from the
+  // flattened notice search response; skip instead of inventing an association.
+  if(Array.isArray(winners)&&winners.length!==1) return null;
+  const supplierName=firstText(winners);
+  const websites=item?.["winner-internet-address"]??item?.["winner-touchpoint-internet-address"];
+  const emails=item?.["winner-touchpoint-email"];
+  if(Array.isArray(websites)&&websites.length>1) return null;
+  if(Array.isArray(emails)&&emails.length>1) return null;
+  const website=firstText(websites);
+  const hostname=hostFromHttps(website);
+  if(!awardNoticeId||!supplierName||!hostname) return null;
+  const email=firstText(emails);
+  const emailDomain=corporateEmailDomain(email);
+  const domainVerified=domainMatches(emailDomain,hostname);
+  const title=firstText(item?.["notice-title"]??item?.noticeTitle);
+  return {
+    awardNoticeId:clean(awardNoticeId,180),
+    supplierName:clean(supplierName,260),
+    supplierWebsite:website,
+    supplierEmail:domainVerified?email:null,
+    supplierDomain:hostname,
+    emailDomainVerified:domainVerified,
+    awardTitle:clean(title,400),
+    evidenceUrl:`https://ted.europa.eu/en/notice/-/detail/${encodeURIComponent(awardNoticeId)}`,
+    evidenceSource:"official_ted_contract_award",
+    contactPolicy:"research_only_human_approval_required"
+  };
+}
+async function ensureAwardSchema(env) {
+  if(!env?.DB) return false;
+  await env.DB.batch([
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS lumen_official_award_suppliers(award_notice_id TEXT PRIMARY KEY,supplier_name TEXT NOT NULL,supplier_website TEXT NOT NULL,supplier_domain TEXT NOT NULL,supplier_email TEXT,domain_verified INTEGER NOT NULL DEFAULT 0,award_title TEXT,evidence_url TEXT NOT NULL,first_seen_at TEXT NOT NULL,last_seen_at TEXT NOT NULL)"),
+    env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_lumen_award_suppliers_domain ON lumen_official_award_suppliers(supplier_domain,last_seen_at DESC)"),
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS lumen_award_supplier_scan_state(id TEXT PRIMARY KEY,last_scan_at TEXT,last_scan_status TEXT,last_error TEXT)")
+  ]);
+  return true;
+}
+async function refreshAwardSuppliers(env) {
+  if(!(await ensureAwardSchema(env))) return {ok:false,error:"persistence_unavailable",version:VERSION};
+  const state=await env.DB.prepare("SELECT last_scan_at FROM lumen_award_supplier_scan_state WHERE id='ted_awards'").first();
+  if(state?.last_scan_at&&Date.now()-Date.parse(state.last_scan_at)<6*3600000)
+    return {ok:true,skipped:true,reason:"six_hour_research_cooldown",version:VERSION,createsExternalMessages:false};
+  const now=new Date().toISOString();
+  let candidates=[];
+  try {
+    const data=await fetchJson("https://api.ted.europa.eu/v3/notices/search",{
+      method:"POST",headers:{"content-type":"application/json"},
+      body:JSON.stringify({
+        query:`PD = (${compactDate(isoDaysAgo(14))} <> ${compactDate(now)}) SORT BY publication-date DESC`,
+        fields:["publication-number","notice-title","winner-name","winner-internet-address","winner-touchpoint-internet-address","winner-touchpoint-email"],
+        page:1,limit:60,scope:"ALL",checkQuerySyntax:false,paginationMode:"PAGE_NUMBER"
+      })
+    });
+    const rows=Array.isArray(data?.notices)?data.notices:Array.isArray(data?.results)?data.results:[];
+    candidates=rows.map(normalizeTedAward).filter(Boolean);
+  } catch(error) {
+    const reason=clean(error?.message||error,160);
+    await env.DB.prepare("INSERT INTO lumen_award_supplier_scan_state(id,last_scan_at,last_scan_status,last_error) VALUES('ted_awards',?,'FAILED',?) ON CONFLICT(id) DO UPDATE SET last_scan_at=excluded.last_scan_at,last_scan_status=excluded.last_scan_status,last_error=excluded.last_error")
+      .bind(now,reason).run();
+    return {ok:false,version:VERSION,error:reason,createsExternalMessages:false};
+  }
+  let newAwards=0,updatedAwards=0;
+  for(const candidate of candidates) {
+    const old=await env.DB.prepare("SELECT award_notice_id FROM lumen_official_award_suppliers WHERE award_notice_id=?").bind(candidate.awardNoticeId).first();
+    await env.DB.prepare("INSERT INTO lumen_official_award_suppliers(award_notice_id,supplier_name,supplier_website,supplier_domain,supplier_email,domain_verified,award_title,evidence_url,first_seen_at,last_seen_at) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(award_notice_id) DO UPDATE SET supplier_name=excluded.supplier_name,supplier_website=excluded.supplier_website,supplier_domain=excluded.supplier_domain,supplier_email=excluded.supplier_email,domain_verified=excluded.domain_verified,award_title=excluded.award_title,evidence_url=excluded.evidence_url,last_seen_at=excluded.last_seen_at")
+      .bind(candidate.awardNoticeId,candidate.supplierName,candidate.supplierWebsite,candidate.supplierDomain,candidate.supplierEmail,candidate.emailDomainVerified?1:0,candidate.awardTitle,candidate.evidenceUrl,now,now).run();
+    if(old) updatedAwards++; else newAwards++;
+  }
+  await env.DB.prepare("INSERT INTO lumen_award_supplier_scan_state(id,last_scan_at,last_scan_status,last_error) VALUES('ted_awards',?,'SUCCESS',NULL) ON CONFLICT(id) DO UPDATE SET last_scan_at=excluded.last_scan_at,last_scan_status=excluded.last_scan_status,last_error=NULL").bind(now).run();
+  return {ok:true,version:VERSION,acceptedAwardEvidence:candidates.length,newAwards,updatedAwards,createsExternalMessages:false,createsA2AOutreachTargets:false,verifiedEmailDomains:candidates.filter(x=>x.emailDomainVerified).length,source:"TED public contract awards"};
+}
+async function awardSupplierInventory(env,limit=20) {
+  await ensureAwardSchema(env);
+  const total=await env.DB.prepare("SELECT COUNT(DISTINCT supplier_domain) AS n FROM lumen_official_award_suppliers").first();
+  const rows=await env.DB.prepare("SELECT supplier_name,supplier_website,supplier_domain,domain_verified,award_title,evidence_url,MAX(last_seen_at) AS last_seen_at FROM lumen_official_award_suppliers GROUP BY supplier_domain ORDER BY MAX(last_seen_at) DESC LIMIT ?").bind(limit).all();
+  return {ok:true,version:VERSION,distinctSupplierDomains:Number(total?.n||0),candidates:(rows.results||[]).map(x=>({...x,requiresHumanApproval:true,commercialInterestVerified:false})),policy:{officialAwardEvidence:true,doesNotVerifyCurrentSellingCapacity:true,doesNotVerifyBuyingIntent:true,createsExternalMessages:false,noAutomaticOutreach:true,bindingActionsHumanGated:true}};
 }
 
 async function scanTed() {
@@ -471,6 +584,15 @@ export async function handleSourceIntelligence(request, env) {
     const signals = await safeAll(env, "SELECT a.source_id,a.opportunity_id,a.remote_id,a.first_seen_at,a.last_seen_at,a.evidence_url,o.name,o.description,o.endpoint,o.score,o.fit,o.demand_signal,o.revenue_offer_id,o.status,o.raw_json FROM lumen_source_signal_attribution a JOIN lumen_opportunities o ON o.id=a.opportunity_id ORDER BY a.last_seen_at DESC LIMIT 200");
     return json({ version: VERSION, signals });
   }
+  if (request.method === "POST" && url.pathname === "/source-intelligence/supplier-refresh") {
+    if(!authorized(request,env)) return json({ok:false,error:"admin_token_required"},403);
+    return json(await refreshAwardSuppliers(env),202);
+  }
+  if (request.method === "GET" && url.pathname === "/source-intelligence/suppliers") {
+    if(!authorized(request,env)) return json({ok:false,error:"admin_token_required"},403);
+    const limit=Math.max(1,Math.min(50,Number(url.searchParams.get("limit")||20)));
+    return json(await awardSupplierInventory(env,limit));
+  }
   if (request.method === "GET" && url.pathname === "/source-intelligence/contact-candidates") {
     if (!authorized(request, env)) return json({ ok: false, error: "admin_token_required" }, 403);
     await ensureSchema(env);
@@ -516,6 +638,10 @@ export const __test = {
   safeParse,
   normalizeTedItem,
   normalizeUkRelease,
+  normalizeTedAward,
+  hostFromHttps,
+  corporateEmailDomain,
+  domainMatches,
   procurementScore,
   selectionScore,
   compactDate
