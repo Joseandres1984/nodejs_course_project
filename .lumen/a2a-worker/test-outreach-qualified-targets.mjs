@@ -57,6 +57,8 @@ globalThis.fetch = async (url, options = {}) => {
     return Response.json({ supportedInterfaces: [{ protocolBinding: "JSONRPC", protocolVersion: "1.0", url: "https://supplier.example/a2a" }] });
   if (String(url) === "https://supplier.example/a2a")
     return Response.json({ jsonrpc:"2.0", result:{ task:{ id:"task-good", status:{ state:"submitted" } } } });
+  if (String(url) === "https://stablecard.example/card")
+    return Response.json({ supportedInterfaces:[{ protocolBinding:"JSONRPC", protocolVersion:"1.0", url:"https://champion-penetration-geographic-danny.trycloudflare.com/a2a" }] });
   if (String(url) === "https://invalid.example/card") return new Response("<html>not an agent</html>", { status: 200, headers: { "content-type": "text/html" } });
   throw new Error("Unexpected fetch: " + url);
 };
@@ -99,7 +101,15 @@ try {
   assert.equal(probe.status, "INCOMPATIBLE", JSON.stringify(probe));
   assert.equal(probe.error, "card_invalid_json");
   assert.equal(sqlite.prepare("SELECT status FROM lumen_outreach_attempts WHERE proposal_id='prop-invalid-card'").get().status,"INCOMPATIBLE");
-  console.log("OUTREACH_QUALIFIED_TARGETS_OK: stale/weak/synthetic excluded; temporary tunnel rejected; malformed agent card terminal");
+  // A stable HTTPS agent card must not bypass the tunnel ban via an advertised interface.
+  sqlite.prepare("INSERT INTO lumen_opportunities(id,name,endpoint) VALUES(?,?,?)").run("unstable-interface","Unstable Interface","https://stablecard.example/card");
+  sqlite.prepare("INSERT INTO lumen_opportunity_assessments(opportunity_id,commercially_actionable,synthetic_or_test_only,commercial_score,evidence_strength) VALUES(?,?,?,?,?)").run("unstable-interface",1,0,88,"strong");
+  sqlite.prepare("INSERT INTO lumen_proposal_drafts(proposal_id,opportunity_id,offer_id,offer_name,amount_usd,subject,message,metadata_json,status,quality_gate_status,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)").run("prop-unstable-interface","unstable-interface","MP-TENDER-LEAD","Tender Hot Lead",1,"Valid subject","Non-binding, no order, contract or commitment.","{}","APPROVED","PASS",now);
+  const unstable = await probeNextApproved(env);
+  assert.equal(unstable.status, "INCOMPATIBLE", JSON.stringify(unstable));
+  assert.equal(unstable.error, "no_supported_public_a2a_interface");
+  assert.equal(fetches.filter(x => x.url.includes("trycloudflare.com")).length, 0);
+  console.log("OUTREACH_QUALIFIED_TARGETS_OK: stale/weak/synthetic excluded; temporary tunnel and interface rejected; malformed agent card terminal");
 } finally {
   globalThis.fetch = originalFetch;
   sqlite.close();
