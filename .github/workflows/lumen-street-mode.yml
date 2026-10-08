@@ -46,7 +46,8 @@ jobs:
 
           post() {
             local endpoint="$1"
-            local body="/tmp/${endpoint//\//-}.json"
+            local endpoint_path="${endpoint%%\?*}"
+            local body="/tmp/${endpoint_path//\//-}.json"
             local code
             code=$(curl --show-error --silent --connect-timeout 10 --max-time 35 --retry 2 --retry-delay 2 --retry-all-errors -o "$body" -w '%{http_code}' \
               -X POST "$BASE/$endpoint" \
@@ -82,8 +83,10 @@ jobs:
           done
 
           ready_probes=0
-          for attempt in $(seq 1 30); do
-            echo "===== CLOSER SWARM PROSPECT ROTATION $attempt/30 ====="
+          # Controlled owner-authorized intervention: reserve one of the ten total prospect slots
+          # for the explicit-demand email fallback in LUMEN Zero. Street Mode may consume at most nine.
+          for attempt in $(seq 1 9); do
+            echo "===== CLOSER SWARM PROSPECT ROTATION $attempt/9 ====="
             post proposals/prepare-top || continue
             post quality/review-next || continue
             post outreach/probe-next || continue
@@ -92,12 +95,19 @@ jobs:
               ready_probes=$((ready_probes + 1))
               echo "CLOSER_SWARM_READY_PROBES=$ready_probes"
             fi
-            if [ "$ready_probes" -ge 30 ]; then
+            if [ "$ready_probes" -ge 9 ]; then
               break
             fi
           done
 
-          post outreach/send-batch || true
+          # Keep the complete controlled intervention <=10 prospects: one slot is reserved for
+          # the explicit-demand email rescue. If a hot lane already used a Street Mode slot,
+          # subtract it from the A2A batch as well.
+          batch_limit=9
+          if [ "$hot_consumed" = 'true' ]; then
+            batch_limit=8
+          fi
+          post "outreach/send-batch?limit=$batch_limit" || true
           batch='/tmp/outreach-send-batch.json'
           batch_attempted=$(jq -r '.attempted // 0' "$batch" 2>/dev/null || echo 0)
           batch_sent=$(jq -r '.sent // 0' "$batch" 2>/dev/null || echo 0)
