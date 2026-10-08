@@ -75,4 +75,37 @@ function emptySnapshot() {
   assert.ok(after>before,"venture proof should increase when evidence-gated ideas improve");
 }
 
+
+// Regression: verified first-cash intent must not be buried below partner inventory.
+{
+  const s = emptySnapshot();
+  s.B2B = {...s.B2B, inbound7d:4, machineRequests7d:4, activeCandidates:40};
+  s.PARTNER = {partnerAgents:119, matches:391, councils:5};
+  s.VENTURE = {highPotential:0, review:0, bestScore:81, ingestedPass:0};
+  const memory = {B2B:{learnedWeight:-5.61}, PARTNER:{learnedWeight:-1.59}};
+  const ranked = scoreGrowthLanes(s, memory);
+  assert.equal(ranked[0].lane, "B2B", "real buyer conversations outrank unsold partner inventory");
+  assert.ok(ranked.find(x=>x.lane==="PARTNER").score <= 18);
+  assert.ok(ranked.find(x=>x.lane==="VENTURE").score <= 18);
+  const allocation = chooseGrowthAllocation(ranked, memory, 6);
+  assert.equal(allocation.primaryLane, "B2B");
+  assert.ok(allocation.explorationLane, "research lane can remain a bounded challenger");
+  assert.equal(allocation.allocation.primary, .8);
+}
+
+// The cap is conditional: exploratory networks remain eligible without real
+// downstream B2B intent, and it lifts upon any verified monetary event.
+{
+  const s = emptySnapshot();
+  s.PARTNER = {partnerAgents:119, matches:391, councils:5};
+  const noIntent = scoreGrowthLanes(s, {});
+  assert.ok(noIntent.find(x=>x.lane==="PARTNER").score > 18);
+  s.B2B.inbound7d = 3;
+  s.TRAVEL.verifiedRevenueUsd30d = 10;
+  s.TRAVEL.verifiedRewards30d = 1;
+  const verified = scoreGrowthLanes(s, {});
+  assert.ok(verified.find(x=>x.lane==="PARTNER").score > 18);
+  assert.equal(verified[0].lane, "TRAVEL", "verified payment wins over noisy activity");
+}
+
 console.log("GROWTH_MULTIPLIER_V2_DECISIONS_OK");

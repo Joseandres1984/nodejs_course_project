@@ -193,6 +193,18 @@ export function scoreGrowthLanes(snapshotValue = {}, memory = {}) {
   const p = snapshotValue.PARTNER || {};
   const v = snapshotValue.VENTURE || {};
 
+  // First-cash routing: a large stock of partner matches or speculative ideas
+  // is not proof of a buyer. When B2B has real downstream conversations but
+  // no lane has a verified payment, cap research-only signals as primary drivers.
+  // Verified revenue immediately lifts this cap for economic winner selection.
+  const anyVerifiedPayment = [
+    b.verifiedRevenueUsd30d, b.verifiedSettlements30d,
+    t.verifiedRevenueUsd30d, t.verifiedRewards30d,
+    r.verifiedRevenueUsd30d, r.verifiedSettlements30d
+  ].some(x => num(x) > 0);
+  const b2bDownstreamIntent = [b.negotiating, b.quotes7d, b.inbound7d].some(x => num(x) > 0);
+  const researchOnlyCeiling = !anyVerifiedPayment && b2bDownstreamIntent ? 18 : Infinity;
+
   const scores = [
     {
       lane: "B2B",
@@ -220,7 +232,7 @@ export function scoreGrowthLanes(snapshotValue = {}, memory = {}) {
     },
     {
       lane: "PARTNER",
-      score: 6 + Math.min(11, num(p.partnerAgents) * .7) + Math.min(16, num(p.matches) * 2) + Math.min(18, num(p.councils) * 3) + learnedWeight(memory, "PARTNER"),
+      score: Math.min(researchOnlyCeiling, 6 + Math.min(11, num(p.partnerAgents) * .7) + Math.min(16, num(p.matches) * 2) + Math.min(18, num(p.councils) * 3) + learnedWeight(memory, "PARTNER")),
       verifiedRevenueUsd: 0,
       verifiedEvents: 0,
       proof: growthProof("PARTNER", p),
@@ -228,7 +240,7 @@ export function scoreGrowthLanes(snapshotValue = {}, memory = {}) {
     },
     {
       lane: "VENTURE",
-      score: 6 + Math.min(24, num(v.highPotential) * 8) + Math.min(12, num(v.review) * 3) + Math.min(18, num(v.bestScore) * .2) + Math.min(10, num(v.ingestedPass) * 2) + learnedWeight(memory, "VENTURE"),
+      score: Math.min(researchOnlyCeiling, 6 + Math.min(24, num(v.highPotential) * 8) + Math.min(12, num(v.review) * 3) + Math.min(18, num(v.bestScore) * .2) + Math.min(10, num(v.ingestedPass) * 2) + learnedWeight(memory, "VENTURE")),
       verifiedRevenueUsd: 0,
       verifiedEvents: 0,
       proof: growthProof("VENTURE", v),
