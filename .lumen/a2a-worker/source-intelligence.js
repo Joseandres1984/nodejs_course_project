@@ -1,4 +1,4 @@
-const VERSION = "1.6-precise-award-demand-fit";
+const VERSION = "1.7-indexed-deadline-caution";
 const FETCH_TIMEOUT_MS = 8000;
 const MAX_SOURCE_SCANS_PER_CYCLE = 2;
 const MAX_RESULTS_PER_SOURCE = 20;
@@ -446,7 +446,11 @@ function officialTenderAwardFit(award,tender,now=Date.now()){
     tenderTitle:clean(tender.name,500),
     tenderEvidenceUrl:clean(tender.evidence,1200),
     tenderSource:tender.source,
+    // TED search-index deadlines can diverge from individual lot submission dates.
+    // They are discovery filters, never verified final bid-submission advice.
     tenderDeadline:new Date(until).toISOString(),
+    deadlineEvidence:"SEARCH_INDEX_ONLY",
+    deadlineNeedsOriginalNoticeVerification:true,
     supplierName:clean(award.supplier_name,240),
     supplierDomain:clean(award.supplier_domain,260),
     supplierWebsite:clean(award.supplier_website,1000),
@@ -489,6 +493,7 @@ async function awardToOpenTenderResearch(env,limit=20) {
     policy:{
       publicAwardAndActiveTenderEvidenceRequired:true,
       missingOrExpiredDeadlineRejected:true,
+      indexedDatesNotOfficialLotDeadlines:true,
       historicalSupplyDoesNotVerifyCurrentCapacity:true,
       procurementDemandIsNotLumenServiceDemand:true,
       createsExternalMessages:false,createsA2AOutreachTargets:false,
