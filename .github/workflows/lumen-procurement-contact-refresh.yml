@@ -28,7 +28,7 @@ jobs:
       - name: Read official buyer-contact inventory
         run: |
           set -euo pipefail
-          curl -fsS --max-time 45             -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN"             -H 'cache-control: no-cache'             "$BASE/source-intelligence/contact-candidates?limit=30" -o /tmp/contacts.json
+          curl -fsS --max-time 45             -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN"             -H 'cache-control: no-cache'             "$BASE/source-intelligence/contact-candidates?limit=50" -o /tmp/contacts.json
           node - <<'NODE'
           const fs=require('fs');
           const p=JSON.parse(fs.readFileSync('/tmp/contacts.json','utf8'));
@@ -38,6 +38,8 @@ jobs:
           const same=(a,b)=>a&&b&&(a===b||a.endsWith('.'+b)||b.endsWith('.'+a));
           const usable=rows.filter(r=>same(ed(r.buyerEmail),host(r.buyerWebsite)));
           console.log(JSON.stringify({
+            inventoryMode:"official_public_procurement_buyers_read_only",
+            reviewedCandidateLimit:50,
             version:p.version,
             totalCandidates:rows.length,
             withPublishedEmail:rows.filter(r=>r.buyerEmail).length,
