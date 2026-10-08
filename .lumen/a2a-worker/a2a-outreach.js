@@ -284,6 +284,12 @@ async function claimReadyAttempts(env, rows) {
   return claimed;
 }
 
+export function boundedBatchLimit(rawValue, fallback = MAX_CLOSERS_PER_CYCLE) {
+  const parsed = Number(rawValue);
+  if (!Number.isFinite(parsed)) return Math.max(1, Math.min(MAX_CLOSERS_PER_CYCLE, Number(fallback || MAX_CLOSERS_PER_CYCLE)));
+  return Math.max(1, Math.min(MAX_CLOSERS_PER_CYCLE, Math.trunc(parsed)));
+}
+
 export async function sendApprovedBatch(env, { force = false, limit = MAX_CLOSERS_PER_CYCLE } = {}) {
   if (!(await ensureSchema(env))) return { ok: false, error: "persistence_unavailable", version: VERSION };
   const autoEnabled = String(env?.A2A_AUTONOMOUS_OUTREACH || "false").toLowerCase() === "true";
@@ -554,7 +560,10 @@ export async function handleA2AOutreach(request, env) {
     if (!authorized(request, env)) return json({ ok: false, error: "admin_token_required" }, 403);
     if (url.pathname === "/outreach/probe-next") return json(await probeNextApproved(env), 202);
     if (url.pathname === "/outreach/send-next") return json(await sendNextApproved(env, { force: true }), 202);
-    if (url.pathname === "/outreach/send-batch") return json(await sendApprovedBatch(env, { force: true, limit: MAX_CLOSERS_PER_CYCLE }), 202);
+    if (url.pathname === "/outreach/send-batch") {
+      const limit = boundedBatchLimit(url.searchParams.get("limit"));
+      return json(await sendApprovedBatch(env, { force: true, limit }), 202);
+    }
     if (url.pathname === "/outreach/poll") return json(await pollOutstandingResponses(env), 202);
   }
   return null;
