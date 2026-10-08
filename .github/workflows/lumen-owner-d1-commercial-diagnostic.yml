@@ -1,0 +1,55 @@
+name: LUMEN Owner D1 Commercial Diagnostic
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-owner-d1-commercial-diagnostic.yml'
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Inspect current First Settlement proposal truth
+        working-directory: .lumen/a2a-worker
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          SQL="SELECT p.proposal_id,p.opportunity_id,p.status AS proposal_status,p.offer_id,p.amount_usd,p.quality_gate_status,p.updated_at AS proposal_updated_at,o.source,o.name,o.endpoint,o.score AS discovery_score,o.fit AS discovery_fit,o.demand_signal,o.revenue_offer_id,o.status AS opportunity_status,o.evidence,a.assessed_at,a.commercial_score,a.commercial_fit,a.evidence_strength,a.commercially_actionable,a.synthetic_or_test_only,a.reasons_json,q.status AS review_status,q.quality_score,q.reasons_json AS quality_reasons,m.match_id,m.tender_opportunity_id,m.supplier_opportunity_id,m.match_score,m.matched_terms_json,m.status AS match_status FROM lumen_proposal_drafts p JOIN lumen_opportunities o ON o.id=p.opportunity_id LEFT JOIN lumen_opportunity_assessments a ON a.opportunity_id=p.opportunity_id LEFT JOIN lumen_quality_reviews q ON q.proposal_id=p.proposal_id LEFT JOIN lumen_tender_supplier_matches m ON m.match_opportunity_id=p.opportunity_id WHERE p.proposal_id='PROP-E4896E101BD7' LIMIT 1;"
+          npx --yes wrangler@latest d1 execute lumen-zero --remote --command "$SQL" --json > /tmp/row.json
+          node - <<'NODE'
+          const fs=require('fs');
+          const p=JSON.parse(fs.readFileSync('/tmp/row.json','utf8'));
+          const rows=Array.isArray(p)?(p[0]?.results||[]):(p?.results||[]);
+          const row=rows[0]||null;
+          if(!row){console.log(JSON.stringify({found:false},null,2));process.exit(0);}
+          for(const k of ['reasons_json','quality_reasons','matched_terms_json']){
+            if(row[k]){try{row[k]=JSON.parse(row[k]);}catch{}}
+          }
+          console.log(JSON.stringify({found:true,row},null,2));
+          NODE
+      - name: Inspect strongest current actionable opportunities
+        working-directory: .lumen/a2a-worker
+        run: |
+          set -euo pipefail
+          SQL="SELECT o.id,o.source,o.name,o.endpoint,o.score AS discovery_score,o.fit AS discovery_fit,o.demand_signal,o.revenue_offer_id,o.status,a.commercial_score,a.commercial_fit,a.evidence_strength,a.commercially_actionable,a.reasons_json,p.proposal_id,p.status AS proposal_status,p.quality_gate_status,x.status AS outreach_status,m.match_score,m.matched_terms_json FROM lumen_opportunities o JOIN lumen_opportunity_assessments a ON a.opportunity_id=o.id LEFT JOIN lumen_proposal_drafts p ON p.opportunity_id=o.id LEFT JOIN lumen_outreach_attempts x ON x.proposal_id=p.proposal_id LEFT JOIN lumen_tender_supplier_matches m ON m.match_opportunity_id=o.id WHERE a.synthetic_or_test_only=0 AND a.commercially_actionable=1 ORDER BY a.commercial_score DESC,o.score DESC,o.updated_at DESC LIMIT 12;"
+          npx --yes wrangler@latest d1 execute lumen-zero --remote --command "$SQL" --json > /tmp/top.json
+          node - <<'NODE'
+          const fs=require('fs');
+          const p=JSON.parse(fs.readFileSync('/tmp/top.json','utf8'));
+          const rows=Array.isArray(p)?(p[0]?.results||[]):(p?.results||[]);
+          for(const r of rows){
+            for(const k of ['reasons_json','matched_terms_json'])if(r[k]){try{r[k]=JSON.parse(r[k]);}catch{}}
+          }
+          console.log(JSON.stringify({count:rows.length,rows},null,2));
+          NODE
