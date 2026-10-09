@@ -36,6 +36,8 @@ jobs:
           node-version: '24'
       - name: Compile runtime
         run: python -m compileall .lumen/runtime
+      - name: Verify Gmail reply classification and no-contact safety
+        run: python -m unittest discover -s .lumen/runtime -p 'test_mail_feedback_suppression.py'
       - name: Verify Autonomous Director, Experiment Engine and Acquisition Sprint activation
         working-directory: .lumen/runtime
         run: |
