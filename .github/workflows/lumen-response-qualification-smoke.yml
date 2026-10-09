@@ -9,6 +9,10 @@ on:
       - '.lumen/a2a-worker/followup-engine.js'
       - '.lumen/a2a-worker/revenue-director.js'
       - '.github/workflows/lumen-response-qualification-smoke.yml'
+  pull_request:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-response-qualification-smoke.yml'
   workflow_dispatch:
 
 jobs:
