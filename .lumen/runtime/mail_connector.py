@@ -89,6 +89,33 @@ def is_suppressed(state: Dict[str, Any], recipient: str) -> bool:
     )
 
 
+def register_declined_recipient(state: Dict[str, Any], sender: str, reason: str = "opt_out") -> bool:
+    """Close further outbound to one mailbox, not a whole company domain."""
+    address = str(sender or "").strip().lower()
+    if not address or "@" not in address:
+        return False
+    state.setdefault("opt_out", [])
+    state.setdefault("email_suppression", [])
+    if not is_suppressed(state, address):
+        state["email_suppression"].append(
+            {"email": address, "reason": reason, "created_at": utcnow()}
+        )
+    if address not in state["opt_out"]:
+        state["opt_out"].append(address)
+    for relation in state.get("commercial_relationships", []) or []:
+        if str(relation.get("commercial_email") or "").strip().lower() == address:
+            relation["opted_out"] = True
+            relation["relationship_state"] = "do_not_contact"
+            relation["follow_up_due"] = False
+    for pending in state.get("outbox", []) or []:
+        if str(pending.get("contact") or "").strip().lower() == address and pending.get("status") in {
+            "ready", "needs_verified_contact", "send_failed"
+        }:
+            pending["status"] = "blocked"
+            pending["last_error"] = "recipient_declined_commercial_contact"
+    return True
+
+
 def classify_reply(subject: str, body: str) -> Dict[str, Any]:
     text = f"{subject}\n{body}".lower()
     # Analyze the current sender message, not earlier quoted emails.
@@ -241,7 +268,7 @@ def fetch_unseen(state: Dict[str, Any], max_messages: int = 10) -> Dict[str, int
             stats["received"] += 1; stats["classified"] += 1
             stats["documents_ingested"] += len(document_ingest_ids)
             if classification["kind"] == "opt_out" and sender:
-                if sender not in state["opt_out"]: state["opt_out"].append(sender)
+                register_declined_recipient(state, sender, "commercial_refusal_or_opt_out")
             if classification["kind"] == "commercial_offer" and classification.get("amount"):
                 stats["offers_detected"] += 1
             _log(state, f"Inbox recibió respuesta de {sender or 'remitente desconocido'}: {classification['kind']} ({len(document_ingest_ids)} adjuntos comerciales ingeridos).")
@@ -320,6 +347,8 @@ def apply_inbox_to_deals(state: Dict[str, Any]) -> Dict[str, int]:
             stats["objections"] += 1
         elif kind == "opt_out":
             deal["next_action"] = "No volver a contactar esta dirección"
+            deal["commercial_outreach_closed"] = True
+            deal["close_prob"] = 0.0
             stats["opt_outs"] += 1
         incoming["processed"] = True; incoming["deal_id"] = deal["id"]
     return stats
