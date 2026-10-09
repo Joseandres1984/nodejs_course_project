@@ -192,7 +192,7 @@ jobs:
             .bindingActionsHumanGated == true
           ' /tmp/scout-policy.json >/dev/null
           jq -e '
-            .version == "2.0-closer-swarm" and
+            .version == "2.3-qualified-outreach-idle-truth" and
             .closerCapacity >= 30 and
             .concurrentCloserWave >= 5 and
             .dailyNewOutreachCap == 120 and
@@ -330,7 +330,7 @@ jobs:
             (.lastRun.selected | length) == 24
           ' /tmp/scout-state.json >/dev/null
           jq -e '
-            .version == "2.0-closer-swarm" and
+            .version == "2.3-qualified-outreach-idle-truth" and
             .closerCapacity >= 30 and
             .dailyNewOutreachCap == 120 and
             .domainCooldownHours == 24
