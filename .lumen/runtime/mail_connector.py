@@ -73,9 +73,11 @@ def _plain_body(msg) -> str:
 
 def classify_reply(subject: str, body: str) -> Dict[str, Any]:
     text = f"{subject}\n{body}".lower()
+    # Analyze the current sender message, not earlier quoted emails.
+    text = re.split(r"(?im)-{2,}\s*On\s+.{4,200}\bwrote\b|^\s*On\s+.{4,200}\bwrote:|^\s*>", text, maxsplit=1)[0]
     kind = "general"
 
-    if any(k in text for k in ["no me interesa", "no contactar", "no contacten", "baja", "unsubscribe", "remover", "quitarme"]):
+    if any(k in text for k in ["no me interesa", "no contactar", "no contacten", "baja", "unsubscribe", "remover", "quitarme", "preferimos no avanzar", "preferimos no continuar", "no vamos a avanzar", "por el momento no avanzaremos", "we prefer not to proceed"]):
         kind = "opt_out"
     elif any(k in text for k in ["caro", "precio alto", "muy alto", "descuento", "mejorar precio", "mejor precio", "fuera de presupuesto", "no nos cierra el precio", "no me cierra el precio"]):
         kind = "price_objection"
