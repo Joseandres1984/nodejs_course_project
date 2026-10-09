@@ -28,7 +28,7 @@ for (const [path,lang,expected] of [
   assert.match(html,/name="next" value="checkout"/);
   assert.match(html,/name="next" value="consult"/);
   assert.match(html,/action="\/intent\/quote-sanity\?/);
-  assert.match(html,/source=industrial-quote-audit/);
+  assert.match(html,/src=direct/);
   assert.match(html,/campaign=industrial-first-cash-pilot/);
   assert.match(html,/type="email"/);
 }
