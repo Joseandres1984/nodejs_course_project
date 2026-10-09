@@ -71,6 +71,24 @@ def _plain_body(msg) -> str:
     return raw.decode(msg.get_content_charset() or "utf-8", errors="replace")[:12000]
 
 
+def is_suppressed(state: Dict[str, Any], recipient: str) -> bool:
+    """Block opted-out or declined email recipients on every transport."""
+    address = str(recipient or "").strip().lower()
+    if not address:
+        return True
+    if address in {str(x).strip().lower() for x in state.get("opt_out", []) or []}:
+        return True
+    for item in state.get("email_suppression", []) or []:
+        email_value = item.get("email") if isinstance(item, dict) else item
+        if str(email_value or "").strip().lower() == address:
+            return True
+    return any(
+        str(item.get("commercial_email") or "").strip().lower() == address
+        and (item.get("opted_out") or item.get("relationship_state") == "do_not_contact")
+        for item in state.get("commercial_relationships", []) or []
+    )
+
+
 def classify_reply(subject: str, body: str) -> Dict[str, Any]:
     text = f"{subject}\n{body}".lower()
     # Analyze the current sender message, not earlier quoted emails.
@@ -144,7 +162,7 @@ def send_pending(state: Dict[str, Any], live_outbound: bool) -> Dict[str, int]:
             stats["blocked"] += 1
             continue
         target = (item.get("contact") or "").strip().lower()
-        if not target or not item.get("contact_verified") or target in {x.lower() for x in state["opt_out"]}:
+        if not target or not item.get("contact_verified") or is_suppressed(state, target):
             item["status"] = "blocked"
             stats["blocked"] += 1
             continue
