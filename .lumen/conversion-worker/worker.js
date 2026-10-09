@@ -136,6 +136,46 @@ function englishCatalogHtml(attr) {
   }).join('');
   return page('B2B research and supplier sourcing in USD','<main><h1>Find better suppliers. Check quotes. Move faster.</h1><p class="sub">Scope-first remote B2B research with documented public evidence. Simple fixed USD prices, no credit card or cryptocurrency required just to request an invoice. We confirm delivery scope and payment route before any commitment.</p><div class="grid" style="margin-top:34px">'+cards+'</div><div class="truth">No autonomous purchasing. No guaranteed supplier stock or prices. No charges from submitting a request. Human approval for binding commercial commitments.</div><div class="actions"><a class="btn secondary" href="/catalog">Ver catálogo en español</a></div></main>', 'en');
 }
+function industrialQuoteAuditHtml(attr, lang="en") {
+  // A narrow, source-evidenced demonstration. Reuse the existing validated
+  // quote-sanity intake; this path does not issue an invoice or collect payment.
+  const en = lang === "en";
+  const tracking = qs({...attr,source:attr.source||"industrial-quote-audit",campaign:attr.campaign||"industrial-first-cash-pilot",lang:en?"en":"es"});
+  const intent = "/intent/quote-sanity" + (tracking?"?"+tracking:"");
+  const title = en ? "Industrial Supplier Quote Review" : "Revisión de cotizaciones industriales";
+  const intro = en
+    ? "Before approving an industrial purchase, check the part number, specification, quantity, quoted price and missing commercial terms."
+    : "Antes de aprobar una compra industrial, revisá marca, modelo, especificaciones, cantidad, precio y condiciones faltantes.";
+  const sample = en
+    ? ["Specification requires stainless steel AISI 316; quotation states AISI 304 — verify or reject the substitution.","Quoted part number is missing; ask for manufacturer and exact model before comparing prices.","Delivery time is unspecified — request a written lead time and validity date."]
+    : ["La especificación exige acero AISI 316; la oferta indica AISI 304 — verificar o rechazar la sustitución.","No se identifica código de parte; pedir fabricante y modelo exacto antes de comparar precios.","No figura plazo de entrega; solicitarlo por escrito junto con la vigencia de la oferta."];
+  const li=sample.map(x=>"<li>"+html(x)+"</li>").join("");
+  const content='<main class="card">'
+    +'<div style="color:#a8b7d8;font-weight:800;letter-spacing:.12em">'+(en?"PROCUREMENT · RFQ · TECHNICAL COMPLIANCE":"COMPRAS · RFQ · CUMPLIMIENTO TÉCNICO")+'</div>'
+    +'<h1>'+html(title)+'</h1><p class="sub">'+html(intro)+'</p>'
+    +'<div class="price">USD 7 '+(en?"/ scoped review":"/ revisión acotada")+'</div>'
+    +'<h2>'+(en?"Illustrative findings":"Ejemplo ilustrativo de observaciones")+'</h2>'
+    +'<p>'+(en?"Fictional example — not a review of a real supplier:":"Ejemplo ficticio — no corresponde a una oferta real:")+'</p><ul>'+li+'</ul>'
+    +'<h2>'+(en?"You receive":"Qué recibís")+'</h2><p class="sub">'+(en
+      ?"A concise review with specification mismatches, commercial gaps, questions for the supplier and source-backed public price signals when available. No fabricated market prices or verified-stock claims."
+      :"Un informe breve con incompatibilidades técnicas, condiciones comerciales faltantes, consultas al proveedor y referencias públicas de precio cuando existan. Sin precios ni disponibilidad inventados.")+'</p>'
+    +'<h2>'+(en?"Submit one quotation for review":"Enviá una cotización para revisar")+'</h2>'
+    +'<p class="sub">'+(en?"Include product, brand/model, quantity, unit price, currency, delivery country and offered terms. Do not include confidential or restricted technical data.":"Indicá producto, marca/modelo, cantidad, precio, moneda, país de entrega y condiciones. No incluyas información técnica confidencial o restringida.")+'</p>'
+    +'<form method="post" action="'+html(intent)+'">'
+    +'<input name="email" type="email" maxlength="180" autocomplete="email" required placeholder="'+(en?"Business email":"Correo comercial")+'">'
+    +'<input name="company" maxlength="180" autocomplete="organization" placeholder="'+(en?"Company (optional)":"Empresa (opcional)")+'">'
+    +'<textarea name="details" maxlength="1800" minlength="8" required placeholder="'+(en?"Product, exact specification, manufacturer/part number, quoted quantity and price, country and terms":"Producto, especificación, fabricante/código, cantidad y precio cotizados, país y condiciones")+'"></textarea>'
+    +'<div class="actions"><button class="btn" type="submit" name="next" value="invoice_usd">'+(en?"Request review & USD payment options":"Solicitar revisión y opciones de pago USD")+'</button>'
+    +'<button class="btn secondary" type="submit" name="next" value="consult">'+(en?"Ask before buying":"Consultar antes de comprar")+'</button>'
+    +'<button class="btn secondary" type="submit" name="next" value="checkout">'+(en?"USDC / x402 checkout":"Pagar USDC / x402")+'</button></div></form>'
+    +'<div class="truth">'+(en
+      ?"This request does not create a charge or binding order. Scope, capability and payment method are confirmed before work. Public price checks are indicative, not a certified valuation; no guarantee of a best price, supplier response or purchase outcome. Only provider-verified settlement counts as revenue."
+      :"La solicitud no crea un cargo ni una orden vinculante. Se confirma alcance, capacidad y medio de pago antes de trabajar. Las referencias públicas son orientativas, no tasación certificada; no garantizamos mejor precio ni resultados de compra. Sólo se registra ingreso tras verificar el cobro.")+'</div>'
+    +'<div class="actions"><a class="btn secondary" href="'+(en?"/en":"/catalog")+'">'+(en?"Other services":"Otros servicios")+'</a><a class="btn secondary" href="'+(en?"/industrial-rfq":"/en/industrial-rfq")+'">'+(en?"Español":"English")+'</a></div>'
+    +'</main>';
+  return page(title,content,en?"en":"es");
+}
+
 function catalogHtml(attr) {
   const cards = Object.entries(PRODUCTS).map(([slug,p]) => {
     const q = qs({...attr, campaign:attr.campaign || `catalog-${slug}`});
@@ -185,6 +225,12 @@ export default {
       if (request.method === "GET" && path === "/health") {
         await ensureSchema(env);
         return Response.json({ok:true,service:SERVICE,version:VERSION,x402:X402_BASE,paidSpend:false,crmBridge:true,productContractVersion:PRODUCT_CONTRACT_VERSION,requirementsBeforeHumanCheckout:true,briefLinkedCheckout:true},{headers});
+      }
+      if (request.method === "GET" && (path === "/industrial-rfq" || path === "/en/industrial-rfq")) {
+        const language=path.startsWith("/en/")?"en":"es";
+        await recordEvent(env,"visit",sid,"quote-sanity",{...attr,source:attr.source||"industrial-quote-audit",campaign:attr.campaign||"industrial-first-cash-pilot"},{path,landing:"industrial-rfq",paid:false});
+        headers.set("content-type","text/html; charset=utf-8");
+        return new Response(industrialQuoteAuditHtml(attr,language),{status:200,headers});
       }
       if (request.method === "GET" && (path === "/en" || path === "/en/catalog")) {
         await recordEvent(env,"catalog_visit",sid,null,attr);
