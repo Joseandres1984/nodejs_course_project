@@ -120,7 +120,8 @@ async function findCandidate(env){
     const c=classifyCommercialResponse(row.response_text,row.message);
     if(c.responseClass!=="COMMERCIAL_QUESTION")continue;
     if(!isHttps(row.agent_url))continue;
-    return{...row,classification:c,replyText:replyFor(row),firstSettlementPriority:firstSettlementOpportunityId===row.opportunity_id};
+    const fallbackPriority=!firstSettlementOpportunityId&&scores.has(row.proposal_id)&&rows[0]?.proposal_id===row.proposal_id&&Number(scores.get(row.proposal_id)?.first_cash_score||0)>0;
+    return{...row,classification:c,replyText:replyFor(row),firstSettlementPriority:(Boolean(firstSettlementOpportunityId)&&firstSettlementOpportunityId===row.opportunity_id)||fallbackPriority,prioritySource:fallbackPriority?"verified_pipeline_score_fallback":firstSettlementOpportunityId?"mission":"none"};
   }
   return null;
 }
