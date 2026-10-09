@@ -32,7 +32,7 @@ for (const [path,lang,expected] of [
   assert.match(html,/campaign=industrial-first-cash-pilot/);
   assert.match(html,/type="email"/);
 }
-const response=await worker.fetch(new Request(root+"/intent/quote-sanity?lang=en&source=industrial-quote-audit&campaign=industrial-first-cash-pilot",{
+const response=await worker.fetch(new Request(root+"/intent/quote-sanity?lang=en&src=industrial-quote-audit&campaign=industrial-first-cash-pilot",{
   method:"POST",
   body:new URLSearchParams({
     email:"purchaser@example.org",
