@@ -1,0 +1,36 @@
+name: LUMEN Industrial RFQ conversion QA
+
+on:
+  pull_request:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/conversion-worker/worker.js'
+      - '.lumen/conversion-worker/test-industrial-rfq-first-cash.mjs'
+      - '.github/workflows/lumen-industrial-rfq-qa.yml'
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/conversion-worker/worker.js'
+      - '.lumen/conversion-worker/test-industrial-rfq-first-cash.mjs'
+      - '.github/workflows/lumen-industrial-rfq-qa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validate offer and intake boundaries
+        run: |
+          set -euo pipefail
+          node --check .lumen/conversion-worker/worker.js
+          node .lumen/conversion-worker/test-industrial-rfq-first-cash.mjs
+          node .lumen/conversion-worker/test-english-b2b-buyer.mjs
+          node .lumen/conversion-worker/test-usd-human-intent.mjs
