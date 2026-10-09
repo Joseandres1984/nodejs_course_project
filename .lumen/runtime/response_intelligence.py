@@ -56,7 +56,9 @@ def _source_lane_id(state: Dict[str, Any], source: Dict[str, Any]) -> str:
 
 def _intent(incoming: Dict[str, Any]) -> str:
     classified = str((incoming.get("classification") or {}).get("kind") or "").lower()
-    text = _norm(f"{incoming.get('subject', '')} {incoming.get('body', '')}")
+    # Exclude previous messages quoted inside the incoming reply.
+    from mail_connector import current_reply_text
+    text = _norm(f"{incoming.get('subject', '')} {current_reply_text(incoming.get('body', ''))}")
     if classified == "opt_out" or any(x in text for x in ("no contactar", "no me interesa", "unsubscribe", "quitarme")):
         return "opt_out"
     if any(x in text for x in ("reclamo", "devolución", "devolucion", "reembolso", "daño", "danio", "falló", "fallo", "incumplimiento", "penalidad")):

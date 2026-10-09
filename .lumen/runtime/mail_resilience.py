@@ -170,7 +170,7 @@ def resilient_send_pending(state: Dict[str, Any], live_outbound: bool) -> Dict[s
             continue
 
         target = str(item.get("contact") or "").strip().lower()
-        if not target or not item.get("contact_verified") or target in {str(x).lower() for x in state["opt_out"]}:
+        if not target or not item.get("contact_verified") or mail_connector.is_suppressed(state, target):
             item["status"] = "blocked"
             stats["blocked"] += 1
             continue

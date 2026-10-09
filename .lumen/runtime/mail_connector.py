@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import email
+import hashlib
 import imaplib
 import os
 import re
 import smtplib
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.header import decode_header
 from email.message import EmailMessage
 from typing import Any, Dict, List
@@ -71,11 +72,58 @@ def _plain_body(msg) -> str:
     return raw.decode(msg.get_content_charset() or "utf-8", errors="replace")[:12000]
 
 
+def is_suppressed(state: Dict[str, Any], recipient: str) -> bool:
+    """Block opted-out or declined email recipients on every transport."""
+    address = str(recipient or "").strip().lower()
+    if not address:
+        return True
+    if address in {str(x).strip().lower() for x in state.get("opt_out", []) or []}:
+        return True
+    for item in state.get("email_suppression", []) or []:
+        email_value = item.get("email") if isinstance(item, dict) else item
+        if str(email_value or "").strip().lower() == address:
+            return True
+    return any(
+        str(item.get("commercial_email") or "").strip().lower() == address
+        and (item.get("opted_out") or item.get("relationship_state") == "do_not_contact")
+        for item in state.get("commercial_relationships", []) or []
+    )
+
+
+def register_declined_recipient(state: Dict[str, Any], sender: str, reason: str = "opt_out") -> bool:
+    """Close further outbound to one mailbox, not a whole company domain."""
+    address = str(sender or "").strip().lower()
+    if not address or "@" not in address:
+        return False
+    state.setdefault("opt_out", [])
+    state.setdefault("email_suppression", [])
+    if not is_suppressed(state, address):
+        state["email_suppression"].append(
+            {"email": address, "reason": reason, "created_at": utcnow()}
+        )
+    if address not in state["opt_out"]:
+        state["opt_out"].append(address)
+    for relation in state.get("commercial_relationships", []) or []:
+        if str(relation.get("commercial_email") or "").strip().lower() == address:
+            relation["opted_out"] = True
+            relation["relationship_state"] = "do_not_contact"
+            relation["follow_up_due"] = False
+    for pending in state.get("outbox", []) or []:
+        if str(pending.get("contact") or "").strip().lower() == address and pending.get("status") in {
+            "ready", "needs_verified_contact", "send_failed"
+        }:
+            pending["status"] = "blocked"
+            pending["last_error"] = "recipient_declined_commercial_contact"
+    return True
+
+
 def classify_reply(subject: str, body: str) -> Dict[str, Any]:
     text = f"{subject}\n{body}".lower()
+    # Analyze the current sender message, not earlier quoted emails.
+    text = re.split(r"(?im)-{2,}\s*On\s+.{4,200}\bwrote\b|^\s*On\s+.{4,200}\bwrote:|^\s*>", text, maxsplit=1)[0]
     kind = "general"
 
-    if any(k in text for k in ["no me interesa", "no contactar", "no contacten", "baja", "unsubscribe", "remover", "quitarme"]):
+    if any(k in text for k in ["no me interesa", "no contactar", "no contacten", "baja", "unsubscribe", "remover", "quitarme", "preferimos no avanzar", "preferimos no continuar", "no vamos a avanzar", "por el momento no avanzaremos", "we prefer not to proceed"]):
         kind = "opt_out"
     elif any(k in text for k in ["caro", "precio alto", "muy alto", "descuento", "mejorar precio", "mejor precio", "fuera de presupuesto", "no nos cierra el precio", "no me cierra el precio"]):
         kind = "price_objection"
@@ -142,7 +190,7 @@ def send_pending(state: Dict[str, Any], live_outbound: bool) -> Dict[str, int]:
             stats["blocked"] += 1
             continue
         target = (item.get("contact") or "").strip().lower()
-        if not target or not item.get("contact_verified") or target in {x.lower() for x in state["opt_out"]}:
+        if not target or not item.get("contact_verified") or is_suppressed(state, target):
             item["status"] = "blocked"
             stats["blocked"] += 1
             continue
@@ -178,6 +226,7 @@ def send_pending(state: Dict[str, Any], live_outbound: bool) -> Dict[str, int]:
 def fetch_unseen(state: Dict[str, Any], max_messages: int = 10) -> Dict[str, int]:
     state.setdefault("inbox", []); state.setdefault("opt_out", [])
     stats = {"received": 0, "classified": 0, "offers_detected": 0, "documents_ingested": 0}
+    seen = {str(item.get("message_fingerprint") or "") for item in state["inbox"]}
     status = connector_status()
     if not status["imap_configured"]:
         return stats
@@ -185,15 +234,21 @@ def fetch_unseen(state: Dict[str, Any], max_messages: int = 10) -> Dict[str, int
     try:
         client = imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT) if IMAP_SSL else imaplib.IMAP4(IMAP_HOST, IMAP_PORT)
         client.login(IMAP_USER, IMAP_PASSWORD)
-        client.select("INBOX")
-        typ, data = client.search(None, "UNSEEN")
-        ids = (data[0].split() if data and data[0] else [])[-max_messages:]
+        # Gmail can mark a reply as read before the autonomous runtime polls.
+        # Scan recent Inbox without changing flags, dedupe persistently by content digest.
+        client.select("INBOX", readonly=True)
+        since = (datetime.now(timezone.utc) - timedelta(days=3)).strftime("%d-%b-%Y")
+        typ, data = client.search(None, "SINCE", since)
+        ids = (data[0].split() if typ == "OK" and data and data[0] else [])[-max(1, min(100, max_messages * 5)):]
         for msg_id in ids:
-            typ, payload = client.fetch(msg_id, "(RFC822)")
+            typ, payload = client.fetch(msg_id, "(BODY.PEEK[])")
             if typ != "OK" or not payload:
                 continue
             raw = next((p[1] for p in payload if isinstance(p, tuple)), None)
             if not raw:
+                continue
+            fingerprint = hashlib.sha256(raw).hexdigest()
+            if fingerprint in seen:
                 continue
             msg = email.message_from_bytes(raw)
             sender = email.utils.parseaddr(msg.get("From", ""))[1].lower()
@@ -216,12 +271,14 @@ def fetch_unseen(state: Dict[str, Any], max_messages: int = 10) -> Dict[str, int
                 "classification": classification,
                 "document_ingest_ids": document_ingest_ids,
                 "received_at": utcnow(),
+                "message_fingerprint": fingerprint,
             }
             state["inbox"].append(record)
+            seen.add(fingerprint)
             stats["received"] += 1; stats["classified"] += 1
             stats["documents_ingested"] += len(document_ingest_ids)
             if classification["kind"] == "opt_out" and sender:
-                if sender not in state["opt_out"]: state["opt_out"].append(sender)
+                register_declined_recipient(state, sender, "commercial_refusal_or_opt_out")
             if classification["kind"] == "commercial_offer" and classification.get("amount"):
                 stats["offers_detected"] += 1
             _log(state, f"Inbox recibió respuesta de {sender or 'remitente desconocido'}: {classification['kind']} ({len(document_ingest_ids)} adjuntos comerciales ingeridos).")
@@ -300,6 +357,8 @@ def apply_inbox_to_deals(state: Dict[str, Any]) -> Dict[str, int]:
             stats["objections"] += 1
         elif kind == "opt_out":
             deal["next_action"] = "No volver a contactar esta dirección"
+            deal["commercial_outreach_closed"] = True
+            deal["close_prob"] = 0.0
             stats["opt_outs"] += 1
         incoming["processed"] = True; incoming["deal_id"] = deal["id"]
     return stats
