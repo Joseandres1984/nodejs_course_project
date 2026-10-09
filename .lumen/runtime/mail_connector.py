@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import email
+import hashlib
 import imaplib
 import os
 import re
 import smtplib
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.header import decode_header
 from email.message import EmailMessage
 from typing import Any, Dict, List
@@ -225,6 +226,7 @@ def send_pending(state: Dict[str, Any], live_outbound: bool) -> Dict[str, int]:
 def fetch_unseen(state: Dict[str, Any], max_messages: int = 10) -> Dict[str, int]:
     state.setdefault("inbox", []); state.setdefault("opt_out", [])
     stats = {"received": 0, "classified": 0, "offers_detected": 0, "documents_ingested": 0}
+    seen = {str(item.get("message_fingerprint") or "") for item in state["inbox"]}
     status = connector_status()
     if not status["imap_configured"]:
         return stats
@@ -232,15 +234,21 @@ def fetch_unseen(state: Dict[str, Any], max_messages: int = 10) -> Dict[str, int
     try:
         client = imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT) if IMAP_SSL else imaplib.IMAP4(IMAP_HOST, IMAP_PORT)
         client.login(IMAP_USER, IMAP_PASSWORD)
-        client.select("INBOX")
-        typ, data = client.search(None, "UNSEEN")
-        ids = (data[0].split() if data and data[0] else [])[-max_messages:]
+        # Gmail can mark a reply as read before the autonomous runtime polls.
+        # Scan recent Inbox without changing flags, dedupe persistently by content digest.
+        client.select("INBOX", readonly=True)
+        since = (datetime.now(timezone.utc) - timedelta(days=3)).strftime("%d-%b-%Y")
+        typ, data = client.search(None, "SINCE", since)
+        ids = (data[0].split() if typ == "OK" and data and data[0] else [])[-max(1, min(100, max_messages * 5)):]
         for msg_id in ids:
-            typ, payload = client.fetch(msg_id, "(RFC822)")
+            typ, payload = client.fetch(msg_id, "(BODY.PEEK[])")
             if typ != "OK" or not payload:
                 continue
             raw = next((p[1] for p in payload if isinstance(p, tuple)), None)
             if not raw:
+                continue
+            fingerprint = hashlib.sha256(raw).hexdigest()
+            if fingerprint in seen:
                 continue
             msg = email.message_from_bytes(raw)
             sender = email.utils.parseaddr(msg.get("From", ""))[1].lower()
@@ -263,8 +271,10 @@ def fetch_unseen(state: Dict[str, Any], max_messages: int = 10) -> Dict[str, int
                 "classification": classification,
                 "document_ingest_ids": document_ingest_ids,
                 "received_at": utcnow(),
+                "message_fingerprint": fingerprint,
             }
             state["inbox"].append(record)
+            seen.add(fingerprint)
             stats["received"] += 1; stats["classified"] += 1
             stats["documents_ingested"] += len(document_ingest_ids)
             if classification["kind"] == "opt_out" and sender:
