@@ -9,6 +9,10 @@ on:
       - '.lumen/a2a-worker/followup-engine.js'
       - '.lumen/a2a-worker/revenue-director.js'
       - '.github/workflows/lumen-response-qualification-smoke.yml'
+  pull_request:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-response-qualification-smoke.yml'
   workflow_dispatch:
 
 jobs:
@@ -33,6 +37,8 @@ jobs:
             ["We're interested in this.", 'COMMERCIAL_INTEREST'],
             ["Please send the checkout link. We're ready to buy.", 'PURCHASE_INTENT'],
             ['No thanks, not interested.', 'DECLINED'],
+            ['Muchas gracias, pero por el momento preferimos no avanzar.', 'DECLINED'],
+            ['Nos resulta interesante. ¿Qué precios manejan?', 'COMMERCIAL_QUESTION'],
             ['Wrong agent, this is not relevant.', 'NOT_RELEVANT']
           ];
           for (const [text, expected] of cases) {
@@ -51,7 +57,7 @@ jobs:
             follow=$(curl --show-error --silent --max-time 10 "$base/followup/stats" || true)
             director=$(curl --show-error --silent --max-time 10 "$base/revenue-director/policy" || true)
             if echo "$cash" | grep -q '1.1-shared-response-first-cash-closer' \
-              && echo "$follow" | grep -q '1.1-qualified-commercial-followup' \
+              && echo "$follow" | grep -q '1.4-superseded-match-aware-followup' \
               && echo "$director" | grep -q '1.2-shared-response-revenue-director'; then
               echo "$cash"
               echo "$follow"
