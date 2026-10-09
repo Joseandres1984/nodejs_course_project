@@ -94,10 +94,27 @@ async function findCandidate(env){
     const status=await getFirstSettlementMissionStatus(env);
     firstSettlementOpportunityId=clean(status?.mission?.focus?.opportunity_id,120)||null;
   }catch{}
+  // The mission may be unavailable while its D1 schema is being migrated.
+  // In that case use existing revenue-loop scores, never most-recent-first.
+  // Score lookup is read-only and can fail closed to the original ordering.
+  const scores=new Map();
+  if(!firstSettlementOpportunityId&&rows.length){
+    try{
+      const eligible=rows.map(r=>r.proposal_id).filter(Boolean);
+      const q=await env.DB.prepare(`SELECT proposal_id,first_cash_score,intent_score FROM lumen_revenue_loop_v5 WHERE proposal_id IN (${eligible.map(()=>"?").join(",")})`).bind(...eligible).all();
+      for(const entry of q.results||[])scores.set(entry.proposal_id,entry);
+    }catch{}
+  }
   rows.sort((a,b)=>{
     const ap=firstSettlementOpportunityId&&a.opportunity_id===firstSettlementOpportunityId?1:0;
     const bp=firstSettlementOpportunityId&&b.opportunity_id===firstSettlementOpportunityId?1:0;
-    return bp-ap;
+    if(ap!==bp)return bp-ap;
+    if(!firstSettlementOpportunityId){
+      const av=scores.get(a.proposal_id),bv=scores.get(b.proposal_id);
+      const value=(r)=>Number(r?.first_cash_score||0)+Number(r?.intent_score||0)*0.1;
+      if(value(av)!==value(bv))return value(bv)-value(av);
+    }
+    return 0;
   });
   for(const row of rows){
     const c=classifyCommercialResponse(row.response_text,row.message);
