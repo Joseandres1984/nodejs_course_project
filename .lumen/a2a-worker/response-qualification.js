@@ -34,6 +34,20 @@ const REJECT = [
   "please stop","don't contact","dont contact","not looking","not buying","not needed"
 ];
 
+// A courteous "not now" is still a decline, never a follow-up invitation.
+// This generic training vocabulary intentionally contains no customer data.
+const DEFERRED_DECLINE = [
+  "preferimos no avanzar","preferimos no continuar","preferimos no seguir","por ahora no vamos a avanzar",
+  "no vamos a avanzar","no avanzaremos por ahora","no estamos interesados","no estamos interesadas",
+  "no nos interesa","no es el momento de avanzar","lo dejamos para mas adelante",
+  "preferimos dejarlo para mas adelante","por el momento no avanzaremos",
+  "we prefer not to proceed","we prefer not to move forward","not moving forward at this time",
+  "not proceeding at this time","we will not proceed for now"
+];
+const SPANISH_INTEREST = ["nos resulta interesante","estamos interesados","estamos interesadas","nos interesa","me interesa","queremos conocer mas","nos gustaria conocer","nos gustaria entender"];
+const SPANISH_QUESTION = ["cual es el precio","cuales son los precios","que precios manejan","que rangos manejan","tiene costo","cuanto cuesta","como funciona","como validan","podrian compartirnos","pueden compartirnos","cuales son las condiciones"];
+function withoutAccents(value) { return value.normalize("NFD").replace(/[\u0300-\u036f]/g, ""); }
+
 const NOT_RELEVANT = [
   "not relevant","wrong fit","not a fit","wrong agent","wrong contact","wrong person","outside our scope",
   "not applicable","not for us","doesn't apply","does not apply"
@@ -81,9 +95,11 @@ function result(responseClass, extra = {}) {
 export function classifyCommercialResponse(responseText, originalMessage = "") {
   const raw = clean(responseText, 8000);
   const t = raw.toLowerCase();
+  const normalized = withoutAccents(t);
   if (!t) return result("EMPTY", { reason:"no_response_text", echoRatio:0 });
 
   if (hasAny(t, REJECT)) return result("DECLINED", { reason:"explicit_decline", echoRatio:0 });
+  if (hasAny(normalized, DEFERRED_DECLINE)) return result("DECLINED", { reason:"explicit_deferred_decline", echoRatio:0 });
   if (hasAny(t, NOT_RELEVANT)) return result("NOT_RELEVANT", { reason:"explicit_not_relevant", echoRatio:0 });
 
   const ratio = echoRatio(raw, originalMessage);
@@ -94,9 +110,9 @@ export function classifyCommercialResponse(responseText, originalMessage = "") {
   const purchase = hasAny(t, PURCHASE);
   if (purchase) return result("PURCHASE_INTENT", { reason:"explicit_purchase_or_payment_language", echoRatio:Number(ratio.toFixed(3)) });
 
-  const explicitCommercialQuestion = hasAny(t, QUESTION);
+  const explicitCommercialQuestion = hasAny(t, QUESTION) || hasAny(normalized, SPANISH_QUESTION);
   const genericQuestion = t.includes("?") || /^(how|what|which|when|where|who|can|could|would|do|does|is|are)\b/.test(t);
-  const interest = hasAny(t, INTEREST);
+  const interest = hasAny(t, INTEREST) || hasAny(normalized, SPANISH_INTEREST);
 
   if (interest && genericQuestion) return result("COMMERCIAL_QUESTION", { reason:"commercial_interest_with_question", echoRatio:Number(ratio.toFixed(3)) });
   if (interest) return result("COMMERCIAL_INTEREST", { reason:"explicit_interest_language", echoRatio:Number(ratio.toFixed(3)) });
@@ -126,6 +142,8 @@ export async function handleResponseQualification(request, env) {
       classes:["TECHNICAL_ACK","ECHO","GENERIC_RESPONSE","COMMERCIAL_QUESTION","COMMERCIAL_INTEREST","PURCHASE_INTENT","DECLINED","NOT_RELEVANT"],
       qualifiedCommercialClasses:["COMMERCIAL_QUESTION","COMMERCIAL_INTEREST","PURCHASE_INTENT"],
       checkoutEligibleClasses:["PURCHASE_INTENT","COMMERCIAL_INTEREST"],
+      deferredDeclineStopsFollowups:true,
+      spanishCommercialFeedbackSupported:true,
       rawResponseIsNotCommercialIntent:true,
       technicalAckIsNotIntent:true,
       echoIsNotIntent:true,

@@ -186,3 +186,7 @@ jobs:
         run: python -m unittest discover -s .lumen/runtime -p 'test_demand_recovery_runtime.py'
       - name: Run Revenue Expansion unit tests
         run: python -m unittest discover -s .lumen/runtime -p 'test_revenue_expansion_runtime.py'
+      - name: Verify Spanish commercial feedback and terminal decline logic
+        run: |
+          node --check .lumen/a2a-worker/response-qualification.js
+          node .lumen/a2a-worker/test-response-qualification-spanish-feedback.mjs
