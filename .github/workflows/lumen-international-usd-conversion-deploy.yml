@@ -58,6 +58,27 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx --yes wrangler@latest deploy --config wrangler.toml
+      - name: Verify live industrial RFQ buyer intake landing
+        run: |
+          set -euo pipefail
+          BASE='https://lumen-zero-conversion.lumen-b2b.workers.dev'
+          live=0
+          for i in $(seq 1 12); do
+            en=$(curl -fsS --max-time 15 "$BASE/en/industrial-rfq?src=technical-canary&campaign=live-smoke&technical_canary=1" || true)
+            es=$(curl -fsS --max-time 15 "$BASE/industrial-rfq?src=technical-canary&campaign=live-smoke&technical_canary=1" || true)
+            if printf '%s' "$en" | grep -q 'Industrial Supplier Quote Review' \
+              && printf '%s' "$en" | grep -q 'USD 7' \
+              && printf '%s' "$en" | grep -q 'name="next" value="invoice_usd"' \
+              && printf '%s' "$en" | grep -q 'action="/intent/quote-sanity' \
+              && printf '%s' "$es" | grep -q 'Revisión de cotizaciones industriales' \
+              && printf '%s' "$es" | grep -q 'Pagar USDC / x402'; then
+              live=1
+              break
+            fi
+            sleep 3
+          done
+          test "$live" -eq 1
+          echo 'INDUSTRIAL_RFQ_LIVE_BILINGUAL_USD_X402_INTAKE_OK_NO_PAYMENTS'
       - name: Bind existing owner-only admin secret to conversion Worker
         working-directory: .lumen/conversion-worker
         env:
