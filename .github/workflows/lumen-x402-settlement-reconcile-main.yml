@@ -1,0 +1,87 @@
+name: LUMEN x402 Settlement Reconciliation (No Spending)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 * * * *'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/lumen-x402-settlement-reconcile-main.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lumen-x402-settlement-reconcile-main
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      BASE_URL: https://lumen-zero-a2a.lumen-b2b.workers.dev
+      ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+    steps:
+      - name: Verify runtime and settlement-only policy
+        run: |
+          set -euo pipefail
+          test -n "${ADMIN_TOKEN:-}"
+          curl -fsS --max-time 25 "$BASE_URL/health" >/dev/null
+          curl -fsS --max-time 25 "$BASE_URL/x402-revenue-bridge/policy" -o /tmp/x402-policy.json
+          jq -e '
+            .truthRule == "only_receipts_with_verified_settlement_proof_become_verified_revenue_events_even_after_fulfillment_queueing"
+            and .autonomousSpend == false
+            and .bindingActionsHumanGated == true
+          ' /tmp/x402-policy.json >/dev/null
+
+      - name: Capture internal reconciliation baseline
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 25 "$BASE_URL/x402-revenue-bridge/stats" -o /tmp/x402-before.json
+          jq -e '
+            (.bridgedSettlements|type) == "number"
+            and (.bridgedRevenueUsd|type) == "number"
+          ' /tmp/x402-before.json >/dev/null
+
+      - name: Reconcile previously verified x402 receipts only
+        run: |
+          set -euo pipefail
+          code=$(curl --silent --show-error --max-time 60 \
+            -o /tmp/x402-sync.json -w '%{http_code}' \
+            -X POST "$BASE_URL/x402-revenue-bridge/sync" \
+            -H "x-lumen-admin: $ADMIN_TOKEN" \
+            -H 'content-type: application/json' -d '{}')
+          test "$code" = "202"
+          jq -e '
+            .ok == true
+            and .guardrails.settlementProofRequired == true
+            and .guardrails.noUnverifiedRevenue == true
+            and .guardrails.autonomousSpend == false
+            and .guardrails.bindingActionsHumanGated == true
+            and (.guardrails.acceptedReceiptStates | sort) == (["redeemed_queued", "settled_verified"] | sort)
+          ' /tmp/x402-sync.json >/dev/null
+          echo "RECONCILIATION_COMPLETED_NO_CHARGE_NO_SEND"
+
+      - name: Validate 3-settlement campaign counter and no regression
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 25 "$BASE_URL/x402-revenue-bridge/stats" -o /tmp/x402-after.json
+          jq -e --slurpfile before /tmp/x402-before.json '
+            (.bridgedSettlements|type) == "number"
+            and (.bridgedRevenueUsd|type) == "number"
+            and .bridgedSettlements >= $before[0].bridgedSettlements
+            and .bridgedRevenueUsd >= $before[0].bridgedRevenueUsd
+          ' /tmp/x402-after.json >/dev/null
+          curl -fsS --max-time 25 -H "x-lumen-admin: $ADMIN_TOKEN" \
+            "$BASE_URL/first-settlement/status" -o /tmp/three-settlements.json
+          jq -e '
+            .campaign.target == 3
+            and .campaign.proof == "distinct_verified_x402_receipt_evidence"
+            and .campaign.noChargesExecutedByThisCheck == true
+            and (.campaign.verifiedSettlements|type) == "number"
+            and (.campaign.verifiedRevenueUsd|type) == "number"
+          ' /tmp/three-settlements.json >/dev/null
+          jq -c '{campaign: .campaign | {target, verifiedSettlements, verifiedRevenueUsd, status}}' /tmp/three-settlements.json
+          echo "INTERNAL_RECEIPT_AUDIT_ONLY_PROVIDER_PAYOUT_UNCONFIRMED"
