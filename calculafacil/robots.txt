@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://calculafacil.lumen-b2b.workers.dev/sitemap.xml
