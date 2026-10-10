@@ -37,7 +37,9 @@ jobs:
           node --test calculafacil/test-calculators.mjs
           grep -q 'id="herramientas"' calculafacil/index.html
           grep -q 'lang="es-AR"' calculafacil/index.html
-          ! grep -Ei 'google-analytics|gtag\(|facebook\.com/tr|pixel\(' calculafacil/index.html calculafacil/app.js calculafacil/styles.css
+          ! grep -Ei 'google-analytics|gtag\(|facebook\.com/tr|pixel\(' calculafacil/index.html calculafacil/app.js calculafacil/styles.css calculafacil/pro.html
+          grep -q 'Compras todavía no habilitadas' calculafacil/pro.html
+          grep -q 'href="/pro.html"' calculafacil/index.html
 
   deploy:
     needs: validate
@@ -55,8 +57,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p calculafacil/dist
-          cp calculafacil/index.html calculafacil/styles.css calculafacil/app.js calculafacil/calculators.mjs calculafacil/favicon.svg calculafacil/dist/
-          test "$(find calculafacil/dist -maxdepth 1 -type f | wc -l)" -eq 5
+          cp calculafacil/index.html calculafacil/styles.css calculafacil/app.js calculafacil/calculators.mjs calculafacil/favicon.svg calculafacil/pro.html calculafacil/robots.txt calculafacil/sitemap.xml calculafacil/_headers calculafacil/dist/
+          test "$(find calculafacil/dist -maxdepth 1 -type f | wc -l)" -eq 9
+          ! grep -qi "mercadopago.com.ar/checkout/" calculafacil/pro.html
       - name: Verify Cloudflare access (no financial authority)
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -83,7 +86,13 @@ jobs:
                curl -fsS --max-time 20 "$BASE/calculators.mjs" -o /tmp/calculafacil-module.mjs && \
                curl -fsS --max-time 20 "$BASE/styles.css" -o /tmp/calculafacil.css && \
                grep -q 'export function margin' /tmp/calculafacil-module.mjs && \
-               grep -q 'tool-card' /tmp/calculafacil.css; then
+               grep -q 'tool-card' /tmp/calculafacil.css && \
+               curl -fsS --max-time 20 "$BASE/pro.html" -o /tmp/calculafacil-pro.html && \
+               grep -q 'Compras todavía no habilitadas' /tmp/calculafacil-pro.html && \
+               curl -fsS --max-time 20 "$BASE/robots.txt" -o /tmp/calculafacil-robots.txt && \
+               grep -q 'sitemap.xml' /tmp/calculafacil-robots.txt && \
+               curl -fsS --max-time 20 "$BASE/sitemap.xml" -o /tmp/calculafacil-sitemap.xml && \
+               grep -q '/pro.html' /tmp/calculafacil-sitemap.xml; then
               echo 'CALCULAFACIL_LIVE_SITE_AND_ASSETS_VERIFIED'
               exit 0
             fi
