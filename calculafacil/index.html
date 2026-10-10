@@ -1,1 +1,70 @@
-<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>CalculaFácil</title><style>body{font:16px system-ui;max-width:850px;margin:auto;padding:24px;background:#f6f8fb}section{background:white;border:1px solid #ddd;border-radius:12px;padding:18px;margin:14px 0}input{display:block;margin:6px 0 12px;padding:9px;width:90%}output{font-weight:bold;color:#125d3b}</style><h1>CalculaFácil</h1><p>Calculadoras gratuitas para negocios. Sin registro.</p><section><h2>Margen de ganancia</h2>Costo<input id="a" type="number" value="100">Venta<input id="b" type="number" value="150"><output id="o1"></output></section><section><h2>Precio de venta</h2>Costo<input id="c" type="number" value="100">Margen deseado (%)<input id="d" type="number" value="30"><output id="o2"></output></section><section><h2>Descuentos</h2>Precio<input id="e" type="number" value="200">Descuento (%)<input id="f" type="number" value="15"><output id="o3"></output></section><section><h2>Cuotas</h2>Capital<input id="g" type="number" value="1000">Interés mensual (%)<input id="h" type="number" value="3">Cantidad de cuotas<input id="i" type="number" value="12"><output id="o4"></output></section><section><h2>Costo unitario</h2>Costos fijos<input id="j" type="number" value="200">Costo variable por unidad<input id="k" type="number" value="25">Unidades<input id="l" type="number" value="20"><output id="o5"></output></section><p>Los resultados son orientativos; no incluyen impuestos ni gastos adicionales.</p><script>let v=x=>+document.getElementById(x).value,show=(id,s)=>document.getElementById(id).textContent=s,n=x=>Number.isFinite(x)?x.toLocaleString('es-AR',{maximumFractionDigits:2}):'—';function calc(){let a=v('a'),b=v('b');show('o1',b>0?'Ganancia: '+n(b-a)+' · Margen: '+n((b-a)/b*100)+'%':'Precio inválido');let d=v('d');show('o2',d>=0&&d<100?'Precio: '+n(v('c')/(1-d/100)):'Margen inválido');let f=v('f');show('o3',f>=0&&f<=100?'Precio final: '+n(v('e')*(1-f/100)):'Descuento inválido');let r=v('h')/100,t=v('i'),p=v('g'),q=t>0&&Number.isInteger(t)?r===0?p/t:p*r/(1-Math.pow(1+r,-t)):NaN;show('o4','Cuota: '+n(q)+' · Total: '+n(q*t));let u=v('l');show('o5',u>0&&Number.isInteger(u)?'Costo unitario: '+n(v('j')/u+v('k')):'Unidades inválidas')}document.querySelectorAll('input').forEach(x=>x.addEventListener('input',calc));calc()</script></html>
+<!doctype html>
+<html lang="es-AR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#070b16">
+<meta name="description" content="Cinco calculadoras gratuitas para negocios: margen de ganancia, precio de venta, descuentos, cuotas y costo unitario. Sin registro ni seguimiento.">
+<meta property="og:title" content="CalculaFácil · Decisiones claras, números precisos">
+<meta property="og:description" content="Herramientas de cálculo gratuitas para negocios, sin registro.">
+<meta property="og:type" content="website">
+<title>CalculaFácil — Calculadoras gratis para negocios</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/styles.css">
+<script type="module" src="/app.js"></script>
+</head>
+<body>
+<a class="skip-link" href="#herramientas">Ir a las calculadoras</a>
+<div class="backdrop" aria-hidden="true"></div>
+<div class="shell">
+<header class="topbar">
+  <a class="brand" href="/" aria-label="CalculaFácil, inicio"><span class="brand-mark"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m13 2-9 11h7l-1 9 10-12h-7l1-8Z"/></svg></span><span>calcula<span class="brand-accent">fácil</span><sup>™</sup></span></a>
+  <nav class="toplinks" aria-label="Navegación principal"><a href="#herramientas">Herramientas</a><a href="#como-funciona">Cómo funciona</a></nav>
+  <a href="#herramientas" class="nav-cta">Empezar gratis <span aria-hidden="true">↗</span></a>
+</header>
+<main>
+<section class="hero" aria-labelledby="hero-title">
+  <div class="hero-copy">
+    <p class="eyebrow"><span class="pulse"></span> TU CENTRO DE CÁLCULO · GRATIS</p>
+    <h1 id="hero-title">Los números, <span class="gradient-text">a tu favor.</span></h1>
+    <p class="hero-description">Tomá mejores decisiones en segundos. Calculá márgenes, precios, descuentos, cuotas y costos sin planillas complicadas.</p>
+    <div class="hero-actions"><a class="button button-main" href="#herramientas">Explorar calculadoras <span aria-hidden="true">↗</span></a><span class="no-registration"><span aria-hidden="true">✓</span> Sin registro ni tarjeta</span></div>
+    <div class="trust-strip"><span><strong>05</strong> calculadoras</span><span><strong>100%</strong> gratuitas</span><span><strong>0</strong> datos enviados</span></div>
+  </div>
+  <div class="hero-display" aria-hidden="true">
+    <div class="floating-chip chip-top"><span class="chip-dot"></span> PRECISIÓN EN TIEMPO REAL</div>
+    <div class="preview-card">
+      <div class="preview-header"><span><i></i><i></i><i></i></span><span>SIMULADOR / MARGEN</span><span class="preview-spark">✳</span></div>
+      <p class="preview-label">TU GANANCIA ESTIMADA</p>
+      <p class="preview-number"><small>$</small> 50<span>,00</span></p>
+      <div class="preview-trend"><span class="trend-icon">↗</span> <span>33,33% de margen</span><span class="trend-note">sobre venta</span></div>
+      <div class="preview-graph"><svg viewBox="0 0 440 112" preserveAspectRatio="none"><defs><linearGradient id="graphFill" x1="0" x2="0" y1="0" y2="1"><stop stop-color="#26e6ca" stop-opacity=".27"/><stop offset="1" stop-color="#26e6ca" stop-opacity="0"/></linearGradient></defs><path d="M0 97 C38 83,65 101,95 78 S153 65,185 74 S237 22,272 43 S329 54,361 18 S414 36,440 7 V112 H0Z" fill="url(#graphFill)"/><path d="M0 97 C38 83,65 101,95 78 S153 65,185 74 S237 22,272 43 S329 54,361 18 S414 36,440 7" fill="none" stroke="#4beacf" stroke-width="3" stroke-linecap="round"/></svg></div>
+      <div class="preview-footer"><span>PRECIO DE VENTA <strong>$ 150</strong></span><span>COSTO <strong>$ 100</strong></span></div>
+    </div>
+    <div class="floating-chip chip-bottom">● MOTOR DE CÁLCULO ACTIVO</div>
+  </div>
+</section>
+<section class="tools-section" id="herramientas" aria-labelledby="tools-title">
+  <div class="section-top"><div><p class="section-kicker">HERRAMIENTAS / 01</p><h2 id="tools-title">Una herramienta para <span>cada decisión.</span></h2><p class="section-description">Elegí una calculadora y obtené resultados claros al instante.</p></div><span class="tools-count">5 HERRAMIENTAS DISPONIBLES <span class="status-light"></span></span></div>
+  <div class="tools-grid" aria-label="Elegir calculadora">
+    <button class="tool-card" type="button" data-tool="margin" aria-controls="workspace" aria-expanded="false"><span class="tool-icon aqua"><svg viewBox="0 0 24 24"><path d="M4 18V8m5 10V4m5 14v-6m5 6V9M3 21h18"/></svg></span><span class="tool-index">01 / FINANZAS</span><strong>Margen de ganancia</strong><span class="tool-description">Descubrí cuánto ganás realmente por cada venta.</span><span class="tool-link">Calcular ahora <span aria-hidden="true">↗</span></span></button>
+    <button class="tool-card" type="button" data-tool="salePrice" aria-controls="workspace" aria-expanded="false"><span class="tool-icon blue"><svg viewBox="0 0 24 24"><path d="m3 12 9-9h8v8l-9 9-8-8Z"/><circle cx="16.5" cy="7.5" r="1"/></svg></span><span class="tool-index">02 / VENTAS</span><strong>Precio de venta</strong><span class="tool-description">Definí un precio a partir del margen que buscás.</span><span class="tool-link">Calcular ahora <span aria-hidden="true">↗</span></span></button>
+    <button class="tool-card" type="button" data-tool="discount" aria-controls="workspace" aria-expanded="false"><span class="tool-icon violet"><svg viewBox="0 0 24 24"><path d="M5 19 19 5M8 8h.01M16 16h.01"/><circle cx="7.5" cy="7.5" r="3"/><circle cx="16.5" cy="16.5" r="3"/></svg></span><span class="tool-index">03 / PROMOCIONES</span><strong>Descuentos</strong><span class="tool-description">Calculá el precio final y el ahorro de una oferta.</span><span class="tool-link">Calcular ahora <span aria-hidden="true">↗</span></span></button>
+    <button class="tool-card" type="button" data-tool="installments" aria-controls="workspace" aria-expanded="false"><span class="tool-icon orange"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 10h18M7 15h5"/></svg></span><span class="tool-index">04 / FINANCIACIÓN</span><strong>Cuotas e intereses</strong><span class="tool-description">Estimá cuotas mensuales y el total a pagar.</span><span class="tool-link">Calcular ahora <span aria-hidden="true">↗</span></span></button>
+    <button class="tool-card" type="button" data-tool="unitCost" aria-controls="workspace" aria-expanded="false"><span class="tool-icon green"><svg viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5 9-5ZM3 8v8l9 5 9-5V8M12 13v8"/></svg></span><span class="tool-index">05 / PRODUCCIÓN</span><strong>Costo unitario</strong><span class="tool-description">Conocé el costo de producir o comprar cada unidad.</span><span class="tool-link">Calcular ahora <span aria-hidden="true">↗</span></span></button>
+  </div>
+  <section class="workspace" id="workspace" aria-labelledby="workspace-title" hidden>
+    <div class="workspace-top"><div class="workspace-heading"><span class="workspace-icon">◈</span><div><p class="section-kicker">CALCULADORA INTERACTIVA</p><h3 id="workspace-title" tabindex="-1">Calculadora</h3></div></div><button class="close-tool" id="close-tool" type="button" aria-label="Cerrar calculadora">Cerrar <span aria-hidden="true">×</span></button></div>
+    <div class="workspace-content">
+      <form class="input-panel" id="calculator-form" novalidate><div class="form-top"><p>INGRESÁ TUS DATOS</p><label class="currency-switch" for="currency"><span>Moneda</span><select id="currency" name="currency"><option value="ARS" selected>ARS $</option><option value="USD">USD US$</option></select></label></div><div id="fields"></div><p class="form-support">Podés modificar los valores y ver el resultado al instante.</p><button class="reset-button" id="reset-button" type="reset">↺ Restablecer valores</button></form>
+      <div class="result-panel"><div class="result-top"><span><span class="pulse"></span> RESULTADO EN TIEMPO REAL</span><span class="mini-tag">CALCULAFÁCIL</span></div><div class="result-content" aria-live="polite" aria-atomic="true"><p class="result-label" id="result-label">RESULTADO</p><p class="result-primary" id="result-primary">—</p><p class="result-error" id="result-error" role="status" hidden></p><div class="result-stats" id="result-stats"></div></div><p class="result-footnote" id="result-footnote">Los resultados son orientativos.</p><button class="copy-button" type="button" id="copy-button">Copiar resultado <span aria-hidden="true">↗</span></button></div>
+    </div>
+  </section>
+</section>
+<section class="benefits" id="como-funciona" aria-labelledby="benefits-title"><div class="benefit-intro"><p class="section-kicker">DISEÑADA PARA VOS / 02</p><h2 id="benefits-title">Menos dudas.<br><span>Más decisiones.</span></h2></div><div class="benefit-items"><article><span class="benefit-num">01</span><h3>Sin complicaciones</h3><p>Elegí, ingresá tus números y obtené un resultado inmediato.</p></article><article><span class="benefit-num">02</span><h3>Privacidad real</h3><p>Los cálculos suceden en tu navegador. No enviamos tus importes a ningún servidor.</p></article><article><span class="benefit-num">03</span><h3>Siempre gratis</h3><p>Sin suscripciones, registros ni datos de tarjeta para usar las herramientas.</p></article></div></section>
+</main>
+<footer class="footer"><a href="/" class="brand footer-brand"><span class="brand-mark"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m13 2-9 11h7l-1 9 10-12h-7l1-8Z"/></svg></span><span>calcula<span class="brand-accent">fácil</span></span></a><p>Herramientas claras. Decisiones inteligentes.</p><span>© 2026 CalculaFácil · Los resultados son orientativos y no reemplazan asesoramiento profesional.</span></footer>
+</div>
+</body>
+</html>
