@@ -8,3 +8,56 @@
 @media(max-width:760px){.shell{width:calc(100% - 34px)}.topbar{height:76px;gap:12px}.toplinks{display:none}.brand{font-size:22px;margin-right:auto}.nav-cta{font-size:11px;padding:11px}.hero{padding:69px 0 58px;grid-template-columns:1fr;gap:30px;min-height:auto}.hero h1{font-size:clamp(51px,12vw,72px)}.hero-description{font-size:15px;max-width:560px}.hero-display{min-height:360px}.preview-card{width:min(420px,89%);transform:rotate(-2deg);padding:20px}.chip-top{right:-4px;top:-5px}.chip-bottom{left:0;bottom:0}.trust-strip{margin-top:37px;gap:14px}.trust-strip span:not(:last-child){padding-right:13px}.tools-section{padding:50px 0}.section-top{display:block}.tools-count{display:block;margin-top:24px}.tools-grid{grid-template-columns:repeat(2,1fr);gap:12px}.tool-card{min-height:236px;padding:18px}.tool-card strong{font-size:17px}.workspace-content{grid-template-columns:1fr;padding:15px}.workspace-top{padding:20px}.input-panel,.result-panel{padding:20px;min-height:0}.result-content{padding:27px 0 10px}.result-primary{font-size:clamp(36px,10vw,53px)}.benefits{margin:0 0 60px;padding:45px 0}.benefit-items{grid-template-columns:1fr;gap:15px}.footer{padding-bottom:40px}.footer>span{text-align:left}}
 @media(max-width:460px){.nav-cta span{display:none}.hero h1{font-size:52px}.hero-actions{gap:14px}.hero-display{min-height:315px}.preview-number{font-size:57px}.preview-number span{font-size:34px}.preview-header{font-size:8px}.floating-chip{font-size:8px;padding:10px}.tools-grid{grid-template-columns:1fr}.tool-card{min-height:195px;padding:18px}.tool-icon{margin-bottom:12px}.tool-description{margin-top:6px}.tool-link{padding-top:13px}.section-top h2{font-size:35px}.result-stats{gap:9px}.result-stat{padding:12px 10px}.result-stat strong{font-size:16px}.workspace-heading h3{font-size:19px}.close-tool{font-size:0}.close-tool span{font-size:21px;margin:0}}
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*:before,*:after{transition:none!important;animation:none!important}}
+
+
+/* Commercial pages, separately styled to preserve the free calculator UX. */
+.commercial-section{padding:62px 0 85px;border-top:1px solid #263347;scroll-margin-top:28px}
+.commercial-header{max-width:700px;margin-bottom:25px}
+.commercial-header h2,.pro-modules h2,.pro-example h2,.pro-crosssell h2{font-size:clamp(30px,3.3vw,47px);letter-spacing:-.055em;line-height:1.14;margin:0 0 18px}
+.commercial-header h2 span{color:#93a8c3}
+.commercial-header p:last-child,.pro-example>p:not(.section-kicker),.pro-crosssell>p{font-size:14px;color:#9aaac2;line-height:1.75}
+.commercial-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:18px}
+.commercial-card{border:1px solid #2d4059;border-radius:17px;background:linear-gradient(146deg,#111d31,#0e1727);padding:30px;display:flex;flex-direction:column;align-items:flex-start;min-height:342px}
+.premium-card{border-color:#43847d;background:linear-gradient(130deg,#162d34,#0e1b2a)}
+.commercial-tag{font-size:10px;letter-spacing:.16em;color:#63edce;font-weight:800}
+.commercial-card h3{font-size:26px;letter-spacing:-.04em;margin:16px 0 9px}
+.commercial-card>p{color:#a6b9cd;font-size:13px;line-height:1.7;margin:0}
+.commercial-price{font-size:27px;font-weight:800;margin:22px 0 7px;color:#f1fbff}
+.commercial-price small{font-weight:500;font-size:12px;color:#8eabc0;margin-left:7px}
+.commercial-card .commercial-note{font-size:11px;color:#99b5c6}
+.commercial-link{font-weight:800;color:#66e9cf;font-size:13px;margin-top:auto;padding-top:24px}
+.commercial-link:hover{text-decoration:underline}
+.pro-page{padding:75px 0}
+.pro-hero{max-width:820px;margin:0 auto 90px;text-align:center}
+.pro-hero .gradient-text{display:inline}
+.pro-hero h1{font-size:clamp(45px,7vw,83px);letter-spacing:-.065em;line-height:1.08;margin:0 auto 23px}
+.pro-hero .hero-description{max-width:665px;margin:0 auto 28px}
+.pro-hero .button{margin-top:10px}
+.price-banner{display:flex;gap:16px;flex-direction:column;justify-content:center;align-items:center;background:#112437;border:1px solid #3a666f;padding:28px;border-radius:17px;max-width:400px;margin:20px auto}
+.price-banner strong{font-size:43px;letter-spacing:-.06em}
+.price-banner span{color:#9bbac9;font-size:12px}
+.price-banner .pro-price-label{font-size:10px;letter-spacing:.14em;font-weight:800;color:#8cebd6}
+.pro-availability{background:#232332;border:1px solid #666275;border-radius:12px;padding:14px 16px;max-width:640px;color:#d8d0d3;line-height:1.7;font-size:13px;margin:0 auto 20px}
+.pro-modules{margin-bottom:86px}
+.pro-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:29px}
+.pro-grid article{padding:24px;border:1px solid #30415a;border-radius:13px;background:#121b2d}
+.pro-grid article>span{font-size:11px;color:#68e8d4;font-weight:800;letter-spacing:.12em}
+.pro-grid h3{font-size:20px;letter-spacing:-.04em;margin:16px 0 9px}
+.pro-grid p{font-size:13px;line-height:1.65;color:#9baec6;margin:0}
+.pro-example{margin-bottom:75px}
+.table-scroll{overflow-x:auto}
+.pro-example table{border-collapse:collapse;width:100%;min-width:530px;margin:25px 0;background:#111d30}
+.pro-example th,.pro-example td{border-bottom:1px solid #314458;padding:14px;text-align:left;font-size:13px}
+.pro-example th{color:#70e4d0;font-size:11px;letter-spacing:.06em}
+.pro-example td{color:#d6e8f7}
+.pro-smallprint{font-size:11px!important;color:#839db5!important;line-height:1.7}
+.pro-crosssell{border-radius:18px;background:linear-gradient(130deg,#183638,#0f1c2c);border:1px solid #347b73;padding:38px;margin-bottom:80px}
+.pro-crosssell h2{margin-top:14px}
+.pro-crosssell .button{margin:16px 0}
+.pro-faq{max-width:800px;margin:0 auto 60px}
+.pro-faq h2{font-size:30px;margin-bottom:24px}
+.pro-faq details{border-bottom:1px solid #2d3d51;padding:18px 0}
+.pro-faq summary{font-weight:730;cursor:pointer}
+.pro-faq details p{color:#a4b7ce;font-size:13px;line-height:1.8}
+@media(max-width:760px){.commercial-grid{grid-template-columns:1fr}.commercial-card{min-height:280px}.pro-page{padding:55px 0}.pro-grid{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:520px){.pro-grid{grid-template-columns:1fr}.pro-hero h1{font-size:47px}.pro-crosssell{padding:22px}.commercial-card{padding:23px}.price-banner strong{font-size:38px}}
