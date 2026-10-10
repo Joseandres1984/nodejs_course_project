@@ -85,7 +85,7 @@ jobs:
             ok=1
             for endpoint in index.html calculators.mjs styles.css pro.html robots.txt sitemap.xml; do
               file="/tmp/calculafacil-${endpoint//\//-}"
-              status=$(curl -sS --max-time 20 -H 'cache-control: no-cache' -o "$file" -w '%{http_code}' "$BASE/$endpoint?release=$GITHUB_SHA&attempt=$attempt" || true)
+              status=$(curl --location --max-redirs 3 --proto-redir '=https' -sS --max-time 20 -H 'cache-control: no-cache' -o "$file" -w '%{http_code}' "$BASE/$endpoint?release=$GITHUB_SHA&attempt=$attempt" || true)
               echo "SMOKE_PATH=/$endpoint HTTP=${status:-ERR} BYTES=$(wc -c < "$file" 2>/dev/null || echo 0)"
               if [ "$status" != "200" ]; then
                 ok=0
