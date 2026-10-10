@@ -1,0 +1,93 @@
+name: CalculaFacil - Validate and deploy (Cloudflare free static assets)
+
+on:
+  pull_request:
+    branches: [lumen-zero]
+    paths:
+      - 'calculafacil/**'
+      - '.github/workflows/calculafacil-deploy.yml'
+  push:
+    branches: [lumen-zero]
+    paths:
+      - 'calculafacil/**'
+      - '.github/workflows/calculafacil-deploy.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: calculafacil-static-production
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Calculator correctness and static security checks
+        run: |
+          set -euo pipefail
+          node --check calculafacil/calculators.mjs
+          node --check calculafacil/app.js
+          node --test calculafacil/test-calculators.mjs
+          grep -q 'id="herramientas"' calculafacil/index.html
+          grep -q 'lang="es-AR"' calculafacil/index.html
+          ! grep -Ei 'google-analytics|gtag\(|facebook\.com/tr|pixel\(' calculafacil/index.html calculafacil/app.js calculafacil/styles.css
+
+  deploy:
+    needs: validate
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Build only public static files
+        run: |
+          set -euo pipefail
+          mkdir -p calculafacil/dist
+          cp calculafacil/index.html calculafacil/styles.css calculafacil/app.js calculafacil/calculators.mjs calculafacil/favicon.svg calculafacil/dist/
+          test "$(find calculafacil/dist -maxdepth 1 -type f | wc -l)" -eq 5
+      - name: Verify Cloudflare access (no financial authority)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          test -n "${CLOUDFLARE_API_TOKEN:-}"
+          test -n "${CLOUDFLARE_ACCOUNT_ID:-}"
+      - name: Deploy isolated static Worker
+        working-directory: calculafacil
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4 deploy --config wrangler.toml
+      - name: Verify public site and assets
+        run: |
+          set -euo pipefail
+          BASE='https://calculafacil.lumen-b2b.workers.dev'
+          for attempt in $(seq 1 12); do
+            if curl -fsS --max-time 20 -H 'cache-control: no-cache' "$BASE/?verify=$GITHUB_SHA" -o /tmp/calculafacil.html && \
+               grep -q 'Los números' /tmp/calculafacil.html && \
+               curl -fsS --max-time 20 "$BASE/calculators.mjs" -o /tmp/calculafacil-module.mjs && \
+               curl -fsS --max-time 20 "$BASE/styles.css" -o /tmp/calculafacil.css && \
+               grep -q 'export function margin' /tmp/calculafacil-module.mjs && \
+               grep -q 'tool-card' /tmp/calculafacil.css; then
+              echo 'CALCULAFACIL_LIVE_SITE_AND_ASSETS_VERIFIED'
+              exit 0
+            fi
+            sleep 3
+          done
+          echo 'STATIC_DEPLOYMENT_NOT_CONFIRMED'
+          exit 1
