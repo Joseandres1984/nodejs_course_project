@@ -81,20 +81,31 @@ jobs:
           set -euo pipefail
           BASE='https://calculafacil.lumen-b2b.workers.dev'
           for attempt in $(seq 1 12); do
-            if curl -fsS --max-time 20 -H 'cache-control: no-cache' "$BASE/?verify=$GITHUB_SHA" -o /tmp/calculafacil.html && \
-               grep -q 'Los números' /tmp/calculafacil.html && \
-               curl -fsS --max-time 20 "$BASE/calculators.mjs" -o /tmp/calculafacil-module.mjs && \
-               curl -fsS --max-time 20 "$BASE/styles.css" -o /tmp/calculafacil.css && \
-               grep -q 'export function margin' /tmp/calculafacil-module.mjs && \
-               grep -q 'tool-card' /tmp/calculafacil.css && \
-               curl -fsS --max-time 20 "$BASE/pro.html" -o /tmp/calculafacil-pro.html && \
-               grep -q 'Compras todavía no habilitadas' /tmp/calculafacil-pro.html && \
-               curl -fsS --max-time 20 "$BASE/robots.txt" -o /tmp/calculafacil-robots.txt && \
-               grep -q 'sitemap.xml' /tmp/calculafacil-robots.txt && \
-               curl -fsS --max-time 20 "$BASE/sitemap.xml" -o /tmp/calculafacil-sitemap.xml && \
-               grep -q '/pro.html' /tmp/calculafacil-sitemap.xml; then
-              echo 'CALCULAFACIL_LIVE_SITE_AND_ASSETS_VERIFIED'
-              exit 0
+            echo "===== CALCULAFACIL LIVE SMOKE ATTEMPT $attempt ====="
+            ok=1
+            for endpoint in index.html calculators.mjs styles.css pro.html robots.txt sitemap.xml; do
+              file="/tmp/calculafacil-${endpoint//\//-}"
+              status=$(curl -sS --max-time 20 -H 'cache-control: no-cache' -o "$file" -w '%{http_code}' "$BASE/$endpoint?release=$GITHUB_SHA&attempt=$attempt" || true)
+              echo "SMOKE_PATH=/$endpoint HTTP=${status:-ERR} BYTES=$(wc -c < "$file" 2>/dev/null || echo 0)"
+              if [ "$status" != "200" ]; then
+                ok=0
+                if [ -s "$file" ]; then head -c 200 "$file"; echo; fi
+              fi
+            done
+            if [ "$ok" = 1 ]; then
+              if grep -q 'Los números' /tmp/calculafacil-index.html && \
+                 grep -q 'export function margin' /tmp/calculafacil-calculators.mjs && \
+                 grep -q 'tool-card' /tmp/calculafacil-styles.css && \
+                 grep -q 'Compras todavía no habilitadas' /tmp/calculafacil-pro.html && \
+                 grep -q 'sitemap.xml' /tmp/calculafacil-robots.txt && \
+                 grep -q '/pro.html' /tmp/calculafacil-sitemap.xml; then
+                echo 'CALCULAFACIL_LIVE_SITE_AND_ASSETS_VERIFIED'
+                exit 0
+              fi
+              echo "SMOKE_CONTENT_MISMATCH"
+              for file in index.html calculators.mjs styles.css pro.html robots.txt sitemap.xml; do
+                echo "$file: $(head -c 100 "/tmp/calculafacil-$file" | tr '\n' ' ')"
+              done
             fi
             sleep 3
           done
