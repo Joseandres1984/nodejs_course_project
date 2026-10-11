@@ -150,12 +150,14 @@ jobs:
                       error="PROBE_ROUTE_NOT_READY"
                       time.sleep(2)
                   elif status=="503":
-                      try: reason=json.loads(response_body).get("reason","unknown")
-                      except ValueError: reason="unparseable"
+                      try: data=json.loads(response_body)
+                      except ValueError: data={}
+                      reason=data.get("reason","unknown")
+                      payment_api=data.get("paymentsApi","unknown")
                       import re
-                      if not isinstance(reason,str) or not re.fullmatch("[a-z0-9_]{1,50}",reason):
-                          reason="unknown"
-                      error="PROVIDER_AUTHENTICATION_NOT_CONFIRMED_"+reason
+                      if not isinstance(reason,str) or not re.fullmatch("[a-z0-9_]{1,50}",reason): reason="unknown"
+                      if not isinstance(payment_api,str) or not re.fullmatch("[a-z0-9_]{1,50}",payment_api): payment_api="unknown"
+                      error="PROVIDER_AUTH_NOT_CONFIRMED_"+reason+"_PAYMENTS_API_"+payment_api
                       break
                   else:
                       error="PROVIDER_DIAGNOSTIC_HTTP_"+status

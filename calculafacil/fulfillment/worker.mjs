@@ -134,8 +134,23 @@ export default {
         const ok=authenticated && siteIsArgentina && !testUser;
         const reason=ok?"verified":!authenticated?"no_merchant_id":!siteIsArgentina?"site_not_argentina":"test_user";
         return json({ok,authenticated,siteIsArgentina,testUser,deliveryEnabled:false,reason},ok?200:503);
-      }catch{
-        return json({ok:false,authenticated:false,deliveryEnabled:false,reason:"provider_network_or_parse_error"},503);
+      }catch(error){
+        let paymentsApi="not_checked";
+        try{
+          const paymentResponse=await fetch("https://api.mercadopago.com/v1/payments/search?limit=1",{
+            method:"GET",headers:{"Authorization":"Bearer "+env.MP_ACCESS_TOKEN,"Accept":"application/json"},
+            redirect:"error",signal:AbortSignal.timeout(9000)
+          });
+          if(paymentResponse.ok){
+            const paymentData=await paymentResponse.json();
+            paymentsApi=Array.isArray(paymentData?.results)?"authorized":"unexpected_response";
+          }else{
+            paymentsApi="http_"+paymentResponse.status;
+          }
+        }catch{paymentsApi="network_or_parse_error";}
+        const reason=error?.name==="TimeoutError"?"identity_timeout":
+          error?.name==="SyntaxError"?"identity_invalid_json":"identity_network_or_redirect";
+        return json({ok:false,authenticated:false,deliveryEnabled:false,reason,paymentsApi},503);
       }
     }
     if(url.pathname==="/health" && request.method==="GET") {
