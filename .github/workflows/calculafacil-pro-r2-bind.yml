@@ -150,7 +150,12 @@ jobs:
                       error="PROBE_ROUTE_NOT_READY"
                       time.sleep(2)
                   elif status=="503":
-                      error="PROVIDER_AUTHENTICATION_NOT_CONFIRMED"
+                      try: reason=json.loads(response_body).get("reason","unknown")
+                      except ValueError: reason="unparseable"
+                      import re
+                      if not isinstance(reason,str) or not re.fullmatch("[a-z0-9_]{1,50}",reason):
+                          reason="unknown"
+                      error="PROVIDER_AUTHENTICATION_NOT_CONFIRMED_"+reason
                       break
                   else:
                       error="PROVIDER_DIAGNOSTIC_HTTP_"+status

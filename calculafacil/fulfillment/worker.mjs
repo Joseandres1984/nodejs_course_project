@@ -116,17 +116,26 @@ export default {
       const supplied=request.headers.get("X-LUMEN-AUDIT-KEY")||"";
       if(typeof key!=="string" || key.length<48 || supplied!==key)
         return json({error:"not_found"},404);
-      if(!env.MP_ACCESS_TOKEN || env.FULFILLMENT_ENABLED==="true")
-        return json({ok:false,authenticated:false,deliveryEnabled:env.FULFILLMENT_ENABLED==="true"},503);
+      if(!env.MP_ACCESS_TOKEN)
+        return json({ok:false,authenticated:false,deliveryEnabled:false,reason:"token_not_configured"},503);
+      if(env.FULFILLMENT_ENABLED==="true")
+        return json({ok:false,authenticated:false,deliveryEnabled:true,reason:"delivery_active"},503);
       try{
-        const user=await mpGet(env,"api.mercadolibre.com","/users/me");
+        const result=await fetch("https://api.mercadolibre.com/users/me",{
+          method:"GET",
+          headers:{"Authorization":"Bearer "+env.MP_ACCESS_TOKEN,"Accept":"application/json"},
+          redirect:"error",signal:AbortSignal.timeout(9000)
+        });
+        if(!result.ok) return json({ok:false,authenticated:false,deliveryEnabled:false,reason:"provider_http_"+result.status},503);
+        const user=await result.json();
         const authenticated=!!(user && user.id);
         const siteIsArgentina=String(user?.site_id)==="MLA";
         const testUser=Array.isArray(user?.tags)&&user.tags.includes("test_user");
         const ok=authenticated && siteIsArgentina && !testUser;
-        return json({ok,authenticated,siteIsArgentina,testUser,deliveryEnabled:false},ok?200:503);
+        const reason=ok?"verified":!authenticated?"no_merchant_id":!siteIsArgentina?"site_not_argentina":"test_user";
+        return json({ok,authenticated,siteIsArgentina,testUser,deliveryEnabled:false,reason},ok?200:503);
       }catch{
-        return json({ok:false,authenticated:false,deliveryEnabled:false},503);
+        return json({ok:false,authenticated:false,deliveryEnabled:false,reason:"provider_network_or_parse_error"},503);
       }
     }
     if(url.pathname==="/health" && request.method==="GET") {
