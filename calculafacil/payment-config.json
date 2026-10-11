@@ -3,17 +3,20 @@
   "product": "CalculaFácil PRO – Kit Excel",
   "currency": "ARS",
   "expected_amount": 9900,
-  "payment_url": "https://mpago.li/1NuWTrY",
+  "payment_url": null,
   "checkout_enabled": false,
-  "checkout_verification": "user_supplied_mercadopago_checkout_screenshot_lumen_ars_9900_20261011",
+  "checkout_verification": "merchant_amount_item_and_back_urls_checked_via_official_mp_api_20261011",
   "delivery": {
-    "mode": "not_configured",
+    "mode": "self_service_approved_payment_claim",
     "automated": false,
     "artifact": "CalculaFacil_PRO_Kit_v1.xlsx",
-    "private_delivery_required": true
+    "private_delivery_required": true,
+    "verification": "approved_payment_payer_email_merchant_order_exact_preference_and_product"
   },
-  "notes": "El enlace fue proporcionado por el titular. No cobrar desde la web antes de comprobar importe, beneficiario y entrega. Nunca confundir abrir URL con confirmar pago.",
-  "provider_api_confirmation": "not_verified",
+  "notes": "La preferencia oficial fue creada y comprobada por API. Comprar en la web permanece deshabilitado hasta enlazar la URL oficial y completar validación final del circuito; no usar el link legado de Mercado Pago.",
+  "provider_api_confirmation": "real_merchant_approved_and_production_preference_readback_verified_no_charge",
   "fulfillment_code_prepared": true,
-  "fulfillment_deployed": false
+  "fulfillment_deployed": true,
+  "legacy_payment_url": "https://mpago.li/1NuWTrY",
+  "preference_id": "59348768-483e73d1-8b3f-450c-a610-b7ce39d70da9"
 }
