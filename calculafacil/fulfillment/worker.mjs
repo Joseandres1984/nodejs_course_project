@@ -110,6 +110,25 @@ async function limitClaim(env,request) {
 export default {
   async fetch(request,env) {
     const url=new URL(request.url);
+    // Privileged diagnostic; never accepts buyer data, issues payments, or exposes identities.
+    if(url.pathname==="/__internal/provider-auth-check" && request.method==="POST") {
+      const key=env.PROVIDER_AUDIT_SECRET;
+      const supplied=request.headers.get("X-LUMEN-AUDIT-KEY")||"";
+      if(typeof key!=="string" || key.length<48 || supplied!==key)
+        return json({error:"not_found"},404);
+      if(!env.MP_ACCESS_TOKEN || env.FULFILLMENT_ENABLED==="true")
+        return json({ok:false,authenticated:false,deliveryEnabled:env.FULFILLMENT_ENABLED==="true"},503);
+      try{
+        const user=await mpGet(env,"api.mercadolibre.com","/users/me");
+        const authenticated=!!(user && user.id);
+        const siteIsArgentina=String(user?.site_id)==="MLA";
+        const testUser=Array.isArray(user?.tags)&&user.tags.includes("test_user");
+        const ok=authenticated && siteIsArgentina && !testUser;
+        return json({ok,authenticated,siteIsArgentina,testUser,deliveryEnabled:false},ok?200:503);
+      }catch{
+        return json({ok:false,authenticated:false,deliveryEnabled:false},503);
+      }
+    }
     if(url.pathname==="/health" && request.method==="GET") {
       const stored=env.PRO_KIT ? !!(await env.PRO_KIT.head(FILE_KEY).catch(()=>null)) : false;
       return json({ok:true,service:"calculafacil-pro-fulfillment",ready:configured(env)&&stored,privateWorkbookPresent:stored,enabled:env.FULFILLMENT_ENABLED==="true",provider:"mercadopago",paymentsMadeByServer:false,storagePrivate:true});

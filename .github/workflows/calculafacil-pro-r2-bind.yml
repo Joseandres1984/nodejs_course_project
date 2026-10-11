@@ -91,3 +91,68 @@ jobs:
           done
           echo "PRIVATE_R2_BINDING_NOT_VERIFIED"
           exit 1
+
+      - name: Authenticate Mercado Pago read-only via ephemeral private Worker probe
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,os,secrets,sys,time,urllib.request,urllib.error
+          token=os.getenv("CLOUDFLARE_API_TOKEN") or ""
+          account=os.getenv("CLOUDFLARE_ACCOUNT_ID") or ""
+          if not token or not account:
+              sys.exit("CLOUDFLARE_CREDENTIALS_MISSING")
+          base="https://api.cloudflare.com/client/v4/accounts/"+account+"/workers/scripts/calculafacil-pro-fulfillment/secrets"
+          name="PROVIDER_AUDIT_SECRET"
+          # One-time, random access token never printed, committed, or persisted in Actions.
+          ephemeral=secrets.token_hex(40)
+          def cf(method,url,payload=None):
+              headers={"Authorization":"Bearer "+token,"Accept":"application/json"}
+              if payload is not None: headers["Content-Type"]="application/json"
+              req=urllib.request.Request(url,data=json.dumps(payload).encode() if payload is not None else None,method=method,headers=headers)
+              try:
+                  with urllib.request.urlopen(req,timeout=20) as res:
+                      return res.status,json.load(res)
+              except urllib.error.HTTPError as exc:
+                  return exc.code,{}
+          put_status,put_data=cf("PUT",base,{"name":name,"text":ephemeral,"type":"secret_text"})
+          if put_status not in (200,201) or not put_data.get("success"):
+              sys.exit("EPHEMERAL_DIAGNOSTIC_KEY_INSTALL_FAILED_HTTP_"+str(put_status))
+          error=None
+          try:
+              for n in range(16):
+                  req=urllib.request.Request("https://calculafacil-pro-fulfillment.lumen-b2b.workers.dev/__internal/provider-auth-check",
+                    data=b"",method="POST",
+                    headers={"X-LUMEN-AUDIT-KEY":ephemeral,"Content-Type":"application/octet-stream"})
+                  try:
+                      with urllib.request.urlopen(req,timeout=13) as response:
+                          payload=json.load(response)
+                          if response.status==200 and payload.get("ok") and payload.get("authenticated") and payload.get("siteIsArgentina") and not payload.get("testUser") and payload.get("deliveryEnabled") is False:
+                              print("MERCADOPAGO_PRODUCTION_CREDENTIAL_AUTHENTICATED_READ_ONLY")
+                              error=None
+                              break
+                          error="PROVIDER_IDENTITY_NOT_CONFIRMED"
+                  except urllib.error.HTTPError as exc:
+                      if exc.code==404:
+                          error="PROBE_ROUTE_NOT_READY"
+                      elif exc.code==503:
+                          error="PROVIDER_AUTHENTICATION_NOT_CONFIRMED"
+                          break
+                      else:
+                          error="PROVIDER_DIAGNOSTIC_HTTP_"+str(exc.code)
+                  except Exception:
+                      error="PROVIDER_DIAGNOSTIC_NETWORK_UNAVAILABLE"
+                  time.sleep(2)
+              if error:
+                  print(error)
+          finally:
+              delete_status,_=cf("DELETE",base+"/"+name)
+              if delete_status not in (200,204):
+                  sys.exit("DIAGNOSTIC_SECRET_CLEANUP_NOT_CONFIRMED_HTTP_"+str(delete_status))
+              print("TEMPORARY_PROBE_SECRET_REMOVED")
+          if error:
+              sys.exit(1)
+          PY
