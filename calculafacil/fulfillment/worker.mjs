@@ -50,7 +50,7 @@ async function mpGet(env,host,path) {
 function matchItem(item) {
   const name=norm(item?.title || item?.description || "");
   return name.includes("calculafacil pro") && name.includes("kit excel") &&
-    Number(item?.quantity) === 1 && String(item?.currency_id || "ARS")==="ARS" &&
+    Number(item?.quantity) === 1 && String(item?.currency_id)==="ARS" &&
     cents(Number(item?.unit_price)) === AMOUNT_CENTS;
 }
 /** Only a matching, paid Mercado Pago merchant order qualifies; fail closed. */
@@ -66,7 +66,7 @@ export async function verifyPurchase(env,paymentId,email) {
   const orderId=String(payment?.order?.id || "");
   if(!/^[0-9]{4,25}$/.test(orderId)) return false;
   const order=await mpGet(env,"api.mercadopago.com","/merchant_orders/"+encodeURIComponent(orderId));
-  if(String(order?.id)!==orderId || String(order?.collector?.id)!==String(merchant.id)) return false;
+  if(String(order?.id)!==orderId || order?.status!=="closed" || String(order?.collector?.id)!==String(merchant.id)) return false;
   if(env.EXPECTED_PREFERENCE_ID && String(order?.preference_id)!==String(env.EXPECTED_PREFERENCE_ID)) return false;
   if(!Array.isArray(order?.items) || order.items.length!==1 || !matchItem(order.items[0])) return false;
   if(!Array.isArray(order?.payments) || !order.payments.some(x=>String(x?.id)===paymentId && x?.status==="approved")) return false;
@@ -124,6 +124,9 @@ export default {
     if(url.pathname==="/claim" && request.method==="POST") {
       if(!configured(env)) return page("Entrega en preparación","<p>El sistema de entrega todavía no está habilitado. No se efectuó ningún cargo.</p>",503);
       if(!(await limitClaim(env,request))) return page("Demasiados intentos","<p>Volvé a probar en un minuto.</p>",429);
+      const contentType=request.headers.get("content-type")||"";
+      const contentLength=Number(request.headers.get("content-length")||"0");
+      if(!contentType.startsWith("application/x-www-form-urlencoded") || contentLength>2048) return page("Solicitud inválida","<p>Usá el formulario para verificar el pago.</p>",400);
       const form=await request.formData().catch(()=>null);
       const id=cleanPaymentId(form?.get("payment_id")),email=cleanEmail(form?.get("email"));
       if(!id||!email) return page("Revisá los datos","<p>Ingresá un correo válido y el número de operación indicado en tu comprobante.</p>",400);
