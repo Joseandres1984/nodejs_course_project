@@ -58,6 +58,32 @@ async function safeNetworkCheck(url,authorization){
   }catch(e){return safeOutboundReason(e);}
 }
 
+/** Internal-only report: no response bodies, paths, account identifiers, or authorization material. */
+async function safeAuthorizedRedirectProbe(url, env){
+  try{
+    const result=await fetch(url,{
+      method:"GET",headers:{"Authorization":"Bearer "+String(env.MP_ACCESS_TOKEN??"").trim(),"Accept":"application/json"},
+      redirect:"manual",signal:AbortSignal.timeout(8500)
+    });
+    let redirectDestination="none";
+    if(result.status>=300 && result.status<400){
+      const location=result.headers.get("Location");
+      try{
+        const target=new URL(location,url);
+        const host=target.hostname.toLowerCase();
+        redirectDestination=target.protocol!=="https:"?"non_https":
+          host==="api.mercadopago.com"?"mp_api":
+          host==="api.mercadolibre.com"?"ml_api":
+          host.endsWith(".mercadopago.com")||host.endsWith(".mercadopago.com.ar")?"mp_site":
+          host.endsWith(".mercadolibre.com")||host.endsWith(".mercadolibre.com.ar")?"ml_site":"outside_provider";
+      }catch{redirectDestination="invalid_location";}
+    }
+    return {status:"http_"+result.status,redirectDestination};
+  }catch(error){
+    return {status:safeOutboundReason(error),redirectDestination:"unknown"};
+  }
+}
+
 function json(body,status=200) {
   return Response.json(body,{status,headers:NO_CACHE});
 }
@@ -180,7 +206,11 @@ export default {
           publicWeb:await safeNetworkCheck("https://example.com/",null),
           mpNoAuth:await safeNetworkCheck("https://api.mercadopago.com/v1/payments/search?limit=1",null)
         };
-        return json({ok:false,authenticated:false,deliveryEnabled:false,reason,paymentsApi,connectivity},503);
+        const authorizedRequests={
+          identity:await safeAuthorizedRedirectProbe("https://api.mercadolibre.com/users/me",env),
+          payments:await safeAuthorizedRedirectProbe("https://api.mercadopago.com/v1/payments/search?limit=1",env)
+        };
+        return json({ok:false,authenticated:false,deliveryEnabled:false,reason,paymentsApi,connectivity,authorizedRequests},503);
       }
     }
     if(url.pathname==="/health" && request.method==="GET") {
