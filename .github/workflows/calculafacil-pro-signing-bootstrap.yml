@@ -1,0 +1,74 @@
+name: CalculaFácil PRO — private signing key bootstrap (one-time)
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/calculafacil-pro-signing-bootstrap.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bootstrap-if-missing:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Provision cryptographically random signing key only if absent
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,os,secrets,urllib.request,urllib.error,sys,time
+          token=os.getenv("CLOUDFLARE_API_TOKEN") or ""
+          account=os.getenv("CLOUDFLARE_ACCOUNT_ID") or ""
+          if not token or not account:
+              sys.exit("CLOUDFLARE_CREDENTIALS_NOT_CONFIGURED")
+          base="https://api.cloudflare.com/client/v4/accounts/"+account+"/workers/scripts/calculafacil-pro-fulfillment/secrets"
+          def call(method="GET",data=None):
+              headers={"Authorization":"Bearer "+token,"Accept":"application/json"}
+              if data is not None:
+                  headers["Content-Type"]="application/json"
+              req=urllib.request.Request(base,headers=headers,data=json.dumps(data).encode() if data is not None else None,method=method)
+              try:
+                  with urllib.request.urlopen(req,timeout=20) as response:
+                      return response.status,json.load(response)
+              except urllib.error.HTTPError as exc:
+                  print("CLOUDFLARE_SECRET_API_HTTP_"+str(exc.code))
+                  sys.exit(2)
+          status,current=call()
+          if status!=200 or not current.get("success") or not isinstance(current.get("result"),list):
+              sys.exit("CLOUDFLARE_SECRET_LIST_UNEXPECTED")
+          existing={s.get("name") for s in current["result"]}
+          if "MP_ACCESS_TOKEN" not in existing:
+              sys.exit("MERCADOPAGO_ACCESS_TOKEN_NOT_INSTALLED")
+          if "DOWNLOAD_SIGNING_KEY" in existing:
+              print("DOWNLOAD_SIGNING_KEY_PRESENT_ALREADY_NO_CHANGE")
+          else:
+              secret=secrets.token_hex(48)
+              status,result=call("POST",{"name":"DOWNLOAD_SIGNING_KEY","text":secret,"type":"secret_text"})
+              if status not in (200,201) or not result.get("success"):
+                  sys.exit("SIGNING_SECRET_CREATE_FAILED")
+              print("DOWNLOAD_SIGNING_KEY_CREATED_VALUE_NEVER_EXPORTED")
+          for attempt in range(8):
+              status,check=call()
+              names={s.get("name") for s in (check.get("result") or [])}
+              if status==200 and "DOWNLOAD_SIGNING_KEY" in names and "MP_ACCESS_TOKEN" in names:
+                  print("PRO_FULFILLMENT_BOTH_SECRETS_REGISTERED")
+                  break
+              time.sleep(2)
+          else:
+              sys.exit("SECRETS_NOT_VISIBLE_AFTER_WRITE")
+          PY
+      - name: Confirm private workbook still present and paid delivery disabled
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --max-time 20 \
+            'https://calculafacil-pro-fulfillment.lumen-b2b.workers.dev/health' \
+            | jq -e '.ok==true and .privateWorkbookPresent==true and .enabled==false and .ready==false and .storagePrivate==true' >/dev/null
+          echo 'PRIVATE_WORKBOOK_PRESENT_AND_FULFILLMENT_DISABLED'
