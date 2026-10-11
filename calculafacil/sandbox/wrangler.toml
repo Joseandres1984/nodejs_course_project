@@ -7,3 +7,4 @@ workers_dev = true
 [vars]
 SANDBOX_ENABLED = "true" # TEST SELLER ONLY: no access to production payment, workbook, or buyer fulfillment
 EXPECTED_TEST_SELLER_ID = "3566088094"
+EXPECTED_TEST_PREFERENCE_ID = "3566088094-707a03b1-5ded-42e3-8146-8207d2949ef9"

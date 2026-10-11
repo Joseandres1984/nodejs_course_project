@@ -126,3 +126,52 @@ test("Private identity probe refuses an unrelated test seller",async()=>{
     assert.equal(f.seen.length,1);
   }finally{f.restore();}
 });
+
+test("Sandbox transaction audit is strictly private",async()=>{
+  const f=mockNetwork();
+  try{
+    const r=await worker.fetch(new Request(root+"/__internal/audit-sandbox-payment",{
+      method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({payment_id:"12345678"})
+    }),env({SANDBOX_AUDIT_SECRET:"a".repeat(60),EXPECTED_TEST_PREFERENCE_ID:"TEST_PREFERENCE_123"}));
+    assert.equal(r.status,404);assert.equal(f.seen.length,0);
+  }finally{f.restore();}
+});
+test("Sandbox transaction audit validates test payment against seller, preference, order and production verifier without exposing PII",async()=>{
+  const f=mockNetwork();
+  try{
+    const e=env({SANDBOX_AUDIT_SECRET:"a".repeat(60),EXPECTED_TEST_PREFERENCE_ID:"TEST_PREFERENCE_123"});
+    const r=await worker.fetch(new Request(root+"/__internal/audit-sandbox-payment",{
+      method:"POST",headers:{"Content-Type":"application/json","X-SANDBOX-AUDIT-KEY":e.SANDBOX_AUDIT_SECRET},
+      body:JSON.stringify({payment_id:"12345678"})
+    }),e);
+    assert.equal(r.status,200);
+    const result=await r.json();
+    for(const key of ["paymentConfirmed","fullStrictMatch","statusApproved","amountMatches",
+      "sellerMatches","operationIdMatches","approvalDatePresent","payerEmailPresent",
+      "orderPresent","orderClosed","orderSeller","orderProduct","orderPayment",
+      "preferenceMatches","strictVerifierAccepted"])
+      assert.equal(result[key],true,key);
+    assert.equal(result.realMoneyReceived,0);
+    assert.equal(result.workbookDelivered,false);
+    const raw=JSON.stringify(result);
+    assert.equal(raw.includes("buyer-test@example.com"),false);
+    assert.equal(raw.includes(TOKEN),false);
+    assert.equal(raw.includes("12345678"),false);
+  }finally{f.restore();}
+});
+test("Sandbox transaction audit never calls an unrelated or rejected payment a valid match",async()=>{
+  const f=mockNetwork({paymentStatus:"rejected"});
+  try{
+    const e=env({SANDBOX_AUDIT_SECRET:"a".repeat(60),EXPECTED_TEST_PREFERENCE_ID:"SOME_OTHER_PREFERENCE"});
+    const r=await worker.fetch(new Request(root+"/__internal/audit-sandbox-payment",{
+      method:"POST",headers:{"Content-Type":"application/json","X-SANDBOX-AUDIT-KEY":e.SANDBOX_AUDIT_SECRET},
+      body:JSON.stringify({payment_id:"12345678"})
+    }),e);
+    assert.equal(r.status,200);
+    const result=await r.json();
+    assert.equal(result.paymentConfirmed,false);
+    assert.equal(result.fullStrictMatch,false);
+    assert.equal(result.preferenceMatches,false);
+    assert.equal(result.statusApproved,false);
+  }finally{f.restore();}
+});

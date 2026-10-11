@@ -91,6 +91,78 @@ export default {
           sellerMatched:false,reason:"provider_unavailable",sandboxEnabled:false},503);
       }
     }
+
+    // Server-side sandbox reconciliation: read-only, privileged, no payer PII in output.
+    // This is diagnostic ONLY and never authorizes delivery or books revenue.
+    if(url.pathname==="/__internal/audit-sandbox-payment" && request.method==="POST"){
+      const secret=env.SANDBOX_AUDIT_SECRET;
+      const presented=request.headers.get("X-SANDBOX-AUDIT-KEY")||"";
+      if(typeof secret!=="string"||secret.length<48||secret!==presented)
+        return json({error:"not_found"},404);
+      if(!validTestToken(env)||env.SANDBOX_ENABLED!=="true")
+        return json({error:"sandbox_not_configured"},503);
+      try{
+        const body=await request.json();
+        const id=String(body?.payment_id??"").trim();
+        if(!validId(id))return json({error:"invalid_operation_id"},400);
+        const authorization="Bearer "+env.MP_TEST_ACCESS_TOKEN.trim();
+        const get=async path=>{
+          const response=await fetch("https://api.mercadopago.com"+path,{
+            method:"GET",headers:{"Authorization":authorization,"Accept":"application/json"},
+            redirect:"manual",signal:AbortSignal.timeout(9000)
+          });
+          if(!response.ok||response.status>=300&&response.status<400)
+            return {error:"http_"+response.status,data:null};
+          return {error:null,data:await response.json()};
+        };
+        const p=await get("/v1/payments/"+encodeURIComponent(id));
+        if(p.error)return json({ok:false,simulated:true,paymentFound:false,
+          providerResult:p.error,realMoneyReceived:0,workbookDelivered:false},503);
+        const payment=p.data;
+        const seller=String(payment?.collector_id)===String(env.EXPECTED_TEST_SELLER_ID);
+        const approved=payment?.status==="approved";
+        const price=payment?.currency_id==="ARS"&&Number(payment?.transaction_amount)===9900;
+        const email=cleanEmail(payment?.payer?.email);
+        const paymentIdMatches=String(payment?.id)===id;
+        const orderId=String(payment?.order?.id||"");
+        let orderPresent=false,orderClosed=false,orderSeller=false,orderProduct=false,orderPayment=false,preferenceMatches=false,merchantOrderProviderResult="missing_order";
+        if(/^[0-9]{4,25}$/.test(orderId)){
+          const result=await get("/merchant_orders/"+encodeURIComponent(orderId));
+          if(result.data){
+            const order=result.data;
+            orderPresent=true;merchantOrderProviderResult="ok";
+            orderClosed=order.status==="closed";
+            orderSeller=String(order?.collector?.id)===String(env.EXPECTED_TEST_SELLER_ID);
+            orderProduct=Array.isArray(order?.items)&&order.items.length===1&&
+              String(order.items[0]?.title||"").includes("CalculaFácil PRO")&&
+              Number(order.items[0]?.quantity)===1&&Number(order.items[0]?.unit_price)===9900;
+            orderPayment=Array.isArray(order?.payments)&&order.payments.some(x=>String(x.id)===id&&x.status==="approved");
+            preferenceMatches=String(order?.preference_id)===String(env.EXPECTED_TEST_PREFERENCE_ID);
+          }else merchantOrderProviderResult=result.error;
+        }
+        let strictVerifierAccepted=false,strictVerifierError=false;
+        if(email){
+          try{
+            strictVerifierAccepted=await verifyPurchase({
+              MP_ACCESS_TOKEN:env.MP_TEST_ACCESS_TOKEN.trim(),
+              EXPECTED_MERCHANT_ID:env.EXPECTED_TEST_SELLER_ID,
+              EXPECTED_PREFERENCE_ID:env.EXPECTED_TEST_PREFERENCE_ID
+            },id,email);
+          }catch{strictVerifierError=true;}
+        }
+        const paymentConfirmed=paymentIdMatches&&seller&&approved&&price&&!!payment?.date_approved;
+        const fullStrictMatch=paymentConfirmed&&strictVerifierAccepted&&preferenceMatches;
+        return json({ok:true,simulated:true,paymentFound:true,
+          paymentConfirmed,fullStrictMatch,statusApproved:approved,amountMatches:price,
+          sellerMatches:seller,operationIdMatches:paymentIdMatches,approvalDatePresent:!!payment?.date_approved,
+          payerEmailPresent:!!email,orderPresent,orderClosed,orderSeller,orderProduct,orderPayment,
+          preferenceMatches,strictVerifierAccepted,strictVerifierError,merchantOrderProviderResult,
+          realMoneyReceived:0,workbookDelivered:false});
+      }catch{
+        return json({error:"sandbox_audit_unavailable",simulated:true,
+          realMoneyReceived:0,workbookDelivered:false},503);
+      }
+    }
     if(!["/admin/create-preference","/admin/check-payment"].includes(url.pathname)
         ||request.method!=="POST"||!privateAdmin(request,env))return json({error:"not_found"},404);
     if(env.SANDBOX_ENABLED!=="true"||!validTestToken(env))return json({error:"sandbox_not_configured"},503);
