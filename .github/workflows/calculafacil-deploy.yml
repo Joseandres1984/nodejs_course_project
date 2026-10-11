@@ -38,8 +38,34 @@ jobs:
           grep -q 'id="herramientas"' calculafacil/index.html
           grep -q 'lang="es-AR"' calculafacil/index.html
           ! grep -Ei 'google-analytics|gtag\(|facebook\.com/tr|pixel\(' calculafacil/index.html calculafacil/app.js calculafacil/styles.css calculafacil/pro.html
-          grep -q 'Compras todavía no habilitadas' calculafacil/pro.html
+          grep -q 'El enlace de Mercado Pago ya está preparado' calculafacil/pro.html
           grep -q 'href="/pro.html"' calculafacil/index.html
+          node -e 'const x=require("./calculafacil/payment-config.json"); if(x.checkout_enabled!==false||x.delivery.automated!==false||x.expected_amount!==9900||x.currency!=="ARS"||x.payment_url!=="https://mpago.li/1NuWTrY") process.exit(1); console.log("PAYMENT_LINK_RECORDED_CHECKOUT_STILL_DISABLED")'
+
+  payment_link_probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    continue-on-error: true
+    steps:
+      - name: Inspect merchant-provided payment link (GET only, no charge)
+        shell: bash
+        run: |
+          set -euo pipefail
+          result=$(curl -L --max-redirs 4 --proto-redir '=https' -sS --max-time 20 -o /tmp/mercadopago-link.html -w '%{http_code} %{url_effective}' 'https://mpago.li/1NuWTrY' || true)
+          python3 - "$result" <<'PY'
+          import sys
+          from urllib.parse import urlparse
+          parts=sys.argv[1].split(' ',1)
+          status=parts[0] if parts else '?'
+          host=urlparse(parts[1]).hostname if len(parts)>1 else None
+          print('PUBLIC_CHECKOUT_LINK_GET_ONLY', {'status':status,'redirect_host':host,'payment_attempted':False})
+          if status=='403':
+              print('LINK_BLOCKED_FOR_AUTOMATED_PROBE; HUMAN_CHECKOUT_VERIFICATION_REQUIRED')
+          elif status in {'200','302','303'} and host and (host.endswith('mercadopago.com.ar') or host=='mpago.li' or host.endswith('mercadopago.com')):
+              print('PAYMENT_PROVIDER_HOST_REACHABLE; AMOUNT_AND_SELLER_NOT_VERIFIED')
+          else:
+              print('LINK_NOT_PROVIDER_VERIFIED_BY_CI')
+          PY
 
   deploy:
     needs: validate
@@ -96,7 +122,7 @@ jobs:
               if grep -q 'Los números' /tmp/calculafacil-index.html && \
                  grep -q 'export function margin' /tmp/calculafacil-calculators.mjs && \
                  grep -q 'tool-card' /tmp/calculafacil-styles.css && \
-                 grep -q 'Compras todavía no habilitadas' /tmp/calculafacil-pro.html && \
+                 grep -q 'El enlace de Mercado Pago ya está preparado' /tmp/calculafacil-pro.html && \
                  grep -q 'sitemap.xml' /tmp/calculafacil-robots.txt && \
                  grep -q '/pro.html' /tmp/calculafacil-sitemap.xml; then
                 echo 'CALCULAFACIL_LIVE_SITE_AND_ASSETS_VERIFIED'
