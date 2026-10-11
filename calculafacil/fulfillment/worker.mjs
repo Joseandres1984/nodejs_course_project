@@ -219,6 +219,30 @@ export default {
       }
     }
 
+    // Temporary single-purpose download transport diagnostic.
+    // Requires an ephemeral 384-bit audit secret installed by CI and deleted on completion.
+    // No public download route, no buyer payments, no authorization bypass for /download.
+    if(url.pathname==="/__internal/transport-test-download" && request.method==="POST"){
+      const required=env.KIT_AUDIT_SECRET;
+      const supplied=request.headers.get("X-LUMEN-KIT-AUDIT-KEY")||"";
+      if(typeof required!=="string"||required.length<48||supplied!==required)
+        return json({error:"not_found"},404);
+      if(env.FULFILLMENT_ENABLED==="true")
+        return json({error:"test_disabled_in_live_mode"},503);
+      try{
+        const obj=await env.PRO_KIT?.get(FILE_KEY);
+        if(!obj||!obj.body||obj.size>1024*1024)
+          return json({error:"private_file_not_ready"},503);
+        return new Response(obj.body,{status:200,headers:{
+          ...NO_CACHE,
+          "Content-Type":"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "Content-Disposition":'attachment; filename="CalculaFacil_PRO_Kit_v1.xlsx"',
+          "Content-Security-Policy":"default-src 'none'; frame-ancestors 'none'",
+        }});
+      }catch{
+        return json({error:"private_file_not_ready"},503);
+      }
+    }
     // Privileged, read-only object integrity probe. It NEVER returns workbook bytes,
     // cannot issue download tokens, and only works while commercial delivery is OFF.
     if(url.pathname==="/__internal/check-private-kit" && request.method==="POST") {
