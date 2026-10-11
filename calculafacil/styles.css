@@ -66,3 +66,44 @@
 .pro-faq details p{color:#a4b7ce;font-size:13px;line-height:1.8}
 @media(max-width:760px){.commercial-grid{grid-template-columns:1fr}.commercial-card{min-height:280px}.pro-page{padding:55px 0}.pro-grid{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:520px){.pro-grid{grid-template-columns:1fr}.pro-hero h1{font-size:47px}.pro-crosssell{padding:22px}.commercial-card{padding:23px}.price-banner strong{font-size:38px}}
+
+/* Search-intent education and conversion without analytics pixels or popups. */
+.guides-section{padding:65px 0 75px}
+.guides-section>h2{font-size:clamp(28px,4vw,46px);letter-spacing:-.045em;margin:10px 0 14px}
+.guides-intro{max-width:740px;color:#a4b7ce;line-height:1.75}
+.guides-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;margin-top:27px}
+.guide-link-card{background:linear-gradient(145deg,#162637,#0f192a);border:1px solid #30445a;border-radius:16px;padding:30px}
+.guide-link-card h3{font-size:24px;line-height:1.2;margin:14px 0 10px}
+.guide-link-card p{color:#acbed0;font-size:14px;line-height:1.7}
+.guide-link-card a{color:#75e5d5;font-weight:750;text-decoration:none}
+.guide-link-card a:hover,.guide-link-card a:focus-visible{text-decoration:underline}
+.guide-page{max-width:970px;margin:0 auto;padding:85px 18px 60px}
+.guide-lead{margin-bottom:46px}
+.guide-lead h1{font-size:clamp(36px,5.4vw,64px);line-height:1.13;letter-spacing:-.055em;max-width:940px}
+.guide-lead .hero-description{max-width:870px;margin:24px 0;color:#bdd0df}
+.guide-actions{display:flex;flex-wrap:wrap;align-items:center;gap:14px;margin-top:28px}
+.guide-actions .button{margin:0}
+.guide-panel{padding:29px 33px;margin:22px 0;background:#101d2c;border:1px solid #2b4056;border-radius:17px}
+.guide-panel h2{font-size:clamp(23px,3vw,33px);letter-spacing:-.035em;margin:0 0 17px}
+.guide-panel p,.guide-panel li{font-size:15px;line-height:1.85;color:#bfd0dd}
+.guide-panel ol{padding-left:23px}
+.guide-panel li{margin-bottom:9px}
+.guide-panel details{padding:17px 0;border-bottom:1px solid #385366}
+.guide-panel details summary{font-weight:720;cursor:pointer}
+.guide-formula{padding:17px 20px;border-left:4px solid #58e3d0;border-radius:10px;background:#173044;margin:20px 0}
+.guide-formula strong{display:block;color:#7df0dd;margin-bottom:10px}
+.guide-formula code{display:block;white-space:normal;overflow-wrap:anywhere;color:#f3faff;font-size:15px}
+.guide-table{width:100%;border-collapse:collapse;margin:24px 0}
+.guide-table caption{color:#a5c3d4;text-align:left;margin-bottom:11px}
+.guide-table th,.guide-table td{padding:13px 10px;border-bottom:1px solid #324c60;text-align:left;line-height:1.5}
+.guide-table th{color:#79e9da}
+.guide-table td:last-child,.guide-table th:last-child{text-align:right}
+.guide-total{background:#174436;color:#a9ffe2}
+.guide-offer{background:linear-gradient(120deg,#163f3f,#172333);border:1px solid #419d8a;padding:36px;border-radius:20px;margin:44px 0}
+.guide-offer h2{margin:15px 0;font-size:clamp(26px,3.7vw,38px)}
+.guide-offer p{color:#d5e5ee;line-height:1.75}
+.guide-offer-price{margin:17px 0;font-size:18px}
+.guide-offer-price strong{color:#b1ffdf;font-size:27px}
+.guide-offer .button{display:inline-flex;margin:0}
+.guide-note{color:#aac2d0;font-size:12px!important;line-height:1.7}
+@media(max-width:680px){.guides-grid{grid-template-columns:1fr}.guide-page{padding:54px 8px 40px}.guide-panel{padding:23px 18px}.guide-offer{padding:25px 19px}.guide-table th,.guide-table td{padding:10px 6px;font-size:13px}.guide-actions{flex-direction:column;align-items:stretch}.guide-actions .button{width:100%;text-align:center;justify-content:center}}
