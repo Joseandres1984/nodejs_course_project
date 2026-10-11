@@ -107,3 +107,11 @@
 .guide-offer .button{display:inline-flex;margin:0}
 .guide-note{color:#aac2d0;font-size:12px!important;line-height:1.7}
 @media(max-width:680px){.guides-grid{grid-template-columns:1fr}.guide-page{padding:54px 8px 40px}.guide-panel{padding:23px 18px}.guide-offer{padding:25px 19px}.guide-table th,.guide-table td{padding:10px 6px;font-size:13px}.guide-actions{flex-direction:column;align-items:stretch}.guide-actions .button{width:100%;text-align:center;justify-content:center}}
+
+.pro-guides{margin:16px 0 76px;padding:28px 32px;background:#10262f;border-radius:16px;border:1px solid #315e62}
+.pro-guides h2{font-size:28px;margin:12px 0}
+.pro-guides p:not(.section-kicker){color:#bed1da;line-height:1.7}
+.pro-guide-links{display:flex;flex-wrap:wrap;gap:16px;margin-top:20px}
+.pro-guide-links a{display:block;flex:1 1 240px;color:#8ff4de;padding:15px 18px;background:#173743;border:1px solid #437a84;border-radius:12px;text-decoration:none;font-weight:700}
+.pro-guide-links a:hover,.pro-guide-links a:focus-visible{text-decoration:underline;border-color:#6ee9d9}
+@media(max-width:680px){.pro-guides{padding:25px 19px}}
