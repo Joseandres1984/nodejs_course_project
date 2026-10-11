@@ -49,7 +49,7 @@ async function createPreference(env){
   if(typeof raw!=="string"||!String(data?.id||""))throw new Error("invalid_test_preference");
   const url=new URL(raw);
   if(url.protocol!=="https:"||![
-    "www.mercadopago.com.ar","mercadopago.com.ar","www.mercadopago.com",
+    "www.mercadopago.com.ar","mercadopago.com.ar","sandbox.mercadopago.com.ar","www.mercadopago.com",
     "mercadopago.com","www.mercadopago.com.br","mercadopago.com.br"
   ].includes(url.hostname.toLowerCase()))throw new Error("unexpected_checkout_origin");
   return {checkout_url:url.toString(),preference_id:String(data.id)};
