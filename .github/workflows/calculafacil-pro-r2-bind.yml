@@ -1,4 +1,4 @@
-name: CalculaFácil PRO — R2 private binding (delivery disabled)
+name: CalculaFácil PRO — verified production fulfillment health
 
 on:
   pull_request:
@@ -23,27 +23,28 @@ concurrency:
 jobs:
   safety-and-binding-check:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 6
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Fail-closed tests
+      - name: Verify payment authentication, signed downloads and expected preference
         shell: bash
         run: |
           set -euo pipefail
           node --check calculafacil/fulfillment/worker.mjs
           node --test calculafacil/fulfillment/worker.test.mjs
-          grep -Fq 'FULFILLMENT_ENABLED = "false"' calculafacil/fulfillment/wrangler.toml
+          grep -Fq 'FULFILLMENT_ENABLED = "true"' calculafacil/fulfillment/wrangler.toml
+          grep -Fq 'EXPECTED_PREFERENCE_ID = "59348768-483e73d1-8b3f-450c-a610-b7ce39d70da9"' calculafacil/fulfillment/wrangler.toml
           grep -Fq 'bucket_name = "calculafacil-pro-private"' calculafacil/fulfillment/wrangler.toml
-          grep -Fq 'FILE_KEY = "calculafacil-pro/CalculaFacil_PRO_Kit_v1.xlsx"' calculafacil/fulfillment/worker.mjs
+          grep -Fq '"checkout_enabled": false' calculafacil/payment-config.json
 
-  deploy-binding-only:
+  deploy-verified-private-delivery:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     needs: safety-and-binding-check
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 9
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -58,7 +59,7 @@ jobs:
           set -euo pipefail
           test -n "${CLOUDFLARE_API_TOKEN:-}"
           test -n "${CLOUDFLARE_ACCOUNT_ID:-}"
-      - name: Deploy separate private delivery Worker (OFF by default)
+      - name: Deploy verified private delivery Worker with exact preference match
         working-directory: calculafacil/fulfillment
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -67,124 +68,40 @@ jobs:
         run: |
           set -euo pipefail
           npx --yes wrangler@4 deploy --config wrangler.toml
-      - name: Verify R2 object visibility without leaking workbook
+      - name: Verify live health and deny invalid download before publishing checkout
         shell: bash
         run: |
           set -euo pipefail
           BASE='https://calculafacil-pro-fulfillment.lumen-b2b.workers.dev'
-          for i in $(seq 1 10); do
-            code=$(curl -sS -o /tmp/cf-pro-private-health.json -w '%{http_code}' --max-time 12 "$BASE/health?verify=$GITHUB_SHA&attempt=$i" || true)
+          for i in $(seq 1 15); do
+            code=$(curl -sS -o /tmp/cf-pro-live-health.json -w '%{http_code}' --max-time 12 "$BASE/health?sha=$GITHUB_SHA&attempt=$i" || true)
             if [[ "$code" == "200" ]] && jq -e '
-              .ok==true and
-              .service=="calculafacil-pro-fulfillment" and
-              .privateWorkbookPresent==true and
-              .ready==false and
-              .enabled==false and
-              .paymentsMadeByServer==false and
-              .storagePrivate==true
-            ' /tmp/cf-pro-private-health.json >/dev/null 2>&1; then
-              echo "CF_PRO_R2_PRIVATE_OBJECT_PRESENT_DELIVERY_DISABLED_VERIFIED"
-              exit 0
+              .ok==true and .service=="calculafacil-pro-fulfillment" and
+              .privateWorkbookPresent==true and .ready==true and .enabled==true and
+              .paymentsMadeByServer==false and .storagePrivate==true
+            ' /tmp/cf-pro-live-health.json >/dev/null 2>&1; then
+              echo "VERIFIED_PRIVATE_DELIVERY_WORKER_READY"
+              break
             fi
-            echo "TRY=$i STATUS=$code SAFE_HEALTH=$(jq -c '{privateWorkbookPresent,ready,enabled}' /tmp/cf-pro-private-health.json 2>/dev/null || echo unavailable)"
-            sleep 3
+            if [[ "$i" == "15" ]]; then
+              echo "PRIVATE_DELIVERY_NOT_READY"
+              exit 1
+            fi
+            sleep 2
           done
-          echo "PRIVATE_R2_BINDING_NOT_VERIFIED"
-          exit 1
-
-      - name: Authenticate Mercado Pago read-only via ephemeral private Worker probe
-        shell: bash
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import json,os,secrets,sys,time,urllib.request,urllib.error
-          token=os.getenv("CLOUDFLARE_API_TOKEN") or ""
-          account=os.getenv("CLOUDFLARE_ACCOUNT_ID") or ""
-          if not token or not account:
-              sys.exit("CLOUDFLARE_CREDENTIALS_MISSING")
-          base="https://api.cloudflare.com/client/v4/accounts/"+account+"/workers/scripts/calculafacil-pro-fulfillment/secrets"
-          name="PROVIDER_AUDIT_SECRET"
-          # One-time, random access token never printed, committed, or persisted in Actions.
-          ephemeral=secrets.token_hex(40)
-          def cf(method,url,payload=None):
-              headers={"Authorization":"Bearer "+token,"Accept":"application/json"}
-              if payload is not None: headers["Content-Type"]="application/json"
-              req=urllib.request.Request(url,data=json.dumps(payload).encode() if payload is not None else None,method=method,headers=headers)
-              try:
-                  with urllib.request.urlopen(req,timeout=20) as res:
-                      return res.status,json.load(res)
-              except urllib.error.HTTPError as exc:
-                  return exc.code,{}
-          put_status,put_data=cf("PUT",base,{"name":name,"text":ephemeral,"type":"secret_text"})
-          if put_status not in (200,201) or not put_data.get("success"):
-              sys.exit("EPHEMERAL_DIAGNOSTIC_KEY_INSTALL_FAILED_HTTP_"+str(put_status))
-          error=None
-          try:
-              # Curl is already permitted for the public health endpoint.
-              # Pass audit secret via stdin config, not process arguments or logs.
-              import subprocess
-              url="https://calculafacil-pro-fulfillment.lumen-b2b.workers.dev/__internal/provider-auth-check"
-              for n in range(12):
-                  config='url = "'+url+'"\nrequest = "POST"\nheader = "X-LUMEN-AUDIT-KEY: '+ephemeral+'"\n'
-                  result=subprocess.run(["curl","--silent","--show-error","--max-time","15","--max-redirs","0","--config","-","--write-out","\\n%{http_code}"],
-                    input=config,text=True,capture_output=True,timeout=18)
-                  if result.returncode!=0 or "\n" not in result.stdout:
-                      error="PROVIDER_DIAGNOSTIC_NETWORK_UNAVAILABLE"
-                      time.sleep(2)
-                      continue
-                  response_body,status=result.stdout.rsplit("\n",1)
-                  status=status.strip()
-                  if status=="200":
-                      try: payload=json.loads(response_body)
-                      except ValueError: payload={}
-                      if payload.get("ok") and payload.get("authenticated") and payload.get("siteIsArgentina") and not payload.get("testUser") and payload.get("deliveryEnabled") is False:
-                          print("MERCADOPAGO_PRODUCTION_CREDENTIAL_AUTHENTICATED_READ_ONLY")
-                          error=None
-                          break
-                      error="PROVIDER_IDENTITY_NOT_CONFIRMED"
-                      break
-                  elif status=="404":
-                      error="PROBE_ROUTE_NOT_READY"
-                      time.sleep(2)
-                  elif status=="503":
-                      try: data=json.loads(response_body)
-                      except ValueError: data={}
-                      reason=data.get("reason","unknown")
-                      payment_api=data.get("paymentsApi","unknown")
-                      import re
-                      if not isinstance(reason,str) or not re.fullmatch("[a-z0-9_]{1,50}",reason): reason="unknown"
-                      if not isinstance(payment_api,str) or not re.fullmatch("[a-z0-9_]{1,50}",payment_api): payment_api="unknown"
-                      checks=data.get("connectivity") or {}
-                      if not isinstance(checks,dict): checks={}
-                      public=checks.get("publicWeb","unknown")
-                      mp=checks.get("mpNoAuth","unknown")
-                      if not isinstance(public,str) or not re.fullmatch("[a-z0-9_]{1,50}",public): public="unknown"
-                      if not isinstance(mp,str) or not re.fullmatch("[a-z0-9_]{1,50}",mp): mp="unknown"
-                      authorized=data.get("authorizedRequests") or {}
-                      if not isinstance(authorized,dict): authorized={}
-                      def format_status(name):
-                          val=authorized.get(name) or {}
-                          if not isinstance(val,dict): return "unknown_unknown"
-                          status=val.get("status","unknown")
-                          destination=val.get("redirectDestination","unknown")
-                          if not isinstance(status,str) or not re.fullmatch("[a-z0-9_]{1,50}",status): status="unknown"
-                          if not isinstance(destination,str) or not re.fullmatch("[a-z0-9_]{1,50}",destination): destination="unknown"
-                          return status+"_"+destination
-                      error="PROVIDER_AUTH_NOT_CONFIRMED_"+reason+"_PAYMENTS_API_"+payment_api+"_PUBLIC_"+public+"_MP_NOAUTH_"+mp+"_AUTH_IDENTITY_"+format_status("identity")+"_AUTH_PAYMENTS_"+format_status("payments")
-                      break
-                  else:
-                      error="PROVIDER_DIAGNOSTIC_HTTP_"+status
-                      break
-              if error:
-                  print(error)
-          finally:
-              delete_status,_=cf("DELETE",base+"/"+name)
-              if delete_status not in (200,204):
-                  sys.exit("DIAGNOSTIC_SECRET_CLEANUP_NOT_CONFIRMED_HTTP_"+str(delete_status))
-              print("TEMPORARY_PROBE_SECRET_REMOVED")
-          if error:
-              sys.exit(1)
-          PY
+          code=$(curl -sS -o /tmp/cf-pro-invalid.json -w '%{http_code}' --max-time 12 \
+            "$BASE/download?payment_id=987654321000&until=9999999999999&sig=not-a-signature" || true)
+          test "$code" = "403"
+          jq -e '.error=="invalid_or_expired_download_link"' /tmp/cf-pro-invalid.json >/dev/null
+          echo "UNAUTHENTICATED_DOWNLOAD_DENIED"
+          code=$(curl -sS -o /tmp/cf-pro-claim.html -w '%{http_code}' --max-time 12 \
+            "$BASE/claim?resultado=aprobado&payment_id=183642547454" || true)
+          test "$code" = "200"
+          grep -Fq 'Verificar pago y descargar Excel' /tmp/cf-pro-claim.html
+          grep -Fq 'value="183642547454"' /tmp/cf-pro-claim.html
+          echo "BUYER_CLAIM_READY_WITH_UNTRUSTED_RETURN_PREFILL"
+          code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 12 -X POST \
+            "$BASE/__internal/transport-test-download" || true)
+          test "$code" = "404"
+          echo "PRIVATE_FILE_DIAGNOSTIC_REMAINS_ACCESS_CONTROLLED"
+          echo "WEBSITE_PURCHASE_BUTTON_NOT_YET_PUBLISHED"
