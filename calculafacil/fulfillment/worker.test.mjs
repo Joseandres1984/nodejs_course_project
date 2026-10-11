@@ -205,3 +205,35 @@ test("Provider redirects cannot be followed with merchant credentials",async()=>
     assert.equal(calls,1,"Never follow provider redirects or send credentials to another host");
   }finally{globalThis.fetch=original;}
 });
+
+test("Private Excel integrity probe returns 404 without an ephemeral audit key",async()=>{
+  const env=makeEnv({FULFILLMENT_ENABLED:"false",KIT_AUDIT_SECRET:"a".repeat(80)});
+  const r=await worker.fetch(new Request("https://fulfillment.example/__internal/check-private-kit",{method:"POST"}),env);
+  assert.equal(r.status,404);
+});
+test("Private Excel integrity probe validates actual R2 object bytes without returning workbook",async()=>{
+  const names=Array.from({length:7},(_,i)=>"xl/worksheets/sheet"+(i+1)+".xml").join("\n");
+  const bytes=new Uint8Array(12000);
+  bytes.set([0x50,0x4b,0x03,0x04],0);
+  bytes.set(new TextEncoder().encode(names),10);
+  const env=makeEnv({FULFILLMENT_ENABLED:"false",KIT_AUDIT_SECRET:"a".repeat(80),
+    PRO_KIT:{get:async()=>({body:new ReadableStream({start(c){c.enqueue(bytes);c.close();}})})}
+  });
+  const r=await worker.fetch(new Request("https://fulfillment.example/__internal/check-private-kit",{
+    method:"POST",headers:{"X-LUMEN-KIT-AUDIT-KEY":env.KIT_AUDIT_SECRET}
+  }),env);
+  assert.equal(r.status,200);
+  const j=await r.json();
+  assert.equal(j.ok,true);assert.equal(j.privateWorkbookReadable,true);
+  assert.equal(j.validXlsxZip,true);assert.equal(j.worksheetsFound,7);
+  assert.equal(j.privateBytesRead,12000);assert.equal(j.workbookContentExposed,false);
+  assert.equal(j.productionDownloadsEnabled,false);
+});
+test("Private Excel integrity probe is blocked after commercial launch",async()=>{
+  const env=makeEnv({FULFILLMENT_ENABLED:"true",KIT_AUDIT_SECRET:"a".repeat(80)});
+  const r=await worker.fetch(new Request("https://fulfillment.example/__internal/check-private-kit",{
+    method:"POST",headers:{"X-LUMEN-KIT-AUDIT-KEY":env.KIT_AUDIT_SECRET}
+  }),env);
+  assert.equal(r.status,503);
+  assert.equal((await r.json()).error,"audit_disabled_in_live_mode");
+});
