@@ -83,6 +83,10 @@ jobs:
           cp calculafacil/index.html calculafacil/styles.css calculafacil/app.js calculafacil/calculators.mjs calculafacil/favicon.svg calculafacil/pro.html calculafacil/robots.txt calculafacil/sitemap.xml calculafacil/_headers calculafacil/calcular-precio-venta-emprendimiento.html calculafacil/punto-de-equilibrio-emprendimiento.html calculafacil/1dbf6671f85eb74a413f76fd2681d570.txt calculafacil/dist/
           python3 -m pip install --disable-pip-version-check --quiet Pillow
           python3 calculafacil/marketing/make_instagram.py calculafacil/dist/instagram-pro-launch.jpg
+          command -v ffmpeg >/dev/null
+          command -v ffprobe >/dev/null
+          python3 calculafacil/marketing/render_margin_reel.py calculafacil/dist/reels/precios-margen-2026.mp4
+          ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,height -of json calculafacil/dist/reels/precios-margen-2026.mp4 | jq -e '.streams[0].codec_name=="h264" and .streams[0].width==720 and .streams[0].height==1280' >/dev/null
           test "$(find calculafacil/dist -maxdepth 1 -type f | wc -l)" -eq 13
           file calculafacil/dist/instagram-pro-launch.jpg | grep -Fq 'JPEG image data'
           grep -Fq 'https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=59348768-483e73d1-8b3f-450c-a610-b7ce39d70da9' calculafacil/pro.html
@@ -128,7 +132,7 @@ jobs:
           for attempt in $(seq 1 12); do
             echo "===== CALCULAFACIL LIVE SMOKE ATTEMPT $attempt ====="
             ok=1
-            for endpoint in index.html calculators.mjs styles.css pro.html robots.txt sitemap.xml instagram-pro-launch.jpg calcular-precio-venta-emprendimiento.html punto-de-equilibrio-emprendimiento.html 1dbf6671f85eb74a413f76fd2681d570.txt; do
+            for endpoint in index.html calculators.mjs styles.css pro.html robots.txt sitemap.xml instagram-pro-launch.jpg calcular-precio-venta-emprendimiento.html punto-de-equilibrio-emprendimiento.html 1dbf6671f85eb74a413f76fd2681d570.txt reels/precios-margen-2026.mp4; do
               file="/tmp/calculafacil-${endpoint//\//-}"
               status=$(curl --location --max-redirs 3 --proto-redir '=https' -sS --max-time 20 -H 'cache-control: no-cache' -o "$file" -w '%{http_code}' "$BASE/$endpoint?release=$GITHUB_SHA&attempt=$attempt" || true)
               echo "SMOKE_PATH=/$endpoint HTTP=${status:-ERR} BYTES=$(wc -c < "$file" 2>/dev/null || echo 0)"
@@ -139,6 +143,8 @@ jobs:
             done
             if [ "$ok" = 1 ]; then
               if grep -Fxq '1dbf6671f85eb74a413f76fd2681d570' /tmp/calculafacil-1dbf6671f85eb74a413f76fd2681d570.txt && \
+                 test "$(wc -c < /tmp/calculafacil-reels-precios-margen-2026.mp4)" -gt 25000 && \
+                 ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,height -of json /tmp/calculafacil-reels-precios-margen-2026.mp4 | jq -e '.streams[0].codec_name=="h264" and .streams[0].width==720 and .streams[0].height==1280' >/dev/null && \
                  test "$(wc -c < /tmp/calculafacil-instagram-pro-launch.jpg)" -ge 40000 && \
                  grep -q 'Los números' /tmp/calculafacil-index.html && \
                  grep -Fq 'Cómo calcular un precio de venta' /tmp/calculafacil-calcular-precio-venta-emprendimiento.html && \
