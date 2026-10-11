@@ -31,6 +31,33 @@ function htmlEscape(s) {
   return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 }
 const NO_CACHE = {"Cache-Control":"no-store, private","X-Content-Type-Options":"nosniff","Referrer-Policy":"no-referrer"};
+
+/** Privacy-safe error categories only: never echo remote responses, URL, token or exception text. */
+function safeOutboundReason(error){
+  const name=String(error?.name || "").toLowerCase();
+  const message=String(error?.message || "").toLowerCase();
+  if(name==="timeouterror" || name==="aborterror" || message.includes("timed out"))return "timeout";
+  if(message.includes("1042"))return "cloudflare_worker_loop_1042";
+  if(message.includes("1024"))return "cloudflare_ip_block_1024";
+  if(message.includes("1021"))return "cloudflare_host_block_1021";
+  if(message.includes("invalid") && (message.includes("header")||message.includes("character")))return "malformed_authorization_header";
+  if(message.includes("redirect"))return "redirect_rejected";
+  if(message.includes("dns") || message.includes("resolve"))return "dns_resolution";
+  if(name==="syntaxerror")return "invalid_json";
+  if(name==="typeerror")return "network_type_error";
+  return "unexpected_exception";
+}
+async function safeNetworkCheck(url,authorization){
+  try{
+    const response=await fetch(url,{
+      method:"GET",
+      headers:authorization?{"Authorization":"Bearer "+authorization.trim(),"Accept":"application/json"}:{"Accept":"application/json"},
+      redirect:"manual",signal:AbortSignal.timeout(8500)
+    });
+    return "http_"+response.status;
+  }catch(e){return safeOutboundReason(e);}
+}
+
 function json(body,status=200) {
   return Response.json(body,{status,headers:NO_CACHE});
 }
@@ -43,7 +70,7 @@ function page(title,content,status=200) {
   return new Response(body,{status,headers:{...NO_CACHE,"Content-Type":"text/html; charset=utf-8","Content-Security-Policy":"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"}});
 }
 async function mpGet(env,host,path) {
-  const response=await fetch('https://'+host+path,{headers:{"Authorization":"Bearer "+env.MP_ACCESS_TOKEN,"Accept":"application/json"},redirect:"error",signal:AbortSignal.timeout(9000)});
+  const response=await fetch('https://'+host+path,{headers:{"Authorization":"Bearer "+String(env.MP_ACCESS_TOKEN ?? "").trim(),"Accept":"application/json"},redirect:"error",signal:AbortSignal.timeout(9000)});
   if(!response.ok) throw new Error("mercadopago_api_unavailable");
   return await response.json();
 }
@@ -123,7 +150,7 @@ export default {
       try{
         const result=await fetch("https://api.mercadolibre.com/users/me",{
           method:"GET",
-          headers:{"Authorization":"Bearer "+env.MP_ACCESS_TOKEN,"Accept":"application/json"},
+          headers:{"Authorization":"Bearer "+String(env.MP_ACCESS_TOKEN ?? "").trim(),"Accept":"application/json"},
           redirect:"error",signal:AbortSignal.timeout(9000)
         });
         if(!result.ok) return json({ok:false,authenticated:false,deliveryEnabled:false,reason:"provider_http_"+result.status},503);
@@ -138,7 +165,7 @@ export default {
         let paymentsApi="not_checked";
         try{
           const paymentResponse=await fetch("https://api.mercadopago.com/v1/payments/search?limit=1",{
-            method:"GET",headers:{"Authorization":"Bearer "+env.MP_ACCESS_TOKEN,"Accept":"application/json"},
+            method:"GET",headers:{"Authorization":"Bearer "+String(env.MP_ACCESS_TOKEN ?? "").trim(),"Accept":"application/json"},
             redirect:"error",signal:AbortSignal.timeout(9000)
           });
           if(paymentResponse.ok){
@@ -148,9 +175,12 @@ export default {
             paymentsApi="http_"+paymentResponse.status;
           }
         }catch{paymentsApi="network_or_parse_error";}
-        const reason=error?.name==="TimeoutError"?"identity_timeout":
-          error?.name==="SyntaxError"?"identity_invalid_json":"identity_network_or_redirect";
-        return json({ok:false,authenticated:false,deliveryEnabled:false,reason,paymentsApi},503);
+        const reason="identity_"+safeOutboundReason(error);
+        const connectivity={
+          publicWeb:await safeNetworkCheck("https://example.com/",null),
+          mpNoAuth:await safeNetworkCheck("https://api.mercadopago.com/v1/payments/search?limit=1",null)
+        };
+        return json({ok:false,authenticated:false,deliveryEnabled:false,reason,paymentsApi,connectivity},503);
       }
     }
     if(url.pathname==="/health" && request.method==="GET") {
@@ -183,7 +213,7 @@ export default {
       return page("Pago confirmado","<p>Mercado Pago confirmó tu compra. El enlace estará disponible durante 15 minutos.</p><p><a class=\"action\" href=\""+htmlEscape(link)+"\">Descargar Excel PRO</a></p>");
     }
     if(url.pathname==="/download" && request.method==="GET") {
-      if(!env.PRO_KIT || !env.DOWNLOAD_SIGNING_KEY) return json({error:"delivery_not_configured"},503);
+      if(env.FULFILLMENT_ENABLED!=="true" || !env.PRO_KIT || !env.DOWNLOAD_SIGNING_KEY) return json({error:"delivery_not_configured"},503);
       const id=cleanPaymentId(url.searchParams.get("payment_id"));
       const rawUntil=url.searchParams.get("until")||"";
       const until=Number(rawUntil),sig=url.searchParams.get("sig")||"";

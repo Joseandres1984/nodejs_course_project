@@ -157,7 +157,13 @@ jobs:
                       import re
                       if not isinstance(reason,str) or not re.fullmatch("[a-z0-9_]{1,50}",reason): reason="unknown"
                       if not isinstance(payment_api,str) or not re.fullmatch("[a-z0-9_]{1,50}",payment_api): payment_api="unknown"
-                      error="PROVIDER_AUTH_NOT_CONFIRMED_"+reason+"_PAYMENTS_API_"+payment_api
+                      checks=data.get("connectivity") or {}
+                      if not isinstance(checks,dict): checks={}
+                      public=checks.get("publicWeb","unknown")
+                      mp=checks.get("mpNoAuth","unknown")
+                      if not isinstance(public,str) or not re.fullmatch("[a-z0-9_]{1,50}",public): public="unknown"
+                      if not isinstance(mp,str) or not re.fullmatch("[a-z0-9_]{1,50}",mp): mp="unknown"
+                      error="PROVIDER_AUTH_NOT_CONFIRMED_"+reason+"_PAYMENTS_API_"+payment_api+"_PUBLIC_"+public+"_MP_NOAUTH_"+mp
                       break
                   else:
                       error="PROVIDER_DIAGNOSTIC_HTTP_"+status

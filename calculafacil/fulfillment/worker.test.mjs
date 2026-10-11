@@ -184,3 +184,10 @@ test("Provider audit rejects test-user credentials and delivery already enabled"
   const r=await worker.fetch(new Request("https://fulfillment.example/__internal/provider-auth-check",{method:"POST",headers:{"X-LUMEN-AUDIT-KEY":enabled.PROVIDER_AUDIT_SECRET}}),enabled);
   assert.equal(r.status,503);
 });
+
+test("Signed delivery is disabled even if the R2 file and signing key exist",async()=>{
+  const disabled=makeEnv({FULFILLMENT_ENABLED:"false"});
+  const r=await worker.fetch(new Request("https://fulfillment.example/download?payment_id=12345678&until=9999999999999&sig=random"),disabled);
+  assert.equal(r.status,503);
+  assert.equal((await r.json()).error,"delivery_not_configured");
+});
