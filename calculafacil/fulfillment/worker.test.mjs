@@ -354,3 +354,38 @@ test("Buyer return from Mercado Pago prefills only numeric operation ID, never c
   assert.doesNotMatch(safe,/<script>/);
   assert.doesNotMatch(safe,/value=".*script/);
 });
+
+test("Exact production checkout lookup cannot be invoked without a private audit key",async()=>{
+  const env=makeEnv({FULFILLMENT_ENABLED:"false",PREFERENCE_AUDIT_KEY:"P".repeat(96)});
+  const r=await worker.fetch(new Request("https://fulfillment.example/__internal/get-production-checkout",{method:"POST"}),env);
+  assert.equal(r.status,404);
+});
+test("Exact production checkout lookup checks merchant identity, price and all return URLs",async()=>{
+  const old=globalThis.fetch;
+  const id="59348768-483e73d1-8b3f-450c-a610-b7ce39d70da9";
+  const url="https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id="+id;
+  const origin="https://calculafacil-pro-fulfillment.lumen-b2b.workers.dev/claim";
+  globalThis.fetch=async(link,opts)=>{
+    const path=new URL(link).pathname;
+    assert.match(opts.headers.Authorization,/^Bearer /);
+    if(path==="/users/me")return Response.json({id:44112233,site_id:"MLA"});
+    if(path==="/checkout/preferences/"+id)return Response.json({
+      id,init_point:url,collector_id:44112233,
+      items:[{title:"CalculaFácil PRO – Kit Excel",currency_id:"ARS",quantity:1,unit_price:9900}],
+      back_urls:{success:origin+"?resultado=aprobado",
+        failure:origin+"?resultado=rechazado",pending:origin+"?resultado=pendiente"}
+    });
+    return Response.json({error:"missing"},{status:404});
+  };
+  try{
+    const e=makeEnv({FULFILLMENT_ENABLED:"false",EXPECTED_PREFERENCE_ID:id,
+      PREFERENCE_AUDIT_KEY:"P".repeat(96)});
+    const r=await worker.fetch(new Request("https://fulfillment.example/__internal/get-production-checkout",{
+      method:"POST",headers:{"X-LUMEN-PREFERENCE-AUDIT-KEY":e.PREFERENCE_AUDIT_KEY}
+    }),e);
+    assert.equal(r.status,200);
+    const j=await r.json();
+    assert.equal(j.ok,true);assert.equal(j.checkoutUrl,url);
+    assert.equal(j.vendorVerified,true);assert.equal(j.amountVerified,true);assert.equal(j.paid,false);
+  }finally{globalThis.fetch=old;}
+});
