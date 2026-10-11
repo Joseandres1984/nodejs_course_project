@@ -339,3 +339,18 @@ test("Production preference setup rejects a test seller or unexpected checkout U
     assert.equal(response.status,503);
   }finally{globalThis.fetch=old;}
 });
+
+test("Buyer return from Mercado Pago prefills only numeric operation ID, never considers redirects payment proof",async()=>{
+  const env=makeEnv({FULFILLMENT_ENABLED:"false",EXPECTED_PREFERENCE_ID:"59348768-483e73d1-8b3f-450c-a610-b7ce39d70da9"});
+  const r=await worker.fetch(new Request("https://fulfillment.example/claim?resultado=aprobado&payment_id=183642547454"),env);
+  assert.equal(r.status,200);
+  const html=await r.text();
+  assert.match(html,/value="183642547454"/);
+  assert.match(html,/verificaremos el pago directamente/);
+  assert.doesNotMatch(html,/href="\/download/);
+  const malicious=await worker.fetch(new Request("https://fulfillment.example/claim?payment_id=%22%3E%3Cscript%3E"),env);
+  assert.equal(malicious.status,200);
+  const safe=await malicious.text();
+  assert.doesNotMatch(safe,/<script>/);
+  assert.doesNotMatch(safe,/value=".*script/);
+});
