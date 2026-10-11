@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: calculafacil-pro-private-r2-binding
+  group: calculafacil-pro-one-time-production-preference
   cancel-in-progress: false
 
 jobs:
