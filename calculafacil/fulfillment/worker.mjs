@@ -340,11 +340,25 @@ export default {
       return json({ok:true,service:"calculafacil-pro-fulfillment",ready:configured(env)&&stored,privateWorkbookPresent:stored,enabled:env.FULFILLMENT_ENABLED==="true",provider:"mercadopago",paymentsMadeByServer:false,storagePrivate:true});
     }
     if(url.pathname==="/claim" && request.method==="GET") {
+      // Provider redirect query strings are merely hints, never proof of payment.
+      const paymentId=cleanPaymentId(url.searchParams.get("payment_id"))||
+        cleanPaymentId(url.searchParams.get("collection_id"))||"";
+      const hint=url.searchParams.get("resultado")||"";
+      const message=hint==="aprobado"
+        ? "Volviste de Mercado Pago. Para descargar, verificaremos el pago directamente con la API, no con esta redirección."
+        : hint==="pendiente"
+        ? "Si tu pago está pendiente, esperá a que Mercado Pago lo apruebe antes de descargar."
+        : hint==="rechazado"
+        ? "Si no se aprobó el pago, no se habilitará ninguna descarga."
+        : "Si ya compraste CalculaFácil PRO por AR$ 9.900, verificá tu operación para descargar el archivo.";
+      const prefill=paymentId?' value="'+htmlEscape(paymentId)+'"':"";
       return page("Descargá tu Kit PRO",
-        '<p>Si ya pagaste AR$ 9.900 a LUMEN por CalculaFácil PRO, ingresá el número de operación y el correo utilizado en Mercado Pago. Solo un pago aprobado y coincidente permite descargar el archivo.</p>'+
-        '<form method="post" action="/claim"><label>Correo del pago<input type="email" name="email" required maxlength="254" autocomplete="email"></label>'+
-        '<label>Número de operación de Mercado Pago<input name="payment_id" inputmode="numeric" pattern="[0-9]{6,25}" required></label>'+
-        '<button type="submit">Verificar y descargar</button></form><p><small>Si el pago fue en efectivo, esperá su aprobación. La verificación no realiza cargos.</small></p>');
+        "<p>"+htmlEscape(message)+"</p>"+
+        '<p><small>Ingresá el correo usado en Mercado Pago y el número de operación del comprobante. Nunca te pediremos contraseña ni datos de tarjeta.</small></p>'+
+        '<form method="post" action="/claim"><label>Correo usado para pagar<input type="email" name="email" required maxlength="254" autocomplete="email"></label>'+
+        '<label>Número de operación de Mercado Pago<input name="payment_id" inputmode="numeric" pattern="[0-9]{6,25}" required'+prefill+'></label>'+
+        '<button type="submit">Verificar pago y descargar Excel</button></form>'+
+        '<p><small>La descarga solo se habilita si el pago está aprobado, corresponde a este producto y coincide con el vendedor. Podés repetir la verificación sin que genere un nuevo cobro.</small></p>');
     }
     if(url.pathname==="/claim" && request.method==="POST") {
       if(!configured(env)) return page("Entrega en preparación","<p>El sistema de entrega todavía no está habilitado. No se efectuó ningún cargo.</p>",503);
