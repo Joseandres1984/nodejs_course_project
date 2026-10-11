@@ -1,0 +1,16 @@
+{
+  "provider": "mercadopago",
+  "product": "CalculaFácil PRO – Kit Excel",
+  "currency": "ARS",
+  "expected_amount": 9900,
+  "payment_url": "https://mpago.li/1NuWTrY",
+  "checkout_enabled": false,
+  "checkout_verification": "pending_independent_provider_verification",
+  "delivery": {
+    "mode": "not_configured",
+    "automated": false,
+    "artifact": "CalculaFacil_PRO_Kit_v1.xlsx",
+    "private_delivery_required": true
+  },
+  "notes": "El enlace fue proporcionado por el titular. No cobrar desde la web antes de comprobar importe, beneficiario y entrega. Nunca confundir abrir URL con confirmar pago."
+}
