@@ -50,7 +50,7 @@ jobs:
               print("DOWNLOAD_SIGNING_KEY_PRESENT_ALREADY_NO_CHANGE")
           else:
               secret=secrets.token_hex(48)
-              status,result=call("POST",{"name":"DOWNLOAD_SIGNING_KEY","text":secret,"type":"secret_text"})
+              status,result=call("PUT",{"name":"DOWNLOAD_SIGNING_KEY","text":secret,"type":"secret_text"})
               if status not in (200,201) or not result.get("success"):
                   sys.exit("SIGNING_SECRET_CREATE_FAILED")
               print("DOWNLOAD_SIGNING_KEY_CREATED_VALUE_NEVER_EXPORTED")
