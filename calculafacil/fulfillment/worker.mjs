@@ -166,6 +166,71 @@ async function limitClaim(env,request) {
 export default {
   async fetch(request,env) {
     const url=new URL(request.url);
+
+    // Single-use administrator preference setup: creates a Checkout Pro OFFER,
+    // not a payment. Requires an independent short-lived secret; commercial
+    // fulfillment must still be OFF. Never follow redirects with bearer tokens.
+    if(url.pathname==="/__internal/create-production-preference" && request.method==="POST"){
+      const key=env.PREFERENCE_SETUP_KEY;
+      const supplied=request.headers.get("X-LUMEN-PREFERENCE-SETUP-KEY")||"";
+      if(typeof key!=="string"||key.length<48||supplied!==key)
+        return json({error:"not_found"},404);
+      if(env.FULFILLMENT_ENABLED==="true")
+        return json({error:"setup_unavailable_after_launch"},503);
+      if(!env.MP_ACCESS_TOKEN||!env.PRO_KIT||!await env.PRO_KIT.head(FILE_KEY).catch(()=>null))
+        return json({error:"merchant_or_file_not_ready"},503);
+      try{
+        const merchant=await mpGet(env,"api.mercadolibre.com","/users/me");
+        if(!merchant?.id||merchant?.site_id!=="MLA"||
+           (Array.isArray(merchant?.tags)&&merchant.tags.includes("test_user")))
+          return json({error:"production_merchant_not_verified"},503);
+        const origin="https://calculafacil-pro-fulfillment.lumen-b2b.workers.dev";
+        const body={
+          items:[{id:"CALCULAFACIL_PRO_V1",title:PRODUCT_NAME,
+            description:"Kit Excel editable con 7 hojas",quantity:1,currency_id:"ARS",unit_price:9900}],
+          external_reference:"CALCULAFACIL_PRO_LUMEN_2026",
+          back_urls:{
+            success:origin+"/claim?resultado=aprobado",
+            pending:origin+"/claim?resultado=pendiente",
+            failure:origin+"/claim?resultado=rechazado"
+          },
+          auto_return:"approved",
+          binary_mode:false
+        };
+        const response=await fetch("https://api.mercadopago.com/checkout/preferences",{
+          method:"POST",headers:{
+            "Authorization":"Bearer "+String(env.MP_ACCESS_TOKEN).trim(),
+            "Content-Type":"application/json",
+            "Accept":"application/json",
+            "X-Idempotency-Key":crypto.randomUUID()
+          },body:JSON.stringify(body),redirect:"manual",signal:AbortSignal.timeout(10000)
+        });
+        if(![200,201].includes(response.status))
+          return json({error:"preference_create_http_"+response.status},503);
+        const pref=await response.json();
+        const prefId=String(pref?.id||"");
+        const checkoutUrl=String(pref?.init_point||"");
+        let checkout;
+        try{checkout=new URL(checkoutUrl);}catch{}
+        const allowedHosts=new Set(["www.mercadopago.com.ar","mercadopago.com.ar",
+          "www.mercadopago.com","mercadopago.com"]);
+        if(!prefId||String(pref?.collector_id)!==String(merchant.id)||
+           !checkout||checkout.protocol!=="https:"||!allowedHosts.has(checkout.hostname.toLowerCase())||
+           checkout.pathname.includes("sandbox"))
+          return json({error:"invalid_production_preference"},503);
+        const verified=await mpGet(env,"api.mercadopago.com","/checkout/preferences/"+encodeURIComponent(prefId));
+        const item=Array.isArray(verified?.items)?verified.items[0]:null;
+        if(String(verified?.id)!==prefId||
+           String(verified?.collector_id)!==String(merchant.id)||
+           !Array.isArray(verified?.items)||verified.items.length!==1||
+           !matchItem(item)||
+           !String(verified?.back_urls?.success||"").startsWith(origin+"/claim?"))
+          return json({error:"preference_readback_mismatch"},503);
+        return json({ok:true,paymentCharged:false,commercialDeliveryEnabled:false,
+          preferenceId:prefId,checkoutUrl:checkout.toString(),
+          sellerVerified:true,productVerified:true,backUrlsVerified:true});
+      }catch{return json({error:"preference_provider_unavailable"},503);}
+    }
     // Privileged diagnostic; never accepts buyer data, issues payments, or exposes identities.
     if(url.pathname==="/__internal/provider-auth-check" && request.method==="POST") {
       const key=env.PROVIDER_AUDIT_SECRET;
