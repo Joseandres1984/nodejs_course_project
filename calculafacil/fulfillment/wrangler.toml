@@ -8,6 +8,7 @@ workers_dev = true
 # Public, non-secret configuration.
 FULFILLMENT_ENABLED = "false" # Keep off until buyer journey is proven
 EXPECTED_AMOUNT_ARS = "9900"
+EXPECTED_PREFERENCE_ID = "59348768-483e73d1-8b3f-450c-a610-b7ce39d70da9"
 PRO_KIT_OBJECT_KEY = "calculafacil-pro/CalculaFacil_PRO_Kit_v1.xlsx"
 
 [[r2_buckets]]
