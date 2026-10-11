@@ -191,3 +191,17 @@ test("Signed delivery is disabled even if the R2 file and signing key exist",asy
   assert.equal(r.status,503);
   assert.equal((await r.json()).error,"delivery_not_configured");
 });
+
+test("Provider redirects cannot be followed with merchant credentials",async()=>{
+  const original=globalThis.fetch;
+  let calls=0;
+  globalThis.fetch=async(_url,options)=>{
+    calls++;
+    assert.equal(options.redirect,"manual");
+    return new Response(null,{status:302,headers:{"Location":"https://attacker.example/steal"}});
+  };
+  try{
+    await assert.rejects(()=>verifyPurchase(makeEnv(),paymentId,email),/mercadopago_redirect_not_allowed/);
+    assert.equal(calls,1,"Never follow provider redirects or send credentials to another host");
+  }finally{globalThis.fetch=original;}
+});
