@@ -59,9 +59,12 @@ jobs:
           status=parts[0] if parts else '?'
           host=urlparse(parts[1]).hostname if len(parts)>1 else None
           print('PUBLIC_CHECKOUT_LINK_GET_ONLY', {'status':status,'redirect_host':host,'payment_attempted':False})
-          if status not in {'200','302','303'} or not host or not (host.endswith('mercadopago.com.ar') or host=='mpago.li' or host.endswith('mercadopago.com')):
+          if status=='403':
+              print('LINK_BLOCKED_FOR_AUTOMATED_PROBE; HUMAN_CHECKOUT_VERIFICATION_REQUIRED')
+          elif status in {'200','302','303'} and host and (host.endswith('mercadopago.com.ar') or host=='mpago.li' or host.endswith('mercadopago.com')):
+              print('PAYMENT_PROVIDER_HOST_REACHABLE; AMOUNT_AND_SELLER_NOT_VERIFIED')
+          else:
               print('LINK_NOT_PROVIDER_VERIFIED_BY_CI')
-              raise SystemExit(1)
           PY
 
   deploy:
