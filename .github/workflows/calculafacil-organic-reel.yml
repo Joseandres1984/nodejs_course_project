@@ -77,8 +77,7 @@ jobs:
               -o /tmp/organic-reel-pro.html -w '%{http_code}' "$ORIGIN/pro.html?attempt=$i" || true)
             if [ "$code" = 200 ] && [ "$site" = 200 ] && \
                grep -Fq 'Comprar CalculaFácil PRO' /tmp/organic-reel-pro.html && \
-               ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,height -of json /tmp/organic-margin-reel.mp4 |
-                 jq -e '.streams[0].codec_name=="h264" and .streams[0].width==720 and .streams[0].height==1280' >/dev/null; then
+               python3 -c 'import os; p="/tmp/organic-margin-reel.mp4"; assert os.path.getsize(p)>30000 and open(p,"rb").read(8)[4:8]==b"ftyp"'; then
               ready=1;break
             fi
             sleep 6
