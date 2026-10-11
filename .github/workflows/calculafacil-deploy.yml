@@ -38,8 +38,9 @@ jobs:
           grep -q 'id="herramientas"' calculafacil/index.html
           grep -q 'lang="es-AR"' calculafacil/index.html
           ! grep -Ei 'google-analytics|gtag\(|facebook\.com/tr|pixel\(' calculafacil/index.html calculafacil/app.js calculafacil/styles.css calculafacil/pro.html
-          grep -q 'Compras todavía no habilitadas' calculafacil/pro.html
+          grep -q 'El enlace de Mercado Pago ya está preparado' calculafacil/pro.html
           grep -q 'href="/pro.html"' calculafacil/index.html
+          node -e 'const x=require("./calculafacil/payment-config.json"); if(x.checkout_enabled!==false||x.delivery.automated!==false||x.expected_amount!==9900||x.currency!=="ARS"||x.payment_url!=="https://mpago.li/1NuWTrY") process.exit(1); console.log("PAYMENT_LINK_RECORDED_CHECKOUT_STILL_DISABLED")'
 
   deploy:
     needs: validate
@@ -96,7 +97,7 @@ jobs:
               if grep -q 'Los números' /tmp/calculafacil-index.html && \
                  grep -q 'export function margin' /tmp/calculafacil-calculators.mjs && \
                  grep -q 'tool-card' /tmp/calculafacil-styles.css && \
-                 grep -q 'Compras todavía no habilitadas' /tmp/calculafacil-pro.html && \
+                 grep -q 'El enlace de Mercado Pago ya está preparado' /tmp/calculafacil-pro.html && \
                  grep -q 'sitemap.xml' /tmp/calculafacil-robots.txt && \
                  grep -q '/pro.html' /tmp/calculafacil-sitemap.xml; then
                 echo 'CALCULAFACIL_LIVE_SITE_AND_ASSETS_VERIFIED'
