@@ -1,0 +1,102 @@
+name: CalculaFácil PRO — launch on connected LUMEN Instagram (organic)
+
+on:
+  pull_request:
+    branches: [lumen-zero]
+    paths:
+      - "calculafacil/instagram/publish_launch.py"
+      - ".github/workflows/calculafacil-instagram-launch.yml"
+  push:
+    branches: [lumen-zero]
+    paths:
+      - "calculafacil/instagram/publish_launch.py"
+      - ".github/workflows/calculafacil-instagram-launch.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: calculafacil-pro-one-time-instagram-organic-launch
+  cancel-in-progress: false
+
+jobs:
+  offline-campaign-qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install open source image renderer
+        run: python -m pip install --disable-pip-version-check pillow
+      - name: Verify honest offer, correct amount and campaign creative
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile calculafacil/marketing/make_instagram.py calculafacil/instagram/publish_launch.py
+          python calculafacil/instagram/publish_launch.py --self-test
+          python calculafacil/marketing/make_instagram.py /tmp/calculafacil-instagram-test.jpg
+          python - <<'PY'
+          from PIL import Image
+          p="/tmp/calculafacil-instagram-test.jpg"
+          with Image.open(p) as pic:
+              assert pic.format=="JPEG" and pic.size==(1080,1350)
+          print("INSTAGRAM_IMAGE_QUALITY_VERIFIED")
+          PY
+          grep -Fq '"checkout_enabled": true' calculafacil/payment-config.json
+          grep -Fq 'EXPECTED_PREFERENCE_ID = "59348768-483e73d1-8b3f-450c-a610-b7ce39d70da9"' calculafacil/fulfillment/wrangler.toml
+
+  publish-one-organic-post:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    needs: offline-campaign-qa
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      LUMEN_INSTAGRAM_ACCESS_TOKEN: ${{ secrets.LUMEN_INSTAGRAM_ACCESS_TOKEN }}
+      LUMEN_IG_ONE_TIME_CAMPAIGN_AUTHORIZATION: organic_calculafacil_pro_launch_20261011
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install image validation dependency
+        run: python -m pip install --disable-pip-version-check pillow
+      - name: Wait for deployed public media and active protected PRO checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${LUMEN_INSTAGRAM_ACCESS_TOKEN:-}"
+          BASE='https://calculafacil.lumen-b2b.workers.dev'
+          ready=0
+          for attempt in $(seq 1 40); do
+            status=$(curl -sS -L --max-redirs 2 --proto-redir '=https' -o /tmp/cf-pro-ig-creative.jpg -w '%{http_code}' --max-time 14 \
+              "$BASE/instagram-pro-launch.jpg?release=$GITHUB_SHA&attempt=$attempt" || true)
+            pro_status=$(curl -sS -L --max-redirs 2 --proto-redir '=https' -o /tmp/cf-pro-ig-page.html -w '%{http_code}' --max-time 14 \
+              "$BASE/pro.html?release=$GITHUB_SHA&attempt=$attempt" || true)
+            if [ "$status" = "200" ] && [ "$pro_status" = "200" ] && \
+               grep -Fq 'Comprar CalculaFácil PRO' /tmp/cf-pro-ig-page.html && \
+               grep -Fq '59348768-483e73d1-8b3f-450c-a610-b7ce39d70da9' /tmp/cf-pro-ig-page.html && \
+               python - <<'PY'
+          from PIL import Image
+          p='/tmp/cf-pro-ig-creative.jpg'
+          with Image.open(p) as image:
+              assert image.format=="JPEG" and image.size==(1080,1350)
+          PY
+            then
+              ready=1
+              break
+            fi
+            sleep 6
+          done
+          test "$ready" = "1"
+          echo "PUBLIC_INSTAGRAM_CREATIVE_AND_CHECKOUT_VERIFIED"
+          health=$(curl -sS -o /tmp/cf-pro-ig-health.json -w '%{http_code}' --max-time 15 \
+            'https://calculafacil-pro-fulfillment.lumen-b2b.workers.dev/health')
+          test "$health" = "200"
+          jq -e '.ok==true and .ready==true and .enabled==true and .privateWorkbookPresent==true' \
+            /tmp/cf-pro-ig-health.json >/dev/null
+          echo "PRIVATE_DELIVERY_READY_BEFORE_INSTAGRAM_PUBLICATION"
+      - name: Publish exactly one user-authorized post to @lumen.b2b and confirm provider receipt
+        run: python calculafacil/instagram/publish_launch.py
