@@ -1,0 +1,52 @@
+name: CalculaFácil PRO — verify real private XLSX download
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - ".github/workflows/calculafacil-pro-private-xlsx-download.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: calculafacil-pro-private-r2-binding
+  cancel-in-progress: false
+
+jobs:
+  private-download-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Offline tests and commercial lock
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check calculafacil/fulfillment/worker.mjs
+          node --test calculafacil/fulfillment/worker.test.mjs
+          python3 -m py_compile calculafacil/fulfillment/probe_private_download.py
+          grep -Fq 'FULFILLMENT_ENABLED = "false"' calculafacil/fulfillment/wrangler.toml
+          grep -Fq '"checkout_enabled": false' calculafacil/payment-config.json
+          grep -Fq 'bucket_name = "calculafacil-pro-private"' calculafacil/fulfillment/wrangler.toml
+      - name: Deploy private Worker with commercial delivery disabled
+        working-directory: calculafacil/fulfillment
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4 deploy --config wrangler.toml
+      - name: Download private Excel through Worker with ephemeral authenticated HTTP test
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 calculafacil/fulfillment/probe_private_download.py
