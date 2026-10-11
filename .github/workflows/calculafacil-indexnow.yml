@@ -1,0 +1,93 @@
+name: CalculaFácil — notify search engines of new finance guides (IndexNow)
+
+on:
+  pull_request:
+    branches: [lumen-zero]
+    paths:
+      - 'calculafacil/1dbf6671f85eb74a413f76fd2681d570.txt'
+      - '.github/workflows/calculafacil-indexnow.yml'
+  push:
+    branches: [lumen-zero]
+    paths:
+      - 'calculafacil/1dbf6671f85eb74a413f76fd2681d570.txt'
+      - '.github/workflows/calculafacil-indexnow.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: calculafacil-indexnow-first-submission
+  cancel-in-progress: false
+
+jobs:
+  validate-key-and-pages:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify same-domain key, sitemap and honest content
+        shell: bash
+        run: |
+          set -euo pipefail
+          KEY='1dbf6671f85eb74a413f76fd2681d570'
+          test "$(tr -d '\n' < "calculafacil/$KEY.txt")" = "$KEY"
+          grep -Fq '/calcular-precio-venta-emprendimiento.html' calculafacil/sitemap.xml
+          grep -Fq '/punto-de-equilibrio-emprendimiento.html' calculafacil/sitemap.xml
+          grep -Fq '"checkout_enabled": true' calculafacil/payment-config.json
+          echo "SITEMAP_AND_INDEXNOW_KEY_PREPARED"
+  notify-search-engines:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    needs: validate-key-and-pages
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Wait for public verification key to deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          KEY='1dbf6671f85eb74a413f76fd2681d570'
+          ORIGIN='https://calculafacil.lumen-b2b.workers.dev'
+          for attempt in $(seq 1 35); do
+            code=$(curl --silent --show-error --max-time 12 --max-redirs 0 \
+              -o /tmp/indexnow-key.txt -w '%{http_code}' "$ORIGIN/$KEY.txt?attempt=$attempt" || true)
+            if [ "$code" = 200 ] && grep -Fxq "$KEY" /tmp/indexnow-key.txt; then
+              echo 'INDEXNOW_OWNERSHIP_FILE_PUBLIC_AND_VERIFIED'
+              exit 0
+            fi
+            sleep 6
+          done
+          echo 'INDEXNOW_KEY_NOT_PUBLIC; NO_SEARCH_ENGINE_SUBMISSION'
+          exit 1
+      - name: Submit four verified pages to IndexNow (not a Google submission)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,sys,urllib.error,urllib.request
+          host="calculafacil.lumen-b2b.workers.dev"
+          key="1dbf6671f85eb74a413f76fd2681d570"
+          origin="https://"+host
+          urls=[origin+"/",origin+"/pro.html",
+             origin+"/calcular-precio-venta-emprendimiento.html",
+             origin+"/punto-de-equilibrio-emprendimiento.html"]
+          data={"host":host,"key":key,"keyLocation":origin+"/"+key+".txt","urlList":urls}
+          req=urllib.request.Request("https://api.indexnow.org/indexnow",
+              method="POST",data=json.dumps(data).encode("utf-8"),
+              headers={"Content-Type":"application/json; charset=utf-8",
+                       "Accept":"application/json","User-Agent":"CalculaFacil-IndexNow/1.0"})
+          try:
+              with urllib.request.urlopen(req,timeout=35) as resp:
+                  status=resp.status
+          except urllib.error.HTTPError as exc:
+              status=exc.code
+          except (urllib.error.URLError,TimeoutError):
+              sys.exit("INDEXNOW_NETWORK_UNAVAILABLE")
+          print("INDEXNOW_PROVIDER_HTTP="+str(status))
+          print("URLS_SUBMITTED_COUNT="+str(len(urls)))
+          print("NO_PAID_ADVERTISING=YES")
+          if status in (200,202):
+              print("INDEXNOW_URLS_RECEIVED_NO_INDEXING_OR_TRAFFIC_GUARANTEED")
+          else:
+              sys.exit("INDEXNOW_SUBMISSION_NOT_ACCEPTED")
+          PY
