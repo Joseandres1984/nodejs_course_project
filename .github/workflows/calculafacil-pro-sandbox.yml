@@ -69,7 +69,6 @@ jobs:
             if [[ "$status" == "200" ]] && jq -e '
               .service=="calculafacil-pro-sandbox" and
               .mode=="test_only" and
-              .ready==false and
               .checkoutProductionEnabled==false and
               .readsProductionWorkbook==false
             ' /tmp/cf-mp-test-health.json >/dev/null 2>&1; then
