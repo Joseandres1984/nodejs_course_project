@@ -11,7 +11,7 @@ const payment={
   order:{id:98765432}
 };
 const order={
-  id:98765432,collector:{id:merchantId},preference_id:"PREFERENCE-PRO-UNIQUE",
+  id:98765432,status:"closed",collector:{id:merchantId},preference_id:"PREFERENCE-PRO-UNIQUE",
   items:[{title:"CalculaFácil PRO – Kit Excel",currency_id:"ARS",quantity:1,unit_price:9900}],
   payments:[{id:Number(paymentId),status:"approved"}]
 };
@@ -87,7 +87,9 @@ test("API: rejects other products and other order payment references",async()=>{
     {items:[{title:"Bolso",currency_id:"ARS",quantity:1,unit_price:9900}]},
     {items:[{title:"CalculaFácil PRO – Kit Excel",currency_id:"ARS",quantity:2,unit_price:9900}]},
     {payments:[{id:888888,status:"approved"}]},
-    {payments:[{id:Number(paymentId),status:"pending"}]}
+    {payments:[{id:Number(paymentId),status:"pending"}]},
+    {status:"opened"},
+    {items:[{title:"CalculaFácil PRO – Kit Excel",quantity:1,unit_price:9900}]}
   ]){
     const restore=installMockFetch({order:patch});
     try{assert.equal(await verifyPurchase(makeEnv(),paymentId,email),false);}
