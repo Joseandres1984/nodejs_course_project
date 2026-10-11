@@ -83,6 +83,8 @@ jobs:
           cp calculafacil/index.html calculafacil/styles.css calculafacil/app.js calculafacil/calculators.mjs calculafacil/favicon.svg calculafacil/pro.html calculafacil/robots.txt calculafacil/sitemap.xml calculafacil/_headers calculafacil/calcular-precio-venta-emprendimiento.html calculafacil/punto-de-equilibrio-emprendimiento.html calculafacil/1dbf6671f85eb74a413f76fd2681d570.txt calculafacil/dist/
           python3 -m pip install --disable-pip-version-check --quiet Pillow
           python3 calculafacil/marketing/make_instagram.py calculafacil/dist/instagram-pro-launch.jpg
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
           command -v ffmpeg >/dev/null
           command -v ffprobe >/dev/null
           python3 calculafacil/marketing/render_margin_reel.py calculafacil/dist/reels/precios-margen-2026.mp4
