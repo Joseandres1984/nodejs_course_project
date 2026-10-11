@@ -45,12 +45,11 @@ async function createPreference(env){
   });
   if(response.status!==201&&response.status!==200)throw new Error("test_preference_not_created");
   const data=await response.json();
-  const raw=data?.sandbox_init_point||data?.init_point;
-  if(typeof raw!=="string"||!String(data?.id||""))throw new Error("invalid_test_preference");
+  const raw=data?.sandbox_init_point;
+  if(typeof raw!=="string"||!String(data?.id||"") || String(data?.collector_id)!==String(env.EXPECTED_TEST_SELLER_ID))throw new Error("invalid_test_preference");
   const url=new URL(raw);
   if(url.protocol!=="https:"||![
-    "www.mercadopago.com.ar","mercadopago.com.ar","sandbox.mercadopago.com.ar","www.mercadopago.com",
-    "mercadopago.com","www.mercadopago.com.br","mercadopago.com.br"
+    "sandbox.mercadopago.com","sandbox.mercadopago.com.ar"
   ].includes(url.hostname.toLowerCase()))throw new Error("unexpected_checkout_origin");
   return {checkout_url:url.toString(),preference_id:String(data.id)};
 }

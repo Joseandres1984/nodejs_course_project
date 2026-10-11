@@ -34,7 +34,7 @@ jobs:
           set -euo pipefail
           node --check calculafacil/sandbox/worker.mjs
           node --test calculafacil/sandbox/worker.test.mjs
-          grep -Fq 'SANDBOX_ENABLED = "false"' calculafacil/sandbox/wrangler.toml
+          grep -Fq 'SANDBOX_ENABLED = "true"' calculafacil/sandbox/wrangler.toml
           ! grep -Eq 'r2_buckets|MP_ACCESS_TOKEN|FULFILLMENT_ENABLED|CalculaFacil_PRO_Kit_v1.xlsx' calculafacil/sandbox/wrangler.toml
           ! grep -Fq 'https://mpago.li/1NuWTrY' calculafacil/sandbox/worker.mjs
           grep -Fq 'EXPECTED_TEST_SELLER_ID' calculafacil/sandbox/worker.mjs
@@ -69,7 +69,6 @@ jobs:
             if [[ "$status" == "200" ]] && jq -e '
               .service=="calculafacil-pro-sandbox" and
               .mode=="test_only" and
-              .ready==false and
               .checkoutProductionEnabled==false and
               .readsProductionWorkbook==false
             ' /tmp/cf-mp-test-health.json >/dev/null 2>&1; then
