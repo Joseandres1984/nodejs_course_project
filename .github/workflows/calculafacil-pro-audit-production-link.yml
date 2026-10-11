@@ -1,0 +1,52 @@
+name: CalculaFácil PRO — verify official production link before launch
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - ".github/workflows/calculafacil-pro-audit-production-link.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: calculafacil-pro-link-audit-2026
+  cancel-in-progress: false
+
+jobs:
+  verify-official-provider-link:
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Ensure payment fulfillment and the site remain closed
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check calculafacil/fulfillment/worker.mjs
+          node --test calculafacil/fulfillment/worker.test.mjs
+          python3 -m py_compile calculafacil/fulfillment/audit_production_link.py
+          grep -Fq 'FULFILLMENT_ENABLED = "false"' calculafacil/fulfillment/wrangler.toml
+          grep -Fq '"checkout_enabled": false' calculafacil/payment-config.json
+          grep -Fq 'EXPECTED_PREFERENCE_ID = "59348768-483e73d1-8b3f-450c-a610-b7ce39d70da9"' calculafacil/fulfillment/wrangler.toml
+      - name: Deploy safe read-only preference audit route
+        working-directory: calculafacil/fulfillment
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4 deploy --config wrangler.toml
+      - name: Retrieve provider-verified checkout URL and then remove admin key
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          python3 calculafacil/fulfillment/audit_production_link.py
