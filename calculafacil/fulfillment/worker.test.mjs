@@ -155,14 +155,14 @@ test("Public: no purchase when only a screenshot, redirect or unsigned token exi
 });
 
 test("Provider audit route is inaccessible without its independent ephemeral key",async()=>{
-  const env=makeEnv({PROVIDER_AUDIT_SECRET:"test-temporary-private-probe-key-min-48-chars-xxxxxxxx"});
+  const env=makeEnv({FULFILLMENT_ENABLED:"false",PROVIDER_AUDIT_SECRET:"test-temporary-private-probe-key-min-48-chars-xxxxxxxx"});
   for(const headers of [{},{"X-LUMEN-AUDIT-KEY":"wrong"}]){
     const r=await worker.fetch(new Request("https://fulfillment.example/__internal/provider-auth-check",{method:"POST",headers}),env);
     assert.equal(r.status,404);
   }
 });
 test("Provider audit verifies a live merchant identity by read-only GET (mocked)",async()=>{
-  const env=makeEnv({PROVIDER_AUDIT_SECRET:"test-temporary-private-probe-key-min-48-chars-xxxxxxxx"});
+  const env=makeEnv({FULFILLMENT_ENABLED:"false",PROVIDER_AUDIT_SECRET:"test-temporary-private-probe-key-min-48-chars-xxxxxxxx"});
   const restore=installMockFetch({merchant:{site_id:"MLA",tags:[]}});
   try{
     const r=await worker.fetch(new Request("https://fulfillment.example/__internal/provider-auth-check",{method:"POST",headers:{"X-LUMEN-AUDIT-KEY":env.PROVIDER_AUDIT_SECRET}}),env);
@@ -173,7 +173,7 @@ test("Provider audit verifies a live merchant identity by read-only GET (mocked)
   }finally{restore();}
 });
 test("Provider audit rejects test-user credentials and delivery already enabled",async()=>{
-  const env=makeEnv({PROVIDER_AUDIT_SECRET:"test-temporary-private-probe-key-min-48-chars-xxxxxxxx"});
+  const env=makeEnv({FULFILLMENT_ENABLED:"false",PROVIDER_AUDIT_SECRET:"test-temporary-private-probe-key-min-48-chars-xxxxxxxx"});
   const restore=installMockFetch({merchant:{site_id:"MLA",tags:["test_user"]}});
   try{
     const r=await worker.fetch(new Request("https://fulfillment.example/__internal/provider-auth-check",{method:"POST",headers:{"X-LUMEN-AUDIT-KEY":env.PROVIDER_AUDIT_SECRET}}),env);
