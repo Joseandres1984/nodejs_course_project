@@ -96,7 +96,10 @@ function page(title,content,status=200) {
   return new Response(body,{status,headers:{...NO_CACHE,"Content-Type":"text/html; charset=utf-8","Content-Security-Policy":"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"}});
 }
 async function mpGet(env,host,path) {
-  const response=await fetch('https://'+host+path,{headers:{"Authorization":"Bearer "+String(env.MP_ACCESS_TOKEN ?? "").trim(),"Accept":"application/json"},redirect:"error",signal:AbortSignal.timeout(9000)});
+  // Workers rejects some valid authenticated responses with redirect:"error".
+  // Manual mode prevents following a redirect and therefore never forwards bearer tokens.
+  const response=await fetch('https://'+host+path,{headers:{"Authorization":"Bearer "+String(env.MP_ACCESS_TOKEN ?? "").trim(),"Accept":"application/json"},redirect:"manual",signal:AbortSignal.timeout(9000)});
+  if(response.status>=300 && response.status<400) throw new Error("mercadopago_redirect_not_allowed");
   if(!response.ok) throw new Error("mercadopago_api_unavailable");
   return await response.json();
 }
@@ -177,8 +180,10 @@ export default {
         const result=await fetch("https://api.mercadolibre.com/users/me",{
           method:"GET",
           headers:{"Authorization":"Bearer "+String(env.MP_ACCESS_TOKEN ?? "").trim(),"Accept":"application/json"},
-          redirect:"error",signal:AbortSignal.timeout(9000)
+          redirect:"manual",signal:AbortSignal.timeout(9000)
         });
+        if(result.status>=300 && result.status<400)
+          return json({ok:false,authenticated:false,deliveryEnabled:false,reason:"provider_redirect_not_allowed"},503);
         if(!result.ok) return json({ok:false,authenticated:false,deliveryEnabled:false,reason:"provider_http_"+result.status},503);
         const user=await result.json();
         const authenticated=!!(user && user.id);
@@ -192,7 +197,7 @@ export default {
         try{
           const paymentResponse=await fetch("https://api.mercadopago.com/v1/payments/search?limit=1",{
             method:"GET",headers:{"Authorization":"Bearer "+String(env.MP_ACCESS_TOKEN ?? "").trim(),"Accept":"application/json"},
-            redirect:"error",signal:AbortSignal.timeout(9000)
+            redirect:"manual",signal:AbortSignal.timeout(9000)
           });
           if(paymentResponse.ok){
             const paymentData=await paymentResponse.json();
