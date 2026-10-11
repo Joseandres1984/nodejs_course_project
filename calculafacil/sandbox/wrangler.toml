@@ -5,5 +5,5 @@ compatibility_date = "2026-10-11"
 workers_dev = true
 
 [vars]
-SANDBOX_ENABLED = "false"
+SANDBOX_ENABLED = "true" # TEST SELLER ONLY: no access to production payment, workbook, or buyer fulfillment
 EXPECTED_TEST_SELLER_ID = "3566088094"
