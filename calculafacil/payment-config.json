@@ -4,7 +4,7 @@
   "currency": "ARS",
   "expected_amount": 9900,
   "payment_url": "https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=59348768-483e73d1-8b3f-450c-a610-b7ce39d70da9",
-  "checkout_enabled": false,
+  "checkout_enabled": true,
   "checkout_verification": "merchant_amount_item_and_back_urls_checked_via_official_mp_api_20261011",
   "delivery": {
     "mode": "self_service_approved_payment_claim",
@@ -15,10 +15,12 @@
     "redemption_url": "https://calculafacil-pro-fulfillment.lumen-b2b.workers.dev/claim",
     "human_action": "buyer enters email and payment ID; approval verified automatically"
   },
-  "notes": "Checkout oficial preparado; publicación pendiente de health-check live. El enlace legado mpago.li no forma parte del sistema de entrega seguro.",
+  "notes": "Venta pública habilitada con Checkout Pro oficial y preferencia fijada, ingreso por Mercado Pago, validación automática por correo e ID de operación, descarga privada de 15 minutos. No se ha realizado ninguna venta productiva de prueba ni settlement verificado hasta el lanzamiento.",
   "provider_api_confirmation": "exact_checkout_url_product_merchant_and_back_urls_confirmed_official_mp_api_20261011",
   "fulfillment_code_prepared": true,
   "fulfillment_deployed": true,
   "legacy_payment_url": "https://mpago.li/1NuWTrY",
-  "preference_id": "59348768-483e73d1-8b3f-450c-a610-b7ce39d70da9"
+  "preference_id": "59348768-483e73d1-8b3f-450c-a610-b7ce39d70da9",
+  "launch_date": "2026-10-11",
+  "launch_verification": "live_private_fulfillment_health_ready_38158105649; sandbox_mp_paid_e2e_38156166740; private_xlsx_38156750017; official_prod_preference_38157879476"
 }
