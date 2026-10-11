@@ -1,0 +1,41 @@
+name: CalculaFácil PRO — check Instagram buyer path and organic response
+
+on:
+  pull_request:
+    branches: [lumen-zero]
+    paths:
+      - 'calculafacil/marketing/check_ig_buyer_path.py'
+      - '.github/workflows/calculafacil-instagram-buyer-path.yml'
+  push:
+    branches: [lumen-zero]
+    paths:
+      - 'calculafacil/marketing/check_ig_buyer_path.py'
+      - '.github/workflows/calculafacil-instagram-buyer-path.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  instagram-organic-buyer-path-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      LUMEN_INSTAGRAM_ACCESS_TOKEN: ${{ secrets.LUMEN_INSTAGRAM_ACCESS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Confirm audit is read only and campaign paths are safe
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile calculafacil/marketing/check_ig_buyer_path.py
+          python calculafacil/marketing/check_ig_buyer_path.py --self-test
+          ! grep -Ei 'media_publish|send_email|access_token":' calculafacil/marketing/check_ig_buyer_path.py
+      - name: Read LUMEN Instagram profile link and post engagement without modifying account
+        shell: bash
+        run: |
+          set -euo pipefail
+          python calculafacil/marketing/check_ig_buyer_path.py
