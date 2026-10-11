@@ -38,34 +38,26 @@ jobs:
           grep -q 'id="herramientas"' calculafacil/index.html
           grep -q 'lang="es-AR"' calculafacil/index.html
           ! grep -Ei 'google-analytics|gtag\(|facebook\.com/tr|pixel\(' calculafacil/index.html calculafacil/app.js calculafacil/styles.css calculafacil/pro.html
-          grep -q 'El enlace de Mercado Pago ya está preparado' calculafacil/pro.html
+          grep -Fq 'Comprar CalculaFácil PRO' calculafacil/pro.html
+          grep -Fq 'Ya pagué: verificar y descargar' calculafacil/pro.html
           grep -q 'href="/pro.html"' calculafacil/index.html
-          node -e 'const x=require("./calculafacil/payment-config.json"); if(x.checkout_enabled!==false||x.delivery.automated!==false||x.expected_amount!==9900||x.currency!=="ARS"||x.payment_url!=="https://mpago.li/1NuWTrY") process.exit(1); console.log("PAYMENT_LINK_RECORDED_CHECKOUT_STILL_DISABLED")'
-
-  payment_link_probe:
-    runs-on: ubuntu-latest
-    timeout-minutes: 3
-    continue-on-error: true
-    steps:
-      - name: Inspect merchant-provided payment link (GET only, no charge)
-        shell: bash
-        run: |
-          set -euo pipefail
-          result=$(curl -L --max-redirs 4 --proto-redir '=https' -sS --max-time 20 -o /tmp/mercadopago-link.html -w '%{http_code} %{url_effective}' 'https://mpago.li/1NuWTrY' || true)
-          python3 - "$result" <<'PY'
-          import sys
-          from urllib.parse import urlparse
-          parts=sys.argv[1].split(' ',1)
-          status=parts[0] if parts else '?'
-          host=urlparse(parts[1]).hostname if len(parts)>1 else None
-          print('PUBLIC_CHECKOUT_LINK_GET_ONLY', {'status':status,'redirect_host':host,'payment_attempted':False})
-          if status=='403':
-              print('LINK_BLOCKED_FOR_AUTOMATED_PROBE; HUMAN_CHECKOUT_VERIFICATION_REQUIRED')
-          elif status in {'200','302','303'} and host and (host.endswith('mercadopago.com.ar') or host=='mpago.li' or host.endswith('mercadopago.com')):
-              print('PAYMENT_PROVIDER_HOST_REACHABLE; AMOUNT_AND_SELLER_NOT_VERIFIED')
-          else:
-              print('LINK_NOT_PROVIDER_VERIFIED_BY_CI')
-          PY
+          node - <<'NODE'
+          const fs=require("node:fs");
+          const x=require("./calculafacil/payment-config.json");
+          const html=fs.readFileSync("calculafacil/pro.html","utf8");
+          const wrangler=fs.readFileSync("calculafacil/fulfillment/wrangler.toml","utf8");
+          const pref="59348768-483e73d1-8b3f-450c-a610-b7ce39d70da9";
+          const checkout="https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id="+pref;
+          const claim="https://calculafacil-pro-fulfillment.lumen-b2b.workers.dev/claim";
+          if(x.checkout_enabled!==true || x.delivery.automated!==true || x.fulfillment_deployed!==true ||
+             x.expected_amount!==9900 || x.currency!=="ARS" ||
+             x.preference_id!==pref || x.payment_url!==checkout ||
+             x.delivery.redemption_url!==claim ||
+             !html.includes('href="'+checkout+'"') || !html.includes('href="'+claim+'"') ||
+             !wrangler.includes('FULFILLMENT_ENABLED = "true"') ||
+             !wrangler.includes('EXPECTED_PREFERENCE_ID = "'+pref+'"')) process.exit(1);
+          console.log("PAID_CHECKOUT_CONFIG_MATCHES_VERIFIED_MP_PREFERENCE_AND_PRIVATE_DELIVERY");
+          NODE
 
   deploy:
     needs: validate
@@ -85,7 +77,8 @@ jobs:
           mkdir -p calculafacil/dist
           cp calculafacil/index.html calculafacil/styles.css calculafacil/app.js calculafacil/calculators.mjs calculafacil/favicon.svg calculafacil/pro.html calculafacil/robots.txt calculafacil/sitemap.xml calculafacil/_headers calculafacil/dist/
           test "$(find calculafacil/dist -maxdepth 1 -type f | wc -l)" -eq 9
-          ! grep -qi "mercadopago.com.ar/checkout/" calculafacil/pro.html
+          grep -Fq 'https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=59348768-483e73d1-8b3f-450c-a610-b7ce39d70da9' calculafacil/pro.html
+          grep -Fq 'https://calculafacil-pro-fulfillment.lumen-b2b.workers.dev/claim' calculafacil/pro.html
       - name: Verify Cloudflare access (no financial authority)
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -94,6 +87,24 @@ jobs:
           set -euo pipefail
           test -n "${CLOUDFLARE_API_TOKEN:-}"
           test -n "${CLOUDFLARE_ACCOUNT_ID:-}"
+      - name: Gate public checkout on healthy private fulfillment
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='https://calculafacil-pro-fulfillment.lumen-b2b.workers.dev'
+          for attempt in $(seq 1 12); do
+            code=$(curl -sS -o /tmp/fulfillment-preflight.json -w '%{http_code}' --max-time 12 "$BASE/health?site=$GITHUB_SHA&attempt=$attempt" || true)
+            if [ "$code" = 200 ] && jq -e '
+              .ok==true and .ready==true and .enabled==true and
+              .privateWorkbookPresent==true and .storagePrivate==true
+            ' /tmp/fulfillment-preflight.json >/dev/null 2>&1; then
+              echo "BUYER_PAYMENT_DELIVERY_READY_BEFORE_STATIC_CHECKOUT_RELEASE"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "BUYER_DELIVERY_NOT_READY_REFUSING_PUBLIC_CHECKOUT"
+          exit 1
       - name: Deploy isolated static Worker
         working-directory: calculafacil
         env:
@@ -122,7 +133,9 @@ jobs:
               if grep -q 'Los números' /tmp/calculafacil-index.html && \
                  grep -q 'export function margin' /tmp/calculafacil-calculators.mjs && \
                  grep -q 'tool-card' /tmp/calculafacil-styles.css && \
-                 grep -q 'El enlace de Mercado Pago ya está preparado' /tmp/calculafacil-pro.html && \
+                 grep -Fq 'Comprar CalculaFácil PRO' /tmp/calculafacil-pro.html && \
+                 grep -Fq 'https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=59348768-483e73d1-8b3f-450c-a610-b7ce39d70da9' /tmp/calculafacil-pro.html && \
+                 grep -Fq 'Ya pagué: verificar y descargar' /tmp/calculafacil-pro.html && \
                  grep -q 'sitemap.xml' /tmp/calculafacil-robots.txt && \
                  grep -q '/pro.html' /tmp/calculafacil-sitemap.xml; then
                 echo 'CALCULAFACIL_LIVE_SITE_AND_ASSETS_VERIFIED'

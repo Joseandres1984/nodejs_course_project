@@ -38,7 +38,7 @@ jobs:
           grep -Fq 'FULFILLMENT_ENABLED = "true"' calculafacil/fulfillment/wrangler.toml
           grep -Fq 'EXPECTED_PREFERENCE_ID = "59348768-483e73d1-8b3f-450c-a610-b7ce39d70da9"' calculafacil/fulfillment/wrangler.toml
           grep -Fq 'bucket_name = "calculafacil-pro-private"' calculafacil/fulfillment/wrangler.toml
-          grep -Fq '"checkout_enabled": false' calculafacil/payment-config.json
+          grep -Fq '"checkout_enabled": true' calculafacil/payment-config.json
 
   deploy-verified-private-delivery:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
