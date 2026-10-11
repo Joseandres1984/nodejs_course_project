@@ -153,3 +153,34 @@ test("Public: no purchase when only a screenshot, redirect or unsigned token exi
   const h=await worker.fetch(new Request("https://fulfillment.example/health"),makeEnv({PRO_KIT:{head:async()=>null}}));
   assert.equal((await h.json()).ready,false);
 });
+
+test("Provider audit route is inaccessible without its independent ephemeral key",async()=>{
+  const env=makeEnv({PROVIDER_AUDIT_SECRET:"test-temporary-private-probe-key-min-48-chars-xxxxxxxx"});
+  for(const headers of [{},{"X-LUMEN-AUDIT-KEY":"wrong"}]){
+    const r=await worker.fetch(new Request("https://fulfillment.example/__internal/provider-auth-check",{method:"POST",headers}),env);
+    assert.equal(r.status,404);
+  }
+});
+test("Provider audit verifies a live merchant identity by read-only GET (mocked)",async()=>{
+  const env=makeEnv({PROVIDER_AUDIT_SECRET:"test-temporary-private-probe-key-min-48-chars-xxxxxxxx"});
+  const restore=installMockFetch({merchant:{site_id:"MLA",tags:[]}});
+  try{
+    const r=await worker.fetch(new Request("https://fulfillment.example/__internal/provider-auth-check",{method:"POST",headers:{"X-LUMEN-AUDIT-KEY":env.PROVIDER_AUDIT_SECRET}}),env);
+    assert.equal(r.status,200);
+    const j=await r.json();
+    assert.equal(j.authenticated,true);assert.equal(j.siteIsArgentina,true);assert.equal(j.deliveryEnabled,false);
+    assert.equal(j.ok,true);assert.ok(!Object.hasOwn(j,"id"));
+  }finally{restore();}
+});
+test("Provider audit rejects test-user credentials and delivery already enabled",async()=>{
+  const env=makeEnv({PROVIDER_AUDIT_SECRET:"test-temporary-private-probe-key-min-48-chars-xxxxxxxx"});
+  const restore=installMockFetch({merchant:{site_id:"MLA",tags:["test_user"]}});
+  try{
+    const r=await worker.fetch(new Request("https://fulfillment.example/__internal/provider-auth-check",{method:"POST",headers:{"X-LUMEN-AUDIT-KEY":env.PROVIDER_AUDIT_SECRET}}),env);
+    assert.equal(r.status,503);
+    assert.equal((await r.json()).testUser,true);
+  }finally{restore();}
+  const enabled=makeEnv({PROVIDER_AUDIT_SECRET:env.PROVIDER_AUDIT_SECRET,FULFILLMENT_ENABLED:"true"});
+  const r=await worker.fetch(new Request("https://fulfillment.example/__internal/provider-auth-check",{method:"POST",headers:{"X-LUMEN-AUDIT-KEY":enabled.PROVIDER_AUDIT_SECRET}}),enabled);
+  assert.equal(r.status,503);
+});
