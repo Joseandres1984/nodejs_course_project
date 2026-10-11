@@ -1,0 +1,22 @@
+# PRIVATE fulfillment worker. Do not deploy before completing README.
+name = "calculafacil-pro-fulfillment"
+main = "worker.mjs"
+compatibility_date = "2026-10-11"
+workers_dev = true
+
+[vars]
+# Public, non-secret configuration.
+EXPECTED_AMOUNT_ARS = "9900"
+PRO_KIT_OBJECT_KEY = "calculafacil-pro/CalculaFacil_PRO_Kit_v1.xlsx"
+
+[[r2_buckets]]
+binding = "PRO_KIT"
+bucket_name = "calculafacil-pro-private"
+
+[[ratelimits]]
+name = "CLAIM_LIMITER"
+namespace_id = "50131"
+
+  [ratelimits.simple]
+  limit = 4
+  period = 60
