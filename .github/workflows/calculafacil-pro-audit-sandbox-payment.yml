@@ -1,0 +1,120 @@
+name: CalculaFácil PRO — reconcile screenshot sandbox payment with API
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/calculafacil-pro-audit-sandbox-payment.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: calculafacil-pro-test-only-sandbox
+  cancel-in-progress: false
+
+jobs:
+  sandbox-payment-reconciliation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Fail closed — never enable commercial checkout or paid workbook
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check calculafacil/sandbox/worker.mjs
+          node --test calculafacil/sandbox/worker.test.mjs
+          grep -Fq 'FULFILLMENT_ENABLED = "false"' calculafacil/fulfillment/wrangler.toml
+          grep -Fq '"checkout_enabled": false' calculafacil/payment-config.json
+          grep -Fq 'EXPECTED_TEST_PREFERENCE_ID = "3566088094-707a03b1-5ded-42e3-8146-8207d2949ef9"' calculafacil/sandbox/wrangler.toml
+          ! grep -q 'r2_buckets' calculafacil/sandbox/wrangler.toml
+      - name: Deploy TEST-ONLY Worker without touching paid fulfillment
+        working-directory: calculafacil/sandbox
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4 deploy --config wrangler.toml
+      - name: Query simulated operation and verify exact seller / preference (READ ONLY)
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,os,secrets,subprocess,time,sys,re,urllib.request,urllib.error
+          account=os.environ["CLOUDFLARE_ACCOUNT_ID"]
+          token=os.environ["CLOUDFLARE_API_TOKEN"]
+          base="https://api.cloudflare.com/client/v4/accounts/"+account+"/workers/scripts/calculafacil-pro-sandbox/secrets"
+          h={"Authorization":"Bearer "+token,"Accept":"application/json"}
+          def cf(method,url,payload=None):
+              hdr=dict(h)
+              if payload is not None:hdr["Content-Type"]="application/json"
+              req=urllib.request.Request(url,headers=hdr,method=method,data=json.dumps(payload).encode() if payload is not None else None)
+              try:
+                  with urllib.request.urlopen(req,timeout=20) as res:return res.status,json.load(res)
+              except urllib.error.HTTPError as e:return e.code,{}
+          status,response=cf("GET",base)
+          if status!=200 or not response.get("success") or not isinstance(response.get("result"),list):
+              sys.exit("CLOUDFLARE_SANDBOX_SECRETS_NOT_ACCESSIBLE")
+          if not any(x.get("name")=="MP_TEST_ACCESS_TOKEN" for x in response["result"]):
+              sys.exit("SANDBOX_TEST_TOKEN_ABSENT")
+          secret=secrets.token_hex(48)
+          status,response=cf("PUT",base,{"name":"SANDBOX_AUDIT_SECRET","text":secret,"type":"secret_text"})
+          if status not in (200,201) or not response.get("success"):
+              sys.exit("SANDBOX_AUDIT_KEY_INSTALL_FAILED")
+          audit_result=None;http_status="unknown"
+          try:
+              endpoint="https://calculafacil-pro-sandbox.lumen-b2b.workers.dev/__internal/audit-sandbox-payment"
+              # This is an entirely simulated Sandbox operation shown by the user;
+              # it contains no production purchase, secret or financial settlement.
+              sample='{"payment_id":"183642547454"}'
+              for attempt in range(16):
+                  config='url = "'+endpoint+'"\nrequest = "POST"\nheader = "Content-Type: application/json"\nheader = "X-SANDBOX-AUDIT-KEY: '+secret+'"\n'
+                  result=subprocess.run(["curl","--silent","--show-error","--max-time","17","--max-redirs","0",
+                    "--config","-","--data-raw",sample,"--write-out","\\n%{http_code}"],
+                    input=config,text=True,capture_output=True,timeout=20)
+                  if result.returncode!=0 or "\n" not in result.stdout:
+                      print("SIMULATED_PAYMENT_LOOKUP_NETWORK_RETRY")
+                      time.sleep(2)
+                      continue
+                  raw,http_status=result.stdout.rsplit("\n",1)
+                  http_status=http_status.strip()
+                  try:audit_result=json.loads(raw)
+                  except ValueError:audit_result={}
+                  if http_status=="404":
+                      time.sleep(2)
+                      continue
+                  break
+              if audit_result is None:sys.exit("SANDBOX_AUDIT_ROUTE_NOT_RESPONDING")
+              print("SANDBOX_PAYMENT_API_HTTP="+re.sub("[^0-9]","",http_status))
+              # Only allow-listed diagnostic booleans and provider HTTP label, never buyer PII.
+              allowed=("paymentFound","paymentConfirmed","fullStrictMatch","statusApproved","amountMatches",
+                "sellerMatches","operationIdMatches","approvalDatePresent","payerEmailPresent",
+                "orderPresent","orderClosed","orderSeller","orderProduct","orderPayment",
+                "preferenceMatches","strictVerifierAccepted","strictVerifierError",
+                "workbookDelivered","realMoneyReceived","merchantOrderProviderResult","providerResult")
+              safe={k:v for k,v in audit_result.items() if k in allowed and isinstance(v,(bool,int))}
+              for k in ("merchantOrderProviderResult","providerResult"):
+                  value=audit_result.get(k)
+                  if isinstance(value,str) and re.fullmatch("[a-z0-9_]{1,35}",value):safe[k]=value
+              print("SANDBOX_PAYMENT_API_CHECKS="+json.dumps(safe,sort_keys=True))
+              if http_status!="200" or not audit_result.get("paymentConfirmed"):
+                  sys.exit("SIMULATED_PAYMENT_NOT_CONFIRMED_BY_PROVIDER")
+              if not audit_result.get("fullStrictMatch"):
+                  sys.exit("SIMULATED_PAYMENT_CONFIRMED_BUT_STRICT_VERIFIER_NEEDS_WORK")
+              print("SIMULATED_PAYMENT_AND_FULL_DELIVERY_RULES_VALIDATED_NO_REAL_REVENUE")
+          finally:
+              status,_=cf("DELETE",base+"/SANDBOX_AUDIT_SECRET")
+              if status not in (200,204):
+                  sys.exit("SANDBOX_AUDIT_SECRET_CLEANUP_NOT_CONFIRMED")
+              print("EPHEMERAL_AUDIT_SECRET_REMOVED")
+          PY
