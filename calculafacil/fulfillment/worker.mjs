@@ -167,6 +167,43 @@ export default {
   async fetch(request,env) {
     const url=new URL(request.url);
 
+
+    // Private, read-only audit of the EXACT production preference; no payment is created.
+    if(url.pathname==="/__internal/get-production-checkout" && request.method==="POST"){
+      const key=env.PREFERENCE_AUDIT_KEY;
+      const given=request.headers.get("X-LUMEN-PREFERENCE-AUDIT-KEY")||"";
+      if(typeof key!=="string"||key.length<48||given!==key)
+        return json({error:"not_found"},404);
+      if(env.FULFILLMENT_ENABLED==="true"||
+         !env.EXPECTED_PREFERENCE_ID||!env.MP_ACCESS_TOKEN)
+        return json({error:"audit_disabled"},503);
+      try{
+        const merchant=await mpGet(env,"api.mercadolibre.com","/users/me");
+        const id=String(env.EXPECTED_PREFERENCE_ID);
+        const pref=await mpGet(env,"api.mercadopago.com",
+          "/checkout/preferences/"+encodeURIComponent(id));
+        const url=String(pref?.init_point||"");
+        let link;
+        try{link=new URL(url);}catch{}
+        const allowed=new Set(["www.mercadopago.com.ar","mercadopago.com.ar",
+          "www.mercadopago.com","mercadopago.com"]);
+        const origin="https://calculafacil-pro-fulfillment.lumen-b2b.workers.dev/claim";
+        const item=Array.isArray(pref?.items)&&pref.items.length===1?pref.items[0]:null;
+        const verified=String(pref?.id)===id&&!!merchant?.id&&
+          String(pref?.collector_id)===String(merchant.id)&&
+          merchant?.site_id==="MLA"&&!merchant?.tags?.includes?.("test_user")&&
+          item&&matchItem(item)&&link&&link.protocol==="https:"&&
+          allowed.has(link.hostname.toLowerCase())&&
+          !link.hostname.includes("sandbox")&&
+          String(pref?.back_urls?.success||"").startsWith(origin)&&
+          String(pref?.back_urls?.failure||"").startsWith(origin)&&
+          String(pref?.back_urls?.pending||"").startsWith(origin);
+        if(!verified)return json({error:"production_preference_mismatch"},503);
+        return json({ok:true,preferenceId:id,checkoutUrl:link.toString(),
+          vendorVerified:true,amountVerified:true,returnVerified:true,
+          paid:false,deliveryEnabled:false});
+      }catch{return json({error:"production_preference_unavailable"},503);}
+    }
     // Single-use administrator preference setup: creates a Checkout Pro OFFER,
     // not a payment. Requires an independent short-lived secret; commercial
     // fulfillment must still be OFF. Never follow redirects with bearer tokens.
