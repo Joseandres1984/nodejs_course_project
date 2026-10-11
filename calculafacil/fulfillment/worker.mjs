@@ -218,6 +218,34 @@ export default {
         return json({ok:false,authenticated:false,deliveryEnabled:false,reason,paymentsApi,connectivity,authorizedRequests},503);
       }
     }
+
+    // Privileged, read-only object integrity probe. It NEVER returns workbook bytes,
+    // cannot issue download tokens, and only works while commercial delivery is OFF.
+    if(url.pathname==="/__internal/check-private-kit" && request.method==="POST") {
+      const required=env.KIT_AUDIT_SECRET;
+      const given=request.headers.get("X-LUMEN-KIT-AUDIT-KEY")||"";
+      if(typeof required!=="string"||required.length<48||given!==required)
+        return json({error:"not_found"},404);
+      if(env.FULFILLMENT_ENABLED==="true")
+        return json({ok:false,error:"audit_disabled_in_live_mode"},503);
+      try{
+        const obj=await env.PRO_KIT?.get(FILE_KEY);
+        if(!obj||!obj.body)return json({ok:false,privateWorkbookReadable:false},503);
+        const bytes=new Uint8Array(await new Response(obj.body).arrayBuffer());
+        const zipValid=bytes.length>=4&&bytes[0]===0x50&&bytes[1]===0x4b&&
+          bytes[2]===0x03&&bytes[3]===0x04;
+        const zippedText=new TextDecoder("latin1").decode(bytes);
+        const worksheetEntries=[...zippedText.matchAll(/xl\/worksheets\/sheet[0-9]+\.xml/g)]
+          .map(x=>x[0]);
+        const sheetCount=new Set(worksheetEntries).size;
+        const expectedName=FILE_KEY.endsWith("CalculaFacil_PRO_Kit_v1.xlsx");
+        const valid=zipValid&&sheetCount===7&&bytes.length>10000&&expectedName;
+        return json({ok:valid,privateWorkbookReadable:true,validXlsxZip:zipValid,
+          worksheetsFound:sheetCount,privateBytesRead:bytes.length,
+          productionDownloadsEnabled:false,workbookContentExposed:false},valid?200:503);
+      }catch{return json({ok:false,privateWorkbookReadable:false,
+        productionDownloadsEnabled:false,workbookContentExposed:false},503);}
+    }
     if(url.pathname==="/health" && request.method==="GET") {
       const stored=env.PRO_KIT ? !!(await env.PRO_KIT.head(FILE_KEY).catch(()=>null)) : false;
       return json({ok:true,service:"calculafacil-pro-fulfillment",ready:configured(env)&&stored,privateWorkbookPresent:stored,enabled:env.FULFILLMENT_ENABLED==="true",provider:"mercadopago",paymentsMadeByServer:false,storagePrivate:true});
