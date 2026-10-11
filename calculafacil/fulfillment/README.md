@@ -76,3 +76,16 @@ junto con `ready=false` y `enabled=false`.
 **Ninguna operación GET, comprobante ni página de cobro habilita por sí sola
 la venta ni la entrega.** Falta configurar las credenciales privadas y validar
 al menos un caso real antes de cambiar el interruptor explícito.
+
+## Actualización verificada 11/10/2026: Checkout Pro de producción
+
+- La cuenta real de vendedor LUMEN superó `GET /users/me` por API con el token secreto de Cloudflare.
+- Se creó y releyó (GET de la API) una nueva preferencia de **producción**:
+  `59348768-483e73d1-8b3f-450c-a610-b7ce39d70da9`.
+- El único producto es `CalculaFácil PRO – Kit Excel`, cantidad 1, ARS 9.900, con URL de retorno a `/claim`.
+- La preferencia está fijada como `EXPECTED_PREFERENCE_ID` en Wrangler. Esto evita que otras órdenes legítimas del mismo vendedor permitan descargar el Excel.
+- El enlace anterior `mpago.li/1NuWTrY` **no debe utilizarse para el lanzamiento** porque no está demostrado que su orden sea compatible con la validación comercial de nuestro Worker.
+- La prueba real en Mercado Pago Sandbox, operación de prueba confirmada por API, superó todas las verificaciones de producto, vendedor, orden, preferencia y correo.
+- El R2 privado entregó correctamente 17.016 bytes de Excel con 7 hojas mediante una descarga HTTP temporal protegida y eliminada de inmediato.
+- El acceso comercial sigue controlado por `FULFILLMENT_ENABLED` y `checkout_enabled`: ambos deben habilitarse solo después de validar el Worker y publicar la URL oficial de esta preferencia en el sitio.
+- El comprador será redirigido desde Checkout Pro a `/claim`; el ID del pago puede venir precargado como **dato no confiable**, pero el Worker debe verificarlo ante la API de Mercado Pago junto al correo antes de permitir la descarga.
