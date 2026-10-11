@@ -5,12 +5,15 @@
   "expected_amount": 9900,
   "payment_url": "https://mpago.li/1NuWTrY",
   "checkout_enabled": false,
-  "checkout_verification": "pending_independent_provider_verification",
+  "checkout_verification": "user_supplied_mercadopago_checkout_screenshot_lumen_ars_9900_20261011",
   "delivery": {
     "mode": "not_configured",
     "automated": false,
     "artifact": "CalculaFacil_PRO_Kit_v1.xlsx",
     "private_delivery_required": true
   },
-  "notes": "El enlace fue proporcionado por el titular. No cobrar desde la web antes de comprobar importe, beneficiario y entrega. Nunca confundir abrir URL con confirmar pago."
+  "notes": "El enlace fue proporcionado por el titular. No cobrar desde la web antes de comprobar importe, beneficiario y entrega. Nunca confundir abrir URL con confirmar pago.",
+  "provider_api_confirmation": "not_verified",
+  "fulfillment_code_prepared": true,
+  "fulfillment_deployed": false
 }

@@ -1,0 +1,38 @@
+name: CalculaFácil PRO — secure fulfillment QA (no deployment)
+
+on:
+  pull_request:
+    branches: [lumen-zero]
+    paths:
+      - 'calculafacil/fulfillment/**'
+      - '.github/workflows/calculafacil-pro-fulfillment-qa.yml'
+  push:
+    branches: [lumen-zero]
+    paths:
+      - 'calculafacil/fulfillment/**'
+      - '.github/workflows/calculafacil-pro-fulfillment-qa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-without-real-payments:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Syntax and offline payment + fulfillment tests
+        run: |
+          set -euo pipefail
+          node --check calculafacil/fulfillment/worker.mjs
+          node --test calculafacil/fulfillment/worker.test.mjs
+      - name: Assert no deployment, secrets, or public workbook introduced
+        run: |
+          set -euo pipefail
+          test ! -f calculafacil/dist/CalculaFacil_PRO_Kit_v1.xlsx
+          test ! -f calculafacil/fulfillment/CalculaFacil_PRO_Kit_v1.xlsx
+          ! grep -Ei 'APP_USR-[0-9]|ACCESS_TOKEN[[:space:]]*=' calculafacil/fulfillment/worker.mjs
