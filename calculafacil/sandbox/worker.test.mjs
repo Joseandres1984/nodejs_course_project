@@ -21,7 +21,7 @@ function mockNetwork(opts={}){
       return Response.json({id:opts.sellerId||3566088094,site_id:"MLA"});
     if(u.pathname==="/checkout/preferences"){
       if(opts.fail) return Response.json({error:"blocked"},{status:403});
-      return Response.json({id:"TEST_PREFERENCE_123",
+      return Response.json({id:"TEST_PREFERENCE_123",collector_id:3566088094,
         sandbox_init_point:"https://sandbox.mercadopago.com.ar/checkout/v1/redirect?pref_id=TEST_PREFERENCE_123"},{status:201});
     }
     const payment={id:12345678,status:opts.paymentStatus||"approved",currency_id:"ARS",
