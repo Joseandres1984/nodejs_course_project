@@ -31,6 +31,7 @@ function installMockFetch(overrides={}){
 function makeEnv(overrides={}){
   const file=new Uint8Array([80,75,3,4,0,0]); // non-sensitive mock XLSX bytes
   return {
+    FULFILLMENT_ENABLED:"true",
     MP_ACCESS_TOKEN:"TEST_ONLY_NOT_REAL",
     DOWNLOAD_SIGNING_KEY:"test-key-32bytes-test-key-32bytes-test-key",
     PRO_KIT:{
