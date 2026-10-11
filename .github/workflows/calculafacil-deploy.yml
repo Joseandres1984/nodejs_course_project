@@ -76,7 +76,10 @@ jobs:
           set -euo pipefail
           mkdir -p calculafacil/dist
           cp calculafacil/index.html calculafacil/styles.css calculafacil/app.js calculafacil/calculators.mjs calculafacil/favicon.svg calculafacil/pro.html calculafacil/robots.txt calculafacil/sitemap.xml calculafacil/_headers calculafacil/dist/
-          test "$(find calculafacil/dist -maxdepth 1 -type f | wc -l)" -eq 9
+          python3 -m pip install --disable-pip-version-check --quiet Pillow
+          python3 calculafacil/marketing/make_instagram.py calculafacil/dist/instagram-pro-launch.jpg
+          test "$(find calculafacil/dist -maxdepth 1 -type f | wc -l)" -eq 10
+          file calculafacil/dist/instagram-pro-launch.jpg | grep -Fq 'JPEG image data'
           grep -Fq 'https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=59348768-483e73d1-8b3f-450c-a610-b7ce39d70da9' calculafacil/pro.html
           grep -Fq 'https://calculafacil-pro-fulfillment.lumen-b2b.workers.dev/claim' calculafacil/pro.html
       - name: Verify Cloudflare access (no financial authority)
@@ -120,7 +123,7 @@ jobs:
           for attempt in $(seq 1 12); do
             echo "===== CALCULAFACIL LIVE SMOKE ATTEMPT $attempt ====="
             ok=1
-            for endpoint in index.html calculators.mjs styles.css pro.html robots.txt sitemap.xml; do
+            for endpoint in index.html calculators.mjs styles.css pro.html robots.txt sitemap.xml instagram-pro-launch.jpg; do
               file="/tmp/calculafacil-${endpoint//\//-}"
               status=$(curl --location --max-redirs 3 --proto-redir '=https' -sS --max-time 20 -H 'cache-control: no-cache' -o "$file" -w '%{http_code}' "$BASE/$endpoint?release=$GITHUB_SHA&attempt=$attempt" || true)
               echo "SMOKE_PATH=/$endpoint HTTP=${status:-ERR} BYTES=$(wc -c < "$file" 2>/dev/null || echo 0)"
@@ -130,7 +133,8 @@ jobs:
               fi
             done
             if [ "$ok" = 1 ]; then
-              if grep -q 'Los números' /tmp/calculafacil-index.html && \
+              if test "$(wc -c < /tmp/calculafacil-instagram-pro-launch.jpg)" -ge 40000 && \
+                 grep -q 'Los números' /tmp/calculafacil-index.html && \
                  grep -q 'export function margin' /tmp/calculafacil-calculators.mjs && \
                  grep -q 'tool-card' /tmp/calculafacil-styles.css && \
                  grep -Fq 'Comprar CalculaFácil PRO' /tmp/calculafacil-pro.html && \
