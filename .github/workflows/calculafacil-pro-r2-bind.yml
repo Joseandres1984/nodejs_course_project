@@ -1,0 +1,93 @@
+name: CalculaFácil PRO — R2 private binding (delivery disabled)
+
+on:
+  pull_request:
+    branches: [lumen-zero]
+    paths:
+      - "calculafacil/fulfillment/**"
+      - ".github/workflows/calculafacil-pro-r2-bind.yml"
+  push:
+    branches: [lumen-zero]
+    paths:
+      - "calculafacil/fulfillment/**"
+      - ".github/workflows/calculafacil-pro-r2-bind.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: calculafacil-pro-private-r2-binding
+  cancel-in-progress: false
+
+jobs:
+  safety-and-binding-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Fail-closed tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check calculafacil/fulfillment/worker.mjs
+          node --test calculafacil/fulfillment/worker.test.mjs
+          grep -Fq 'FULFILLMENT_ENABLED = "false"' calculafacil/fulfillment/wrangler.toml
+          grep -Fq 'bucket_name = "calculafacil-pro-private"' calculafacil/fulfillment/wrangler.toml
+          grep -Fq 'FILE_KEY = "calculafacil-pro/CalculaFacil_PRO_Kit_v1.xlsx"' calculafacil/fulfillment/worker.mjs
+
+  deploy-binding-only:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    needs: safety-and-binding-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Confirm existing Cloudflare credentials
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${CLOUDFLARE_API_TOKEN:-}"
+          test -n "${CLOUDFLARE_ACCOUNT_ID:-}"
+      - name: Deploy separate private delivery Worker (OFF by default)
+        working-directory: calculafacil/fulfillment
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4 deploy --config wrangler.toml
+      - name: Verify R2 object visibility without leaking workbook
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='https://calculafacil-pro-fulfillment.lumen-b2b.workers.dev'
+          for i in $(seq 1 10); do
+            code=$(curl -sS -o /tmp/cf-pro-private-health.json -w '%{http_code}' --max-time 12 "$BASE/health?verify=$GITHUB_SHA&attempt=$i" || true)
+            if [[ "$code" == "200" ]] && jq -e '
+              .ok==true and
+              .service=="calculafacil-pro-fulfillment" and
+              .privateWorkbookPresent==true and
+              .ready==false and
+              .enabled==false and
+              .paymentsMadeByServer==false and
+              .storagePrivate==true
+            ' /tmp/cf-pro-private-health.json >/dev/null 2>&1; then
+              echo "CF_PRO_R2_PRIVATE_OBJECT_PRESENT_DELIVERY_DISABLED_VERIFIED"
+              exit 0
+            fi
+            echo "TRY=$i STATUS=$code SAFE_HEALTH=$(jq -c '{privateWorkbookPresent,ready,enabled}' /tmp/cf-pro-private-health.json 2>/dev/null || echo unavailable)"
+            sleep 3
+          done
+          echo "PRIVATE_R2_BINDING_NOT_VERIFIED"
+          exit 1

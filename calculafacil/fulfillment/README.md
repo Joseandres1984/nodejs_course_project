@@ -59,3 +59,20 @@ un pago pendiente o un pedido de pago NO equivalen a aprobación.
 - Usar el comprobante real y revisión de protección de datos antes del
   lanzamiento. No registrar ni compartir correos de compradores.
 - No publicar checkout mientras se pueda cobrar sin una entrega probada.
+
+## Conexión verificada de R2 (fase no comercial)
+
+El bucket privado `calculafacil-pro-private` y el objeto
+`calculafacil-pro/CalculaFacil_PRO_Kit_v1.xlsx` fueron mostrados por el titular
+mediante capturas del panel de Cloudflare el 11/10/2026.
+
+El workflow `.github/workflows/calculafacil-pro-r2-bind.yml` despliega
+exclusivamente el Worker aislado de entrega y verifica que puede consultar
+el objeto sin exponer ni descargar bytes, manteniendo
+`FULFILLMENT_ENABLED="false"`, incluso cuando existan otros secretos.
+La prueba de lectura usa solamente `head()` y espera `privateWorkbookPresent=true`
+junto con `ready=false` y `enabled=false`.
+
+**Ninguna operación GET, comprobante ni página de cobro habilita por sí sola
+la venta ni la entrega.** Falta configurar las credenciales privadas y validar
+al menos un caso real antes de cambiar el interruptor explícito.

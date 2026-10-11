@@ -97,7 +97,7 @@ async function tokenValid(env,id,expiration,signature) {
   return crypto.subtle.verify("HMAC",await hmacKey(env),bytes,utf8.encode(id+"|"+expiration));
 }
 function configured(env) {
-  return !!(env.MP_ACCESS_TOKEN && env.DOWNLOAD_SIGNING_KEY &&
+  return !!(env.FULFILLMENT_ENABLED === "true" && env.MP_ACCESS_TOKEN && env.DOWNLOAD_SIGNING_KEY &&
     env.DOWNLOAD_SIGNING_KEY.length>=32 && env.PRO_KIT && env.CLAIM_LIMITER);
 }
 async function limitClaim(env,request) {
@@ -112,7 +112,7 @@ export default {
     const url=new URL(request.url);
     if(url.pathname==="/health" && request.method==="GET") {
       const stored=env.PRO_KIT ? !!(await env.PRO_KIT.head(FILE_KEY).catch(()=>null)) : false;
-      return json({ok:true,service:"calculafacil-pro-fulfillment",ready:configured(env)&&stored,provider:"mercadopago",paymentsMadeByServer:false,storagePrivate:true});
+      return json({ok:true,service:"calculafacil-pro-fulfillment",ready:configured(env)&&stored,privateWorkbookPresent:stored,enabled:env.FULFILLMENT_ENABLED==="true",provider:"mercadopago",paymentsMadeByServer:false,storagePrivate:true});
     }
     if(url.pathname==="/claim" && request.method==="GET") {
       return page("Descargá tu Kit PRO",
