@@ -237,3 +237,36 @@ test("Private Excel integrity probe is blocked after commercial launch",async()=
   assert.equal(r.status,503);
   assert.equal((await r.json()).error,"audit_disabled_in_live_mode");
 });
+
+test("Private XLSX transport denies missing or wrong temporary audit credential",async()=>{
+  const env=makeEnv({FULFILLMENT_ENABLED:"false",KIT_AUDIT_SECRET:"X".repeat(80)});
+  for(const headers of [{},{"X-LUMEN-KIT-AUDIT-KEY":"not-authorized"}]){
+    const r=await worker.fetch(new Request("https://fulfillment.example/__internal/transport-test-download",{
+      method:"POST",headers
+    }),env);
+    assert.equal(r.status,404);
+  }
+});
+test("Private XLSX transport streams binary attachment only with isolated temporary audit secret",async()=>{
+  const original=Uint8Array.from([0x50,0x4b,0x03,0x04,11,12,13,14,15,16,17]);
+  const env=makeEnv({FULFILLMENT_ENABLED:"false",KIT_AUDIT_SECRET:"X".repeat(80),
+    PRO_KIT:{get:async()=>({size:original.byteLength,body:new ReadableStream({start(controller){
+      controller.enqueue(original);controller.close();
+    }})})}
+  });
+  const r=await worker.fetch(new Request("https://fulfillment.example/__internal/transport-test-download",{
+    method:"POST",headers:{"X-LUMEN-KIT-AUDIT-KEY":env.KIT_AUDIT_SECRET}
+  }),env);
+  assert.equal(r.status,200);
+  assert.equal(r.headers.get("Cache-Control"),"no-store, private");
+  assert.match(r.headers.get("Content-Disposition"),/attachment; filename="CalculaFacil_PRO_Kit_v1.xlsx"/);
+  assert.equal(r.headers.get("Content-Type"),"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  assert.deepEqual(new Uint8Array(await r.arrayBuffer()),original);
+});
+test("Private XLSX transport cannot be used with commercial delivery enabled",async()=>{
+  const env=makeEnv({FULFILLMENT_ENABLED:"true",KIT_AUDIT_SECRET:"X".repeat(80)});
+  const r=await worker.fetch(new Request("https://fulfillment.example/__internal/transport-test-download",{
+    method:"POST",headers:{"X-LUMEN-KIT-AUDIT-KEY":env.KIT_AUDIT_SECRET}
+  }),env);
+  assert.equal(r.status,503);
+});
