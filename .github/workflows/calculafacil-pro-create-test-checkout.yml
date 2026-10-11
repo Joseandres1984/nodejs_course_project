@@ -1,0 +1,107 @@
+name: CalculaFácil PRO — one-time simulated Checkout Pro link
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/calculafacil-pro-create-test-checkout.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: calculafacil-pro-test-only-sandbox
+  cancel-in-progress: false
+
+jobs:
+  safe-sandbox-checkout:
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify only sandbox is enabled (paid commercial release remains OFF)
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check calculafacil/sandbox/worker.mjs
+          node --test calculafacil/sandbox/worker.test.mjs
+          grep -Fq 'SANDBOX_ENABLED = "true"' calculafacil/sandbox/wrangler.toml
+          grep -Fq 'FULFILLMENT_ENABLED = "false"' calculafacil/fulfillment/wrangler.toml
+          grep -Fq '"checkout_enabled": false' calculafacil/payment-config.json
+          ! grep -Ei 'r2_buckets|PRO_KIT_OBJECT_KEY|MP_ACCESS_TOKEN' calculafacil/sandbox/wrangler.toml
+      - name: Deploy TEST SELLER isolated Worker (not the real checkout)
+        working-directory: calculafacil/sandbox
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4 deploy --config wrangler.toml
+      - name: Create ONE sandbox preference with private admin control (no money movement)
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,os,secrets,urllib.request,urllib.error,subprocess,sys,time,re
+          token=os.environ["CLOUDFLARE_API_TOKEN"]
+          account=os.environ["CLOUDFLARE_ACCOUNT_ID"]
+          base="https://api.cloudflare.com/client/v4/accounts/"+account+"/workers/scripts/calculafacil-pro-sandbox/secrets"
+          headers={"Authorization":"Bearer "+token,"Accept":"application/json"}
+          req=urllib.request.Request(base,method="GET",headers=headers)
+          with urllib.request.urlopen(req,timeout=20) as response:
+              current=json.load(response)
+          if not current.get("success"):sys.exit("CLOUDFLARE_SECRETS_NOT_ACCESSIBLE")
+          names={x.get("name") for x in current.get("result",[])}
+          if "MP_TEST_ACCESS_TOKEN" not in names:sys.exit("SANDBOX_TEST_CREDENTIAL_MISSING")
+          key=secrets.token_hex(48)
+          payload={"name":"SANDBOX_ADMIN_KEY","text":key,"type":"secret_text"}
+          post_headers={**headers,"Content-Type":"application/json"}
+          req=urllib.request.Request(base,method="PUT",headers=post_headers,data=json.dumps(payload).encode())
+          with urllib.request.urlopen(req,timeout=20) as response:
+              updated=json.load(response)
+          if not updated.get("success"):sys.exit("SANDBOX_ADMIN_KEY_COULD_NOT_BE_INSTALLED")
+          print("TEST_ONLY_ADMIN_KEY_SECURELY_INSTALLED_NO_LOGGING")
+          endpoint="https://calculafacil-pro-sandbox.lumen-b2b.workers.dev"
+          ready=False
+          for attempt in range(15):
+              proc=subprocess.run(["curl","-sS","--max-time","12",endpoint+"/health"],
+                  capture_output=True,text=True,timeout=15)
+              if proc.returncode==0:
+                  try:
+                      health=json.loads(proc.stdout)
+                  except ValueError:health={}
+                  if health.get("service")=="calculafacil-pro-sandbox" and health.get("ready") and not health.get("checkoutProductionEnabled") and not health.get("readsProductionWorkbook"):
+                      ready=True
+                      break
+              time.sleep(2)
+          if not ready:sys.exit("SANDBOX_NOT_READY_OR_PRODUCTION_ISOLATION_FAILED")
+          print("TEST_ONLY_SANDBOX_READY_NO_PRODUCTION_CHECKOUT")
+          config='url = "'+endpoint+'/admin/create-preference"\nrequest = "POST"\nheader = "X-SANDBOX-ADMIN-KEY: '+key+'"\n'
+          proc=subprocess.run(["curl","--silent","--show-error","--max-time","20","--max-redirs","0",
+             "--config","-","--write-out","\\n%{http_code}"],input=config,capture_output=True,text=True,timeout=23)
+          if proc.returncode!=0 or "\n" not in proc.stdout:sys.exit("TEST_CHECKOUT_NETWORK_ERROR")
+          body,status=proc.stdout.rsplit("\n",1)
+          status=status.strip()
+          if status!="200":
+              print("SANDBOX_PREFERENCE_HTTP_"+re.sub("[^0-9]","",status))
+              sys.exit(1)
+          result=json.loads(body)
+          if result.get("ok") is not True or result.get("simulated") is not True:sys.exit("PROVIDER_PREFERENCE_NOT_VERIFIED")
+          link=result.get("checkout_url")
+          import urllib.parse
+          u=urllib.parse.urlparse(link or "")
+          if u.scheme!="https" or u.hostname not in ("sandbox.mercadopago.com","sandbox.mercadopago.com.ar"):
+              sys.exit("TEST_CHECKOUT_HOST_NOT_ISOLATED")
+          print("SANDBOX_PREFERENCE_CREATED_WITH_TEST_SELLER")
+          print("TEST_ONLY_CHECKOUT_URL="+link)
+          print("REAL_MONEY_MOVED=NO")
+          print("PRODUCTION_CHECKOUT_ENABLED=NO")
+          PY
