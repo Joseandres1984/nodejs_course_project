@@ -270,3 +270,72 @@ test("Private XLSX transport cannot be used with commercial delivery enabled",as
   }),env);
   assert.equal(r.status,503);
 });
+
+test("New production checkout preference route is not public and cannot run after launch",async()=>{
+  const key="P".repeat(96);
+  const env=makeEnv({FULFILLMENT_ENABLED:"false",PREFERENCE_SETUP_KEY:key});
+  assert.equal((await worker.fetch(new Request("https://fulfillment.example/__internal/create-production-preference",{
+    method:"POST"
+  }),env)).status,404);
+  const active=makeEnv({FULFILLMENT_ENABLED:"true",PREFERENCE_SETUP_KEY:key});
+  assert.equal((await worker.fetch(new Request("https://fulfillment.example/__internal/create-production-preference",{
+    method:"POST",headers:{"X-LUMEN-PREFERENCE-SETUP-KEY":key}
+  }),active)).status,503);
+});
+
+test("New production preference is for verified merchant and exact product, with no charge",async()=>{
+  const old=globalThis.fetch;
+  const key="P".repeat(96);
+  const requests=[];
+  const id="PREF_LUMEN_TEST_ONLY";
+  const origin="https://calculafacil-pro-fulfillment.lumen-b2b.workers.dev";
+  globalThis.fetch=async(url,opts)=>{
+    const u=new URL(url);
+    requests.push({path:u.pathname,method:opts?.method||"GET",redirect:opts?.redirect,
+      auth:opts?.headers?.Authorization});
+    if(u.pathname==="/users/me")
+      return Response.json({id:44112233,site_id:"MLA",tags:[]});
+    if(u.pathname==="/checkout/preferences" && opts?.method==="POST"){
+      const body=JSON.parse(opts.body);
+      assert.equal(body.items.length,1);
+      assert.deepEqual({amount:body.items[0].unit_price,currency:body.items[0].currency_id,
+        quantity:body.items[0].quantity},{amount:9900,currency:"ARS",quantity:1});
+      assert.equal(body.back_urls.success,origin+"/claim?resultado=aprobado");
+      assert.equal(body.auto_return,"approved");
+      return Response.json({id,collector_id:44112233,
+        init_point:"https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id="+id},{status:201});
+    }
+    if(u.pathname==="/checkout/preferences/"+id){
+      return Response.json({id,collector_id:44112233,
+        items:[{title:"CalculaFácil PRO – Kit Excel",quantity:1,currency_id:"ARS",unit_price:9900}],
+        back_urls:{success:origin+"/claim?resultado=aprobado"}});
+    }
+    return Response.json({error:"not_found"},{status:404});
+  };
+  try{
+    const env=makeEnv({FULFILLMENT_ENABLED:"false",PREFERENCE_SETUP_KEY:key});
+    const response=await worker.fetch(new Request("https://fulfillment.example/__internal/create-production-preference",{
+      method:"POST",headers:{"X-LUMEN-PREFERENCE-SETUP-KEY":key}
+    }),env);
+    assert.equal(response.status,200);
+    const data=await response.json();
+    assert.equal(data.ok,true);assert.equal(data.sellerVerified,true);
+    assert.equal(data.paymentCharged,false);assert.equal(data.commercialDeliveryEnabled,false);
+    assert.equal(requests.filter(x=>x.method==="POST").length,1);
+    assert.equal(requests.length,3);
+    assert.ok(requests.every(x=>x.auth==="Bearer TEST_ONLY_NOT_REAL"&&x.redirect==="manual"));
+  }finally{globalThis.fetch=old;}
+});
+
+test("Production preference setup rejects a test seller or unexpected checkout URL",async()=>{
+  const old=globalThis.fetch;
+  const key="P".repeat(96);
+  try{
+    globalThis.fetch=async()=>Response.json({id:44112233,site_id:"MLA",tags:["test_user"]});
+    const e=makeEnv({FULFILLMENT_ENABLED:"false",PREFERENCE_SETUP_KEY:key});
+    const response=await worker.fetch(new Request("https://fulfillment.example/__internal/create-production-preference",{
+      method:"POST",headers:{"X-LUMEN-PREFERENCE-SETUP-KEY":key}
+    }),e);
+    assert.equal(response.status,503);
+  }finally{globalThis.fetch=old;}
+});
