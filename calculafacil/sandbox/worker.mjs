@@ -49,8 +49,7 @@ async function createPreference(env){
   if(typeof raw!=="string"||!String(data?.id||"") || String(data?.collector_id)!==String(env.EXPECTED_TEST_SELLER_ID))throw new Error("invalid_test_preference");
   const url=new URL(raw);
   if(url.protocol!=="https:"||![
-    "sandbox.mercadopago.com","sandbox.mercadopago.com.ar",
-    "mercadopago.com"
+    "sandbox.mercadopago.com","sandbox.mercadopago.com.ar"
   ].includes(url.hostname.toLowerCase()))throw new Error("unexpected_checkout_origin");
   return {checkout_url:url.toString(),preference_id:String(data.id)};
 }
