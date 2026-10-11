@@ -1,0 +1,96 @@
+name: CalculaFácil PRO — one organic educational Reel for new buyers
+
+on:
+  pull_request:
+    branches: [lumen-zero]
+    paths:
+      - 'calculafacil/marketing/render_margin_reel.py'
+      - 'calculafacil/marketing/publish_margin_reel.py'
+      - '.github/workflows/calculafacil-organic-reel.yml'
+  push:
+    branches: [lumen-zero]
+    paths:
+      - 'calculafacil/marketing/render_margin_reel.py'
+      - 'calculafacil/marketing/publish_margin_reel.py'
+      - '.github/workflows/calculafacil-organic-reel.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: calculafacil-organic-reel-one-time-margin-2026
+  cancel-in-progress: false
+
+jobs:
+  validate-reel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Render and validate an original 12-second vertical MP4
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v ffmpeg
+          command -v ffprobe
+          python -m pip install --disable-pip-version-check --quiet Pillow
+          python -m py_compile calculafacil/marketing/render_margin_reel.py calculafacil/marketing/publish_margin_reel.py
+          python calculafacil/marketing/publish_margin_reel.py --self-test
+          python calculafacil/marketing/render_margin_reel.py /tmp/calculafacil-margin-reel-ci.mp4
+          ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,height -of json /tmp/calculafacil-margin-reel-ci.mp4 |
+            jq -e '.streams[0].codec_name=="h264" and .streams[0].width==720 and .streams[0].height==1280' >/dev/null
+          grep -Fq '"checkout_enabled": true' calculafacil/payment-config.json
+          grep -Fq 'EXPECTED_PREFERENCE_ID = "59348768-483e73d1-8b3f-450c-a610-b7ce39d70da9"' calculafacil/fulfillment/wrangler.toml
+          echo "ORGANIC_REEL_APPROVED_PRODUCT_AND_VIDEO_VALIDATED"
+
+  publish-one-reel:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    needs: validate-reel
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      LUMEN_INSTAGRAM_ACCESS_TOKEN: ${{ secrets.LUMEN_INSTAGRAM_ACCESS_TOKEN }}
+      LUMEN_IG_REEL_ONE_TIME_AUTHORIZATION: organic_margin_education_20261011
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify organic educational Reel is hosted and checkout remains healthy
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${LUMEN_INSTAGRAM_ACCESS_TOKEN:-}"
+          ORIGIN='https://calculafacil.lumen-b2b.workers.dev'
+          ready=0
+          for i in $(seq 1 35); do
+            code=$(curl -sS -L --max-redirs 2 --proto-redir '=https' --max-time 20 \
+              -o /tmp/organic-margin-reel.mp4 -w '%{http_code}' \
+              "$ORIGIN/reels/precios-margen-2026.mp4?release=$GITHUB_SHA&attempt=$i" || true)
+            site=$(curl -sS -L --max-redirs 2 --proto-redir '=https' --max-time 15 \
+              -o /tmp/organic-reel-pro.html -w '%{http_code}' "$ORIGIN/pro.html?attempt=$i" || true)
+            if [ "$code" = 200 ] && [ "$site" = 200 ] && \
+               grep -Fq 'Comprar CalculaFácil PRO' /tmp/organic-reel-pro.html && \
+               ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,height -of json /tmp/organic-margin-reel.mp4 |
+                 jq -e '.streams[0].codec_name=="h264" and .streams[0].width==720 and .streams[0].height==1280' >/dev/null; then
+              ready=1;break
+            fi
+            sleep 6
+          done
+          test "$ready" = 1
+          echo "ORGANIC_REEL_ASSET_AND_BUYER_CHECKOUT_LIVE"
+          health=$(curl -sS --max-time 15 -o /tmp/organic-reel-fulfillment-health.json -w '%{http_code}' \
+            'https://calculafacil-pro-fulfillment.lumen-b2b.workers.dev/health')
+          test "$health" = 200
+          jq -e '.ok==true and .ready==true and .enabled==true and .privateWorkbookPresent==true' \
+            /tmp/organic-reel-fulfillment-health.json >/dev/null
+          echo "REAL_PRIVATE_EXCEL_DELIVERY_READY"
+      - name: Publish one educational Reel through connected @lumen.b2b without ads
+        shell: bash
+        run: |
+          set -euo pipefail
+          python calculafacil/marketing/publish_margin_reel.py
