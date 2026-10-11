@@ -1,0 +1,82 @@
+name: CalculaFácil PRO — deploy isolated test-only Mercado Pago sandbox
+
+on:
+  pull_request:
+    branches: [lumen-zero]
+    paths:
+      - "calculafacil/sandbox/**"
+      - ".github/workflows/calculafacil-pro-sandbox.yml"
+  push:
+    branches: [lumen-zero]
+    paths:
+      - "calculafacil/sandbox/**"
+      - ".github/workflows/calculafacil-pro-sandbox.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: calculafacil-pro-test-only-sandbox
+  cancel-in-progress: false
+
+jobs:
+  safety-qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validate no real money and no private workbook in sandbox
+        run: |
+          set -euo pipefail
+          node --check calculafacil/sandbox/worker.mjs
+          node --test calculafacil/sandbox/worker.test.mjs
+          grep -Fq 'SANDBOX_ENABLED = "false"' calculafacil/sandbox/wrangler.toml
+          ! grep -Eq 'r2_buckets|MP_ACCESS_TOKEN|FULFILLMENT_ENABLED|CalculaFacil_PRO_Kit_v1.xlsx' calculafacil/sandbox/wrangler.toml
+          ! grep -Fq 'https://mpago.li/1NuWTrY' calculafacil/sandbox/worker.mjs
+          grep -Fq 'EXPECTED_TEST_SELLER_ID' calculafacil/sandbox/worker.mjs
+
+  deploy-disabled-test-only-worker:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    needs: safety-qa
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Deploy sandbox Worker with checkout disabled
+        working-directory: calculafacil/sandbox
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          test -n "${CLOUDFLARE_API_TOKEN:-}"
+          test -n "${CLOUDFLARE_ACCOUNT_ID:-}"
+          npx --yes wrangler@4 deploy --config wrangler.toml
+      - name: Verify test-only Worker did not enable purchases or expose workbook
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='https://calculafacil-pro-sandbox.lumen-b2b.workers.dev'
+          for i in $(seq 1 12); do
+            status=$(curl -sS -o /tmp/cf-mp-test-health.json -w '%{http_code}' --max-time 15 "$BASE/health?try=$i" || true)
+            if [[ "$status" == "200" ]] && jq -e '
+              .service=="calculafacil-pro-sandbox" and
+              .mode=="test_only" and
+              .ready==false and
+              .checkoutProductionEnabled==false and
+              .readsProductionWorkbook==false
+            ' /tmp/cf-mp-test-health.json >/dev/null 2>&1; then
+              echo "TEST_ONLY_SANDBOX_DEPLOYED_CHECKOUT_DISABLED_NO_WORKBOOK"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "TEST_ONLY_SANDBOX_NOT_CONFIRMED"
+          exit 1
