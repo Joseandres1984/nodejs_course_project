@@ -1,0 +1,59 @@
+name: CalculaFácil PRO — prepare unpublished production checkout
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - ".github/workflows/calculafacil-pro-production-preference.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: calculafacil-pro-private-r2-binding
+  cancel-in-progress: false
+
+jobs:
+  prepare-checkout-not-live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Run fulfillment tests and verify production commerce is disabled
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check calculafacil/fulfillment/worker.mjs
+          node --test calculafacil/fulfillment/worker.test.mjs
+          python3 -m py_compile calculafacil/fulfillment/create_production_preference.py
+          grep -Fq 'FULFILLMENT_ENABLED = "false"' calculafacil/fulfillment/wrangler.toml
+          grep -Fq '"checkout_enabled": false' calculafacil/payment-config.json
+          grep -Fq 'bucket_name = "calculafacil-pro-private"' calculafacil/fulfillment/wrangler.toml
+      - name: Deploy private fulfillment Worker with sales disabled
+        working-directory: calculafacil/fulfillment
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4 deploy --config wrangler.toml
+      - name: Prepare one unpublished Mercado Pago production preference (no charge)
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          python3 calculafacil/fulfillment/create_production_preference.py
+      - name: Confirm commercial delivery stays locked after preparation
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS 'https://calculafacil-pro-fulfillment.lumen-b2b.workers.dev/health' |
+            jq -e '.ok == true and .privateWorkbookPresent == true and .enabled == false and .ready == false and .storagePrivate == true' >/dev/null
+          echo 'PAID_DELIVERY_STILL_DISABLED'
