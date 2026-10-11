@@ -42,6 +42,28 @@ jobs:
           grep -q 'href="/pro.html"' calculafacil/index.html
           node -e 'const x=require("./calculafacil/payment-config.json"); if(x.checkout_enabled!==false||x.delivery.automated!==false||x.expected_amount!==9900||x.currency!=="ARS"||x.payment_url!=="https://mpago.li/1NuWTrY") process.exit(1); console.log("PAYMENT_LINK_RECORDED_CHECKOUT_STILL_DISABLED")'
 
+  payment_link_probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    continue-on-error: true
+    steps:
+      - name: Inspect merchant-provided payment link (GET only, no charge)
+        shell: bash
+        run: |
+          set -euo pipefail
+          result=$(curl -L --max-redirs 4 --proto-redir '=https' -sS --max-time 20 -o /tmp/mercadopago-link.html -w '%{http_code} %{url_effective}' 'https://mpago.li/1NuWTrY' || true)
+          python3 - "$result" <<'PY'
+          import sys
+          from urllib.parse import urlparse
+          parts=sys.argv[1].split(' ',1)
+          status=parts[0] if parts else '?'
+          host=urlparse(parts[1]).hostname if len(parts)>1 else None
+          print('PUBLIC_CHECKOUT_LINK_GET_ONLY', {'status':status,'redirect_host':host,'payment_attempted':False})
+          if status not in {'200','302','303'} or not host or not (host.endswith('mercadopago.com.ar') or host=='mpago.li' or host.endswith('mercadopago.com')):
+              print('LINK_NOT_PROVIDER_VERIFIED_BY_CI')
+              raise SystemExit(1)
+          PY
+
   deploy:
     needs: validate
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
