@@ -1,0 +1,99 @@
+name: CalculaFácil PRO — verify test seller token privately
+
+on:
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/calculafacil-pro-test-audit.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  confirm-test-token:
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Prove test-only safety before network audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check calculafacil/sandbox/worker.mjs
+          node --test calculafacil/sandbox/worker.test.mjs
+          grep -Fq 'SANDBOX_ENABLED = "false"' calculafacil/sandbox/wrangler.toml
+      - name: Deploy sandbox independently with checkout OFF
+        shell: bash
+        working-directory: calculafacil/sandbox
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4 deploy --config wrangler.toml
+      - name: Read only test token presence and matching test seller
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,os,secrets,urllib.request,urllib.error,subprocess,time,sys,re
+          account=os.environ["CLOUDFLARE_ACCOUNT_ID"]
+          token=os.environ["CLOUDFLARE_API_TOKEN"]
+          base="https://api.cloudflare.com/client/v4/accounts/"+account+"/workers/scripts/calculafacil-pro-sandbox/secrets"
+          def api(method,url,payload=None):
+              headers={"Authorization":"Bearer "+token,"Accept":"application/json"}
+              if payload is not None: headers["Content-Type"]="application/json"
+              req=urllib.request.Request(url,data=json.dumps(payload).encode() if payload is not None else None,headers=headers,method=method)
+              try:
+                  with urllib.request.urlopen(req,timeout=20) as response:return response.status,json.load(response)
+              except urllib.error.HTTPError as exc:return exc.code,{}
+          code,data=api("GET",base)
+          if code!=200 or not data.get("success") or not isinstance(data.get("result"),list):
+              sys.exit("CLOUDFLARE_SECRET_LOOKUP_FAILED")
+          names={r.get("name") for r in data["result"]}
+          if "MP_TEST_ACCESS_TOKEN" not in names:
+              sys.exit("MP_TEST_ACCESS_TOKEN_NOT_FOUND_ON_SANDBOX")
+          print("MP_TEST_ACCESS_TOKEN_INSTALLED")
+          key=secrets.token_hex(40)
+          code,data=api("PUT",base,{"name":"SANDBOX_AUDIT_SECRET","text":key,"type":"secret_text"})
+          if code not in (200,201) or not data.get("success"):
+              sys.exit("TEST_AUDIT_KEY_INSTALL_FAILED")
+          status="unknown";reason="unknown";success=False
+          try:
+              for attempt in range(12):
+                  config='url = "https://calculafacil-pro-sandbox.lumen-b2b.workers.dev/__internal/verify-test-seller"\nrequest = "POST"\nheader = "X-SANDBOX-AUDIT-KEY: '+key+'"\n'
+                  p=subprocess.run(["curl","--silent","--show-error","--max-time","15","--max-redirs","0","--config","-","--write-out","\\n%{http_code}"],
+                      input=config,text=True,capture_output=True,timeout=18)
+                  if p.returncode!=0 or "\n" not in p.stdout:
+                      reason="network_failed";time.sleep(2);continue
+                  raw,status=p.stdout.rsplit("\n",1);status=status.strip()
+                  try:response=json.loads(raw)
+                  except ValueError:response={}
+                  if status=="404":
+                      reason="protected_route_or_secret_not_yet_propagated";time.sleep(2);continue
+                  if status=="200" and response.get("sellerMatched") and response.get("sandboxEnabled") is False:
+                      success=True;reason="matched_argentinian_test_seller";break
+                  if status=="409":
+                      reason="credential_belongs_to_different_seller";break
+                  if status=="503":
+                      reason=response.get("reason","credential_format_or_provider_unavailable")
+                      if not isinstance(reason,str) or not re.fullmatch("[a-z0-9_]{1,60}",reason):reason="verification_failed"
+                      break
+                  reason="unexpected_http_"+re.sub("[^0-9]","",status)
+                  break
+          finally:
+              deleted,_=api("DELETE",base+"/SANDBOX_AUDIT_SECRET")
+              if deleted not in (200,204):
+                  sys.exit("FAILED_TO_REMOVE_TEMPORARY_TEST_AUDIT_SECRET")
+              print("TEMPORARY_TEST_AUDIT_SECRET_REMOVED")
+          print("TEST_SELLER_RESULT="+reason)
+          print("TEST_CHECKOUT_REMAINS_DISABLED")
+          if not success: sys.exit(1)
+          PY

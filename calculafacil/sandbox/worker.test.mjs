@@ -93,3 +93,36 @@ test("Rejected test payment is not verified",async()=>{
     assert.equal(r.status,200);assert.equal((await r.json()).providerConfirmedApproved,false);
   }finally{f.restore();}
 });
+
+test("Private identity probe denies all non-privileged requests with sandbox disabled",async()=>{
+  const f=mockNetwork();
+  try{
+    const disabled=env({SANDBOX_ENABLED:"false",SANDBOX_AUDIT_SECRET:"very-long-random-test-audit-secret-48-characters-xxxxxxxxxxxx"});
+    const unauth=await worker.fetch(request("/__internal/verify-test-seller"),disabled);
+    assert.equal(unauth.status,404);
+    assert.equal(f.seen.length,0);
+  }finally{f.restore();}
+});
+test("Private identity probe accepts matching test seller without enabling checkout",async()=>{
+  const f=mockNetwork();
+  try{
+    const disabled=env({SANDBOX_ENABLED:"false",SANDBOX_AUDIT_SECRET:"very-long-random-test-audit-secret-48-characters-xxxxxxxxxxxx"});
+    const requestObj=new Request(root+"/__internal/verify-test-seller",{method:"POST",headers:{"X-SANDBOX-AUDIT-KEY":disabled.SANDBOX_AUDIT_SECRET}});
+    const r=await worker.fetch(requestObj,disabled);
+    assert.equal(r.status,200);
+    const j=await r.json();
+    assert.equal(j.ok,true);assert.equal(j.sellerMatched,true);assert.equal(j.siteIsArgentina,true);
+    assert.equal(j.sandboxEnabled,false);assert.equal(f.seen.length,1);assert.equal(f.seen[0].method,"GET");
+    assert.ok(!JSON.stringify(j).includes(TOKEN));
+  }finally{f.restore();}
+});
+test("Private identity probe refuses an unrelated test seller",async()=>{
+  const f=mockNetwork({sellerId:999999999});
+  try{
+    const disabled=env({SANDBOX_ENABLED:"false",SANDBOX_AUDIT_SECRET:"very-long-random-test-audit-secret-48-characters-xxxxxxxxxxxx"});
+    const requestObj=new Request(root+"/__internal/verify-test-seller",{method:"POST",headers:{"X-SANDBOX-AUDIT-KEY":disabled.SANDBOX_AUDIT_SECRET}});
+    const r=await worker.fetch(requestObj,disabled);
+    assert.equal(r.status,409);assert.equal((await r.json()).sellerMatched,false);
+    assert.equal(f.seen.length,1);
+  }finally{f.restore();}
+});

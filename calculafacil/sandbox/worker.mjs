@@ -63,6 +63,35 @@ export default {
         ready:enabled&&validTestToken(env)&&!!env.SANDBOX_ADMIN_KEY,
         checkoutProductionEnabled:false,readsProductionWorkbook:false});
     }
+    // Read-only identity validation with ephemeral CI-generated secret.
+    // This is available with checkout OFF and cannot issue payments.
+    if(url.pathname==="/__internal/verify-test-seller" && request.method==="POST"){
+      const key=env.SANDBOX_AUDIT_SECRET;
+      const supplied=request.headers.get("X-SANDBOX-AUDIT-KEY")||"";
+      if(typeof key!=="string" || key.length<48 || supplied!==key)
+        return json({error:"not_found"},404);
+      if(!validTestToken(env))
+        return json({ok:false,tokenPresent:!!env.MP_TEST_ACCESS_TOKEN,
+          credentialFormatValid:false,sellerMatched:false,sandboxEnabled:env.SANDBOX_ENABLED==="true"},503);
+      try{
+        const response=await fetch("https://api.mercadolibre.com/users/me",{
+          method:"GET",headers:{"Authorization":"Bearer "+env.MP_TEST_ACCESS_TOKEN.trim(),"Accept":"application/json"},
+          redirect:"manual",signal:AbortSignal.timeout(9000)
+        });
+        if(!response.ok || response.status>=300&&response.status<400)
+          return json({ok:false,tokenPresent:true,credentialFormatValid:true,
+            sellerMatched:false,reason:"provider_http_"+response.status,sandboxEnabled:false},503);
+        const user=await response.json();
+        const matched=String(user?.id)===String(env.EXPECTED_TEST_SELLER_ID)&&user?.site_id==="MLA";
+        return json({ok:matched,tokenPresent:true,credentialFormatValid:true,
+          sellerMatched:matched,siteIsArgentina:user?.site_id==="MLA",
+          testUserTag:Array.isArray(user?.tags)?user.tags.includes("test_user"):false,
+          sandboxEnabled:env.SANDBOX_ENABLED==="true"},matched?200:409);
+      }catch{
+        return json({ok:false,tokenPresent:true,credentialFormatValid:true,
+          sellerMatched:false,reason:"provider_unavailable",sandboxEnabled:false},503);
+      }
+    }
     if(!["/admin/create-preference","/admin/check-payment"].includes(url.pathname)
         ||request.method!=="POST"||!privateAdmin(request,env))return json({error:"not_found"},404);
     if(env.SANDBOX_ENABLED!=="true"||!validTestToken(env))return json({error:"sandbox_not_configured"},503);
