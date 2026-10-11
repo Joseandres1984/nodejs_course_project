@@ -163,7 +163,17 @@ jobs:
                       mp=checks.get("mpNoAuth","unknown")
                       if not isinstance(public,str) or not re.fullmatch("[a-z0-9_]{1,50}",public): public="unknown"
                       if not isinstance(mp,str) or not re.fullmatch("[a-z0-9_]{1,50}",mp): mp="unknown"
-                      error="PROVIDER_AUTH_NOT_CONFIRMED_"+reason+"_PAYMENTS_API_"+payment_api+"_PUBLIC_"+public+"_MP_NOAUTH_"+mp
+                      authorized=data.get("authorizedRequests") or {}
+                      if not isinstance(authorized,dict): authorized={}
+                      def format_status(name):
+                          val=authorized.get(name) or {}
+                          if not isinstance(val,dict): return "unknown_unknown"
+                          status=val.get("status","unknown")
+                          destination=val.get("redirectDestination","unknown")
+                          if not isinstance(status,str) or not re.fullmatch("[a-z0-9_]{1,50}",status): status="unknown"
+                          if not isinstance(destination,str) or not re.fullmatch("[a-z0-9_]{1,50}",destination): destination="unknown"
+                          return status+"_"+destination
+                      error="PROVIDER_AUTH_NOT_CONFIRMED_"+reason+"_PAYMENTS_API_"+payment_api+"_PUBLIC_"+public+"_MP_NOAUTH_"+mp+"_AUTH_IDENTITY_"+format_status("identity")+"_AUTH_PAYMENTS_"+format_status("payments")
                       break
                   else:
                       error="PROVIDER_DIAGNOSTIC_HTTP_"+status
