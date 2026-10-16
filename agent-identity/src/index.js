@@ -30,7 +30,7 @@ async function rateLimit(request, env, operation, subject = "unknown") {
   // Rate limiting is a guard, not an accounting or payment security mechanism.
   if (!env.IDENTITY_RATE_LIMITER?.limit) throw new ApiError(503, "Rate limiting is not configured");
   const client = request.headers.get("cf-connecting-ip") || "local";
-  const result = await env.IDENTITY_RATE_LIMITER.limit({ key: operation + ":" + client + ":" + String(subject).slice(0, 90) });
+  const result = await env.IDENTITY_RATE_LIMITER.limit({ key: operation + ":" + client });
   if (!result.success) throw new ApiError(429, "Rate limit exceeded");
 }
 async function activeIdentity(db, did) {
@@ -139,7 +139,7 @@ async function handle(request, env) {
     return json({ identityExtension: { did, publicKeyJwk: document.verificationMethod[0].publicKeyJwk, reputation },
       isUcpMerchantProfile: false, note: "Not a UCP checkout, merchant credential, or profile" });
   return json({ did, publicKeyJwk: document.verificationMethod[0].publicKeyJwk,
-    reputation, identityVerified: true, paymentVerified: false,
+    reputation, proofOfPossessionVerified: true, protocolVerified: false, paymentVerified: false,
     note: "Informational x402 identity extension; no verification or settlement performed" });
 }
 export default {
