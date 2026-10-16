@@ -1,0 +1,26 @@
+name = "agent-identity"
+main = "src/index.js"
+compatibility_date = "2026-01-01"
+
+# Replace these IDs with resources actually created in the target Cloudflare account.
+# Do not deploy against the current LUMEN D1 database.
+[[d1_databases]]
+binding = "DB"
+database_name = "agent-identity-db"
+database_id = "REPLACE_WITH_REAL_D1_DATABASE_ID"
+
+[vars]
+NETWORK = "base-mainnet"
+# Set TRUSTED_REPORTER_DIDS only after validating their key ownership.
+TRUSTED_REPORTER_DIDS = ""
+
+[[ratelimits]]
+name = "IDENTITY_RATE_LIMITER"
+namespace_id = "81927"
+simple = { limit = 20, period = 60 }
+
+[triggers]
+crons = ["0 0 * * *"]
+
+[observability]
+enabled = true
