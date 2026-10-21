@@ -9,6 +9,7 @@ on:
       - '.lumen/x402-worker/base-usdc-verifier.js'
       - '.lumen/x402-worker/test-base-usdc-verifier.mjs'
       - '.lumen/x402-worker/test-transfer-claims.mjs'
+      - '.lumen/x402-worker/test-reconciliation-atomicity.mjs'
       - '.lumen/x402-worker/test-settlement-approval.mjs'
       - '.github/workflows/lumen-x402-recovery-tests.yml'
   workflow_dispatch:
@@ -34,3 +35,5 @@ jobs:
         run: node .lumen/x402-worker/test-base-usdc-verifier.mjs
       - name: Exercise SQL transfer-claim uniqueness under competing requests
         run: node .lumen/x402-worker/test-transfer-claims.mjs
+      - name: Verify reconciliation SQL atomicity and rollback under injected failure
+        run: node .lumen/x402-worker/test-reconciliation-atomicity.mjs
