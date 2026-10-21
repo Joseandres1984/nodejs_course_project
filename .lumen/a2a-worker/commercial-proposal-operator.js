@@ -55,8 +55,9 @@ export function qualifyExternalOpportunity(input={},now=new Date()) {
   if(lane==="X402"&&(input.x402CheckoutVerified!==true||input.ownerSettlementApprovalRequired!==true)) blockers.push("x402_owner_checkout_gate_missing");
   if(input.automatedApplicationRequested===true&&input.termsAllowAutomatedApplications!==true) blockers.push("automated_submission_not_allowed");
   const firstCash=(input.paymentCapacityVerified===true?3:0)+(input.directCommercialIntentVerified===true?3:0)+(noFee?2:0)+(proposedUsd>0&&budgetUsd>=proposedUsd?2:0);
-  const speed=Math.max(0,Math.min(10,Number(input.speedScore??5)));
-  const margin=Math.max(0,Math.min(10,Number(input.marginScore??5)));
+  const finiteScore=(value)=>{const n=Number(value);return Number.isFinite(n)?Math.max(0,Math.min(10,n)):5;};
+  const speed=finiteScore(input.speedScore??5);
+  const margin=finiteScore(input.marginScore??5);
   const score={firstCash,speed,margin,weighted:Number((firstCash*.55+speed*.25+margin*.20).toFixed(1))};
   if(score.weighted<7.5) blockers.push("insufficient_commercial_affinity");
   return {ok:blockers.length===0,blockers,sourceUrl,lane,buyer,need,channel,budgetUsd,proposedUsd,score};
