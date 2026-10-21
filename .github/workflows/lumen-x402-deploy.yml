@@ -80,6 +80,19 @@ jobs:
             exit 2
           }
           echo 'RECONCILIATION_SECRET_NAMES_PRESENT'
+      - name: Verify remote Cloudflare D1 connectivity (read-only)
+        working-directory: .lumen/x402-worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx wrangler d1 execute lumen-zero --remote --command 'SELECT 1 AS connectivity_ok' --json > /tmp/lumen-d1-readonly.json
+          jq -e 'any(.[]; any(.results[]?; .connectivity_ok == 1))' /tmp/lumen-d1-readonly.json >/dev/null || {
+            echo 'D1_REMOTE_READONLY_CHECK_FAILED'
+            exit 2
+          }
+          echo 'D1_REMOTE_READONLY_OK'
       - name: Deploy lumen-zero-x402
         working-directory: .lumen/x402-worker
         env:
