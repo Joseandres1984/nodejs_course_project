@@ -70,7 +70,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
-          npx wrangler secret list --name lumen-zero-x402 --json > /tmp/lumen-secret-names.json
+          npx wrangler secret list --name lumen-zero-x402 > /tmp/lumen-secret-names.json
           jq -e 'any(.[]; .name == "LUMEN_RECONCILE_TOKEN") and any(.[]; .name == "BASE_RPC_URL")' /tmp/lumen-secret-names.json >/dev/null
           echo 'CLOUDFLARE_RECONCILIATION_SECRET_NAMES_PRESENT'
       - name: Verify remote D1 connectivity without writes
@@ -112,7 +112,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
-          npx wrangler secret list --name lumen-zero-x402 --json > /tmp/lumen-x402-secret-names.json
+          npx wrangler secret list --name lumen-zero-x402 > /tmp/lumen-x402-secret-names.json
           jq -e 'any(.[]; .name == "LUMEN_RECONCILE_TOKEN") and any(.[]; .name == "BASE_RPC_URL")' /tmp/lumen-x402-secret-names.json >/dev/null || {
             echo 'RECONCILIATION_SECRETS_MISSING: configure LUMEN_RECONCILE_TOKEN and BASE_RPC_URL as Worker secrets before deployment'
             exit 2
