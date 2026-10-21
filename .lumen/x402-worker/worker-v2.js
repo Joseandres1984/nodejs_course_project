@@ -453,7 +453,7 @@ app.post("/internal/reconcile-usdc", async (c) => {
   try {
     const batch=await c.env.DB.batch([
       c.env.DB.prepare("INSERT INTO lumen_x402_verified_transfers(transfer_key,receipt_id,verified_at) VALUES(?,?,?)").bind(transferKey,receiptId,now),
-      c.env.DB.prepare("UPDATE lumen_x402_receipts SET status='settled_verified',request_metadata=? WHERE id=? AND status='awaiting_independent_verification'").bind(JSON.stringify(meta),receiptId)
+      c.env.DB.prepare("UPDATE lumen_x402_receipts SET status='settled_verified',request_metadata=? WHERE id=? AND status='awaiting_independent_verification' AND pay_to=? AND amount_usd=?").bind(JSON.stringify(meta),receiptId,proof.recipient,proof.amountUsd)
     ]);
     if(Number(batch?.[1]?.meta?.changes)!==1) return c.json({ok:false,error:"receipt_state_conflict"},409);
   } catch {return c.json({ok:false,error:"verification_claim_conflict"},409);}
