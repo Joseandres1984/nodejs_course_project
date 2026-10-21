@@ -422,14 +422,18 @@ app.get("/receipt/:id", async (c) => {
 
 app.get("/stats", async (c) => {
   await ensureSchema(c.env);
-  const totals=await c.env.DB.prepare("SELECT COUNT(*) AS payments, COALESCE(SUM(amount_usd),0) AS revenue FROM lumen_x402_receipts WHERE status IN ('settled_verified','redeemed_queued')").first();
   const pending=await c.env.DB.prepare("SELECT COUNT(*) AS n FROM lumen_x402_receipts WHERE status IN ('verified_pending_settlement','awaiting_independent_verification')").first();
   const redeemed=await c.env.DB.prepare("SELECT COUNT(*) AS n FROM lumen_x402_redemptions").first();
+  // Legacy settled_verified rows may predate independent reconciliation.
+  // Report only receipts with an explicit independent-verification marker.
   const paidRows=await c.env.DB.prepare("SELECT amount_usd,request_metadata FROM lumen_x402_receipts WHERE status IN ('settled_verified','redeemed_queued')").all();
-  let attributedPayments=0, attributedRevenueUsd=0;
+  let verifiedPayments=0, verifiedRevenueUsd=0, attributedPayments=0, attributedRevenueUsd=0;
   for (const row of (paidRows.results || [])) {
     try {
       const meta=JSON.parse(row.request_metadata || "{}");
+      if (meta.settlement?.independentlyVerified !== true) continue;
+      verifiedPayments += 1;
+      verifiedRevenueUsd += Number(row.amount_usd || 0);
       if (meta.conversion?.event_id || meta.conversion?.campaign || meta.conversion?.session_id) {
         attributedPayments += 1;
         attributedRevenueUsd += Number(row.amount_usd || 0);
@@ -437,14 +441,14 @@ app.get("/stats", async (c) => {
     } catch {}
   }
   return c.json({
-    payments:Number(totals?.payments||0),
-    realizedRevenueUsd:Number(totals?.revenue||0),
+    payments:verifiedPayments,
+    realizedRevenueUsd:verifiedRevenueUsd,
     pendingSettlementVerification:Number(pending?.n||0),
     redeemedOrders:Number(redeemed?.n||0),
     attributedPayments,
     attributedRevenueUsd,
     conversionAttribution:true,
-    revenueRule:"Only settled_verified or redeemed_queued x402 receipts count as realized revenue; authorization alone never counts.",
+    revenueRule:"Only receipts explicitly marked independentlyVerified count as realized revenue; legacy statuses alone do not prove payment.",
     network:"Base", asset:"USDC", facilitator:FACILITATOR, recipient:PAY_TO,
   });
 });
