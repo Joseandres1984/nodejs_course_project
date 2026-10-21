@@ -139,11 +139,20 @@ const t2=(await p2.response.json()).approvalRequestId;
 await checkResponse(await handleApprovalManagement(owner("/approvals/"+t2+"/approve","POST"),env),200);
 const a2=await preflightX402Settlement(req("/buy/tender-hot-lead",signature("buyer2"),t2),env,p);
 assert.equal(a2.claimedId,t2);
-const paymentResponse=Buffer.from(JSON.stringify({success:true,transaction:"0xverified"})).toString("base64");
+const paymentResponse=Buffer.from(JSON.stringify({success:true,transaction:"0x"+"a".repeat(64)})).toString("base64");
 await finalizeX402Settlement(env,t2,new Response("ok",{status:200,headers:{"payment-response":paymentResponse}}));
-assert.equal(db.tickets.get(t2).status,"SETTLED");
-assert.equal(db.tickets.get(t2).settlement_transaction,"0xverified");
+assert.equal(db.tickets.get(t2).status,"REVIEW_REQUIRED","facilitator response alone is not final payment evidence");
+assert.equal(db.tickets.get(t2).settlement_transaction,"0x"+"a".repeat(64));
 await checkResponse((await preflightX402Settlement(req("/buy/tender-hot-lead",signature("buyer2"),t2),env,p)).response,409);
+
+// A success flag without a transaction hash must not be counted as paid.
+const p3=await preflightX402Settlement(req("/buy/supplier-snapshot",signature("buyer3")),env,p);
+const t3=(await p3.response.json()).approvalRequestId;
+await handleApprovalManagement(owner("/approvals/"+t3+"/approve","POST"),env);
+await preflightX402Settlement(req("/buy/supplier-snapshot",signature("buyer3-fresh"),t3),env,p);
+const missingTx=Buffer.from(JSON.stringify({success:true})).toString("base64");
+await finalizeX402Settlement(env,t3,new Response("ok",{status:200,headers:{"payment-response":missingTx}}));
+assert.equal(db.tickets.get(t3).status,"REVIEW_REQUIRED");
 
 // Separate commission checkout is covered by identical owner approval.
 db.commissions.set("REF-1",{status:"PAYMENT_DUE",agreed_amount_usd:14});

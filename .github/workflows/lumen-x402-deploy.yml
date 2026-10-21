@@ -33,12 +33,89 @@ jobs:
       - name: Install x402 Bazaar dependencies for regression
         working-directory: .lumen/x402-worker
         run: npm install --no-audit --no-fund
+      - name: Bundle Cloudflare Worker without deploying (no secrets or payments)
+        working-directory: .lumen/x402-worker
+        run: npx wrangler deploy --dry-run --outdir /tmp/lumen-x402-bundle --config wrangler.toml
       - name: Test human authorization and Bazaar discovery (no payments)
         run: |
           node .lumen/x402-worker/test-settlement-approval.mjs
           node .lumen/x402-worker/test-discovery.mjs
           node .lumen/x402-worker/test-bazaar-discovery.mjs
           node .lumen/x402-worker/test-buyer-brief.mjs
+          node .lumen/x402-worker/test-base-usdc-verifier.mjs
+          node .lumen/x402-worker/test-transfer-claims.mjs
+          node .lumen/x402-worker/test-reconciliation-atomicity.mjs
+  cloudflare-preflight:
+    needs: validate-approval
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Confirm Cloudflare credentials exist
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          test -n "$CF_TOKEN" && test -n "$CF_ACCOUNT" || { echo 'CLOUDFLARE_CREDENTIALS_MISSING'; exit 2; }
+      - name: Install Wrangler
+        working-directory: .lumen/x402-worker
+        run: npm install --no-audit --no-fund
+      - name: Check Worker reconciliation secret names without exposing values
+        working-directory: .lumen/x402-worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx wrangler secret list --name lumen-zero-x402 > /tmp/lumen-secret-names.json
+          for required in LUMEN_RECONCILE_TOKEN BASE_RPC_URL; do
+            if ! jq -e --arg name "$required" 'any(.[]; .name == $name)' /tmp/lumen-secret-names.json >/dev/null; then
+              echo "::error::MISSING_WORKER_SECRET_NAME: $required"
+              missing=1
+            fi
+          done
+          test "${missing:-0}" -eq 0
+          echo 'CLOUDFLARE_RECONCILIATION_SECRET_NAMES_PRESENT'
+      - name: Verify remote D1 connectivity without writes
+        working-directory: .lumen/x402-worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          if ! npx wrangler d1 execute lumen-zero --remote --command 'SELECT 1 AS connectivity_ok' --json > /tmp/lumen-d1-preflight.json 2> /tmp/lumen-d1-preflight.stderr; then
+            echo "::error::D1_REMOTE_COMMAND_FAILED"
+            echo "D1_DIAGNOSTIC_START"
+            sed -E 's/(https?:\/\/)[^[:space:]]+/[REDACTED_URL]/g; s/[A-Fa-f0-9]{32,}/[REDACTED_HEX]/g' /tmp/lumen-d1-preflight.stderr | tail -n 20
+            sed -E 's/(https?:\/\/)[^[:space:]]+/[REDACTED_URL]/g; s/[A-Fa-f0-9]{32,}/[REDACTED_HEX]/g' /tmp/lumen-d1-preflight.json | tail -n 20
+            echo "D1_DIAGNOSTIC_END"
+            exit 1
+          fi
+          echo "D1_REMOTE_COMMAND_SUCCEEDED"
+          if ! jq -e 'any(.[]; any(.results[]?; .connectivity_ok == 1))' /tmp/lumen-d1-preflight.json >/dev/null; then
+            echo "::error::D1_REMOTE_RESULT_FORMAT_UNEXPECTED"
+            echo "D1_RESULT_BYTES=$(wc -c < /tmp/lumen-d1-preflight.json)"
+            jq -r 'type' /tmp/lumen-d1-preflight.json 2>/dev/null || echo "D1_RESPONSE_NOT_JSON"
+            exit 1
+          fi
+          echo 'CLOUDFLARE_D1_REMOTE_READONLY_OK'
+      - name: Check production D1 receipt schema (read-only)
+        working-directory: .lumen/x402-worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx wrangler d1 execute lumen-zero --remote --command "SELECT name FROM sqlite_master WHERE type='table' AND name='lumen_x402_receipts'" --json > /tmp/lumen-schema-tables.json
+          jq -e 'any(.[]; any(.results[]?; .name == "lumen_x402_receipts"))' /tmp/lumen-schema-tables.json >/dev/null || { echo "::error::D1_RECEIPTS_TABLE_MISSING"; exit 1; }
+          npx wrangler d1 execute lumen-zero --remote --command "PRAGMA table_info(lumen_x402_receipts)" --json > /tmp/lumen-schema-columns.json
+          for column in id amount_usd pay_to status request_metadata payment_fingerprint; do
+            jq -e --arg column "$column" 'any(.[]; any(.results[]?; .name == $column))' /tmp/lumen-schema-columns.json >/dev/null || { echo "::error::D1_RECEIPTS_COLUMN_MISSING: $column"; exit 1; }
+          done
+          echo "D1_RECEIPTS_SCHEMA_COMPATIBLE"
   deploy-x402:
     needs: validate-approval
     if: github.event_name != 'pull_request'
@@ -61,6 +138,54 @@ jobs:
       - name: Install x402 worker dependencies
         working-directory: .lumen/x402-worker
         run: npm install --no-audit --no-fund
+      - name: Verify required Cloudflare reconciliation secrets exist (names only)
+        working-directory: .lumen/x402-worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx wrangler secret list --name lumen-zero-x402 > /tmp/lumen-x402-secret-names.json
+          jq -e 'any(.[]; .name == "LUMEN_RECONCILE_TOKEN") and any(.[]; .name == "BASE_RPC_URL")' /tmp/lumen-x402-secret-names.json >/dev/null || {
+            echo 'RECONCILIATION_SECRETS_MISSING: configure LUMEN_RECONCILE_TOKEN and BASE_RPC_URL as Worker secrets before deployment'
+            exit 2
+          }
+          echo 'RECONCILIATION_SECRET_NAMES_PRESENT'
+      - name: Verify remote Cloudflare D1 connectivity (read-only)
+        working-directory: .lumen/x402-worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          if ! npx wrangler d1 execute lumen-zero --remote --command 'SELECT 1 AS connectivity_ok' --json > /tmp/lumen-d1-readonly.json 2> /tmp/lumen-d1-readonly.stderr; then
+            echo "::error::D1_REMOTE_COMMAND_FAILED"
+            echo "D1_DIAGNOSTIC_START"
+            sed -E 's/(https?:\/\/)[^[:space:]]+/[REDACTED_URL]/g; s/[A-Fa-f0-9]{32,}/[REDACTED_HEX]/g' /tmp/lumen-d1-readonly.stderr | tail -n 20
+            sed -E 's/(https?:\/\/)[^[:space:]]+/[REDACTED_URL]/g; s/[A-Fa-f0-9]{32,}/[REDACTED_HEX]/g' /tmp/lumen-d1-readonly.json | tail -n 20
+            echo "D1_DIAGNOSTIC_END"
+            exit 1
+          fi
+          echo "D1_REMOTE_COMMAND_SUCCEEDED"
+          jq -e 'any(.[]; any(.results[]?; .connectivity_ok == 1))' /tmp/lumen-d1-readonly.json >/dev/null || {
+            echo 'D1_REMOTE_READONLY_CHECK_FAILED'
+            exit 2
+          }
+          echo 'D1_REMOTE_READONLY_OK'
+      - name: Check production D1 receipt schema (read-only)
+        working-directory: .lumen/x402-worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx wrangler d1 execute lumen-zero --remote --command "SELECT name FROM sqlite_master WHERE type='table' AND name='lumen_x402_receipts'" --json > /tmp/lumen-schema-tables.json
+          jq -e 'any(.[]; any(.results[]?; .name == "lumen_x402_receipts"))' /tmp/lumen-schema-tables.json >/dev/null || { echo "::error::D1_RECEIPTS_TABLE_MISSING"; exit 1; }
+          npx wrangler d1 execute lumen-zero --remote --command "PRAGMA table_info(lumen_x402_receipts)" --json > /tmp/lumen-schema-columns.json
+          for column in id amount_usd pay_to status request_metadata payment_fingerprint; do
+            jq -e --arg column "$column" 'any(.[]; any(.results[]?; .name == $column))' /tmp/lumen-schema-columns.json >/dev/null || { echo "::error::D1_RECEIPTS_COLUMN_MISSING: $column"; exit 1; }
+          done
+          echo "D1_RECEIPTS_SCHEMA_COMPATIBLE"
       - name: Deploy lumen-zero-x402
         working-directory: .lumen/x402-worker
         env:
@@ -95,6 +220,10 @@ jobs:
           test "$owner_code" = '403'
           jq -e '.ok == false' /tmp/x402-owner-test.json >/dev/null
           echo 'X402_HUMAN_APPROVAL_FAIL_CLOSED_LIVE_OK'
+          reconcile_code="$(curl -sS --max-time 20 -o /tmp/x402-reconcile-denied.json -w '%{http_code}' -X POST -H 'content-type: application/json' --data '{\"receiptId\":\"FAKE\"}' "$BASE/internal/reconcile-usdc")"
+          test "$reconcile_code" = '403'
+          jq -e '.ok == false and .error == "forbidden"' /tmp/x402-reconcile-denied.json >/dev/null
+          echo 'X402_RECONCILIATION_UNAUTHORIZED_FAIL_CLOSED_LIVE_OK'
           discovery_ready=0
           for n in $(seq 1 18); do
             openapi_code=$(curl --silent --show-error --max-time 20 -o /tmp/x402-openapi.json -w '%{http_code}' "$BASE/openapi.json" || true)

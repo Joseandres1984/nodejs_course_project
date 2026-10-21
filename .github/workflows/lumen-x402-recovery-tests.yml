@@ -1,0 +1,39 @@
+name: LUMEN x402 recovery regression
+on:
+  pull_request:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/x402-worker/settlement-approval.js'
+      - '.lumen/x402-worker/commission-checkout.js'
+      - '.lumen/x402-worker/worker-v2.js'
+      - '.lumen/x402-worker/base-usdc-verifier.js'
+      - '.lumen/x402-worker/test-base-usdc-verifier.mjs'
+      - '.lumen/x402-worker/test-transfer-claims.mjs'
+      - '.lumen/x402-worker/test-reconciliation-atomicity.mjs'
+      - '.lumen/x402-worker/test-settlement-approval.mjs'
+      - '.github/workflows/lumen-x402-recovery-tests.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  approval-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Syntax check commission checkout and settlement gate
+        run: |
+          node --check .lumen/x402-worker/commission-checkout.js
+          node --check .lumen/x402-worker/worker-v2.js
+          node --check .lumen/x402-worker/base-usdc-verifier.js
+          node --check .lumen/x402-worker/settlement-approval.js
+      - name: Run x402 approval state-machine regression (no external payment)
+        run: node .lumen/x402-worker/test-settlement-approval.mjs
+      - name: Run independent Base USDC verifier regression (mock RPC; no external payment)
+        run: node .lumen/x402-worker/test-base-usdc-verifier.mjs
+      - name: Exercise SQL transfer-claim uniqueness under competing requests
+        run: node .lumen/x402-worker/test-transfer-claims.mjs
+      - name: Verify reconciliation SQL atomicity and rollback under injected failure
+        run: node .lumen/x402-worker/test-reconciliation-atomicity.mjs

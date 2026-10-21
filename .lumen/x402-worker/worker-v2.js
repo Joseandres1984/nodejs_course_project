@@ -7,6 +7,7 @@ import { evmPaywall } from "@x402/paywall/evm";
 import { buildWellKnownX402, buildDiscoveryOpenApi, buildDiscoveryLlmsTxt } from "./discovery.js";
 import { declareDiscoveryExtension, bazaarResourceServerExtension } from "@x402/extensions/bazaar";
 import { inspectBuyerBrief, briefFromUrl } from "./buyer-brief.js";
+import { verifyBaseUsdcTransfer } from "./base-usdc-verifier.js";
 
 const SERVICE = "lumen-zero-x402";
 const VERSION = "1.6-x402-human-approval";
@@ -193,48 +194,23 @@ app.use("/buy/*", async (c, next) => {
     const paymentResponse = c.res?.headers?.get("payment-response") || c.res?.headers?.get("x-payment-response") || "";
     const settlement = decodeB64Json(paymentResponse);
 
-    if (settlement?.success === true) {
+    if (c.res?.ok && settlement?.success === true) {
+      // Facilitator response is not independent proof of settlement.
+      // Do not auto-fulfill or count revenue from this unverified evidence.
       const row = await c.env.DB.prepare("SELECT request_metadata FROM lumen_x402_receipts WHERE payment_fingerprint=? LIMIT 1").bind(fingerprint).first();
       if (row) {
         let meta = {};
         try { meta = JSON.parse(row.request_metadata || "{}"); } catch {}
         meta.settlement = {
-          success:true,
+          facilitatorReportedSuccess:true,
+          independentlyVerified:false,
           transaction:clean(settlement.transaction,100),
           network:clean(settlement.network,80),
           payer:clean(settlement.payer,80),
           reconciled_at:new Date().toISOString(),
         };
-        await c.env.DB.prepare("UPDATE lumen_x402_receipts SET status='settled_verified', request_metadata=? WHERE payment_fingerprint=?")
+        await c.env.DB.prepare("UPDATE lumen_x402_receipts SET status='awaiting_independent_verification', request_metadata=? WHERE payment_fingerprint=? AND status='verified_pending_settlement'")
           .bind(JSON.stringify(meta), fingerprint).run();
-
-        try {
-          const settledReceipt=await c.env.DB.prepare("SELECT * FROM lumen_x402_receipts WHERE payment_fingerprint=? LIMIT 1").bind(fingerprint).first();
-          const briefId=clean(meta?.conversion?.brief_id,80);
-          if (settledReceipt && briefId) {
-            const brief=await c.env.DB.prepare("SELECT id,email,company,details,product_id,product_slug FROM lumen_conversion_leads WHERE id=? AND product_id=? AND technical_canary=0 AND LENGTH(TRIM(COALESCE(details,'')))>=8 LIMIT 1").bind(briefId,settledReceipt.product_id).first();
-            if (brief?.details) {
-              const queued=await queuePaidReceipt(c.env,settledReceipt.id,brief.details,{source:"human_brief_auto",brief});
-              meta.fulfillment={auto_queue:queued.ok===true,status:queued.status || queued.error || "unknown",task_id:queued.taskId || null,order_id:queued.orderId || null,brief_id:briefId,reconciled_at:new Date().toISOString()};
-              await c.env.DB.prepare("UPDATE lumen_x402_receipts SET request_metadata=? WHERE id=?").bind(JSON.stringify(meta),settledReceipt.id).run();
-            }
-          }
-          // A buyer who included a nonconfidential requirement in the paid
-          // GET no longer needs an extra POST /redeem. The already-verified
-          // receipt remains the mandatory settlement prerequisite.
-          const machineBrief=briefFromUrl(new URL(c.req.url));
-          if (settledReceipt && machineBrief.ok && !machineBrief.absent && !meta.fulfillment?.auto_queue) {
-            const queued=await queuePaidReceipt(c.env,settledReceipt.id,machineBrief.text,{source:"x402_get_brief"});
-            meta.fulfillment={auto_queue:queued.ok===true,status:queued.status || queued.error || "unknown",
-              task_id:queued.taskId||null,order_id:queued.orderId||null,
-              source:"machine_query_brief",reconciled_at:new Date().toISOString()};
-            await c.env.DB.prepare("UPDATE lumen_x402_receipts SET request_metadata=? WHERE id=?")
-              .bind(JSON.stringify(meta),settledReceipt.id).run();
-          }
-        } catch (error) {
-          meta.fulfillment={auto_queue:false,status:"queue_error",detail:clean(error?.message || error,300),reconciled_at:new Date().toISOString()};
-          await c.env.DB.prepare("UPDATE lumen_x402_receipts SET request_metadata=? WHERE payment_fingerprint=?").bind(JSON.stringify(meta),fingerprint).run();
-        }
       }
     } else if (paymentResponse) {
       await c.env.DB.prepare("UPDATE lumen_x402_receipts SET status='settlement_failed' WHERE payment_fingerprint=? AND status='verified_pending_settlement'")
@@ -268,7 +244,7 @@ function publicCatalog(origin) {
       outgoingSpendEnabled:false,
       humanApprovalRequired:true,
       humanApprovalPath:"/approvals",
-      accountingRule:"realized revenue only after PAYMENT-RESPONSE confirms settlement success",
+      accountingRule:"facilitator responses remain unverified; realized revenue requires independent chain/provider verification",
       conversionAttribution:"campaign/session metadata is persisted with the receipt when supplied",
     },
     products:Object.entries(PRODUCTS).map(([slug,p]) => ({
@@ -445,16 +421,60 @@ app.get("/receipt/:id", async (c) => {
   return c.json({ok:true,receipt:{...row,conversion}});
 });
 
+// Owner-controlled reconciliation: RPC evidence + DB uniqueness; no payment is initiated.
+app.post("/internal/reconcile-usdc", async (c) => {
+  const provided=c.req.header("x-lumen-reconcile-token") || "";
+  const secret=c.env?.LUMEN_RECONCILE_TOKEN || "";
+  if (!secret || secret.length < 32 || provided.length !== secret.length) return c.json({ok:false,error:"forbidden"},403);
+  let mismatch=0;
+  for(let i=0;i<secret.length;i++) mismatch |= provided.charCodeAt(i)^secret.charCodeAt(i);
+  if(mismatch!==0) return c.json({ok:false,error:"forbidden"},403);
+  if (!c.env?.BASE_RPC_URL || !/^https:\/\//.test(c.env.BASE_RPC_URL)) return c.json({ok:false,error:"base_rpc_not_configured"},503);
+  let body;
+  try {body=await c.req.json();} catch {return c.json({ok:false,error:"invalid_json"},400);}
+  const receiptId=clean(body?.receiptId,80);
+  if(!receiptId) return c.json({ok:false,error:"receipt_id_required"},400);
+  await ensureSchema(c.env);
+  const row=await c.env.DB.prepare("SELECT id,amount_usd,pay_to,status,request_metadata FROM lumen_x402_receipts WHERE id=? LIMIT 1").bind(receiptId).first();
+  if(!row) return c.json({ok:false,error:"receipt_not_found"},404);
+  if(row.status!=="awaiting_independent_verification") return c.json({ok:false,error:"receipt_not_awaiting_verification"},409);
+  let meta={};try{meta=JSON.parse(row.request_metadata||"{}");}catch{}
+  const transaction=clean(meta?.settlement?.transaction,100);
+  if(meta?.settlement?.facilitatorReportedSuccess !== true) return c.json({ok:false,error:"facilitator_evidence_missing"},409);
+  const proof=await verifyBaseUsdcTransfer({rpcUrl:c.env.BASE_RPC_URL,transaction,recipient:row.pay_to,amountUsd:row.amount_usd});
+  if(!proof.ok) return c.json({ok:false,error:proof.reason},409);
+  // Only one receipt can claim a specific transfer event; D1 serializes the claim.
+  await c.env.DB.prepare("CREATE TABLE IF NOT EXISTS lumen_x402_verified_transfers (transfer_key TEXT PRIMARY KEY, receipt_id TEXT NOT NULL UNIQUE, verified_at TEXT NOT NULL)").run();
+  if(proof.logIndex == null || !/^0x[0-9a-fA-F]+$/.test(String(proof.logIndex))) return c.json({ok:false,error:"invalid_transfer_log_index"},409);
+  const transferKey=proof.transaction+":"+BigInt(proof.logIndex).toString(16);
+  // The UNIQUE constraints below arbitrate concurrent requests atomically.
+  meta.settlement={...meta.settlement,independentlyVerified:true,transaction:proof.transaction,network:proof.network,recipient:proof.recipient,amountUsd:proof.amountUsd,blockNumber:proof.blockNumber,logIndex:proof.logIndex,verified_at:new Date().toISOString()};
+  const now=new Date().toISOString();
+  try {
+    const batch=await c.env.DB.batch([
+      // Claim only if the receipt is still eligible at write time.
+      c.env.DB.prepare("INSERT INTO lumen_x402_verified_transfers(transfer_key,receipt_id,verified_at) SELECT ?,id,? FROM lumen_x402_receipts WHERE id=? AND status='awaiting_independent_verification' AND lower(pay_to)=? AND amount_usd=?").bind(transferKey,now,receiptId,proof.recipient,proof.amountUsd),
+      c.env.DB.prepare("UPDATE lumen_x402_receipts SET status='settled_verified',request_metadata=? WHERE id=? AND status='awaiting_independent_verification' AND lower(pay_to)=? AND amount_usd=? AND EXISTS (SELECT 1 FROM lumen_x402_verified_transfers WHERE transfer_key=? AND receipt_id=?)").bind(JSON.stringify(meta),receiptId,proof.recipient,proof.amountUsd,transferKey,receiptId)
+    ]);
+    if(Number(batch?.[0]?.meta?.changes)!==1 || Number(batch?.[1]?.meta?.changes)!==1) return c.json({ok:false,error:"receipt_state_conflict"},409);
+  } catch {return c.json({ok:false,error:"verification_claim_conflict"},409);}
+  return c.json({ok:true,receiptId,transaction:proof.transaction,independentlyVerified:true});
+});
+
 app.get("/stats", async (c) => {
   await ensureSchema(c.env);
-  const totals=await c.env.DB.prepare("SELECT COUNT(*) AS payments, COALESCE(SUM(amount_usd),0) AS revenue FROM lumen_x402_receipts WHERE status IN ('settled_verified','redeemed_queued')").first();
-  const pending=await c.env.DB.prepare("SELECT COUNT(*) AS n FROM lumen_x402_receipts WHERE status='verified_pending_settlement'").first();
+  const pending=await c.env.DB.prepare("SELECT COUNT(*) AS n FROM lumen_x402_receipts WHERE status IN ('verified_pending_settlement','awaiting_independent_verification')").first();
   const redeemed=await c.env.DB.prepare("SELECT COUNT(*) AS n FROM lumen_x402_redemptions").first();
+  // Legacy settled_verified rows may predate independent reconciliation.
+  // Report only receipts with an explicit independent-verification marker.
   const paidRows=await c.env.DB.prepare("SELECT amount_usd,request_metadata FROM lumen_x402_receipts WHERE status IN ('settled_verified','redeemed_queued')").all();
-  let attributedPayments=0, attributedRevenueUsd=0;
+  let verifiedPayments=0, verifiedRevenueUsd=0, attributedPayments=0, attributedRevenueUsd=0;
   for (const row of (paidRows.results || [])) {
     try {
       const meta=JSON.parse(row.request_metadata || "{}");
+      if (meta.settlement?.independentlyVerified !== true || !/^0x[a-fA-F0-9]{64}$/.test(String(meta.settlement?.transaction || "")) || meta.settlement?.network !== NETWORK || String(meta.settlement?.recipient || "").toLowerCase() !== PAY_TO.toLowerCase() || Number(meta.settlement?.amountUsd) !== Number(row.amount_usd)) continue;
+      verifiedPayments += 1;
+      verifiedRevenueUsd += Number(row.amount_usd || 0);
       if (meta.conversion?.event_id || meta.conversion?.campaign || meta.conversion?.session_id) {
         attributedPayments += 1;
         attributedRevenueUsd += Number(row.amount_usd || 0);
@@ -462,14 +482,14 @@ app.get("/stats", async (c) => {
     } catch {}
   }
   return c.json({
-    payments:Number(totals?.payments||0),
-    realizedRevenueUsd:Number(totals?.revenue||0),
-    pendingAuthorizations:Number(pending?.n||0),
+    payments:verifiedPayments,
+    realizedRevenueUsd:verifiedRevenueUsd,
+    pendingSettlementVerification:Number(pending?.n||0),
     redeemedOrders:Number(redeemed?.n||0),
     attributedPayments,
     attributedRevenueUsd,
     conversionAttribution:true,
-    revenueRule:"Only settled_verified or redeemed_queued x402 receipts count as realized revenue; authorization alone never counts.",
+    revenueRule:"Only receipts explicitly marked independentlyVerified count as realized revenue; legacy statuses alone do not prove payment.",
     network:"Base", asset:"USDC", facilitator:FACILITATOR, recipient:PAY_TO,
   });
 });

@@ -80,19 +80,23 @@ async function reconcileSettlement(env, request, response) {
   if (!paymentResponse) return;
   const settlement = decodeB64Json(paymentResponse);
   const fingerprint = await sha256Hex(paymentSignature);
-  if (settlement?.success === true) {
+  // A facilitator response is evidence to reconcile, not independent proof of funds.
+  // Do not credit revenue until chain/provider reconciliation verifies the transfer.
+  const transaction = clean(settlement?.transaction, 120);
+  if (response?.ok && settlement?.success === true && /^0x[a-fA-F0-9]{64}$/.test(transaction)) {
     const row = await env.DB.prepare("SELECT request_metadata FROM lumen_x402_receipts WHERE payment_fingerprint=? LIMIT 1").bind(fingerprint).first();
     if (!row) return;
     let meta = {};
     try { meta = JSON.parse(row.request_metadata || "{}"); } catch {}
     meta.settlement = {
-      success:true,
-      transaction:clean(settlement.transaction, 100),
+      facilitatorReportedSuccess:true,
+      independentlyVerified:false,
+      transaction:transaction,
       network:clean(settlement.network, 80),
       payer:clean(settlement.payer, 100),
       reconciled_at:new Date().toISOString()
     };
-    await env.DB.prepare("UPDATE lumen_x402_receipts SET status='settled_verified',request_metadata=? WHERE payment_fingerprint=?")
+    await env.DB.prepare("UPDATE lumen_x402_receipts SET status='awaiting_independent_verification',request_metadata=? WHERE payment_fingerprint=?")
       .bind(JSON.stringify(meta),fingerprint).run();
   } else {
     await env.DB.prepare("UPDATE lumen_x402_receipts SET status='settlement_failed' WHERE payment_fingerprint=? AND status='verified_pending_settlement'")
