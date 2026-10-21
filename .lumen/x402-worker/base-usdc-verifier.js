@@ -20,7 +20,7 @@ export async function verifyBaseUsdcTransfer({rpcUrl,transaction,recipient,amoun
     const receipt=await rpc("eth_getTransactionReceipt",[transaction]);
     if(receipt.status!=="0x1" || String(receipt.transactionHash).toLowerCase()!==transaction.toLowerCase() || !receipt.blockHash || !receipt.blockNumber) return {ok:false,reason:"unconfirmed_or_failed_transaction"};
     const current=BigInt(await rpc("eth_blockNumber",[]));
-    if(current-BigInt(receipt.blockNumber)<12n) return {ok:false,reason:"insufficient_confirmations"};
+    if(current<BigInt(receipt.blockNumber) || current-BigInt(receipt.blockNumber)<12n) return {ok:false,reason:"insufficient_confirmations"};
     const expected=BigInt(Math.round(Number(amountUsd)*1e6));
     const matching=(receipt.logs||[]).filter(log=>String(log.address).toLowerCase()===BASE_USDC && log.removed!==true && Array.isArray(log.topics) && log.topics.length===3 && String(log.topics[0]).toLowerCase()===TRANSFER_TOPIC && String(log.topics[2]).toLowerCase()===pad(recipient) && /^0x[0-9a-fA-F]+$/.test(String(log.data||"")) && BigInt(log.data)===expected);
     if(matching.length!==1) return {ok:false,reason:"usdc_transfer_not_unique_or_missing"};
