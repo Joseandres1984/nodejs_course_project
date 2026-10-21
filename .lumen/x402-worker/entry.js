@@ -36,6 +36,17 @@ export default {
           else errors++;
         } catch { errors++; }
       }
+      // Scheduled observability runs in the deployed Worker, independently of GitHub's default branch.
+      try {
+        const summary = await env.DB.prepare(
+          "SELECT status, COUNT(*) AS receipts FROM lumen_x402_receipts GROUP BY status"
+        ).all();
+        const counts = Object.fromEntries((summary.results || []).map(r => [String(r.status),Number(r.receipts)]));
+        console.log(JSON.stringify({event:"X402_D1_STATUS_AUDIT",counts,nominalAmountsAreNotRevenue:true}));
+      } catch {
+        errors++;
+        console.error("X402_D1_STATUS_AUDIT_FAILED");
+      }
       console.log(JSON.stringify({event:"X402_RECONCILE_CRON",examined:(pending.results||[]).length,verified,deferred,errors}));
       if (errors) console.error("X402_RECONCILE_CRON_ERRORS",errors);
     };
