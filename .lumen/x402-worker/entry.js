@@ -12,7 +12,7 @@ export default {
         return;
       }
       const pending = await env.DB.prepare(
-        "SELECT id,request_metadata FROM lumen_x402_receipts WHERE status='awaiting_independent_verification' ORDER BY created_at ASC LIMIT 10"
+        "SELECT id,request_metadata FROM lumen_x402_receipts WHERE status='awaiting_independent_verification' AND json_valid(request_metadata) AND json_extract(request_metadata,'$.settlement.facilitatorReportedSuccess')=1 AND length(json_extract(request_metadata,'$.settlement.transaction'))=66 ORDER BY created_at ASC LIMIT 10"
       ).all();
       let verified = 0, deferred = 0, errors = 0;
       for (const row of pending.results || []) {
