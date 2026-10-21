@@ -431,7 +431,7 @@ app.get("/stats", async (c) => {
   for (const row of (paidRows.results || [])) {
     try {
       const meta=JSON.parse(row.request_metadata || "{}");
-      if (meta.settlement?.independentlyVerified !== true) continue;
+      if (meta.settlement?.independentlyVerified !== true || !/^0x[a-fA-F0-9]{64}$/.test(String(meta.settlement?.transaction || "")) || meta.settlement?.network !== NETWORK || String(meta.settlement?.recipient || "").toLowerCase() !== PAY_TO.toLowerCase() || Number(meta.settlement?.amountUsd) !== Number(row.amount_usd)) continue;
       verifiedPayments += 1;
       verifiedRevenueUsd += Number(row.amount_usd || 0);
       if (meta.conversion?.event_id || meta.conversion?.campaign || meta.conversion?.session_id) {
