@@ -71,7 +71,13 @@ jobs:
         run: |
           set -euo pipefail
           npx wrangler secret list --name lumen-zero-x402 > /tmp/lumen-secret-names.json
-          jq -e 'any(.[]; .name == "LUMEN_RECONCILE_TOKEN") and any(.[]; .name == "BASE_RPC_URL")' /tmp/lumen-secret-names.json >/dev/null
+          for required in LUMEN_RECONCILE_TOKEN BASE_RPC_URL; do
+            if ! jq -e --arg name "$required" 'any(.[]; .name == $name)' /tmp/lumen-secret-names.json >/dev/null; then
+              echo "::error::MISSING_WORKER_SECRET_NAME: $required"
+              missing=1
+            fi
+          done
+          test "${missing:-0}" -eq 0
           echo 'CLOUDFLARE_RECONCILIATION_SECRET_NAMES_PRESENT'
       - name: Verify remote D1 connectivity without writes
         working-directory: .lumen/x402-worker
