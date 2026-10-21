@@ -86,8 +86,12 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
-          if ! npx wrangler d1 execute lumen-zero --remote --command 'SELECT 1 AS connectivity_ok' --json > /tmp/lumen-d1-preflight.json; then
+          if ! npx wrangler d1 execute lumen-zero --remote --command 'SELECT 1 AS connectivity_ok' --json > /tmp/lumen-d1-preflight.json 2> /tmp/lumen-d1-preflight.stderr; then
             echo "::error::D1_REMOTE_COMMAND_FAILED"
+            echo "D1_DIAGNOSTIC_START"
+            sed -E 's/(https?:\/\/)[^[:space:]]+/[REDACTED_URL]/g; s/[A-Fa-f0-9]{32,}/[REDACTED_HEX]/g' /tmp/lumen-d1-preflight.stderr | tail -n 20
+            sed -E 's/(https?:\/\/)[^[:space:]]+/[REDACTED_URL]/g; s/[A-Fa-f0-9]{32,}/[REDACTED_HEX]/g' /tmp/lumen-d1-preflight.json | tail -n 20
+            echo "D1_DIAGNOSTIC_END"
             exit 1
           fi
           echo "D1_REMOTE_COMMAND_SUCCEEDED"
@@ -140,8 +144,12 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
-          if ! npx wrangler d1 execute lumen-zero --remote --command 'SELECT 1 AS connectivity_ok' --json > /tmp/lumen-d1-readonly.json; then
+          if ! npx wrangler d1 execute lumen-zero --remote --command 'SELECT 1 AS connectivity_ok' --json > /tmp/lumen-d1-readonly.json 2> /tmp/lumen-d1-readonly.stderr; then
             echo "::error::D1_REMOTE_COMMAND_FAILED"
+            echo "D1_DIAGNOSTIC_START"
+            sed -E 's/(https?:\/\/)[^[:space:]]+/[REDACTED_URL]/g; s/[A-Fa-f0-9]{32,}/[REDACTED_HEX]/g' /tmp/lumen-d1-readonly.stderr | tail -n 20
+            sed -E 's/(https?:\/\/)[^[:space:]]+/[REDACTED_URL]/g; s/[A-Fa-f0-9]{32,}/[REDACTED_HEX]/g' /tmp/lumen-d1-readonly.json | tail -n 20
+            echo "D1_DIAGNOSTIC_END"
             exit 1
           fi
           echo "D1_REMOTE_COMMAND_SUCCEEDED"
