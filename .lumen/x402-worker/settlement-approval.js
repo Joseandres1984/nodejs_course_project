@@ -137,9 +137,12 @@ export async function finalizeX402Settlement(env,claimId,response) {
   let status="REVIEW_REQUIRED",transaction=null,code="unconfirmed_settlement";
   const header=response?.headers?.get("payment-response")||response?.headers?.get("x-payment-response")||"";
   const body=decodeB64(header);
-  if(body?.success===true){
+  // Fail closed: a success flag without a usable on-chain transaction hash
+  // is insufficient settlement evidence. HTTP errors must never count as paid.
+  const tx=clean(body?.transaction,120);
+  if(response?.ok && body?.success===true && /^0x[a-fA-F0-9]{64}$/.test(tx)){
     status="SETTLED";
-    transaction=clean(body.transaction,120)||null;
+    transaction=tx;
     code=null;
   }
   try {
