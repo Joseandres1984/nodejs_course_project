@@ -64,6 +64,19 @@ jobs:
       - name: Install x402 worker dependencies
         working-directory: .lumen/x402-worker
         run: npm install --no-audit --no-fund
+      - name: Verify required Cloudflare reconciliation secrets exist (names only)
+        working-directory: .lumen/x402-worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx wrangler secret list --name lumen-zero-x402 --json > /tmp/lumen-x402-secret-names.json
+          jq -e 'any(.[]; .name == "LUMEN_RECONCILE_TOKEN") and any(.[]; .name == "BASE_RPC_URL")' /tmp/lumen-x402-secret-names.json >/dev/null || {
+            echo 'RECONCILIATION_SECRETS_MISSING: configure LUMEN_RECONCILE_TOKEN and BASE_RPC_URL as Worker secrets before deployment'
+            exit 2
+          }
+          echo 'RECONCILIATION_SECRET_NAMES_PRESENT'
       - name: Deploy lumen-zero-x402
         working-directory: .lumen/x402-worker
         env:
