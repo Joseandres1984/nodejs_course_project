@@ -1,8 +1,11 @@
 name: LUMEN x402 D1 revenue observability
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '17 */6 * * *'
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.github/workflows/lumen-x402-revenue-audit.yml'
+      - '.lumen/x402-worker/**'
 permissions:
   contents: read
 jobs:
