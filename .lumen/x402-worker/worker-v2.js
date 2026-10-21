@@ -452,10 +452,11 @@ app.post("/internal/reconcile-usdc", async (c) => {
   const now=new Date().toISOString();
   try {
     const batch=await c.env.DB.batch([
-      c.env.DB.prepare("INSERT INTO lumen_x402_verified_transfers(transfer_key,receipt_id,verified_at) VALUES(?,?,?)").bind(transferKey,receiptId,now),
-      c.env.DB.prepare("UPDATE lumen_x402_receipts SET status='settled_verified',request_metadata=? WHERE id=? AND status='awaiting_independent_verification' AND pay_to=? AND amount_usd=?").bind(JSON.stringify(meta),receiptId,proof.recipient,proof.amountUsd)
+      // Claim only if the receipt is still eligible at write time.
+      c.env.DB.prepare("INSERT INTO lumen_x402_verified_transfers(transfer_key,receipt_id,verified_at) SELECT ?,id,? FROM lumen_x402_receipts WHERE id=? AND status='awaiting_independent_verification' AND lower(pay_to)=? AND amount_usd=?").bind(transferKey,now,receiptId,proof.recipient,proof.amountUsd),
+      c.env.DB.prepare("UPDATE lumen_x402_receipts SET status='settled_verified',request_metadata=? WHERE id=? AND status='awaiting_independent_verification' AND lower(pay_to)=? AND amount_usd=? AND EXISTS (SELECT 1 FROM lumen_x402_verified_transfers WHERE transfer_key=? AND receipt_id=?)").bind(JSON.stringify(meta),receiptId,proof.recipient,proof.amountUsd,transferKey,receiptId)
     ]);
-    if(Number(batch?.[1]?.meta?.changes)!==1) return c.json({ok:false,error:"receipt_state_conflict"},409);
+    if(Number(batch?.[0]?.meta?.changes)!==1 || Number(batch?.[1]?.meta?.changes)!==1) return c.json({ok:false,error:"receipt_state_conflict"},409);
   } catch {return c.json({ok:false,error:"verification_claim_conflict"},409);}
   return c.json({ok:true,receiptId,transaction:proof.transaction,independentlyVerified:true});
 });
