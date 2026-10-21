@@ -1,0 +1,25 @@
+name: LUMEN External Proposal Operator QA
+on:
+  pull_request:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/a2a-worker/commercial-proposal-operator.js'
+      - '.lumen/a2a-worker/test-commercial-proposal-operator.mjs'
+      - '.lumen/a2a-worker/opportunity-entry.js'
+      - '.github/workflows/lumen-external-proposal-operator-qa.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  commercial-proposals:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax validation
+        run: node --check .lumen/a2a-worker/commercial-proposal-operator.js && node --check .lumen/a2a-worker/opportunity-entry.js
+      - name: Non-spending, no-send regression tests
+        run: node --test .lumen/a2a-worker/test-commercial-proposal-operator.mjs
