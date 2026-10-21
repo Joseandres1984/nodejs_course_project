@@ -98,6 +98,10 @@ jobs:
           test "$owner_code" = '403'
           jq -e '.ok == false' /tmp/x402-owner-test.json >/dev/null
           echo 'X402_HUMAN_APPROVAL_FAIL_CLOSED_LIVE_OK'
+          reconcile_code="$(curl -sS --max-time 20 -o /tmp/x402-reconcile-denied.json -w '%{http_code}' -X POST -H 'content-type: application/json' --data '{\"receiptId\":\"FAKE\"}' "$BASE/internal/reconcile-usdc")"
+          test "$reconcile_code" = '403'
+          jq -e '.ok == false and .error == "forbidden"' /tmp/x402-reconcile-denied.json >/dev/null
+          echo 'X402_RECONCILIATION_UNAUTHORIZED_FAIL_CLOSED_LIVE_OK'
           discovery_ready=0
           for n in $(seq 1 18); do
             openapi_code=$(curl --silent --show-error --max-time 20 -o /tmp/x402-openapi.json -w '%{http_code}' "$BASE/openapi.json" || true)
