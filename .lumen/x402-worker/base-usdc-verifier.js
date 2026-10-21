@@ -25,6 +25,7 @@ export async function verifyBaseUsdcTransfer({rpcUrl,transaction,recipient,amoun
     const matching=(receipt.logs||[]).filter(log=>String(log.address).toLowerCase()===BASE_USDC && log.removed!==true && Array.isArray(log.topics) && log.topics.length===3 && String(log.topics[0]).toLowerCase()===TRANSFER_TOPIC && String(log.topics[2]).toLowerCase()===pad(recipient) && /^0x[0-9a-fA-F]+$/.test(String(log.data||"")) && BigInt(log.data)===expected);
     if(matching.length!==1) return {ok:false,reason:"usdc_transfer_not_unique_or_missing"};
     if(!/^0x[0-9a-fA-F]+$/.test(String(matching[0].logIndex||""))) return {ok:false,reason:"missing_log_index"};
+    if(String(matching[0].transactionHash||"").toLowerCase()!==transaction.toLowerCase()) return {ok:false,reason:"transfer_transaction_mismatch"};
     return {ok:true,transaction:transaction.toLowerCase(),network:"eip155:8453",recipient:recipient.toLowerCase(),amountUsd:Number(amountUsd),blockNumber:receipt.blockNumber,logIndex:matching[0].logIndex};
   } catch {return {ok:false,reason:"rpc_verification_failed"};}
 }
