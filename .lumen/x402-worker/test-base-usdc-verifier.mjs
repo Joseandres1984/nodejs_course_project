@@ -11,4 +11,6 @@ assert.equal((await verifyBaseUsdcTransfer({...input,fetchImpl:mock("0x2105",{..
 assert.equal((await verifyBaseUsdcTransfer({...input,fetchImpl:mock("0x2105",receipt,"0x65")})).ok,false);
 assert.equal((await verifyBaseUsdcTransfer({...input,recipient:"0x"+"d".repeat(40),fetchImpl:mock()})).ok,false);
 assert.equal((await verifyBaseUsdcTransfer({...input,amountUsd:7,fetchImpl:mock()})).ok,false);
+assert.equal((await verifyBaseUsdcTransfer({...input,fetchImpl:mock("0x2105",receipt,"0x63")})).ok,false);
+assert.equal((await verifyBaseUsdcTransfer({...input,fetchImpl:mock("0x2105",{...receipt,logs:[...receipt.logs,...receipt.logs]})})).ok,false);
 console.log("BASE_USDC_VERIFIER_TESTS_OK");
