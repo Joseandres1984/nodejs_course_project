@@ -102,6 +102,20 @@ jobs:
             exit 1
           fi
           echo 'CLOUDFLARE_D1_REMOTE_READONLY_OK'
+      - name: Check production D1 receipt schema (read-only)
+        working-directory: .lumen/x402-worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx wrangler d1 execute lumen-zero --remote --command "SELECT name FROM sqlite_master WHERE type='table' AND name='lumen_x402_receipts'" --json > /tmp/lumen-schema-tables.json
+          jq -e 'any(.[]; any(.results[]?; .name == "lumen_x402_receipts"))' /tmp/lumen-schema-tables.json >/dev/null || { echo "::error::D1_RECEIPTS_TABLE_MISSING"; exit 1; }
+          npx wrangler d1 execute lumen-zero --remote --command "PRAGMA table_info(lumen_x402_receipts)" --json > /tmp/lumen-schema-columns.json
+          for column in id amount_usd pay_to status request_metadata payment_fingerprint; do
+            jq -e --arg column "$column" 'any(.[]; any(.results[]?; .name == $column))' /tmp/lumen-schema-columns.json >/dev/null || { echo "::error::D1_RECEIPTS_COLUMN_MISSING: $column"; exit 1; }
+          done
+          echo "D1_RECEIPTS_SCHEMA_COMPATIBLE"
   deploy-x402:
     needs: validate-approval
     if: github.event_name != 'pull_request'
@@ -158,6 +172,20 @@ jobs:
             exit 2
           }
           echo 'D1_REMOTE_READONLY_OK'
+      - name: Check production D1 receipt schema (read-only)
+        working-directory: .lumen/x402-worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx wrangler d1 execute lumen-zero --remote --command "SELECT name FROM sqlite_master WHERE type='table' AND name='lumen_x402_receipts'" --json > /tmp/lumen-schema-tables.json
+          jq -e 'any(.[]; any(.results[]?; .name == "lumen_x402_receipts"))' /tmp/lumen-schema-tables.json >/dev/null || { echo "::error::D1_RECEIPTS_TABLE_MISSING"; exit 1; }
+          npx wrangler d1 execute lumen-zero --remote --command "PRAGMA table_info(lumen_x402_receipts)" --json > /tmp/lumen-schema-columns.json
+          for column in id amount_usd pay_to status request_metadata payment_fingerprint; do
+            jq -e --arg column "$column" 'any(.[]; any(.results[]?; .name == $column))' /tmp/lumen-schema-columns.json >/dev/null || { echo "::error::D1_RECEIPTS_COLUMN_MISSING: $column"; exit 1; }
+          done
+          echo "D1_RECEIPTS_SCHEMA_COMPATIBLE"
       - name: Deploy lumen-zero-x402
         working-directory: .lumen/x402-worker
         env:
