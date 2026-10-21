@@ -1,0 +1,21 @@
+name: LUMEN x402 recovery regression
+on:
+  pull_request:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/x402-worker/settlement-approval.js'
+      - '.lumen/x402-worker/test-settlement-approval.mjs'
+      - '.github/workflows/lumen-x402-recovery-tests.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  approval-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run x402 approval state-machine regression (no external payment)
+        run: node .lumen/x402-worker/test-settlement-approval.mjs
