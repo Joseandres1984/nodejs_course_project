@@ -193,48 +193,23 @@ app.use("/buy/*", async (c, next) => {
     const paymentResponse = c.res?.headers?.get("payment-response") || c.res?.headers?.get("x-payment-response") || "";
     const settlement = decodeB64Json(paymentResponse);
 
-    if (settlement?.success === true) {
+    if (c.res?.ok && settlement?.success === true) {
+      // Facilitator response is not independent proof of settlement.
+      // Do not auto-fulfill or count revenue from this unverified evidence.
       const row = await c.env.DB.prepare("SELECT request_metadata FROM lumen_x402_receipts WHERE payment_fingerprint=? LIMIT 1").bind(fingerprint).first();
       if (row) {
         let meta = {};
         try { meta = JSON.parse(row.request_metadata || "{}"); } catch {}
         meta.settlement = {
-          success:true,
+          facilitatorReportedSuccess:true,
+          independentlyVerified:false,
           transaction:clean(settlement.transaction,100),
           network:clean(settlement.network,80),
           payer:clean(settlement.payer,80),
           reconciled_at:new Date().toISOString(),
         };
-        await c.env.DB.prepare("UPDATE lumen_x402_receipts SET status='settled_verified', request_metadata=? WHERE payment_fingerprint=?")
+        await c.env.DB.prepare("UPDATE lumen_x402_receipts SET status='awaiting_independent_verification', request_metadata=? WHERE payment_fingerprint=? AND status='verified_pending_settlement'")
           .bind(JSON.stringify(meta), fingerprint).run();
-
-        try {
-          const settledReceipt=await c.env.DB.prepare("SELECT * FROM lumen_x402_receipts WHERE payment_fingerprint=? LIMIT 1").bind(fingerprint).first();
-          const briefId=clean(meta?.conversion?.brief_id,80);
-          if (settledReceipt && briefId) {
-            const brief=await c.env.DB.prepare("SELECT id,email,company,details,product_id,product_slug FROM lumen_conversion_leads WHERE id=? AND product_id=? AND technical_canary=0 AND LENGTH(TRIM(COALESCE(details,'')))>=8 LIMIT 1").bind(briefId,settledReceipt.product_id).first();
-            if (brief?.details) {
-              const queued=await queuePaidReceipt(c.env,settledReceipt.id,brief.details,{source:"human_brief_auto",brief});
-              meta.fulfillment={auto_queue:queued.ok===true,status:queued.status || queued.error || "unknown",task_id:queued.taskId || null,order_id:queued.orderId || null,brief_id:briefId,reconciled_at:new Date().toISOString()};
-              await c.env.DB.prepare("UPDATE lumen_x402_receipts SET request_metadata=? WHERE id=?").bind(JSON.stringify(meta),settledReceipt.id).run();
-            }
-          }
-          // A buyer who included a nonconfidential requirement in the paid
-          // GET no longer needs an extra POST /redeem. The already-verified
-          // receipt remains the mandatory settlement prerequisite.
-          const machineBrief=briefFromUrl(new URL(c.req.url));
-          if (settledReceipt && machineBrief.ok && !machineBrief.absent && !meta.fulfillment?.auto_queue) {
-            const queued=await queuePaidReceipt(c.env,settledReceipt.id,machineBrief.text,{source:"x402_get_brief"});
-            meta.fulfillment={auto_queue:queued.ok===true,status:queued.status || queued.error || "unknown",
-              task_id:queued.taskId||null,order_id:queued.orderId||null,
-              source:"machine_query_brief",reconciled_at:new Date().toISOString()};
-            await c.env.DB.prepare("UPDATE lumen_x402_receipts SET request_metadata=? WHERE id=?")
-              .bind(JSON.stringify(meta),settledReceipt.id).run();
-          }
-        } catch (error) {
-          meta.fulfillment={auto_queue:false,status:"queue_error",detail:clean(error?.message || error,300),reconciled_at:new Date().toISOString()};
-          await c.env.DB.prepare("UPDATE lumen_x402_receipts SET request_metadata=? WHERE payment_fingerprint=?").bind(JSON.stringify(meta),fingerprint).run();
-        }
       }
     } else if (paymentResponse) {
       await c.env.DB.prepare("UPDATE lumen_x402_receipts SET status='settlement_failed' WHERE payment_fingerprint=? AND status='verified_pending_settlement'")
