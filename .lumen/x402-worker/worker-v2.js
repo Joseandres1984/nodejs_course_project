@@ -425,7 +425,10 @@ app.get("/receipt/:id", async (c) => {
 app.post("/internal/reconcile-usdc", async (c) => {
   const provided=c.req.header("x-lumen-reconcile-token") || "";
   const secret=c.env?.LUMEN_RECONCILE_TOKEN || "";
-  if (!secret || provided !== secret) return c.json({ok:false,error:"forbidden"},403);
+  if (!secret || provided.length !== secret.length) return c.json({ok:false,error:"forbidden"},403);
+  let mismatch=0;
+  for(let i=0;i<secret.length;i++) mismatch |= provided.charCodeAt(i)^secret.charCodeAt(i);
+  if(mismatch!==0) return c.json({ok:false,error:"forbidden"},403);
   if (!c.env?.BASE_RPC_URL) return c.json({ok:false,error:"base_rpc_not_configured"},503);
   let body;
   try {body=await c.req.json();} catch {return c.json({ok:false,error:"invalid_json"},400);}
