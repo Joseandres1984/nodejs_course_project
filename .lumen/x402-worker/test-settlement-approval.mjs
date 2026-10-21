@@ -141,7 +141,7 @@ const a2=await preflightX402Settlement(req("/buy/tender-hot-lead",signature("buy
 assert.equal(a2.claimedId,t2);
 const paymentResponse=Buffer.from(JSON.stringify({success:true,transaction:"0x"+"a".repeat(64)})).toString("base64");
 await finalizeX402Settlement(env,t2,new Response("ok",{status:200,headers:{"payment-response":paymentResponse}}));
-assert.equal(db.tickets.get(t2).status,"SETTLED");
+assert.equal(db.tickets.get(t2).status,"REVIEW_REQUIRED","facilitator response alone is not final payment evidence");
 assert.equal(db.tickets.get(t2).settlement_transaction,"0x"+"a".repeat(64));
 await checkResponse((await preflightX402Settlement(req("/buy/tender-hot-lead",signature("buyer2"),t2),env,p)).response,409);
 
