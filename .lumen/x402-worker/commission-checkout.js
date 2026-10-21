@@ -89,8 +89,9 @@ async function reconcileSettlement(env, request, response) {
     let meta = {};
     try { meta = JSON.parse(row.request_metadata || "{}"); } catch {}
     meta.settlement = {
-      success:true,
-      transaction:clean(settlement.transaction, 100),
+      facilitatorReportedSuccess:true,
+      independentlyVerified:false,
+      transaction:transaction,
       network:clean(settlement.network, 80),
       payer:clean(settlement.payer, 100),
       reconciled_at:new Date().toISOString()
