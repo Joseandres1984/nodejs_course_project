@@ -39,6 +39,9 @@ jobs:
           node .lumen/x402-worker/test-discovery.mjs
           node .lumen/x402-worker/test-bazaar-discovery.mjs
           node .lumen/x402-worker/test-buyer-brief.mjs
+          node .lumen/x402-worker/test-base-usdc-verifier.mjs
+          node .lumen/x402-worker/test-transfer-claims.mjs
+          node .lumen/x402-worker/test-reconciliation-atomicity.mjs
   deploy-x402:
     needs: validate-approval
     if: github.event_name != 'pull_request'
