@@ -446,8 +446,7 @@ app.post("/internal/reconcile-usdc", async (c) => {
   // Only one receipt can claim a specific transfer event; D1 serializes the claim.
   await c.env.DB.prepare("CREATE TABLE IF NOT EXISTS lumen_x402_verified_transfers (transfer_key TEXT PRIMARY KEY, receipt_id TEXT NOT NULL UNIQUE, verified_at TEXT NOT NULL)").run();
   const transferKey=proof.transaction+":"+String(proof.logIndex);
-  const existing=await c.env.DB.prepare("SELECT receipt_id FROM lumen_x402_verified_transfers WHERE transfer_key=? OR receipt_id=? LIMIT 1").bind(transferKey,receiptId).first();
-  if(existing) return c.json({ok:false,error:"transfer_already_claimed"},409);
+  // The UNIQUE constraints below arbitrate concurrent requests atomically.
   meta.settlement={...meta.settlement,independentlyVerified:true,transaction:proof.transaction,network:proof.network,recipient:proof.recipient,amountUsd:proof.amountUsd,blockNumber:proof.blockNumber,logIndex:proof.logIndex,verified_at:new Date().toISOString()};
   const now=new Date().toISOString();
   try {
