@@ -141,9 +141,10 @@ export async function finalizeX402Settlement(env,claimId,response) {
   // is insufficient settlement evidence. HTTP errors must never count as paid.
   const tx=clean(body?.transaction,120);
   if(response?.ok && body?.success===true && /^0x[a-fA-F0-9]{64}$/.test(tx)){
-    status="SETTLED";
+    // An untrusted response header alone cannot prove a transfer. Keep the
+    // claim under review until independent provider/chain verification exists.
     transaction=tx;
-    code=null;
+    code="awaiting_independent_settlement_verification";
   }
   try {
     await env.DB.prepare("UPDATE lumen_x402_human_approvals SET status=?,settlement_transaction=?,failure_code=?,updated_at=? WHERE id=? AND status='IN_FLIGHT'")
