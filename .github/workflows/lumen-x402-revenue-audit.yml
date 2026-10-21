@@ -1,0 +1,40 @@
+name: LUMEN x402 D1 revenue observability
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 */6 * * *'
+permissions:
+  contents: read
+jobs:
+  d1-readonly-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install Worker dependencies
+        working-directory: .lumen/x402-worker
+        run: npm install --no-audit --no-fund
+      - name: Audit remote D1 aggregate statuses (read-only)
+        working-directory: .lumen/x402-worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          SQL="SELECT status, COUNT(*) AS receipts, ROUND(COALESCE(SUM(amount_usd),0),2) AS nominal_usd FROM lumen_x402_receipts GROUP BY status ORDER BY status"
+          npx wrangler d1 execute lumen-zero --remote --command "$SQL" --json > /tmp/lumen-x402-audit.json
+          jq -e 'type=="array" and all(.[]; .success == true)' /tmp/lumen-x402-audit.json >/dev/null
+          echo 'X402_D1_RECEIPT_STATUS_COUNTS'
+          jq -c '[.[].results[]? | {status,receipts,nominal_usd}]' /tmp/lumen-x402-audit.json
+          echo 'WARNING: nominal_usd is NOT independently verified revenue. Check /stats for proof-qualified revenue.'
+          echo 'X402_D1_READONLY_AUDIT_OK'
+      - name: Check live independently verified revenue
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --max-time 20 'https://lumen-zero-x402.lumen-b2b.workers.dev/stats' > /tmp/lumen-x402-stats.json
+          jq -e '(.payments | type) == "number" and (.realizedRevenueUsd | type) == "number" and (.pendingSettlementVerification | type) == "number"' /tmp/lumen-x402-stats.json >/dev/null
+          jq -c '{payments,realizedRevenueUsd,pendingSettlementVerification,redeemedOrders,revenueRule}' /tmp/lumen-x402-stats.json
+          echo 'X402_PROOF_QUALIFIED_REVENUE_AUDIT_OK'
