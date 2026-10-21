@@ -4,6 +4,43 @@ import { handleApprovalManagement, preflightX402Settlement, finalizeX402Settleme
 import { briefFromUrl } from "./buyer-brief.js";
 
 export default {
+  async scheduled(_event, env, ctx) {
+    // Read-only discovery of candidates. Never initiate transfers or owner approvals.
+    const job = async () => {
+      if (!env.DB || !env.LUMEN_RECONCILE_TOKEN || env.LUMEN_RECONCILE_TOKEN.length < 32) {
+        console.error("X402_RECONCILE_CRON_NOT_CONFIGURED");
+        return;
+      }
+      const pending = await env.DB.prepare(
+        "SELECT id,request_metadata FROM lumen_x402_receipts WHERE status='awaiting_independent_verification' ORDER BY created_at ASC LIMIT 10"
+      ).all();
+      let verified = 0, deferred = 0, errors = 0;
+      for (const row of pending.results || []) {
+        let meta;
+        try { meta = JSON.parse(row.request_metadata || "{}"); } catch { deferred++; continue; }
+        if (meta?.settlement?.facilitatorReportedSuccess !== true ||
+            !/^0x[0-9a-fA-F]{64}$/.test(String(meta?.settlement?.transaction || ""))) {
+          deferred++;
+          continue;
+        }
+        try {
+          // Reuse the same authenticated, fail-closed reconciliation path as manual calls.
+          const request = new Request("https://lumen.internal/internal/reconcile-usdc", {
+            method:"POST",
+            headers:{"content-type":"application/json","x-lumen-reconcile-token":env.LUMEN_RECONCILE_TOKEN},
+            body:JSON.stringify({receiptId:row.id})
+          });
+          const response = await app.fetch(request, env);
+          if (response.status === 200) verified++;
+          else if (response.status === 409) deferred++;
+          else errors++;
+        } catch { errors++; }
+      }
+      console.log(JSON.stringify({event:"X402_RECONCILE_CRON",examined:(pending.results||[]).length,verified,deferred,errors}));
+      if (errors) console.error("X402_RECONCILE_CRON_ERRORS",errors);
+    };
+    ctx.waitUntil(job());
+  },
   async fetch(request, env, ctx) {
     let claimId = null;
     let response = null;
