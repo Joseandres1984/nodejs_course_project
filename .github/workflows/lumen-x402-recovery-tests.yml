@@ -4,6 +4,7 @@ on:
     branches: [lumen-zero]
     paths:
       - '.lumen/x402-worker/settlement-approval.js'
+      - '.lumen/x402-worker/commission-checkout.js'
       - '.lumen/x402-worker/test-settlement-approval.mjs'
       - '.github/workflows/lumen-x402-recovery-tests.yml'
   workflow_dispatch:
@@ -17,5 +18,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Syntax check commission checkout and settlement gate
+        run: |
+          node --check .lumen/x402-worker/commission-checkout.js
+          node --check .lumen/x402-worker/settlement-approval.js
       - name: Run x402 approval state-machine regression (no external payment)
         run: node .lumen/x402-worker/test-settlement-approval.mjs
