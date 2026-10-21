@@ -145,6 +145,15 @@ assert.equal(db.tickets.get(t2).status,"SETTLED");
 assert.equal(db.tickets.get(t2).settlement_transaction,"0x"+"a".repeat(64));
 await checkResponse((await preflightX402Settlement(req("/buy/tender-hot-lead",signature("buyer2"),t2),env,p)).response,409);
 
+// A success flag without a transaction hash must not be counted as paid.
+const p3=await preflightX402Settlement(req("/buy/supplier-snapshot",signature("buyer3")),env,p);
+const t3=(await p3.response.json()).approvalRequestId;
+await handleApprovalManagement(owner("/approvals/"+t3+"/approve","POST"),env);
+await preflightX402Settlement(req("/buy/supplier-snapshot",signature("buyer3-fresh"),t3),env,p);
+const missingTx=Buffer.from(JSON.stringify({success:true})).toString("base64");
+await finalizeX402Settlement(env,t3,new Response("ok",{status:200,headers:{"payment-response":missingTx}}));
+assert.equal(db.tickets.get(t3).status,"REVIEW_REQUIRED");
+
 // Separate commission checkout is covered by identical owner approval.
 db.commissions.set("REF-1",{status:"PAYMENT_DUE",agreed_amount_usd:14});
 const commission=await preflightX402Settlement(req("/commission/REF-1",signature("commission")),env,p);
