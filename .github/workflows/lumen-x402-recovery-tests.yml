@@ -29,3 +29,5 @@ jobs:
           node --check .lumen/x402-worker/settlement-approval.js
       - name: Run x402 approval state-machine regression (no external payment)
         run: node .lumen/x402-worker/test-settlement-approval.mjs
+      - name: Run independent Base USDC verifier regression (mock RPC; no external payment)
+        run: node .lumen/x402-worker/test-base-usdc-verifier.mjs
