@@ -86,8 +86,17 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
-          npx wrangler d1 execute lumen-zero --remote --command 'SELECT 1 AS connectivity_ok' --json > /tmp/lumen-d1-preflight.json
-          jq -e 'any(.[]; any(.results[]?; .connectivity_ok == 1))' /tmp/lumen-d1-preflight.json >/dev/null
+          if ! npx wrangler d1 execute lumen-zero --remote --command 'SELECT 1 AS connectivity_ok' --json > /tmp/lumen-d1-preflight.json; then
+            echo "::error::D1_REMOTE_COMMAND_FAILED"
+            exit 1
+          fi
+          echo "D1_REMOTE_COMMAND_SUCCEEDED"
+          if ! jq -e 'any(.[]; any(.results[]?; .connectivity_ok == 1))' /tmp/lumen-d1-preflight.json >/dev/null; then
+            echo "::error::D1_REMOTE_RESULT_FORMAT_UNEXPECTED"
+            echo "D1_RESULT_BYTES=$(wc -c < /tmp/lumen-d1-preflight.json)"
+            jq -r 'type' /tmp/lumen-d1-preflight.json 2>/dev/null || echo "D1_RESPONSE_NOT_JSON"
+            exit 1
+          fi
           echo 'CLOUDFLARE_D1_REMOTE_READONLY_OK'
   deploy-x402:
     needs: validate-approval
@@ -131,7 +140,11 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
-          npx wrangler d1 execute lumen-zero --remote --command 'SELECT 1 AS connectivity_ok' --json > /tmp/lumen-d1-readonly.json
+          if ! npx wrangler d1 execute lumen-zero --remote --command 'SELECT 1 AS connectivity_ok' --json > /tmp/lumen-d1-readonly.json; then
+            echo "::error::D1_REMOTE_COMMAND_FAILED"
+            exit 1
+          fi
+          echo "D1_REMOTE_COMMAND_SUCCEEDED"
           jq -e 'any(.[]; any(.results[]?; .connectivity_ok == 1))' /tmp/lumen-d1-readonly.json >/dev/null || {
             echo 'D1_REMOTE_READONLY_CHECK_FAILED'
             exit 2
