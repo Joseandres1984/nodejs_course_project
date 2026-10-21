@@ -243,7 +243,7 @@ function publicCatalog(origin) {
       outgoingSpendEnabled:false,
       humanApprovalRequired:true,
       humanApprovalPath:"/approvals",
-      accountingRule:"realized revenue only after PAYMENT-RESPONSE confirms settlement success",
+      accountingRule:"facilitator responses remain unverified; realized revenue requires independent chain/provider verification",
       conversionAttribution:"campaign/session metadata is persisted with the receipt when supplied",
     },
     products:Object.entries(PRODUCTS).map(([slug,p]) => ({
@@ -423,7 +423,7 @@ app.get("/receipt/:id", async (c) => {
 app.get("/stats", async (c) => {
   await ensureSchema(c.env);
   const totals=await c.env.DB.prepare("SELECT COUNT(*) AS payments, COALESCE(SUM(amount_usd),0) AS revenue FROM lumen_x402_receipts WHERE status IN ('settled_verified','redeemed_queued')").first();
-  const pending=await c.env.DB.prepare("SELECT COUNT(*) AS n FROM lumen_x402_receipts WHERE status='verified_pending_settlement'").first();
+  const pending=await c.env.DB.prepare("SELECT COUNT(*) AS n FROM lumen_x402_receipts WHERE status IN ('verified_pending_settlement','awaiting_independent_verification')").first();
   const redeemed=await c.env.DB.prepare("SELECT COUNT(*) AS n FROM lumen_x402_redemptions").first();
   const paidRows=await c.env.DB.prepare("SELECT amount_usd,request_metadata FROM lumen_x402_receipts WHERE status IN ('settled_verified','redeemed_queued')").all();
   let attributedPayments=0, attributedRevenueUsd=0;
@@ -439,7 +439,7 @@ app.get("/stats", async (c) => {
   return c.json({
     payments:Number(totals?.payments||0),
     realizedRevenueUsd:Number(totals?.revenue||0),
-    pendingAuthorizations:Number(pending?.n||0),
+    pendingSettlementVerification:Number(pending?.n||0),
     redeemedOrders:Number(redeemed?.n||0),
     attributedPayments,
     attributedRevenueUsd,
