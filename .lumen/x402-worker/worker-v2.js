@@ -425,7 +425,7 @@ app.get("/receipt/:id", async (c) => {
 app.post("/internal/reconcile-usdc", async (c) => {
   const provided=c.req.header("x-lumen-reconcile-token") || "";
   const secret=c.env?.LUMEN_RECONCILE_TOKEN || "";
-  if (!secret || provided.length !== secret.length) return c.json({ok:false,error:"forbidden"},403);
+  if (!secret || secret.length < 32 || provided.length !== secret.length) return c.json({ok:false,error:"forbidden"},403);
   let mismatch=0;
   for(let i=0;i<secret.length;i++) mismatch |= provided.charCodeAt(i)^secret.charCodeAt(i);
   if(mismatch!==0) return c.json({ok:false,error:"forbidden"},403);
