@@ -8,6 +8,7 @@ on:
       - '.lumen/x402-worker/worker-v2.js'
       - '.lumen/x402-worker/base-usdc-verifier.js'
       - '.lumen/x402-worker/test-base-usdc-verifier.mjs'
+      - '.lumen/x402-worker/test-transfer-claims.mjs'
       - '.lumen/x402-worker/test-settlement-approval.mjs'
       - '.github/workflows/lumen-x402-recovery-tests.yml'
   workflow_dispatch:
@@ -20,7 +21,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '24'
       - name: Syntax check commission checkout and settlement gate
         run: |
           node --check .lumen/x402-worker/commission-checkout.js
@@ -31,3 +32,5 @@ jobs:
         run: node .lumen/x402-worker/test-settlement-approval.mjs
       - name: Run independent Base USDC verifier regression (mock RPC; no external payment)
         run: node .lumen/x402-worker/test-base-usdc-verifier.mjs
+      - name: Exercise SQL transfer-claim uniqueness under competing requests
+        run: node .lumen/x402-worker/test-transfer-claims.mjs
