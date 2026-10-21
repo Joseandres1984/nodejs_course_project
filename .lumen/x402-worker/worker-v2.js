@@ -440,6 +440,7 @@ app.post("/internal/reconcile-usdc", async (c) => {
   if(row.status!=="awaiting_independent_verification") return c.json({ok:false,error:"receipt_not_awaiting_verification"},409);
   let meta={};try{meta=JSON.parse(row.request_metadata||"{}");}catch{}
   const transaction=clean(meta?.settlement?.transaction,100);
+  if(meta?.settlement?.facilitatorReportedSuccess !== true) return c.json({ok:false,error:"facilitator_evidence_missing"},409);
   const proof=await verifyBaseUsdcTransfer({rpcUrl:c.env.BASE_RPC_URL,transaction,recipient:row.pay_to,amountUsd:row.amount_usd});
   if(!proof.ok) return c.json({ok:false,error:proof.reason},409);
   // Only one receipt can claim a specific transfer event; D1 serializes the claim.
