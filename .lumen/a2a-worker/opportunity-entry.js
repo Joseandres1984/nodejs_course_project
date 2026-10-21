@@ -6,6 +6,7 @@ import { handleTravelBroker, pollTravelReferralTasks, runTravelBroker, runTravel
 import { handleTravelPartnerDiscovery, runTravelPartnerDiscovery } from "./travel-partner-discovery.js";
 import { handleCommercialIntelligence, runCommercialReassessment } from "./commercial-intelligence.js";
 import { handleProposalEngine, prepareTopProposal } from "./proposal-engine.js";
+import { handleCommercialProposalOperator } from "./commercial-proposal-operator.js";
 import { handleQualityGate, reviewNextProposal } from "./quality-gate.js";
 import { handleA2AOutreach, pollOutstandingResponses, sendNextApproved } from "./a2a-outreach.js";
 import { handleFollowupEngine, processFollowupCycle } from "./followup-engine.js";
@@ -117,6 +118,7 @@ export default {
     const travelResponse = await handleTravelBroker(request, env); if (travelResponse) return travelResponse;
     const travelPartnerResponse = await handleTravelPartnerDiscovery(request, env); if (travelPartnerResponse) return travelPartnerResponse;
     const commercialResponse = await handleCommercialIntelligence(request, env); if (commercialResponse) return commercialResponse;
+    const externalProposalResponse = await handleCommercialProposalOperator(request, env); if (externalProposalResponse) return externalProposalResponse;
     const proposalResponse = await handleProposalEngine(request, env); if (proposalResponse) return proposalResponse;
     const qualityResponse = await handleQualityGate(request, env); if (qualityResponse) return qualityResponse;
     const outreachResponse = await handleA2AOutreach(request, env); if (outreachResponse) return outreachResponse;
