@@ -45,6 +45,7 @@ jobs:
           node .lumen/x402-worker/test-base-usdc-verifier.mjs
           node .lumen/x402-worker/test-transfer-claims.mjs
           node .lumen/x402-worker/test-reconciliation-atomicity.mjs
+          node .lumen/x402-worker/test-scheduled-reconciliation.mjs
   cloudflare-preflight:
     needs: validate-approval
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
