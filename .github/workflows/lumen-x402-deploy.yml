@@ -33,6 +33,9 @@ jobs:
       - name: Install x402 Bazaar dependencies for regression
         working-directory: .lumen/x402-worker
         run: npm install --no-audit --no-fund
+      - name: Bundle Cloudflare Worker without deploying (no secrets or payments)
+        working-directory: .lumen/x402-worker
+        run: npx wrangler deploy --dry-run --outdir /tmp/lumen-x402-bundle --config wrangler.toml
       - name: Test human authorization and Bazaar discovery (no payments)
         run: |
           node .lumen/x402-worker/test-settlement-approval.mjs
