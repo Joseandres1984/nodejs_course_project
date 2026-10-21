@@ -429,7 +429,7 @@ app.post("/internal/reconcile-usdc", async (c) => {
   let mismatch=0;
   for(let i=0;i<secret.length;i++) mismatch |= provided.charCodeAt(i)^secret.charCodeAt(i);
   if(mismatch!==0) return c.json({ok:false,error:"forbidden"},403);
-  if (!c.env?.BASE_RPC_URL) return c.json({ok:false,error:"base_rpc_not_configured"},503);
+  if (!c.env?.BASE_RPC_URL || !/^https:\/\//.test(c.env.BASE_RPC_URL)) return c.json({ok:false,error:"base_rpc_not_configured"},503);
   let body;
   try {body=await c.req.json();} catch {return c.json({ok:false,error:"invalid_json"},400);}
   const receiptId=clean(body?.receiptId,80);
