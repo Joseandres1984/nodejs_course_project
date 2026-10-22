@@ -29,7 +29,7 @@ export function validateQualifiedLead(entry={},now=new Date()){
  if(!httpsUrl(entry.paymentEvidenceUrl)||trim(entry.paymentEvidenceNote).length<16||entry.paymentCapacityVerified!==true)errors.push("payment_capacity_evidence_missing");
  if(!httpsUrl(entry.channelRulesUrl)||trim(entry.feeCheckNote).length<20||entry.freeApplicationVerified!==true||entry.channelAllowsProposal!==true||entry.requiresConnects===true||entry.requiresPaidVerification===true||Number(entry.requiredSpendUsd||0)!==0)errors.push("free_permitted_channel_not_proven");
  if(!trim(entry.channel,120))errors.push("channel_unspecified");
- if(!/^MP-(SUPPLIER-SNAPSHOT|QUOTE-SANITY|TENDER-SCAN|SOURCING-5|BUYER-SIGNALS)$/.test(trim(entry.productId,50)))errors.push("unknown_lumen_product");
+ if(!/^MP-(SUPPLIER-SNAPSHOT|QUOTE-SANITY|TENDER-SCAN|SOURCING-5|BUYER-SIGNALS|EXPORT-PULSE)$/.test(trim(entry.productId,50)))errors.push("unknown_lumen_product");
  if(entry.lane==="X402"&&(entry.ownerSettlementApprovalRequired!==true||entry.x402CheckoutVerified!==true))errors.push("x402_human_approval_or_checkout_not_verified");
  if(entry.automatedApplicationRequested===true&&entry.termsAllowAutomatedApplications!==true)errors.push("automated_marketplace_applications_not_permitted");
  return{ok:errors.length===0,errors,sourceUrl:src};
