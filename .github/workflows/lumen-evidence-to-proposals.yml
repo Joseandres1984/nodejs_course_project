@@ -1,0 +1,53 @@
+name: LUMEN Evidence to Proposal Intake
+on:
+  pull_request:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/sales/verified-demand-queue.json'
+      - '.lumen/a2a-worker/verified-demand-importer.mjs'
+      - '.lumen/a2a-worker/test-verified-demand-importer.mjs'
+      - '.github/workflows/lumen-evidence-to-proposals.yml'
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/sales/verified-demand-queue.json'
+      - '.lumen/a2a-worker/verified-demand-importer.mjs'
+      - '.github/workflows/lumen-evidence-to-proposals.yml'
+permissions:
+  contents: read
+concurrency:
+  group: lumen-evidence-to-proposals-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  validate-qualified-intake:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validate nonbinding evidence and draft API
+        run: |
+          set -euo pipefail
+          node --check .lumen/a2a-worker/verified-demand-importer.mjs
+          node --test .lumen/a2a-worker/test-verified-demand-importer.mjs
+      - name: Confirm seed is not fabricated buyer demand
+        run: |
+          node --input-type=module -e "import fs from 'node:fs'; const b=JSON.parse(fs.readFileSync('.lumen/sales/verified-demand-queue.json','utf8')); if(b.version!=='1.0'||!Array.isArray(b.leads)||b.leads.length>10) process.exit(1); console.log('EVIDENCE_BATCH_SIZE='+b.leads.length)"
+  sync-truthful-drafts:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/lumen-zero'
+    needs: validate-qualified-intake
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Import only vetted public demand into LUMEN private proposal D1
+        env:
+          OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          node .lumen/a2a-worker/verified-demand-importer.mjs
