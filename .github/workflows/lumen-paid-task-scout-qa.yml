@@ -1,0 +1,35 @@
+name: LUMEN Paid Task Scout QA
+on:
+  pull_request:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/a2a-worker/paid-task-scout.js'
+      - '.lumen/a2a-worker/test-paid-task-scout.mjs'
+      - '.lumen/a2a-worker/paid-boost-entry.js'
+      - '.github/workflows/lumen-paid-task-scout-qa.yml'
+      - '.github/workflows/lumen-cloudflare-deploy.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  scout-validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Syntax and read-only funded scout regression
+        run: |
+          set -euo pipefail
+          node --check .lumen/a2a-worker/paid-task-scout.js
+          node --check .lumen/a2a-worker/paid-boost-entry.js
+          node --test .lumen/a2a-worker/test-paid-task-scout.mjs
+      - name: Match production Cloudflare entry and dry-run bundle
+        working-directory: .lumen/a2a-worker
+        run: |
+          set -euo pipefail
+          sed -i 's/^main = "opportunity-entry.js"$/main = "paid-boost-entry.js"/' wrangler.toml
+          grep -F 'main = "paid-boost-entry.js"' wrangler.toml
+          npx --yes wrangler@latest deploy --dry-run --config wrangler.toml --outdir /tmp/lumen-paid-scout-dryrun
