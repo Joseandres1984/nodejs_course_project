@@ -143,6 +143,22 @@ jobs:
           jq -e '.publicationExecution == "EXPLICIT_ADMIN_ONLY" and .autonomousPublishing == false and .autonomousPurchasing == false and .supplierOrdering == false and .autonomousSpendUsd == 0' tiendanube-policy.json >/dev/null
           echo 'COMMERCE_AND_SOURCE_CONTROL_PLANES_OK'
 
+      - name: Verify live commercial proposal gate and D1 queue
+        env:
+          OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          unauth=$(curl -sS --max-time 20 -w '%{http_code}' -o commercial-unauth.json "$BASE/commercial/proposals/queue")
+          test "$unauth" = "403"
+          jq -e '.ok==false and .error=="admin_token_required"' commercial-unauth.json >/dev/null
+          curl -fsS --retry 3 --retry-delay 2 --max-time 30 -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" "$BASE/commercial/proposals/queue" -o commercial-queue.json
+          jq -e '.ok==true and (.proposals | type=="array")' commercial-queue.json >/dev/null
+          invalid=$(curl -sS --max-time 20 -w '%{http_code}' -o commercial-invalid.json -X POST -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" -H 'content-type: application/json' --data-binary 'not-json' "$BASE/commercial/proposals/prepare")
+          test "$invalid" = "400"
+          jq -e '.ok==false and .error=="invalid_json"' commercial-invalid.json >/dev/null
+          echo 'LUMEN_COMMERCIAL_PROPOSAL_GATE_D1_READ_AND_AUTH_OK'
+
       - name: Start and verify durable deep cycle
         env:
           OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
