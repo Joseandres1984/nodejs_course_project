@@ -14,7 +14,7 @@ const good={
 };
 function fakeDb(){
  const scan={},leads=new Map();
- return {scan,leads,prepare(sql){
+ return {scan,leads,batch:async(stmts)=>Promise.all(stmts.map(stmt=>stmt.run())),prepare(sql){
   let args=[];
   return {bind(...xs){args=xs;return this;},
    async first(){if(sql.includes("last_attempt_at FROM"))return scan.last_attempt_at?{last_attempt_at:scan.last_attempt_at}:null;if(sql.startsWith("SELECT * FROM"))return Object.keys(scan).length?scan:null;throw Error("unexpected SELECT "+sql);},
