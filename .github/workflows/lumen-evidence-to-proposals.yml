@@ -5,6 +5,7 @@ on:
     paths:
       - '.lumen/sales/verified-demand-queue.json'
       - '.lumen/a2a-worker/verified-demand-importer.mjs'
+      - '.lumen/a2a-worker/commercial-proposal-operator.js'
       - '.lumen/a2a-worker/test-verified-demand-importer.mjs'
       - '.github/workflows/lumen-evidence-to-proposals.yml'
   push:
@@ -12,6 +13,7 @@ on:
     paths:
       - '.lumen/sales/verified-demand-queue.json'
       - '.lumen/a2a-worker/verified-demand-importer.mjs'
+      - '.lumen/a2a-worker/commercial-proposal-operator.js'
       - '.github/workflows/lumen-evidence-to-proposals.yml'
 permissions:
   contents: read
