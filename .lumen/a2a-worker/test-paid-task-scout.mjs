@@ -17,7 +17,7 @@ function fakeDb(){
  return {scan,leads,batch:async(stmts)=>Promise.all(stmts.map(stmt=>stmt.run())),prepare(sql){
   let args=[];
   return {bind(...xs){args=xs;return this;},
-   async first(){if(sql.includes("last_attempt_at FROM"))return scan.last_attempt_at?{last_attempt_at:scan.last_attempt_at}:null;if(sql.startsWith("SELECT * FROM"))return Object.keys(scan).length?scan:null;throw Error("unexpected SELECT "+sql);},
+   async first(){if(sql.startsWith("SELECT last_attempt_at"))return scan.last_attempt_at?{last_attempt_at:scan.last_attempt_at,status:scan.status}:null;if(sql.startsWith("SELECT * FROM"))return Object.keys(scan).length?scan:null;throw Error("unexpected SELECT "+sql);},
    async all(){if(sql.startsWith("SELECT task_id"))return {results:[...leads.values()]};throw Error("unexpected SELECT ALL "+sql);},
    async run(){
     if(sql.startsWith("CREATE TABLE"))return {meta:{changes:0}};
@@ -38,7 +38,7 @@ function fakeDb(){
 function provider(tasks=[good]){
  const calls=[];
  const fetchImpl=async(url,opts)=>{
-  calls.push({url,method:opts?.method});
+  calls.push({url,method:opts?.method,redirect:opts?.redirect});
   return{ok:true,status:200,headers:{get:()=>null},text:async()=>JSON.stringify({ok:true,tasks})};
  };
  return {fetchImpl,calls};
@@ -59,7 +59,7 @@ test("reads public GET only, persists research leads but never proposals or clai
  assert.equal(r.ok,true);assert.equal(r.newResearchCandidates,1);assert.equal(r.eligible,1);
  assert.equal(db.leads.size,1);assert.equal(db.leads.get(good.task_id).status,"RESEARCH_ONLY");
  assert.equal(r.spendUsd,0);assert.equal(r.claims,0);assert.equal(r.autonomousMessages,0);
- assert.equal(api.calls.length,1);assert.equal(api.calls[0].method,"GET");
+ assert.equal(api.calls.length,1);assert.equal(api.calls[0].method,"GET");assert.equal(api.calls[0].redirect,"manual");
 });
 test("four-hour cooldown avoids repeated provider traffic",async()=>{
  const db=fakeDb(),api=provider();
@@ -71,6 +71,15 @@ test("provider schema changes fail closed without changing research inventory",a
  const db=fakeDb();
  const r=await scanFundedTasks({DB:db},{now,fetchImpl:async()=>({ok:true,status:200,headers:{get:()=>null},text:async()=>JSON.stringify({data:[good]})})});
  assert.equal(r.ok,false);assert.equal(db.scan.status,"FAILED");assert.equal(db.leads.size,0);
+});
+test("failed provider scan can retry after one minute; no false success on redirects",async()=>{
+ const db=fakeDb();
+ const fail=await scanFundedTasks({DB:db},{now,fetchImpl:async()=>({ok:false,status:302,headers:{get:()=>null},text:async()=>""})});
+ assert.equal(fail.ok,false);assert.equal(fail.error,"provider_http_302");
+ const goodApi=provider();
+ const retry=await scanFundedTasks({DB:db},{now:new Date(now.getTime()+61000),fetchImpl:goodApi.fetchImpl});
+ assert.equal(retry.ok,true);
+ assert.equal(retry.newResearchCandidates,1);
 });
 test("policy is safe public, research state and scan require admin token",async()=>{
  const env={DB:fakeDb(),OPPORTUNITY_ADMIN_TOKEN:"secret"};
