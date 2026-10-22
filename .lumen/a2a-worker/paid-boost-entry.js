@@ -1,4 +1,5 @@
 import adaptive from "./adaptive-entry.js";
+import {handleFundedTaskScout,scanFundedTasks} from "./paid-task-scout.js";
 import { withBudgetedAi } from "./ai-router.js";
 import { DEEP_CRON, PAID_BOOST_POLICY, ensureBoostSchema, startDeepCycle } from "./paid-boost-runtime.js";
 import { handleSovereign } from "./sovereign-runtime.js";
@@ -74,6 +75,8 @@ export async function handlePaidBoost(request, env) {
 
 export default {
   async fetch(request, env, ctx) {
+    const research = await handleFundedTaskScout(request, env);
+    if (research) return research;
     const brain = await handleUnifiedBrain(request, env);
     if (brain) return brain;
     const responseCloser = await handleResponseCloser(request, env);
@@ -93,6 +96,7 @@ export default {
     if (!env.LUMEN_DEEP_WORKFLOW || !env.LUMEN_OPPORTUNITY_WORKFLOW) throw new Error("paid_boost_workflow_bindings_required");
     if (controller.cron === DEEP_CRON) { ctx.waitUntil(startDeepCycle(env, controller.scheduledTime)); return; }
     const minute = new Date(Number(controller?.scheduledTime || Date.now())).getUTCMinutes();
+    if (minute === 7) ctx.waitUntil(scanFundedTasks(env).catch(() => ({ok:false,source:"basedagents",isolatedFailure:true})));
     if (minute === 7) {
       ctx.waitUntil((async () => {
         const brain = await runUnifiedEconomicBrain(withBudgetedAi(env), { trigger:"hourly_commercial_slot", scheduledTime:controller.scheduledTime });
