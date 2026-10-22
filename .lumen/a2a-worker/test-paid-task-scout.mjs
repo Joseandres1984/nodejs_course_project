@@ -17,7 +17,7 @@ function fakeDb(){
  return {scan,leads,batch:async(stmts)=>Promise.all(stmts.map(stmt=>stmt.run())),prepare(sql){
   let args=[];
   return {bind(...xs){args=xs;return this;},
-   async first(){if(sql.includes("last_attempt_at FROM"))return scan.last_attempt_at?{last_attempt_at:scan.last_attempt_at,status:scan.status}:null;if(sql.startsWith("SELECT * FROM"))return Object.keys(scan).length?scan:null;throw Error("unexpected SELECT "+sql);},
+   async first(){if(sql.startsWith("SELECT last_attempt_at"))return scan.last_attempt_at?{last_attempt_at:scan.last_attempt_at,status:scan.status}:null;if(sql.startsWith("SELECT * FROM"))return Object.keys(scan).length?scan:null;throw Error("unexpected SELECT "+sql);},
    async all(){if(sql.startsWith("SELECT task_id"))return {results:[...leads.values()]};throw Error("unexpected SELECT ALL "+sql);},
    async run(){
     if(sql.startsWith("CREATE TABLE"))return {meta:{changes:0}};
