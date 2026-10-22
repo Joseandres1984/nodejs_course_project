@@ -159,6 +159,27 @@ jobs:
           jq -e '.ok==false and .error=="invalid_json"' commercial-invalid.json >/dev/null
           echo 'LUMEN_COMMERCIAL_PROPOSAL_GATE_D1_READ_AND_AUTH_OK'
 
+      - name: Validate public funded-task research and safe provider scan
+        env:
+          OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          curl -fsS --retry 3 --retry-delay 2 --max-time 25 "$BASE/commercial/paid-tasks/policy" -o paid-task-policy.json
+          jq -e '.readOnly == true and .autonomousSpendUsd == 0 and .ownerApprovalBeforeClaim == true and .onchainVerificationStillRequired == true' paid-task-policy.json >/dev/null
+          unauth=$(curl -sS --max-time 20 -w '%{http_code}' -o paid-task-unauth.json "$BASE/commercial/paid-tasks/state")
+          test "$unauth" = "403"
+          jq -e '.error == "admin_token_required"' paid-task-unauth.json >/dev/null
+          curl -fsS --retry 3 --retry-delay 2 --max-time 30 -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" "$BASE/commercial/paid-tasks/state" -o paid-task-state.json
+          jq -e '.ok == true and (.candidates|type == "array")' paid-task-state.json >/dev/null
+          # Only a free public GET to the exact permitted provider; no claims, proposals or payments.
+          curl -fsS --max-time 40 -X POST -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" "$BASE/commercial/paid-tasks/scan" -o paid-task-scan.json
+          jq '{ok,examined,eligible,newResearchCandidates,skipped,error}' paid-task-scan.json
+          if ! jq -e '.ok == true' paid-task-scan.json >/dev/null; then
+            echo 'PROVIDER_DISCOVERY_UNAVAILABLE_NOT_A_FINANCIAL_OR_DEPLOY_FAILURE'
+          fi
+          echo 'FUNDED_TASK_SCOUT_ACCESS_AND_SAFE_READ_OK'
+
       - name: Start and verify durable deep cycle
         env:
           OPPORTUNITY_ADMIN_TOKEN: ${{ secrets.OPPORTUNITY_ADMIN_TOKEN }}
