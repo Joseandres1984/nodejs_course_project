@@ -26,4 +26,10 @@ jobs:
         run: node --test .lumen/a2a-worker/test-commercial-proposal-operator.mjs .lumen/a2a-worker/test-commercial-proposal-operator-integration.mjs
       - name: Verify full Cloudflare Worker module bundle without deployment
         working-directory: .lumen/a2a-worker
-        run: npx --yes wrangler@latest deploy --dry-run --config wrangler.toml --outdir /tmp/lumen-commercial-dryrun
+        run: |
+          set -euo pipefail
+          # Production deployment selects paid-boost-entry.js; match it without committing config changes.
+          sed -i 's/^main = "opportunity-entry.js"$/main = "paid-boost-entry.js"/' wrangler.toml
+          grep -q '^main = "paid-boost-entry.js"
+ wrangler.toml
+          npx --yes wrangler@latest deploy --dry-run --config wrangler.toml --outdir /tmp/lumen-commercial-dryrun
