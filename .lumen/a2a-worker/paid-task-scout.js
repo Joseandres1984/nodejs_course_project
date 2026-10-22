@@ -41,7 +41,7 @@ async function schema(env){
 async function readProvider(fetchImpl){
  const abort=new AbortController(),timer=setTimeout(()=>abort.abort("timeout"),9000);
  try{
-  const r=await fetchImpl(ENDPOINT,{method:"GET",redirect:"error",headers:{accept:"application/json"},signal:abort.signal});
+  const r=await fetchImpl(ENDPOINT,{method:"GET",redirect:"manual",headers:{accept:"application/json"},signal:abort.signal});
   if(!r?.ok)throw Error("provider_http_"+(r?.status||0));
   if(Number(r.headers?.get?.("content-length")||0)>250000)throw Error("provider_response_too_large");
   const raw=await r.text();
@@ -55,9 +55,10 @@ export async function scanFundedTasks(env,{now=new Date(),fetchImpl=fetch}={}){
  const iso=now.toISOString();
  try{
   await schema(env);
-  const state=await env.DB.prepare("SELECT last_attempt_at FROM lumen_funded_task_scans WHERE source=?").bind(SOURCE).first();
+  const state=await env.DB.prepare("SELECT last_attempt_at,status FROM lumen_funded_task_scans WHERE source=?").bind(SOURCE).first();
   const previous=instant(state?.last_attempt_at);
-  if(previous!==null&&now.getTime()-previous<RETRY_MS)return{ok:true,skipped:true,reason:"four_hour_cooldown"};
+  const retryLimit=state?.status==='SUCCESS'?RETRY_MS:60*1000;
+  if(previous!==null&&now.getTime()-previous<retryLimit)return{ok:true,skipped:true,reason:"four_hour_cooldown"};
   await env.DB.prepare("INSERT INTO lumen_funded_task_scans(source,last_attempt_at,status) VALUES(?,?,'RUNNING') ON CONFLICT(source) DO UPDATE SET last_attempt_at=excluded.last_attempt_at,status='RUNNING'").bind(SOURCE,iso).run();
   const found=await readProvider(fetchImpl), qualified=found.map(t=>qualifyTask(t,now)).filter(t=>t.eligible).slice(0,15);
   let added=0;
