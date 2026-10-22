@@ -7,7 +7,8 @@ const products = {
   "MP-QUOTE-SANITY":"Quote Sanity Check",
   "MP-TENDER-SCAN":"Tender Quick Scan",
   "MP-SOURCING-5":"Supplier Shortlist 5",
-  "MP-BUYER-SIGNALS":"Buyer Signal Scan"
+  "MP-BUYER-SIGNALS":"Buyer Signal Scan",
+  "MP-EXPORT-PULSE":"Export Market Pulse"
 };
 const tidy=(x,n=1200)=>String(x??"").replace(/[\x00-\x1f\x7f]/g," ").replace(/\s+/g," ").trim().slice(0,n);
 export function canonicalSourceUrl(raw) {
