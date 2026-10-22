@@ -1,0 +1,26 @@
+name: LUMEN Response Closer shared-contract QA
+on:
+  pull_request:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/a2a-worker/response-closer-v1.js'
+      - '.lumen/a2a-worker/response-qualification.js'
+      - '.lumen/a2a-worker/test-response-closer-v1.mjs'
+      - '.github/workflows/lumen-response-closer-smoke.yml'
+      - '.github/workflows/lumen-response-closer-compat-qa.yml'
+permissions:
+  contents: read
+jobs:
+  shared-response-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify current no-send and owner-gated close plan
+        run: |
+          node --check .lumen/a2a-worker/response-closer-v1.js
+          node .lumen/a2a-worker/test-response-closer-v1.mjs
+          node .lumen/a2a-worker/response-closer-v2.test.js

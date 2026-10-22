@@ -5,6 +5,7 @@ on:
     branches: [lumen-zero]
     paths:
       - '.lumen/a2a-worker/response-closer-v1.js'
+      - '.lumen/a2a-worker/test-response-closer-v1.mjs'
       - '.lumen/a2a-worker/paid-boost-entry.js'
       - '.github/workflows/lumen-response-closer-smoke.yml'
   workflow_dispatch:
@@ -29,7 +30,7 @@ jobs:
           BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
           test -n "$OPPORTUNITY_ADMIN_TOKEN"
           curl -fsS --retry 5 --retry-delay 3 --max-time 20 "$BASE/response-closer/policy" -o response-closer-policy.json
-          jq -e '.version=="1.0-response-closer" and .autonomousSpendUsd==0 and .autonomousPurchase==false and .autonomousContract==false and .changesPrices==false and .sendsBindingMessages==false and .bindingActionsHumanGated==true and .revenueTruth=="verified_x402_settlement_only"' response-closer-policy.json >/dev/null
+          jq -e '.version=="2.0-response-closer-shared-response" and .sharedResponseTruth==true and .technicalAckIsNotIntent==true and .autonomousSpendUsd==0 and .autonomousPurchase==false and .autonomousContract==false and .changesPrices==false and .sendsBindingMessages==false and .bindingActionsHumanGated==true and .revenueTruth=="verified_x402_settlement_only"' response-closer-policy.json >/dev/null
           protected_code=$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' "$BASE/response-closer/status")
           test "$protected_code" = '403'
           echo 'RESPONSE_CLOSER_POLICY_AND_AUTH_OK'
@@ -40,6 +41,6 @@ jobs:
           set -euo pipefail
           BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
           curl -fsS --retry 5 --retry-delay 3 --max-time 20 -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" "$BASE/response-closer/status" -o response-closer-status.json
-          jq -e '.ok==true and (.status=="READY_FOR_CLASSIFICATION" or .status=="NO_REPLIED_OPPORTUNITY")' response-closer-status.json >/dev/null
-          jq '{status,source,plan:{responseClass:.plan.responseClass,commercialQuality:.plan.commercialQuality,intentScore:.plan.intentScore,nextAction:.plan.nextAction,stageRecommendation:.plan.stageRecommendation,prepareOnly:.plan.prepareOnly,executeCheckout:.plan.executeCheckout,sendMessage:.plan.sendMessage,mutatePrice:.plan.mutatePrice,humanGateRequired:.plan.humanGateRequired,successCriterion:.plan.successCriterion}}' response-closer-status.json
+          jq -e '.ok==true and (.status=="QUALIFIED_COMMERCIAL_RESPONSE" or .status=="NON_COMMERCIAL_RESPONSE" or .status=="NO_REAL_RESPONSE_TEXT" or .status=="NO_REPLIED_OPPORTUNITY")' response-closer-status.json >/dev/null
+          jq '{status,source,plan:{responseClass:.plan.responseClass,qualifiedCommercialIntent:.plan.qualifiedCommercialIntent,checkoutEligible:.plan.checkoutEligible,nextAction:.plan.nextAction,stageRecommendation:.plan.stageRecommendation,prepareOnly:.plan.prepareOnly,executeCheckout:.plan.executeCheckout,sendMessage:.plan.sendMessage,mutatePrice:.plan.mutatePrice,humanGateRequired:.plan.humanGateRequired,successCriterion:.plan.successCriterion}}' response-closer-status.json
           echo 'RESPONSE_CLOSER_PRODUCTION_SMOKE_OK'
