@@ -54,12 +54,17 @@ jobs:
           done
           python3 -c "import json; d=json.load(open('/tmp/leadflow-health.json')); assert d['ok'] and d['mode']=='demo_only' and d['real_leads']==0"
           curl -fsS --max-time 15 "$BASE/" -o /tmp/leadflow-landing.html
+          python3 -c "s=open('/tmp/leadflow-landing.html').read(); print('LANDING_BYTES',len(s)); print('FORM_TAG',s[s.find('<form'):s.find('<form')+155]); print('HAS_SEARCH_ACTION', 'action=\"/buscar\"' in s)"
           grep -q 'action="/buscar"' /tmp/leadflow-landing.html
+          echo LANDING_SEARCH_FORM_OK
           curl -fsS --max-time 15 -X POST -H 'content-type: application/json' --data '{"zona":"Zárate","presupuesto":600000,"ambientes":2,"urgencia":"este_mes"}' "$BASE/api/demo" -o /tmp/leadflow-demo.json
           python3 -c "import json; d=json.load(open('/tmp/leadflow-demo.json')); assert d['ok'] and d['stored']==False and d['resultado']['prioridad']=='media'"
           code=$(curl -sS --max-time 15 -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' --data '{}' "$BASE/api/leads" || true)
           [[ "$code" == 503 ]]
-          curl -fsS --max-time 15 "$BASE/buscar?zona=Zarate&presupuesto=600000&ambientes=2&urgencia=este_mes" -o /tmp/leadflow-search.html
+          echo REQUEST_SEARCH_RESULT
+          curl -sS --max-time 15 -w 'SEARCH_HTTP=%{http_code}\n' "$BASE/buscar?zona=Zarate&presupuesto=600000&ambientes=2&urgencia=este_mes" -o /tmp/leadflow-search.html
+          python3 -c "s=open('/tmp/leadflow-search.html').read(); print('RESULT_BYTES',len(s)); print('RESULT_PREVIEW',s[:450])"
+          grep -q '<!doctype html>' /tmp/leadflow-search.html
           grep -q 'Búsqueda analizada' /tmp/leadflow-search.html
           grep -q 'Prioridad de seguimiento' /tmp/leadflow-search.html
           echo LEADFLOW_SEARCH_CLICK_FLOW_OK
