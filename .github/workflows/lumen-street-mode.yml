@@ -49,11 +49,12 @@ jobs:
             local endpoint_path="${endpoint%%\?*}"
             local body="/tmp/${endpoint_path//\//-}.json"
             local code
-            code=$(curl --show-error --silent --connect-timeout 10 --max-time 35 --retry 2 --retry-delay 2 --retry-all-errors -o "$body" -w '%{http_code}' \
+            code=$(curl --show-error --silent --connect-timeout 10 --max-time 35 -o "$body" -w '%{http_code}' \
               -X POST "$BASE/$endpoint" \
               -H "x-lumen-admin: $OPPORTUNITY_ADMIN_TOKEN" \
               -H 'accept: application/json' \
               -H 'cache-control: no-cache' || true)
+            # POST is not assumed idempotent: do not retry after 405/503 or ambiguous timeouts.
             echo "===== POST /$endpoint HTTP $code ====="
             cat "$body"; echo
             case "$code" in
