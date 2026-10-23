@@ -12,7 +12,7 @@ class FakeD1 {
   constructor() { this.leads = []; this.hits = 0; this.notice = "not_configured"; }
   prepare(sql) {
     const db = this;
-    return { bind(...args) {
+    return { async all() { return { results: db.leads }; }, bind(...args) {
       return {
         async run() {
           if (sql.startsWith("INSERT INTO rate_limit")) db.hits++;
