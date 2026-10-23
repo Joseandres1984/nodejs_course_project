@@ -1,6 +1,6 @@
 # LUMEN LeadFlow AI — independent MVP
 
-Status: functional demo code, not a live deployment. No customer data storage, WhatsApp, email, AI inference, autonomous outreach, payments or revenue in this version.
+Status: staging demo deployed via isolated Cloudflare Worker. No customer data storage, WhatsApp, automatic email, AI inference, autonomous outreach, payments or revenue in this version.
 
 ## What is built
 - Responsive Spanish landing page for an inmobiliaria offer.
@@ -8,6 +8,7 @@ Status: functional demo code, not a live deployment. No customer data storage, W
 - POST /api/demo returns a deterministic follow-up priority (high, medium, exploratory), explanation and suggested action.
 - GET /health states demo_only and no verified revenue.
 - POST /api/leads always returns HTTP 503. It is intentionally impossible to collect real leads at this stage.
+- Non-automated mailto contact CTA opens the visitor's own email client with a pre-filled inquiry to the LUMEN Gmail account; the site does not collect it.
 - No changes to production x402, A2A, public Worker, Travel or Instagram.
 
 ## Verify

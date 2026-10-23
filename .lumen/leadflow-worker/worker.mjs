@@ -63,7 +63,7 @@ function searchResults(params) {
     '<h1>'+ (result ? "Búsqueda analizada." : "Revisá tu búsqueda.") +'</h1>'+
     '<p>'+ (result ? "La consulta se clasificó correctamente para un seguimiento humano." : "No se pudo analizar porque faltan datos válidos.") +'</p>'+
     '<div class="panel">'+cards+'</div><p class="note">Esto es una demostración: no se buscaron propiedades reales ni se guardaron contactos.</p>'+
-    '<a class="cta" href="/#demo">← Volver a probar</a></main></body></html>';
+    '<a class="cta" href="/#demo">← Volver a probar</a> <a class="cta" href="mailto:lumenstock2026@gmail.com?subject=Consulta%20LUMEN%20LeadFlow%20AI&body=Hola%20equipo%20LUMEN%2C%0AQuiero%20informaci%C3%B3n%20sobre%20la%20implementaci%C3%B3n%20para%20mi%20inmobiliaria.">Solicitar propuesta →</a></main></body></html>';
   return page(html,error?400:200);
 }
 

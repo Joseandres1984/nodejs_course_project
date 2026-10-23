@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import worker from "../worker.mjs";
 import {qualify} from "../core.mjs";
 
@@ -77,4 +78,17 @@ test("search route validates input and escapes HTML",async()=>{
   const bad=await worker.fetch(new Request("https://leadflow.example/buscar?zona=Zarate"),{});
   assert.equal(bad.status,400);
   assert.match(await bad.text(),/Revisá tu búsqueda/);
+});
+
+test("landing includes working manual contact link and an explicit consent boundary",()=>{
+  const html=readFileSync(new URL("../public/index.html",import.meta.url),"utf8");
+  assert.match(html,/action="\/buscar"/);
+  assert.match(html,/mailto:lumenstock2026@gmail\.com/);
+  assert.match(html,/No envía nada automáticamente/);
+  assert.doesNotMatch(html,/<script/);
+});
+test("search result contains a commercial next step",async()=>{
+  const response=await worker.fetch(new Request("https://leadflow.example/buscar?"+new URLSearchParams(sample)),{});
+  assert.equal(response.status,200);
+  assert.match(await response.text(),/Solicitar propuesta/);
 });
