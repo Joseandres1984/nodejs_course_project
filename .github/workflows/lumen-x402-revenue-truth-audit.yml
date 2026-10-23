@@ -43,7 +43,7 @@ jobs:
           if not isinstance(stats.get("payments"),int) or not isinstance(stats.get("realizedRevenueUsd"),(int,float)):
               raise SystemExit("X402_REVENUE_UNVERIFIABLE")
           rule=stats.get("revenueRule")
-          if "Only settled_verified or redeemed_queued" not in str(rule):
+          if not (isinstance(rule,str) and rule.strip() == "Only receipts explicitly marked independentlyVerified count as realized revenue; legacy statuses alone do not prove payment."):
               print("X402_REVENUE_RULE_OBSERVED",repr(rule)[:500])
               print("X402_REVENUE_RULE_TYPE",type(rule).__name__)
               raise SystemExit("X402_REVENUE_RULE_CHANGED_REVIEW_REQUIRED")
