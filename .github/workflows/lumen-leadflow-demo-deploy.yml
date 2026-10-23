@@ -1,0 +1,73 @@
+name: LUMEN LeadFlow Staging Demo
+on:
+  push:
+    branches: [lumen-leadflow-mvp-20261022]
+    paths: ['.lumen/leadflow-worker/**', '.github/workflows/lumen-leadflow-demo-deploy.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  staging:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_API_TOKEN || secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.LUMEN_D1_ACCOUNT_ID || secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify code and prevent personal data intake
+        run: |
+          set -euo pipefail
+          node --check .lumen/leadflow-worker/worker.mjs
+          node --check .lumen/leadflow-worker/core.mjs
+          node --check .lumen/leadflow-worker/public/app.js
+          node --test .lumen/leadflow-worker/test/leadflow.test.mjs
+          grep -q 'Recepción de contactos reales no habilitada' .lumen/leadflow-worker/worker.mjs
+          ! grep -q '^\[\[d1_databases\]\]' .lumen/leadflow-worker/wrangler.toml
+      - name: Check Cloudflare credentials without printing values
+        id: preflight
+        shell: bash
+        run: |
+          if [[ -n "$CLOUDFLARE_API_TOKEN" && -n "$CLOUDFLARE_ACCOUNT_ID" ]]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "STAGING_NOT_DEPLOYED: missing Cloudflare credentials"
+          fi
+      - name: Deploy dedicated demo Worker
+        if: steps.preflight.outputs.ready == 'true'
+        working-directory: .lumen/leadflow-worker
+        run: npx --yes wrangler@4 deploy
+      - name: Live smoke check, no simulated conversions counted
+        if: steps.preflight.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE=https://lumen-leadflow-demo.lumen-b2b.workers.dev
+          for i in {1..12}; do
+            code=$(curl -sS --max-time 12 -o /tmp/leadflow-health.json -w '%{http_code}' "$BASE/health" || true)
+            if [[ "$code" == 200 ]]; then break; fi
+            sleep 5
+          done
+          python3 -c "import json; d=json.load(open('/tmp/leadflow-health.json')); assert d['ok'] and d['mode']=='demo_only' and d['real_leads']==0"
+          curl -fsS --max-time 15 "$BASE/" -o /tmp/leadflow-landing.html
+          python3 -c "s=open('/tmp/leadflow-landing.html').read(); print('LANDING_BYTES',len(s)); print('FORM_TAG',s[s.find('<form'):s.find('<form')+155]); print('HAS_SEARCH_ACTION', 'action=\"/buscar\"' in s)"
+          grep -q 'action="/buscar"' /tmp/leadflow-landing.html
+          grep -q 'mailto:lumenstock2026@gmail.com' /tmp/leadflow-landing.html
+          echo LANDING_SEARCH_FORM_OK
+          curl -fsS --max-time 15 -X POST -H 'content-type: application/json' --data '{"zona":"Zárate","presupuesto":600000,"ambientes":2,"urgencia":"este_mes"}' "$BASE/api/demo" -o /tmp/leadflow-demo.json
+          python3 -c "import json; d=json.load(open('/tmp/leadflow-demo.json')); assert d['ok'] and d['stored']==False and d['resultado']['prioridad']=='media'"
+          code=$(curl -sS --max-time 15 -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' --data '{}' "$BASE/api/leads" || true)
+          [[ "$code" == 503 ]]
+          echo REQUEST_SEARCH_RESULT
+          curl -sS --max-time 15 -w 'SEARCH_HTTP=%{http_code}\n' "$BASE/buscar?zona=Zarate&presupuesto=600000&ambientes=2&urgencia=este_mes" -o /tmp/leadflow-search.html
+          python3 -c "s=open('/tmp/leadflow-search.html').read(); print('RESULT_BYTES',len(s)); print('RESULT_PREVIEW',s[:450])"
+          grep -q '<!doctype html>' /tmp/leadflow-search.html
+          grep -q 'Búsqueda analizada' /tmp/leadflow-search.html
+          grep -q 'Prioridad de seguimiento' /tmp/leadflow-search.html
+          grep -q 'Solicitar propuesta' /tmp/leadflow-search.html
+          echo LEADFLOW_SEARCH_CLICK_FLOW_OK
+          echo LEADFLOW_DEMO_LIVE_SMOKE_OK
