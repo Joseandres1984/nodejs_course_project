@@ -55,3 +55,26 @@ test("oversized input is rejected",async()=>{
   const response=await worker.fetch(post("/api/demo",data),{});
   assert.equal(response.status,400);
 });
+
+test("search button GET route returns a visible HTML result",async()=>{
+  const query=new URLSearchParams(sample);
+  const response=await worker.fetch(new Request("https://leadflow.example/buscar?"+query),{});
+  assert.equal(response.status,200);
+  assert.match(response.headers.get("content-type"),/text\/html/);
+  const html=await response.text();
+  assert.match(html,/Búsqueda analizada/);
+  assert.match(html,/Prioridad de seguimiento/);
+  assert.match(html,/media/i);
+  assert.match(html,/no se buscaron propiedades reales/);
+});
+test("search route validates input and escapes HTML",async()=>{
+  const params=new URLSearchParams({...sample,zona:"<script>alert(1)</script>"});
+  const response=await worker.fetch(new Request("https://leadflow.example/buscar?"+params),{});
+  const html=await response.text();
+  assert.equal(response.status,200);
+  assert.doesNotMatch(html,/<script>alert\(1\)<\/script>/);
+  assert.match(html,/&lt;script&gt;/);
+  const bad=await worker.fetch(new Request("https://leadflow.example/buscar?zona=Zarate"),{});
+  assert.equal(bad.status,400);
+  assert.match(await bad.text(),/Revisá tu búsqueda/);
+});

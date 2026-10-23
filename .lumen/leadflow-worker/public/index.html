@@ -1,19 +1,19 @@
 <!doctype html>
 <html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="description" content="LUMEN LeadFlow AI: automatización de clasificación de consultas para inmobiliarias.">
-<title>LUMEN LeadFlow AI · Demo inmobiliaria</title><link rel="stylesheet" href="/style.css"><script defer src="/app.js"></script></head>
+<title>LUMEN LeadFlow AI · Demo inmobiliaria</title><link rel="stylesheet" href="/style.css"></head>
 <body><header class="shell top"><a class="brand" href="/">LUMEN <span>LEADFLOW AI</span></a><small class="chip">DEMO SIN DATOS PERSONALES</small></header>
 <main><section class="shell hero"><div><span class="eyebrow">AUTOMATIZACIÓN COMERCIAL PARA INMOBILIARIAS</span><h1>Ninguna consulta debería <em>perderse.</em></h1>
 <p>Transformá preguntas repetidas en oportunidades organizadas. Priorizá seguimientos y dejá que cada asesor se concentre en la atención.</p>
 <a class="cta" href="#demo">Probar la demostración →</a><p class="note">El sistema utiliza reglas transparentes. No consulta inmuebles reales, no contacta clientes ni genera ventas.</p></div>
 <aside class="steps"><h2>El recorrido de cada consulta</h2><ol><li><b>01</b> Recibir la búsqueda</li><li><b>02</b> Organizar la necesidad</li><li><b>03</b> Sugerir un seguimiento humano</li></ol><strong>Menos consultas sin respuesta. Más orden comercial.</strong></aside></section>
 <section id="demo" class="demo"><div class="shell"><div class="heading"><span class="eyebrow">PROTOTIPO INTERACTIVO</span><h2>Simulá una consulta</h2><p>Usá datos ficticios de búsqueda. No solicitamos nombres, teléfonos ni correos.</p></div>
-<div class="columns"><form id="lead-form" class="panel">
+<div class="columns"><form id="lead-form" action="/buscar" method="get" class="panel">
 <label for="zona">Zona buscada</label><input id="zona" name="zona" maxlength="80" minlength="2" value="Zárate" required>
 <label for="presupuesto">Presupuesto mensual (ARS)</label><input id="presupuesto" name="presupuesto" type="number" min="100000" max="100000000" step="1000" value="600000" required>
 <label for="ambientes">Ambientes</label><select id="ambientes" name="ambientes"><option>1</option><option selected>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option></select>
 <label for="urgencia">Plazo</label><select id="urgencia" name="urgencia"><option value="esta_semana">Esta semana</option><option value="este_mes" selected>Este mes</option><option value="flexible">Solo estoy mirando</option></select>
-<button id="submit" type="submit">Analizar consulta →</button><p class="note">Esta demo no almacena tus respuestas.</p></form>
+<button id="submit" type="submit">Buscar y analizar →</button><p class="note">Al buscar, vas a ver un resultado en una página nueva. Esta demo no almacena tus respuestas.</p></form>
 <div class="panel result" aria-live="polite"><div class="result-header"><span>RESULTADO LUMEN</span><span id="status">LISTO</span></div>
 <div id="output" class="empty"><div class="symbol">◎</div><h3>Esperando una búsqueda</h3><p>Completá los campos y observá la clasificación.</p></div></div></div></div></section>
 <section class="shell offer"><span class="eyebrow">OFERTA COMERCIAL PROPUESTA</span><h2>Instalación desde US$390</h2>

@@ -18,9 +18,60 @@ async function readJson(request) {
   try { return JSON.parse(new TextDecoder("utf-8",{fatal:true}).decode(bytes)); }
   catch { throw new InputError("JSON inválido."); }
 }
+
+function escapeHtml(v) {
+  return String(v).replace(/[&<>"']/g, ch => ({
+    "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+  })[ch]);
+}
+function page(body, status=200) {
+  return new Response(body,{
+    status,
+    headers: {
+      ...headers,
+      "content-type":"text/html; charset=utf-8",
+      "content-security-policy":"default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+      "x-frame-options":"DENY"
+    }
+  });
+}
+function searchResults(params) {
+  let result, error;
+  try {
+    result=qualify({
+      zona:params.get("zona"),
+      presupuesto:params.get("presupuesto"),
+      ambientes:params.get("ambientes"),
+      urgencia:params.get("urgencia")
+    });
+  } catch(err) {
+    error=err instanceof InputError ? err.message : "No se pudo procesar la búsqueda.";
+  }
+  const rows=result ? [
+    ["Prioridad de seguimiento",result.prioridad.toUpperCase()],
+    ["Consulta recibida (simulación)",result.resumen],
+    ["Siguiente acción",result.proximo_paso],
+    ["Criterio",result.criterio]
+  ] : [["Revisá los datos",error]];
+  const cards=rows.map(row=>'<div class="result-item"><small>'+escapeHtml(row[0])+'</small><strong>'+escapeHtml(row[1])+'</strong></div>').join("");
+  const html='<!doctype html><html lang="es"><head><meta charset="utf-8">'+
+    '<meta name="viewport" content="width=device-width,initial-scale=1">'+
+    '<title>Resultado · LUMEN LeadFlow AI</title><link rel="stylesheet" href="/style.css"></head>'+
+    '<body><header class="shell top"><a class="brand" href="/">LUMEN <span>LEADFLOW AI</span></a>'+
+    '<small class="chip">SIMULACIÓN SIN DATOS PERSONALES</small></header>'+
+    '<main class="shell offer"><span class="eyebrow">RESULTADO DE LA DEMOSTRACIÓN</span>'+
+    '<h1>'+ (result ? "Búsqueda analizada." : "Revisá tu búsqueda.") +'</h1>'+
+    '<p>'+ (result ? "La consulta se clasificó correctamente para un seguimiento humano." : "No se pudo analizar porque faltan datos válidos.") +'</p>'+
+    '<div class="panel">'+cards+'</div><p class="note">Esto es una demostración: no se buscaron propiedades reales ni se guardaron contactos.</p>'+
+    '<a class="cta" href="/#demo">← Volver a probar</a></main></body></html>';
+  return page(html,error?400:200);
+}
+
 export default {
   async fetch(request,env={}) {
-    const path=new URL(request.url).pathname;
+    const url=new URL(request.url);
+    const path=url.pathname;
+    if(path==="/buscar"&&request.method==="GET")return searchResults(url.searchParams);
     if(path==="/health"&&request.method==="GET")return json({ok:true,service:"LUMEN LeadFlow AI",mode:"demo_only",real_leads:0,revenue:"not_verified"});
     if(path==="/api/demo"&&request.method==="POST"){
       try{return json({ok:true,demo:true,stored:false,resultado:qualify(await readJson(request))});}
