@@ -1,0 +1,28 @@
+name: LUMEN LeadFlow MVP CI
+on:
+  pull_request:
+    paths:
+      - '.lumen/leadflow-worker/**'
+      - '.github/workflows/lumen-leadflow-ci.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run code validation
+        run: |
+          node --check .lumen/leadflow-worker/worker.mjs
+          node --check .lumen/leadflow-worker/core.mjs
+          node --check .lumen/leadflow-worker/public/app.js
+          node --test .lumen/leadflow-worker/test/leadflow.test.mjs
+      - name: Confirm no production intake
+        run: |
+          grep -q 'return json({ok:false,error:"Recepción de contactos reales no habilitada."},503)' .lumen/leadflow-worker/worker.mjs
+          ! grep -q '^\[\[d1_databases\]\]' .lumen/leadflow-worker/wrangler.toml
