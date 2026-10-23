@@ -30,12 +30,20 @@ Abrir http://localhost:8787. La interfaz funciona en modo demo, pero POST /api/l
 7. Configurar [[triggers]] crons = ["0 3 * * *"] para ejecutar eliminación diaria; sin cron, la retención **no se ejecuta automáticamente**. Las solicitudes de borrado puntuales se gestionan por el administrador.
 8. Antes de lanzar públicamente: controles operativos antiabuso (WAF/Turnstile), aviso de privacidad revisado, limitación de acceso a los datos, respaldo y borrado, verificación de WhatsApp/API si se incorpora, pruebas integradas con D1 real.
 
-## Despliegue de la demo no persistente
-Desde leadflow-ai, con cuenta Cloudflare autorizada:
+## Demo pública verificada (sin persistencia)
+URL: https://lumen-leadflow-demo.lumen-b2b.workers.dev/
+
+Se publicó el Worker separado **lumen-leadflow-demo** y se validó desde GitHub Actions la página, GET /health (200), GET /api/status (captación deshabilitada) y POST /api/leads (503 esperado).
+
+Evidencia: https://github.com/Joseandres1984/nodejs_course_project/actions/runs/39883532386
+
+La acción `.github/workflows/lumen-leadflow-demo-deploy.yml` despliega **solo la demo** al cambiar ese workflow en la rama experimental. No toca el runtime LUMEN productivo, no integra inventario y no captura datos reales.
+
+Para repetir un despliegue manual desde leadflow-ai con cuenta Cloudflare autorizada:
 ~~~
 npx wrangler@4 deploy
 ~~~
-El nombre es lumen-leadflow-demo y no comparte nombres ni bindings con el entorno productivo existente. Sin acceso a Cloudflare no puede considerarse desplegado; no se añadió ninguna acción automática de deploy.
+No habilitar SUBMISSIONS_ENABLED hasta verificar D1 aislado, consentimiento, privacidad, alertas, seguridad y cron de retención.
 
 ## API
 - GET /: demo.

@@ -1,4 +1,5 @@
 name: LUMEN LeadFlow Safe Demo Deploy
+# Demo-only: no D1, payments, real customer capture, or changes to the existing LUMEN Worker.
 
 on:
   push:
