@@ -1,0 +1,28 @@
+name: LUMEN LeadFlow CI
+on:
+  pull_request:
+    paths:
+      - 'leadflow-ai/**'
+      - '.github/workflows/lumen-leadflow-ci.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: leadflow-ai
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Node tests (no credentials, no network calls)
+        run: npm test
+      - name: JavaScript syntax checks
+        run: |
+          node --check src/worker.mjs
+          node --check src/qualification.mjs
+          node --check src/page.mjs
+          node --check src/client.mjs
