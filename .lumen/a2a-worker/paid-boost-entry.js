@@ -1,4 +1,5 @@
 import adaptive from "./adaptive-entry.js";
+import { handleAffiliateSales } from "./affiliate-sales.js";
 import {handleFundedTaskScout,scanFundedTasks} from "./paid-task-scout.js";
 import { withBudgetedAi } from "./ai-router.js";
 import { DEEP_CRON, PAID_BOOST_POLICY, ensureBoostSchema, startDeepCycle } from "./paid-boost-runtime.js";
@@ -75,6 +76,8 @@ export async function handlePaidBoost(request, env) {
 
 export default {
   async fetch(request, env, ctx) {
+    const affiliateSalesResponse = await handleAffiliateSales(request, env);
+    if (affiliateSalesResponse) return affiliateSalesResponse;
     const research = await handleFundedTaskScout(request, env);
     if (research) return research;
     const brain = await handleUnifiedBrain(request, env);
