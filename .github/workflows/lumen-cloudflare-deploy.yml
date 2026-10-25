@@ -43,6 +43,7 @@ jobs:
       - name: Verify core revenue guardrails before deploy
         run: |
           set -euo pipefail
+          node --test .lumen/a2a-worker/test-affiliate-sales.mjs
           node .lumen/a2a-worker/test-paid-boost.mjs
           node .lumen/a2a-worker/test-sovereign-revenue.mjs
           node .lumen/a2a-worker/test-bounded-supplier-resale.mjs

@@ -1,0 +1,43 @@
+name: LUMEN Affiliate Sales QA
+
+on:
+  pull_request:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/a2a-worker/affiliate-sales.js'
+      - '.lumen/a2a-worker/affiliate-campaign-cycle.mjs'
+      - '.lumen/a2a-worker/test-affiliate-sales.mjs'
+      - '.lumen/a2a-worker/paid-boost-entry.js'
+      - '.github/workflows/lumen-affiliate-sales-qa.yml'
+      - '.github/workflows/lumen-affiliate-sales-daily.yml'
+      - '.github/workflows/lumen-cloudflare-deploy.yml'
+  push:
+    branches: [lumen-zero]
+    paths:
+      - '.lumen/a2a-worker/affiliate-sales.js'
+      - '.lumen/a2a-worker/affiliate-campaign-cycle.mjs'
+      - '.lumen/a2a-worker/test-affiliate-sales.mjs'
+      - '.lumen/a2a-worker/paid-boost-entry.js'
+      - '.github/workflows/lumen-affiliate-sales-qa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  affiliate-sales-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validate source and zero-spend policy
+        run: |
+          set -euo pipefail
+          node --check .lumen/a2a-worker/affiliate-sales.js
+          node --check .lumen/a2a-worker/paid-boost-entry.js
+          node --check .lumen/a2a-worker/affiliate-campaign-cycle.mjs
+          node --test .lumen/a2a-worker/test-affiliate-sales.mjs
+          node .lumen/a2a-worker/affiliate-campaign-cycle.mjs
