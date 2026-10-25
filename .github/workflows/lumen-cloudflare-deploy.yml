@@ -81,6 +81,26 @@ jobs:
           rm -f "$SECRETS_FILE"
           trap - EXIT
 
+      - name: Verify deployed LUMEN Affiliate Sales live
+        run: |
+          set -euo pipefail
+          BASE='https://lumen-zero-a2a.lumen-b2b.workers.dev'
+          ready=0
+          for attempt in $(seq 1 18); do
+            if curl -fsS --max-time 20 -H 'cache-control: no-cache' "$BASE/affiliate-sales/policy?probe=$attempt" -o affiliate-sales-policy.json; then
+              if jq -e '.ok == true and .version == "1.0-amazon-affiliate-sales-reviewable" and .trackingId == "lumenb2b-20" and .outgoingSpendUsd == 0 and .autonomousAds == false and .unsolicitedOutreach == false and .noRevenueUntilOfficialReport == true' affiliate-sales-policy.json >/dev/null; then
+                status=$(curl --silent --show-error --max-time 20 -o affiliate-sales-unauthorized.json -w '%{http_code}' "$BASE/affiliate-sales/status")
+                if [ "$status" = 403 ] && jq -e '.error == "admin_token_required"' affiliate-sales-unauthorized.json >/dev/null; then
+                  ready=1
+                  break
+                fi
+              fi
+            fi
+            sleep 5
+          done
+          test "$ready" -eq 1
+          echo 'AFFILIATE_SALES_LIVE_POLICY_AND_ACCESS_GUARDS_OK'
+
       - name: Smoke test public safety and intermediary policies
         run: |
           set -euo pipefail
