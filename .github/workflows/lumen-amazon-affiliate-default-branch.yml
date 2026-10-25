@@ -1,0 +1,37 @@
+name: LUMEN Affiliate Sales — safe daily audit
+
+# GitHub scheduled workflows execute only from the repository default branch (main).
+# The source of truth for LUMEN remains lumen-zero, checked out explicitly below.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '19 15 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lumen-amazon-affiliate-audit
+  cancel-in-progress: false
+
+jobs:
+  prepare-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: lumen-zero
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validate zero-spend Amazon affiliate controls
+        run: |
+          set -euo pipefail
+          node --check .lumen/a2a-worker/affiliate-sales.js
+          node --test .lumen/a2a-worker/test-affiliate-sales.mjs
+      - name: Generate reviewable sales campaign status
+        run: |
+          set -euo pipefail
+          node .lumen/a2a-worker/affiliate-campaign-cycle.mjs
