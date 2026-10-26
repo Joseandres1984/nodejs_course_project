@@ -26,3 +26,7 @@
 - Reject expired tasks even when a marketplace still labels them Open. Reject low-value, heavily contested, off-catalog bounties; do not let keyword matching bypass deliverable fit.
 - Keep automated lead import empty until a fresh primary source establishes an identifiable buyer, scope, budget, payment capacity, authorized free response path, and real service fit. Only prepare `AWAITING_OWNER_REVIEW` drafts; never send externally.
 - No outreach, proposal submission, publishing, claims, token transactions, approvals, contract changes, or spend occurred during this review.
+
+## Independent discovery / reachability signal
+
+- A2A Registry publicly lists the LUMEN agent and canonical endpoint at https://a2aregistry.org/agents/a7e29ef8-1270-4f9a-a027-2d55dff2e5aa/ (checked 2026-10-26). Its **observed 30-day reachability is 42.9%**, although its last sweep says task verified. This is third-party monitoring, not an independently reproduced outage, and not proof of any buyer or sale. Commercial inference: unstable A2A reachability may suppress machine buyer conversion; prioritize a future **read-only** comparison of registry checks, Cloudflare deploy logs and public agent-card/A2A smoke before attributing zero sales to lack of demand. No infrastructure change authorized or made.
