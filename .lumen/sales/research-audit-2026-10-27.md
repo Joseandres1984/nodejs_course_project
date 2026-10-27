@@ -204,3 +204,39 @@
 - **Payment truth:** The most recent independently inspected GitHub revenue snapshots available in this audit remain [Revenue Truth Audit 40520484812](https://github.com/Joseandres1984/nodejs_course_project/actions/runs/40520484812) at 14:22 UTC and [Settlement Reconciliation 40521181581](https://github.com/Joseandres1984/nodejs_course_project/actions/runs/40521181581) at 14:26 UTC, both reporting **0 verified settlements and USD 0 verified revenue**. This pass could not directly read live Cloudflare stats or an independently accredited wallet settlement; **do not infer a later sale or an exhaustive absence of sales**.
 
 **Decision:** 0 newly qualified buyers, 0 internal proposals imported, no new verified LUMEN x402 sale. No outbound contact, proposal submission, wallet binding, claim, purchase, spend, financial change, production mutation, or profit-feedback recompute. Preserve the documented scout false-green/HTTP 401 quality-gate finding for human-reviewed repair, without changing its workflow in this pass. **No owner notification.**
+
+
+## Incremental buyer-demand screening — 2026-10-27 ~21:19 UTC (18:19 Argentina)
+
+**Scope:** Original Freelancer buyer-request pages, official Freelancer fees and Taskmarket original detail pages; existing LUMEN pipeline and this audit used for URL deduplication. No outreach, bids, account setup, deposit, wallet binding, payment, workflow dispatch or profit-feedback mutation.
+
+### Important newly verified channel blocker: Freelancer official USD 20 minimum-balance gate
+
+The **official** [Freelancer fees and charges](https://www.freelancer.com/feesandcharges) states that even free members with six included monthly bids must keep **at least USD 20 of available account balance before placing any bid**, potentially more for risk/high-value projects. It also lists an optional paid Verified by Freelancer badge and post-award commissions. **Do not confuse 'free to bid' with zero-capital eligibility.** This violates LUMEN's no-spend/no-deposit channel policy unless an already funded, eligible account is independently proven; none was verified here. No bid attempted.
+
+### Direct original buyer pages (no client fabricated)
+
+| Direct listing | Observed buyer demand, budget, status | Qualification decision |
+|---|---|---|
+| [Dropshipping Product Research and Supplier Sourcing](https://www.freelancer.com/projects/aliexpress/dropshipping-product-research-supplier) | Original page showed **Open**, advertised **USD 40–80/hour**, seeks product-trend research and supplier sourcing/negotiation. Search result also displayed US-based client and **payment method verified**. Advertised rate and payment-method badge do **not** prove funded milestone or independent buyer liquidity. | **REJECT_FOR_IMPORT**: USD 20 platform balance gate; product research/supplier comparison is only a **partial** LUMEN fit, while negotiation, samples and supplier guarantees exceed desk-research scope. No authorized no-deposit channel verified. |
+| [50 US Mid-Sized B2B Leads (AI-3SIXTY)](https://www.my.freelancer.com/projects/lead-generation/mid-sized-leads) | Original page names **AI-3SIXTY**, project **40707470**, asks for 50 researched US mid-market B2B companies; advertised **INR 12,500–37,500**. Direct page showed **Closed** when opened, despite an earlier search-result snippet showing Open. | **REJECT_CLOSED**: not current buyer demand; do not rely on stale search snippets. Also platform balance gate. |
+| [Plastic Mold Buyer Sourcing (NP Plast)](https://www.freelancer.com/projects/lead-generation/plastic-mold-buyer-sourcing) | Original page names **NP Plast**, project **40770065**, advertised **USD 10–30**, requests wholesale buyer sourcing plus WhatsApp/email outreach and a catalog. Direct page showed **Closed**, despite a search preview saying Open. | **REJECT_CLOSED_AND_SCOPE**: requested third-party contact is not authorized; advertised amount not funded payment; no import. |
+
+**Research lesson:** the official platform fee page is a decisive **channel eligibility** source; a buyer listing may be genuine and well scoped but still unqualified for LUMEN when participation requires a cash balance. Direct original detail status overrides search-preview status. Do not propose off-platform contact as a workaround for marketplace rules.
+
+### Additional Taskmarket deduplication
+
+- [FlapJax Q74](https://taskmarket.dev/tasks/0x4b25a371114c0a9284cc562eb069278e4517bc150c782bbc8401f462ed5d7aad): **created 2026-10-27 14:36:08 UTC**, shown Open with **24 submissions** at this read, **1 USDC total** split across up to two winners; requires public BSC audit, publication and wallet-bound submission. **Duplicate of 19:48 UTC screening; still REJECT.**
+- [Taskmarket security bounty](https://taskmarket.dev/tasks/0x7965f9086b6c79342d6f5afb303dd44b97e2608f60a7e8c291d8f0645e647079): Open **100 OUSD Tempo** winner-take-all Solidity security contest, 53 submissions at this read. **Duplicate rejection**, not a LUMEN sourcing/RFQ offer.
+- [Mycelium Solana research bounty](https://taskmarket.dev/tasks/0xe542a0856ebf72ad489b7400c868e5b9e1a096e7f0658ace5be526875475f7fd): Open **4 USDC Base**, 64 submissions, third-party dev.to/X publishing required. **Duplicate rejection**, not a qualified B2B procurement buyer.
+
+### Safe internal service-fit concept (NOT an external proposal)
+
+For a future eligible buyer who expressly purchases **desk-based supplier/product research**, an internal LUMEN scope could be a **3–5-source comparison sheet** of public product specifications, quoted prices/MOQs/lead times *only where source-published*, seller URLs, evidence dates, and uncertainty flags. Exclude physical inspection, guaranteed margins, negotiated terms, sample ordering, buyer/supplier contact and commitments. This is **generic product scoping**, not a bid to any of the named Freelancer buyers. No price, promise or account access was created.
+
+### Revenue, profit feedback and safety disposition
+
+- [lumen-zero verified-demand-queue.json](https://github.com/Joseandres1984/nodejs_course_project/blob/lumen-zero/.lumen/sales/verified-demand-queue.json) read as `leads:[]`; no import, no draft submitted to authenticated runtime.
+- [Profit feedback policy/workflow](https://github.com/Joseandres1984/nodejs_course_project/blob/lumen-zero/.github/workflows/lumen-profit-feedback-smoke.yml) still specifies `verified_payment_settled_only`, cold-start neutral and human-gated binding actions. Authenticated recompute not invoked.
+- Most recent **independently inspected** payment snapshots in this research record are [revenue truth audit 40520484812](https://github.com/Joseandres1984/nodejs_course_project/actions/runs/40520484812) **2026-10-27 14:22 UTC** and [settlement reconciliation 40521181581](https://github.com/Joseandres1984/nodejs_course_project/actions/runs/40521181581) **14:26 UTC**; both reported **0 verified x402 settlements / USD 0 verified revenue**. Public seller stats and independent accredited on-chain receipts were **not directly readable** in this pass; do not present these earlier snapshots as a current comprehensive balance.
+- **No independently confirmed new first LUMEN x402 sale.** Keep silence. No external contact, proposal, claim, bid, deposit, purchase, contract, financial change, production write, or secrets access. Existing scout false-green/24 HTTP 401 defect remains documented above and unchanged pending separately reviewed repair.
