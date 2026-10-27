@@ -144,3 +144,34 @@
 **Latest settlement evidence:** [GitHub Street Mode run 40489484029](https://github.com/Joseandres1984/nodejs_course_project/actions/runs/40489484029), log around 10:35 UTC, reported `settlementSync.processed=0`, `memory.verifiedSettlements=0`, `memory.verifiedRevenueUsd=0`, and `first-settlement/status.campaign.verifiedSettlements=0`, `verifiedRevenueUsd=0`. This is newer than the 07:43 revenue audit and 07:47 reconciliation already recorded. The same run logged `attempted=0`, `sent=0` for its current outreach batch. These are **dated internal observations**, not independently accredited provider payout evidence. No verified first sale found.
 
 **Safety:** No production queue import, profit-feedback recompute, outbound, bids, payments, contracts, account logins, wallet actions or spend. Keep external input firewall, deduplication, quality gates, antispam and human approval intact. No user-facing alert.
+
+
+## Incremental research and quality-gate audit — 2026-10-27 16:00–16:16 UTC
+
+**New primary-source observations (not imported as clients):**
+
+- [Taskmarket FlapJax Q74](https://taskmarket.dev/tasks/0x4b25a371114c0a9284cc562eb069278e4517bc150c782bbc8401f462ed5d7aad): created **2026-10-27 14:36:08 UTC**, open, **1 USDC Base total for up to 2 accepted entries**, 10 submissions visible during inspection, buyer handle SlateGlyphPhantom. Requires a BSC treasury audit, original public post, BSC wallet binding and off-platform token reward. Displayed escrow transaction **not independently reconciled**. **REJECT:** maximum nominal cash 0.5 USDC per accepted answer, no LUMEN supplier/RFQ fit, wallet/public-post conditions outside authorization. Distinct from yesterday's FlapJax Q46; no duplicate import.
+- [RentAHuman Binance historical market-data bounty](https://rentahuman.ai/bounties/f5131666e69a5eb5903b): posted **2026-10-15**, due **2026-11-07**, page shows open/funds secured, USD 50 advertised and **USD 15 per validated free data-source lead**. Original page identifies a requester and contact/application routes. **RESEARCH_ONLY / NOT QUALIFIED:** board categorizes human tasks, agent eligibility not proven; raw market microstructure data, licensing, free application and product compatibility are unverified. Do not contact, register, submit or import.
+- [Jobbi public index](https://jobbi.org/gigs): **2026-10-27 16:00 UTC** refresh reports 741 open gigs (665 agent lane); these are **aggregate indexed listings, not validated buyers**. No individual fresh supplier/RFQ buyer meeting all LUMEN intake gates was verified in this incremental pass.
+
+**Newer verified production snapshots:**
+
+- [GitHub x402 Revenue Truth Audit 40520484812](https://github.com/Joseandres1984/nodejs_course_project/actions/runs/40520484812), **14:22 UTC**: `X402_SETTLEMENTS_UNIQUE_VERIFIED 0`, `X402_VERIFIED_REVENUE_USD 0`.
+- [GitHub x402 Settlement Reconciliation 40521181581](https://github.com/Joseandres1984/nodejs_course_project/actions/runs/40521181581), **14:26 UTC**: `verifiedSettlements:0`, `verifiedRevenueUsd:0`, target 3, status IN_PROGRESS; log says `INTERNAL_RECEIPT_AUDIT_ONLY_PROVIDER_PAYOUT_UNCONFIRMED`.
+- [Paid Report Delivery 40523374972](https://github.com/Joseandres1984/nodejs_course_project/actions/runs/40523374972), **14:40 UTC**: paid-report claim and delivery steps skipped.
+- [USD Inbound Owner Alert 40524519457](https://github.com/Joseandres1984/nodejs_course_project/actions/runs/40524519457), **14:47 UTC**: `USD_OWNER_ALERT_NO_PENDING_REAL_REQUEST`.
+- [Verified-demand queue](https://github.com/Joseandres1984/nodejs_course_project/blob/lumen-zero/.lumen/sales/verified-demand-queue.json) still `leads:[]`. The [profit-feedback policy](https://github.com/Joseandres1984/nodejs_course_project/blob/lumen-zero/.github/workflows/lumen-profit-feedback-smoke.yml) remains settlement-only and human-gated. The [evolution run](https://github.com/Joseandres1984/nodejs_course_project/actions/runs/40505645545) marked a protected `REFRESH_PROFIT_FEEDBACK` action completed with zero revenue delta, but this audit did not execute any additional authenticated recompute.
+
+### Important defect: scout workflow declares green on 24 authentication failures
+
+**Primary evidence:** [LUMEN Evolution Engine 40505645545](https://github.com/Joseandres1984/nodejs_course_project/actions/runs/40505645545), **2026-10-27 12:41 UTC**. The scout endpoint returned HTTP **202**, but response JSON contained `ok:false`, `status:"failed"`, `runId:"MHRUN-49CF9E80ABE944"`. **All 24 selected strategy results** returned `ok:false`, `error:"http_401"`, with `accepted:0`, `inserted:0`, `updated:0`. The workflow nevertheless logged `LUMEN_SCOUT_SWARM_LIVE=green` and completed successfully. **No successful buyer discovery is proven.**
+
+**Confirmed cause in [main workflow](https://github.com/Joseandres1984/nodejs_course_project/blob/main/.github/workflows/lumen-evolution-engine.yml):** step validates HTTP 200/201/202/204, version, selected strategy count and guardrail count, but does not validate top-level `ok`/`status` or nested result errors.
+
+**Internal-only proposed repair, NOT DEPLOYED:**
+1. Before printing green, require `jq -e '.ok == true and .status != "failed" and (.results | type == "array") and ([.results[] | select(.ok != true or .error != null)] | length) == 0'` on the scout response. Fail closed on any 401 and do not mislabel an HTTP 202 wrapper as successful work.
+2. Add a regression fixture with HTTP 202 + JSON `ok:false,status:failed` and 24 nested `http_401`; workflow must fail.
+3. Investigate protected internal scout credential scope/routing, never expose tokens or change authorization without review. No retries that send external messages.
+4. Treat strategy run counts, "ACTIONABLE" labels and green CI as **non-revenue**. The same evolution logs report zero settlements and zero verified revenue in its learning snapshots. Keep profit-feedback neutral until verified settlements.
+
+**Disposition:** 0 new fully qualified LUMEN buyers, 0 new proposals to production, 0 verified x402 settlements, 0 independently accredited USD revenue shown. No external contact, public post, bid, claim, wallet interaction, spend, contract, financial change, workflow dispatch or production modification. Preserve external-input firewall, deduplication, antispam, quality gates and individual human approval. **No notification.**
