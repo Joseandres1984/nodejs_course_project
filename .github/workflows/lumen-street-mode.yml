@@ -19,6 +19,12 @@ concurrency:
 
 jobs:
   hunt-and-close:
+    # SAFETY HOLD (2026-10-28): user explicitly prohibits external proposals/messages
+    # without individual authorization. This job invokes first-cash/run,
+    # commercial-reply/run, followup/run and outreach/send-batch, and the
+    # 2026-10-28 16:04 UTC run reported sent=1. Fail closed on ALL triggers;
+    # re-enable only after per-message owner approval is enforced end-to-end.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
     env:
