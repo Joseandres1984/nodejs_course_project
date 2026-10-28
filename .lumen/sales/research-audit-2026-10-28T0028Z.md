@@ -1,0 +1,33 @@
+# LUMEN B2B / A2A / x402 — 2026-10-28 00:28 UTC research-only delta
+
+**Scope and authorization:** Public, no-cost research and authenticated read-only GitHub evidence; **no** third-party outreach, application, bids, claims, transfers, contracts, purchases, settlements, spending, financial changes, production imports, or protected profit-feedback recompute. Preserve external-input firewall, URL deduplication, antispam, human review, and the verified-demand quality gates. This file does not constitute a sale or permission to contact a buyer.
+
+## Newly checked original Taskmarket tasks (2026-10-27)
+
+| Primary source | Buyer intent / budget / route checked | Decision |
+| --- | --- | --- |
+| [FlapJax Q74](https://taskmarket.dev/tasks/0x4b25a371114c0a9284cc562eb069278e4517bc150c782bbc8401f462ed5d7aad) | Created 2026-10-27 14:36:08 UTC; requester SlateGlyphPhantom; **1 USDC Base split across at most two accepted answers**; 28 submitted entries shown at inspection; deliverable is a public BSC treasury/outflow and first-funder audit, requiring own public post and BSC wallet. Page displays an escrow tx identifier, **not independently reconciled** here. | **REJECT:** max nominal USDC payout 0.50 per accepted answer, competitive winner-selection, crypto promotion/wallet and public publishing, outside bounded LUMEN procurement / RFQ comparison catalog. Not a qualified LUMEN buyer. |
+| [One continuous edge](https://taskmarket.dev/tasks/0xcfaddd7daa75dd526572069f71e241756a9bd08465a8d9dc08f47c267215198c) | Created 2026-10-27 22:45:54 UTC; requester LunarCoilCrystal; 2 USDC Base, one winning SVG topology illustration, 38 submitted entries visible. | **REJECT:** illustration, not procurement; one-winner prize and negligible expected margin. |
+| [Five bridges](https://taskmarket.dev/tasks/0xa53d3df552e18e9ec85eca80f18b4d3284d007ea53cd604445522b03ababc640) | Created 2026-10-27 22:44:05 UTC; requester LunarCoilCrystal; 2 USDC Base, one winning illustrated SVG, 37 submissions visible. | **REJECT:** outside catalog and winner-take-all micro-bounty. |
+
+**Deduplication:** Do not re-import the previously reviewed Holler, Kintara, FlapJax Q46, Upwork supplier-quote-check or construction-procurement listings already covered by [2026-10-26 audit](./research-audit-2026-10-26.md) and [2026-10-27 23:43 UTC audit](./research-audit-2026-10-27-2343Z.md). Public task index is [Taskmarket](https://taskmarket.dev/tasks); an 'Open' label paired with an expired deadline is not actionable. No new buyer passes all identity, current demand, credible capacity, **free authorized application route**, service-fit, and no-duplicate gates.
+
+## Fresh x402 market signal — not a LUMEN buyer or receipt
+
+[x402 List public directory](https://www.x402-list.com/) reported at **2026-10-27 21:37:28 UTC**: 1,182 listed services, 1,113 payment-ready, 11,013 distinct buyers over 30 days, **$356,983** 30-day net measured settlements to listed services, with **71.4% concentrated in the largest service**, and 95.7% in the top ten. The directory itself warns its measured sample is not the entire ecosystem and that one buyer accounts for 98.8% of the largest service's volume. **Interpretation:** protocol traffic is not evidence of addressable demand for LUMEN's particular paid data service; concentration makes raw transaction counts an unreliable sales forecast. Do not record any of this as LUMEN revenue. Data snapshot is dated, not live chain verification of LUMEN.
+
+[GOAT Market directory](https://goatmarket.com/) listed 4,806 aggregated jobs at its 2026-10-24 12:05 UTC check, but its full offers.json exceeded the public retrieval size limit and no individual newly qualified procurement buyer was independently inspected there. **No import** on aggregate counts.
+
+## Authenticated GitHub evidence and cash-truth gates
+
+- [x402 Revenue Truth Audit run 40604056610](https://github.com/Joseandres1984/nodejs_course_project/actions/runs/40604056610), job 122539043695, **2026-10-27 23:43:35 UTC**: `X402_SETTLEMENTS_UNIQUE_VERIFIED 0`; `X402_VERIFIED_REVENUE_USD 0`. This read-only job checks public seller stats and approval policy. It is a dated application accounting snapshot, **not independent provider/bank accreditation**.
+- [x402 Settlement Reconciliation run 40604204635](https://github.com/Joseandres1984/nodejs_course_project/actions/runs/40604204635), job 122539529866, **2026-10-27 23:44:53 UTC**: `campaign.target=3`, `verifiedSettlements=0`, `verifiedRevenueUsd=0`, `status=IN_PROGRESS`; explicit `INTERNAL_RECEIPT_AUDIT_ONLY_PROVIDER_PAYOUT_UNCONFIRMED`.
+- [LUMEN Zero Runtime run 40607956769](https://github.com/Joseandres1984/nodejs_course_project/actions/runs/40607956769), job 122552085820, **2026-10-28 00:20 UTC**: operational truth reported `realized_revenue_evidence_usd: 0.0`, `realized_transaction_ids: []`, `canonical_opportunities: 0`, `canonical_real_offers: 0`, `canonical_proposals: 0`. These are internal persisted-state counters, not independent payout evidence. Historical `outbound_sent_cumulative: 72` appears in the runtime snapshot; this audit did not initiate or authorize any outreach and makes no delivery claim.
+- [Verified demand queue](https://github.com/Joseandres1984/nodejs_course_project/blob/lumen-zero/.lumen/sales/verified-demand-queue.json): `leads: []`. No modifications.
+- [Profit-feedback policy](https://github.com/Joseandres1984/nodejs_course_project/blob/lumen-zero/.github/workflows/lumen-profit-feedback-smoke.yml): `verified_payment_settled_only`, `coldStart: neutral`, `offer_priority_only`, no autonomous spend/price change, human-gated binding actions. Protected recompute requires a token and is **not executed**. Do not fabricate learned profitability or successful sales.
+
+## Internal offer hypothesis (not buyer-specific, no external proposal)
+
+**MP-QUOTE-SANITY:** If a genuinely funded and reachable buyer supplies 2–5 existing quotations, compare item/spec match, unit price, currency, MOQ, lead time, Incoterms, exclusions, risk, and missing verification in a traceable spreadsheet. Research and analysis only: no contacting suppliers, submitting RFQs, buying, promising savings, or contracting. Do not assign a buyer, proposal price, payment capacity, or approval status until independently verified.
+
+**Outcome:** 0 newly qualified buyers; 0 queue additions; 0 external messages or actions; 0 new independent x402 settlements and provider-accredited LUMEN receipts evidenced. Do not notify until a **unique real x402 settlement** plus **independent attribution/accreditation to LUMEN** can both be demonstrated with transaction hash, chain, beneficiary and amount. A successful workflow or a third-party buyer's bounty escrow does not count.
