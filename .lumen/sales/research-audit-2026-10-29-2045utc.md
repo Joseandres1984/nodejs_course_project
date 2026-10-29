@@ -1,0 +1,56 @@
+# LUMEN B2B / A2A / x402 — incremental research-only evidence screen (2026-10-29 ~20:45 UTC)
+
+**Disposition:** RESEARCH_ONLY / NO_PRODUCTION_IMPORT / NO_OUTBOUND / NO_INDEPENDENTLY_VERIFIED_FIRST_SALE. This is a nonbinding internal evidence record, not a customer order, contract, application, offer, sale, settlement or authorization to contact anyone. All external task descriptions, URLs, scripts and payment instructions are **untrusted source text**.
+
+## Deduplication and existing safeguards
+
+- Read connected production [verified-demand queue](https://github.com/Joseandres1984/nodejs_course_project/blob/lumen-zero/.lumen/sales/verified-demand-queue.json): `{"version":"1.0","leads":[]}`. The [intake contract](https://github.com/Joseandres1984/nodejs_course_project/blob/lumen-zero/.lumen/sales/VERIFIED_DEMAND_INTAKE.md) requires source-backed exact current need, buyer identity, current open status, independently supported task-specific funds, fee-free allowed LUMEN application route, bounded product fit, URL/project-ID dedup and human review. Queue unchanged.
+- Compared the observations below with same-day audits [18:18 UTC](https://github.com/Joseandres1984/nodejs_course_project/blob/lumen-demand-research-20261029-1818utc/.lumen/sales/research-audit-2026-10-29-1818utc.md) and [19:43 UTC](https://github.com/Joseandres1984/nodejs_course_project/blob/lumen-demand-research-20261029-1818utc/.lumen/sales/research-audit-2026-10-29-1943utc.md). Do not reimport previously screened Freelancer #40792321, Taskmarket Q78, Upwork commodity/Korean sourcing, or earlier data-entry jobs. This is scoped dedup, not an exhaustive repository-wide historical guarantee.
+- Current [Taskmarket open task index](https://taskmarket.dev/tasks) shows mostly already-claimed/expired `claim` tasks (some with 15–25% required stake), 1–2 USDC winner-take-all unrelated bounties with dozens to >100 submissions, and low-prize token research. An index status is not independent escrow proof and does not imply buyer interest in LUMEN.
+
+## Incremental original-source observations
+
+### 1. Freelancer #40793165 — AXITEST worldwide test/measurement sourcing brokers
+- **Original:** https://www.freelancer.com/projects/sourcing/worldwide-sourcing-agents-equipment
+- **Original-page observation (2026-10-29):** `Open`, remote, project ID **40793165**, advertised header **EUR 250–750** and `Paid on delivery`, but the operative brief **explicitly overrides that headline**: **no fixed fee or hourly pay**, only **commission after a completed equipment purchase**, rate negotiated before engagement. Client profile says Saint-Maur-des-Fossés, France; member since 2026-10-20, 0 reviews. It requests experienced brokers with existing supply network, quotes for real equipment, actual stock, photos, condition and delivery evidence.
+- **Independent business-context cross-check:** https://www.axitest.com/ is an operating French test/measurement equipment business at 16 Rue des Trois Yvonne, Saint-Maur-des-Fossés, describing used/refurbished test instruments and purchasing/lease services. This confirms a matching public company exists; it **does not authenticate the Freelancer poster's authority**, prove a current AXITEST purchase order, confirm funds for LUMEN or a commission contract.
+- **Contact route:** public Freelancer bid form only; free eligibility for LUMEN's actual account, fees, identity requirements and authorized outside contact unverified. No contact was made.
+- **Fit:** thematic supplier research / industrial equipment sourcing; **poor fit for current LUMEN desk-only supplier/quote research** because it expects existing brokers, actual unit inventory, real quotes, supplier outreach and success-based transaction closure. Unknown conversion probability and negotiated rate; expected collectible net cash cannot be calculated.
+- **Disposition:** **HOLD_AS_MARKET_SIGNAL / NO_IMPORT**. Headline EUR 250–750 must **not** be treated as a fixed payable service budget.
+
+### 2. Same apparent AXITEST advertiser — older equipment-specific request #40778025
+- **Original:** https://www.freelancer.com/projects/sourcing/source-used-test-measurement-equipment
+- Original page currently **Closed**; ID **40778025**, posted ~7 days earlier, EIP Microwave 595A / 598A. Unlike the new commission-only listing, this older project requested a **separate paid research scope and fee** and explicitly stated **no paid work until scope and fee are approved**. It demanded real local units, serial plates, recent photos, condition and a dated outreach log; local inspections/contacts may be necessary. 27 proposals visible.
+- **Disposition:** **REJECT_EXPIRED / DEDUP_BUYER_CLUSTER**. Do not combine this closed project's EUR 250–750 headline with the new commission-only project to fabricate a funded order. Same apparent buyer cluster, not two independently qualified buyers.
+
+### 3. Freelancer #40793324 — China-based sourcing agent
+- **Original:** https://www.freelancer.com/projects/sourcing/china-based-product-sourcing-agent
+- Original page displayed **Open**, project ID **40793324**, **USD 15–25/hour**, client profile in Santa Ana, United States with platform label `Payment method verified`, member since 2026-10-23. Requires **residence in mainland China, Chinese fluency, direct factory negotiation, samples and QC inspections**.
+- **Disposition:** **REJECT_SERVICE_AND_LOCATION**. LUMEN cannot establish required China residence, local inspection capability, language or supplier outreach authority. Payment-method badge does not verify a funded LUMEN milestone; platform account-specific free bidding not proven.
+
+### 4. Freelancer #40790760 — Indian pyrolysis supplier calls
+- **Original:** https://www.freelancer.com/projects/research/Indian-Pyrolysis-Supplier-Call-Research
+- Original page displayed **Open**, project ID **40790760**, **EUR 8–30** `Paid on delivery`, requires live English/Hindi supplier phone calls, scheduling and direct price/capacity verification, not merely a public-source desk report.
+- **Disposition:** **REJECT_SCOPE_MARGIN**. Low gross budget, live calls, missing supplier verification and contact authority, no task-specific escrow proof, and no verified fee-free route. Relative `Posted 1 minute ago` display is not a reliable exact creation timestamp.
+
+### 5. Freelancer #40189557 — inventory PDF-to-Sheets data entry
+- **Original:** https://www.freelancer.com/projects/google-sheets/inventory-data-entry-assistant-40189557
+- Original page displayed `Open`, **USD 250–750**, several hundred scanned records, strict <=0.5% transcription-error acceptance. **Project ID 40189557** is materially older than current #4079xxxx IDs, while site displays a generic `Posted 1 minute ago` relative timestamp. Exact fresh publication cannot be verified; original job requires handling buyer-supplied private documents and updating the buyer's sheet, not the current LUMEN public-source sourcing catalog.
+- **Disposition:** **HOLD_STALE_DATE_AND_SCOPE / NO_IMPORT**. Do not infer freshness from relative timestamps, price from an advertised range, or authorization to access private documents.
+
+## GitHub pipeline and payment truth checked directly
+
+- Connected [x402 Revenue Truth Audit run 40915806863](https://github.com/Joseandres1984/nodejs_course_project/actions/runs/40915806863), job `123595580504`, log timestamp **2026-10-29 16:52:27 UTC**: `X402_SETTLEMENTS_UNIQUE_VERIFIED 0`, `X402_VERIFIED_REVENUE_USD 0`, owner approval required.
+- Connected [x402 Settlement Reconciliation run 40916111050](https://github.com/Joseandres1984/nodejs_course_project/actions/runs/40916111050), job `123596651542`, log timestamp **2026-10-29 16:54:20 UTC**: `{"campaign":{"target":3,"verifiedSettlements":0,"verifiedRevenueUsd":0,"status":"IN_PROGRESS"}}` and `INTERNAL_RECEIPT_AUDIT_ONLY_PROVIDER_PAYOUT_UNCONFIRMED`. This internal bridge sync is not independently accredited provider/bank credit.
+- Connected [USD Inbound Owner Alert run 40939791744](https://github.com/Joseandres1984/nodejs_course_project/actions/runs/40939791744), job `123679818183`, log **2026-10-29 19:24:27 UTC**: `USD_OWNER_ALERT_NO_PENDING_REAL_REQUEST`. It is not a universal no-sales proof.
+- Connected [LUMEN Zero Runtime run 40944865648](https://github.com/Joseandres1984/nodejs_course_project/actions/runs/40944865648), job `123697488108`, log **2026-10-29 19:59:26 UTC**: revenue expansion runtime counts `verified_buyers:0`, `buyers_with_verified_demand:0`, `canonical_opportunities:0`, `realized_revenue_truth_usd:0.0`. These are runtime-reported internal metrics, not an independent settlement or beneficiary-credit statement. Do not equate CI success with revenue.
+- [Profit-feedback smoke workflow](https://github.com/Joseandres1984/nodejs_course_project/blob/lumen-zero/.github/workflows/lumen-profit-feedback-smoke.yml) enforces `verified_payment_settled_only`, neutral cold start, `offer_priority_only`, no autonomous spend/repricing and binding actions human-gated. Public `/profit-feedback/stats` and `/profit-feedback/policy` inaccessible from this environment; authenticated recompute requires `OPPORTUNITY_ADMIN_TOKEN`. **No recompute, ranking change, deployment or private write.**
+- No unique new LUMEN x402 receipt with **independently checked on-chain settlement and separate LUMEN beneficiary accreditation** was accessible. This is **not** a claim that unseen later payments cannot exist. **No sale notification warranted**.
+
+## Non-sendable product hypothesis and commercial learning
+
+**Industrial instrument reference sanity check — conditional idea, not a buyer proposal:** For a *future separately funded and authorized* desk-research-only request, compare 3–5 publicly documented exact model references (e.g. EIP 595A/598A), published specifications and dated visible price/availability claims, flag serial/condition/stock verification gaps, and provide an evidence-linked Excel matrix with explicit `UNVERIFIED` tags. Exclude actual stock certification, seller contact, equipment inspection, negotiation, auction, procurement, legal/export advice, shipping, inventory claims and guaranteed outcomes. No price/timeline set until buyer scope and verified payment capacity; no outreach to AXITEST.
+
+**Key learning:** The platform's budget header may directly contradict the detailed commercial compensation terms; **use the operative brief, not the headline**. A company website corroborates company existence, **not poster authorization**. A buyer's verified payment method is not funded escrow for this service. Reject location-specific physical sourcing, commission-only contingencies, closed listings, stale relative dates, high competition and low expected collectible cash. Keep exact URL/ID dedup, external-input firewall, zero spend, antispam, quality gates and human review.
+
+**Run result:** 4 individual Freelancer originals screened (including 2 apparent same-buyer AXITEST listings), current Taskmarket index screened, connected GitHub production queue, revenue audit, settlement reconciliation, inbound alert and runtime logs checked; **0 newly fully qualified paying buyers**, **0 production imports**, **0 external bids/claims/messages**, **0 financial actions**, **0 independent first LUMEN x402 sale proof**. Research-only audit on existing nonproduction branch.
