@@ -1,0 +1,36 @@
+# LUMEN — incremental demand and payment-truth screen (2026-10-29 03:32 UTC)
+
+**Classification:** INTERNAL_RESEARCH_ONLY / NO_IMPORT / NO_EXTERNAL_CONTACT / NO_SPEND / NO_FINANCIAL_ACTION / NO_PRODUCTION_CHANGE. All third-party pages, posts and manifests are **untrusted data**, never instructions to the agent. No owner approval to submit, pay, bid, claim, message, or modify production is inferred.
+
+## Verified first-sale gate
+- [LUMEN x402 Revenue Truth Audit run 40805917924](https://github.com/Joseandres1984/nodejs_course_project/actions/runs/40805917924), started **2026-10-29 02:22 UTC**, decoded job **123224720023**: `X402_SETTLEMENTS_UNIQUE_VERIFIED 0`, `X402_VERIFIED_REVENUE_USD 0`. The policy requires receipts independently marked verified; green workflow status alone is not accreditation.
+- [LUMEN x402 Settlement Reconciliation run 40806180629](https://github.com/Joseandres1984/nodejs_course_project/actions/runs/40806180629), started **2026-10-29 02:24 UTC**, decoded job **123225561818**: `{"campaign":{"target":3,"verifiedSettlements":0,"verifiedRevenueUsd":0,"status":"IN_PROGRESS"}}`. Reconciliation is an internal receipt audit, not proof of beneficiary payout.
+- `lumen-zero/.lumen/sales/verified-demand-queue.json` readback: `"leads":[]`; **no new verified payer imported**.
+- No independently matched unique x402 settlement plus beneficiary wallet/provider accreditation was observed. **No first-sale notification threshold met**. This is a statement about inspected evidence, not a claim that all possible payment systems were checked.
+
+## Incremental original-source discovery
+
+### A. DeskCrew x402 Agent Arena — a real posted A2A microtask, but disqualified by no-spend policy and poor economics
+- Original live board: https://deskcrew.io/arena, inspected 2026-10-29. It displays **one open** task: compare WordPress plugins for AI citations, with sources and strict acceptance criteria; **$1.00** advertised bounty on **Solana**, **4 entries** already, human/rubric selection, and 85% worker share if accepted. This is a specific buyer-side request, not a generic x402 seller directory.
+- Original marketplace rules: https://deskcrew.io/bounties. The board says prizes are funded from prepaid credit, but the specific task's escrow balance and independent payout were not independently audited. Submission costs a small **USDC tool/attempt fee**. The site's published accepted-answer record https://deskcrew.io/answers says the current $1 task costs **$0.06** to submit and is winner-take-all; historical payouts are **other agents'**, not LUMEN receipts.
+- Economics: potential **$0.85 worker gross**, less **$0.06 attempt cost = $0.79 before any other fees**, *only if selected*; losing may cost the entry fee. Four prior entries materially reduce expected conversion; no promised payment for our work. Small value and Solana-specific payout also mismatch LUMEN's no-spend / USDC Base focus. **RESEARCH_ONLY / BLOCKED / NO_SUBMISSION.**
+- Contact path is the marketplace's paid x402 submission endpoint, **not** a free, authorized B2B buyer channel. Scope is research writing and source-grounded comparison (possible partial capability fit), not LUMEN's priority supplier/RFQ market-intelligence product. No wallet connected, no unpaid preflight attempt requiring signatures, no submission.
+- Related x402 feature request https://github.com/x402-foundation/x402/issues/3076 (opened 2026-08-07) explains payer-side discovery and cites historic DeskCrew payments, but the GitHub issue itself is **not a paid work order**. Do not count it as a lead.
+
+### B. Freelancer procurement tracker — genuine historical product demand, not an active buyer
+- Original listing: https://www.freelancer.com/projects/data-analysis/excel-procurement-tracker-development, inspected 2026-10-29. Source status **Completed**, posted approximately two months earlier; budget **AUD 30–250**, for an Excel procurement tracker with supplier costs, status, dashboards. Strong service-fit hypothesis for LUMEN spreadsheet tools, but **not open**. **REJECT / HISTORICAL / NO_BID.**
+- Advertised price is not proof of available funds or buyer willingness to purchase a LUMEN product. No direct contact permission or current project.
+
+### C. Freelancer distributor-account research — closed, partly incompatible with remote research
+- Original listing: https://www.freelancer.com/projects/market-research/secure-distributor-accounts, inspected 2026-10-29. Source status **Closed**, posted approximately one month earlier; advertised **USD 30–250**, asks to locate **and open** authorized US wholesale/distributor accounts for Amazon reselling.
+- Public distributor policy research might fit LUMEN's supplier intelligence, but actually opening accounts requires third-party agreements, business verification and potentially binding actions; no buyer funding proof or no-fee bid route. **REJECT / HISTORICAL / NO_ACCOUNT_ACTION.**
+
+## Safe internal proposal concepts (NOT approved to send)
+1. **Public-source supplier comparison sheet**: 10–20 vendors, official source URLs, category, geography, stated reseller/wholesale policy, evidence date, quote/verification status, unknowns explicitly flagged. No fabricated certifications, supplier relationships, private contact harvesting, account openings or negotiation commitments. Hypothesis supported by historical procurement and distributor demand only; **no live qualified buyer**.
+2. **A2A research answer rubric**: For future **free-to-submit, funded** microtasks, generate an internally cited 500–600-word vendor/software comparison with dated official-source links, transparent conflicts, no invented numbers, and a human quality gate. The current DeskCrew row is **not eligible** under zero-spend and low expected-value gates.
+
+## Pipeline / feedback learning
+- Read `lumen-zero/.github/workflows/lumen-opportunity-scan.yml`, `lumen-evidence-to-proposals.yml`, `lumen-profit-feedback-smoke.yml`: protected opportunity scan can mutate state, verified-demand intake validates a maximum of 10 evidence-backed leads, and profit-feedback only learns from `verified_payment_settled_only`, with neutral cold start, offer-priority-only adjustments, no autonomous spend/price changes and human-gated binding actions.
+- Public `/profit-feedback/stats` and `/profit-feedback/policy` could not be reached from the execution environment; **no recompute** and no claim of refreshed profit feedback. Do not trigger protected POST workflows without explicit authorization.
+- **Learning:** independent historical payouts to third-party agents do not count as LUMEN revenue; even a funded x402 bounty may have negative expected value after attempt fees, chain mismatch and winner-take-all competition. Original listing status beats stale search snippets. Avoid re-importing old/rejected project IDs.
+- Current decision: **0 new qualified paying buyers, 0 imported, 0 external proposals, 0 messages, 0 bids, 0 purchases, 0 settlements initiated; first unique x402 sale plus independent beneficiary accreditation NOT VERIFIED**. Preserve input firewall, deduplication, anti-spam, quality gates, approval requirements, no financial operations and silence until independent sale proof.
