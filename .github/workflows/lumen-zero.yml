@@ -40,8 +40,12 @@ jobs:
       LUMEN_IMAP_SSL: ${{ secrets.LUMEN_IMAP_SSL }}
       LUMEN_IMAP_USER: ${{ secrets.LUMEN_IMAP_USER }}
       LUMEN_IMAP_PASSWORD: ${{ secrets.LUMEN_IMAP_PASSWORD }}
-      LUMEN_LIVE_OUTBOUND: ${{ secrets.LUMEN_LIVE_OUTBOUND }}
-      LUMEN_OUTBOUND_LIVE: ${{ secrets.LUMEN_LIVE_OUTBOUND }}
+      LUMEN_LIVE_OUTBOUND: "false"
+      LUMEN_OUTBOUND_LIVE: "false"
+      LUMEN_OUTBOUND_MAX_NEW_PER_CYCLE: "0"
+      LUMEN_OUTBOUND_MAX_NEW_PER_DAY: "0"
+      LUMEN_OUTBOUND_MAX_FOLLOWUPS_PER_CYCLE: "0"
+      LUMEN_WHATSAPP_ENABLED: "false"
       LUMEN_DISCLOSE_AUTOMATION: ${{ secrets.LUMEN_DISCLOSE_AUTOMATION }}
 
       LUMEN_BREVO_API_KEY: ${{ secrets.LUMEN_BREVO_API_KEY }}
@@ -274,6 +278,12 @@ jobs:
           import runpy
           import agent_network_runtime as network
           import conversion_loop_bridge_runtime  # installs campaign→offer→measurement bridge
+          import a2a_global_sales_runtime as a2a_sales
+          import zero_notification_runtime as owner_notifications
+
+          # Current operator policy: no third-party outreach or owner alerts before the first verified sale.
+          a2a_sales.MAX_FOLLOWUPS_PER_TICK = 0
+          owner_notifications.MAX_EMAILS_PER_TICK = 0
 
           # Seller-side A2A throughput only. No outgoing payment or binding authority is added.
           network.MAX_REGISTRY_QUERIES_PER_TICK = 2
