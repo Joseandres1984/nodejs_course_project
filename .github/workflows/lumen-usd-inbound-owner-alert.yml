@@ -18,6 +18,7 @@ concurrency:
 
 jobs:
   notify-owner:
+    if: ${{ false }} # Silent-until-first-sale policy: no owner alerts.
     runs-on: ubuntu-latest
     timeout-minutes: 4
     env:
