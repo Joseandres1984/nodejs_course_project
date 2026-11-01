@@ -53,11 +53,15 @@ jobs:
           jq -e '.ok == true and .policy.autonomousSpend == false' /tmp/trust.json >/dev/null
 
       - name: Poll existing commercial and commission conversations
+        if: false # No third-party messages or follow-ups before explicit owner authorization.
         run: |
           set -euo pipefail
           for endpoint in referrals/commissions/autopilot/poll; do
             out="/tmp/${endpoint//\//-}.json"
-            curl --fail --show-error --silent --max-time 60               -X POST "$BASE_URL/$endpoint"               -H "x-lumen-admin: $ADMIN_TOKEN"               -H 'content-type: application/json' -d '{}' > "$out"
+            curl --fail --show-error --silent --max-time 60 \
+              -X POST "$BASE_URL/$endpoint" \
+              -H "x-lumen-admin: $ADMIN_TOKEN" \
+              -H 'content-type: application/json' -d '{}' > "$out"
             echo "===== $endpoint ====="; cat "$out"; echo
           done
 
@@ -66,21 +70,31 @@ jobs:
           set -euo pipefail
           for endpoint in x402-revenue-bridge/sync referrals/commissions/sync referrals/settlements/sync; do
             out="/tmp/${endpoint//\//-}.json"
-            curl --fail --show-error --silent --max-time 60               -X POST "$BASE_URL/$endpoint"               -H "x-lumen-admin: $ADMIN_TOKEN"               -H 'content-type: application/json' -d '{}' > "$out"
+            curl --fail --show-error --silent --max-time 60 \
+              -X POST "$BASE_URL/$endpoint" \
+              -H "x-lumen-admin: $ADMIN_TOKEN" \
+              -H 'content-type: application/json' -d '{}' > "$out"
             echo "===== $endpoint ====="; cat "$out"; echo
           done
 
       - name: Plan referral commissions
         run: |
           set -euo pipefail
-          curl --fail --show-error --silent --max-time 60             -X POST "$BASE_URL/referrals/commissions/plan"             -H "x-lumen-admin: $ADMIN_TOKEN"             -H 'content-type: application/json' -d '{}' > /tmp/plan.json
+          curl --fail --show-error --silent --max-time 60 \
+            -X POST "$BASE_URL/referrals/commissions/plan" \
+            -H "x-lumen-admin: $ADMIN_TOKEN" \
+            -H 'content-type: application/json' -d '{}' > /tmp/plan.json
           cat /tmp/plan.json; echo
           jq -e '.ok == true and .guardrails.autonomousSpend == false and .guardrails.automaticContract == false' /tmp/plan.json >/dev/null
 
       - name: Execute at most one bounded commission action
+        if: false # No external action, proposal, commission execution, or funds movement without explicit owner authorization.
         run: |
           set -euo pipefail
-          code=$(curl --show-error --silent --max-time 60 -o /tmp/action.json -w '%{http_code}'             -X POST "$BASE_URL/referrals/commissions/autopilot/run"             -H "x-lumen-admin: $ADMIN_TOKEN"             -H 'content-type: application/json' -d '{}')
+          code=$(curl --show-error --silent --max-time 60 -o /tmp/action.json -w '%{http_code}' \
+            -X POST "$BASE_URL/referrals/commissions/autopilot/run" \
+            -H "x-lumen-admin: $ADMIN_TOKEN" \
+            -H 'content-type: application/json' -d '{}')
           echo "AUTOPILOT_HTTP=$code"
           cat /tmp/action.json; echo
           test "$code" = '202'
@@ -93,7 +107,10 @@ jobs:
         run: |
           set -euo pipefail
           for endpoint in x402-revenue-bridge/sync referrals/commissions/sync; do
-            curl --fail --show-error --silent --max-time 60               -X POST "$BASE_URL/$endpoint"               -H "x-lumen-admin: $ADMIN_TOKEN"               -H 'content-type: application/json' -d '{}' >/tmp/final.json
+            curl --fail --show-error --silent --max-time 60 \
+              -X POST "$BASE_URL/$endpoint" \
+              -H "x-lumen-admin: $ADMIN_TOKEN" \
+              -H 'content-type: application/json' -d '{}' >/tmp/final.json
             cat /tmp/final.json; echo
           done
 
