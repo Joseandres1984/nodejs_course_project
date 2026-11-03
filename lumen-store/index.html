@@ -61,6 +61,24 @@ footer{background:#070d17;color:#aeb8c7;padding:38px 0 30px}.footer-top{display:
  .hero-logo{height:315px}
 }
 
+
+/* LUMEN HERO — definitive image sizing */
+.hero{overflow:visible!important}
+.hero-grid{display:grid!important;grid-template-columns:minmax(0,1.08fr) minmax(280px,.92fr)!important;align-items:center!important;gap:42px!important;min-height:0!important}
+.hero-art{display:flex!important;align-items:center!important;justify-content:center!important;position:relative!important;width:100%!important;height:auto!important;min-height:0!important;max-height:none!important;overflow:visible!important;margin:0!important;padding:0!important}
+.hero-art img.hero-logo{display:block!important;position:static!important;width:min(100%,340px)!important;height:auto!important;max-width:340px!important;max-height:none!important;aspect-ratio:640/760!important;object-fit:contain!important;object-position:center!important;padding:0!important;margin:0 auto!important;border:0!important;border-radius:0!important;transform:none!important}
+.hero-art .float{display:none!important}
+@media(max-width:850px){
+ .hero-grid{grid-template-columns:minmax(0,1fr)!important;gap:22px!important}
+ .hero-art{min-height:0!important;height:auto!important;margin:0 auto!important}
+ .hero-art img.hero-logo{width:min(72vw,290px)!important;max-width:290px!important;height:auto!important}
+}
+@media(max-width:560px){
+ .hero{padding:48px 0 42px!important}
+ .hero-grid{gap:16px!important}
+ .hero-art img.hero-logo{width:min(70vw,250px)!important;max-width:250px!important}
+}
+
 </style>
 </head>
 <body>
