@@ -1,0 +1,22 @@
+name = "lumen-leadflow-demo"
+main = "src/worker.mjs"
+compatibility_date = "2026-10-01"
+workers_dev = true
+
+[vars]
+SUBMISSIONS_ENABLED = "false"
+RETENTION_DAYS = "90"
+
+# Public demo is deliberately non-persistent.
+# To enable captures, create an ISOLATED D1 database, apply migrations,
+# add the following binding with your ACTUAL database ID, and configure:
+# [[d1_databases]]
+# binding = "LEADFLOW_DB"
+# database_name = "lumen-leadflow"
+# database_id = "REPLACE_WITH_REAL_D1_DATABASE_ID"
+# migrations_dir = "migrations"
+#
+# Set LEADFLOW_ADMIN_TOKEN and LEADFLOW_RATE_SALT as Wrangler secrets,
+# PRIVACY_EMAIL as a non-secret var, and set SUBMISSIONS_ENABLED = "true".
+# Optional secrets: NOTIFY_WEBHOOK_URL and NOTIFY_WEBHOOK_TOKEN.
+# Never reuse a production LUMEN D1 database without an explicit migration review.
