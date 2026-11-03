@@ -1,0 +1,34 @@
+name: Agent Identity isolated CI
+on:
+  pull_request:
+    branches: [lumen-zero]
+    paths:
+      - "agent-identity/**"
+      - ".github/workflows/agent-identity-tests.yml"
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: JS unit and security tests
+        run: cd agent-identity && node --test
+      - name: Validate SQLite schema
+        run: |
+          python3 - <<'PY'
+          import sqlite3
+          conn = sqlite3.connect(":memory:")
+          conn.execute("PRAGMA foreign_keys=ON")
+          with open("agent-identity/schema.sql",encoding="utf-8") as f:
+              conn.executescript(f.read())
+          conn.executescript(open("agent-identity/schema.sql",encoding="utf-8").read())
+          expected = {"agent_identities", "protocol_registrations", "credentials", "reputation_events", "reputation_scores", "identity_links", "request_nonces"}
+          tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+          assert expected <= tables, expected - tables
+          print("SQLite schema validated twice")
+          PY
