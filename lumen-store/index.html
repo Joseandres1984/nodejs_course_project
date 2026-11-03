@@ -26,6 +26,23 @@ footer{background:#070d17;color:#aeb8c7;padding:38px 0 30px}.footer-top{display:
 @media(max-width:850px){.hero-grid,.editorial-grid{grid-template-columns:1fr;gap:25px}.hero{padding:65px 0}.hero-art{min-height:285px}.hero-logo{width:240px}.float-a{left:8%}.float-b{right:7%}.categories{grid-template-columns:repeat(2,1fr)}.products{grid-template-columns:repeat(2,minmax(0,1fr))}.section-head{align-items:flex-start;flex-direction:column}.navlinks{gap:15px}.steps{grid-template-columns:1fr}.editorial-grid{gap:30px}}
 @media(max-width:560px){.wrap{width:calc(100% - 30px)}.announcement{font-size:9px}.nav{height:66px}.navlinks{display:none}.nav-action{padding:10px 12px;font-size:10px}.hero{padding:55px 0 48px}.hero h1{font-size:48px}.hero-copy{font-size:13px}.hero-art{min-height:225px}.hero-logo{width:205px}.float{font-size:9px;padding:10px 12px}.float-a{top:12px;left:0}.float-b{bottom:10px;right:0}.promise-grid{grid-template-columns:1fr;gap:13px;padding:18px 0}.content{padding:57px 0!important}.categories{gap:9px}.category{min-height:145px;padding:17px}.category-icon{margin-bottom:14px}.products{grid-template-columns:1fr}.product-visual{height:190px}.catalog-tools{align-items:stretch}.searchbox{width:100%}.catalog-meta{font-size:9px}.footer-links{flex-wrap:wrap}.editorial-card{padding:15px 19px}}
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*:before,*:after{transition:none!important}}
+
+/* Hero logo fit correction: show the complete supplied mark without clipping */
+.hero-grid{grid-template-columns:minmax(0,1.08fr) minmax(300px,.92fr);gap:42px}
+.hero-art{min-height:430px;overflow:visible;align-self:stretch}
+.hero-logo{width:min(270px,62vw);height:auto;max-height:none;object-fit:contain;object-position:center;filter:drop-shadow(0 16px 34px #0007);border-radius:0}
+.hero-art .float{display:none}
+.brand-mark{object-fit:cover;object-position:50% 25%;background:#050609}
+@media(max-width:850px){
+ .hero-grid{grid-template-columns:1fr;gap:12px}
+ .hero-art{min-height:340px;margin-top:6px}
+ .hero-logo{width:230px}
+}
+@media(max-width:560px){
+ .hero-art{min-height:290px;margin-top:0}
+ .hero-logo{width:205px}
+}
+
 </style>
 </head>
 <body>
