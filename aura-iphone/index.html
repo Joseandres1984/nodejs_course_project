@@ -29,7 +29,7 @@
 <header class="topbar"><div class="brand"><span class="mark">A</span><div><strong>AURA</strong><small>PERSONAL INTELLIGENCE</small></div></div><div class="topright"><span class="status" id="statusTag"><span class="dot"></span> IA sin activar</span></div></header>
 <main>
 <section class="screen active" data-screen="chat" id="chatScreen">
-<div class="intro"><small class="eyebrow">EDICIÓN PERSONAL · iPHONE 0.7</small><h1>Tu IA, <em>cara a cara.</em></h1><p>Un rostro, una voz y un cerebro que puede vivir en tu celular.</p></div>
+<div class="intro"><small class="eyebrow">EDICIÓN PERSONAL · iPHONE 0.8</small><h1>Tu IA, <em>cara a cara.</em></h1><p>Un rostro, una voz y un cerebro que puede vivir en tu celular.</p></div>
 <div class="avatar-frame" id="avatarFrame"><div class="halo halo-one"></div><div class="halo halo-two"></div><img src="./assets/motion/femenino-0.webp" alt="Retrato sintético de AURA" id="face"/><div class="frame-top"><span><span class="pulse-point"></span> AURA PERSONAL</span><span id="faceMode">ANIMACIÓN 2D</span></div><div class="frame-bottom"><div><strong id="faceName">AURA</strong><span id="faceStyle">Cálida · Español argentino</span></div><button id="faceSwitch" class="glass-btn" type="button">Cambiar rostro</button></div></div>
 <div class="brain-box"><div class="brain-title"><div><small>ESTADO DEL CEREBRO</small><strong id="brainTitle">IA local disponible para instalar</strong><p id="brainSubtitle">No se descarga ningún modelo sin tocar Activar.</p></div><span class="brain-orb" aria-hidden="true"></span></div><div class="model-choices"><label for="modelChoice">Elegí el cerebro local</label><select id="modelChoice"><option value="light">Ligero · menor memoria, respuestas sencillas</option><option value="quality">Más capaz · requiere más memoria</option></select><small id="modelDetail">Se seleccionará una variante compatible cuando actives el modelo.</small></div><div class="progress" id="progressWrap" hidden><div class="bar" id="progressBar"></div></div><button class="primary" id="activateBtn" type="button">Activar cerebro en mi iPhone <span>↗</span></button><div class="brain-small">Modelo pequeño · Descarga inicial con Wi-Fi · Sin pago por mensaje · Compatibilidad sujeta al dispositivo</div></div>
 <section class="conversation"><div class="section-head"><strong>Conversación</strong><button id="clearBtn" type="button">Borrar chat</button></div><div id="messages" role="log" aria-live="polite"></div>
@@ -99,4 +99,71 @@ if('serviceWorker' in navigator && location.protocol==='https:')navigator.servic
 drawFace();drawChat();drawMemory();drawProfile();updateCapabilities();setStatus('IA sin activar',false);
 })();
 </script>
-</body></html>
+<script>/* AURA 0.8 — sala de conversación por voz. No API de terceros. */
+(() => {
+'use strict';
+const $ = id => document.getElementById(id);
+const assetKey=(gender,n)=>`./assets/motion/${gender}-${n}.webp`;
+const frame=(gender,n)=>window.AURA_ASSETS?.[assetKey(gender,n)]||document.getElementById('face')?.src||'';
+const css=`
+.v8-entry{display:flex;align-items:center;justify-content:space-between;gap:14px;width:100%;border:1px solid #42bfae;border-radius:19px;background:linear-gradient(120deg,#1a4a4b,#132b3c);color:#e7fffc;padding:17px 18px;margin-top:14px;text-align:left;box-shadow:0 8px 30px #03b4ae18}
+.v8-entry strong{font-size:15px;display:block}.v8-entry small{display:block;font-size:11px;color:#a7d6d5;line-height:1.35;margin-top:3px}.v8-entry .v8-arrow{font-size:26px;color:#a3fff0}
+.v8-room{position:fixed;inset:0;background:#060e18;color:#e9fafb;z-index:90;display:none;overflow-y:auto;overscroll-behavior:contain}
+.v8-room.is-open{display:block}.v8-inner{margin:auto;max-width:660px;min-height:100dvh;display:flex;flex-direction:column;padding:calc(12px + env(safe-area-inset-top)) 16px calc(24px + env(safe-area-inset-bottom))}
+.v8-top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px}.v8-label{font-size:10px;color:#a1c3cc;letter-spacing:.18em}.v8-top strong{display:block;letter-spacing:.1em;font-size:15px;margin-top:4px}.v8-close,.v8-btn{border:1px solid #355b66;border-radius:12px;background:#152a39;color:#def9f4;padding:11px 13px}.v8-close{font-size:12px;min-width:75px}
+.v8-stage{height:clamp(280px,49dvh,545px);min-height:280px;position:relative;overflow:hidden;border-radius:25px;border:1px solid #255464;background:radial-gradient(circle at 50% 32%,#165b65,#071822 74%)}
+.v8-stage:after{content:'';pointer-events:none;position:absolute;inset:0;background:linear-gradient(transparent 60%,#05131edb)}
+.v8-stage img{width:100%;height:100%;object-fit:cover;object-position:center 31%;animation:v8-breathe 5s ease-in-out infinite;transform-origin:center 50%}
+.v8-stage[data-phase="speaking"] img{animation:v8-speak 0.9s ease-in-out infinite}.v8-stage[data-phase="listening"]{border-color:#a9f2df;box-shadow:0 0 35px #31ebd22f}
+.v8-person{position:absolute;z-index:2;left:20px;bottom:19px}.v8-person strong{font-size:24px;display:block}.v8-person span{font-size:11px;color:#a9dcda}
+.v8-chip{position:absolute;z-index:2;right:16px;top:17px;padding:7px 10px;border:1px solid #8cf9e57d;border-radius:999px;background:#08272dab;font-size:10px;color:#aafce7}
+.v8-wave{display:flex;justify-content:center;align-items:center;gap:5px;height:35px;margin:15px 0 5px}.v8-wave span{height:6px;width:5px;background:#6ce7d9;border-radius:8px;opacity:.4;transition:height .2s}
+.v8-room[data-phase="listening"] .v8-wave span,.v8-room[data-phase="speaking"] .v8-wave span,.v8-room[data-phase="thinking"] .v8-wave span{animation:v8-bars .7s ease-in-out infinite alternate;opacity:1}
+.v8-wave span:nth-child(2n){animation-delay:-.4s!important}.v8-wave span:nth-child(3n){animation-delay:-.2s!important}
+.v8-status{text-align:center;font-size:13px;font-weight:750;color:#9eebdf;min-height:18px}.v8-transcript{display:flex;flex-direction:column;gap:6px;margin:13px 0;flex:1;min-height:95px;max-height:190px;overflow:auto;padding:14px;border:1px solid #203c51;background:#0d1d2c;border-radius:16px}
+.v8-transcript p{margin:0;color:#c9e0e7;font-size:13px;line-height:1.48}.v8-transcript .v8-question{color:#8df5e3}.v8-transcript .v8-answer{font-size:14px;color:#f2ffff}
+.v8-actions{display:grid;grid-template-columns:1.4fr 1fr 1fr;gap:9px}.v8-actions button{min-height:46px}.v8-mic{border:0;border-radius:12px;background:linear-gradient(125deg,#80ffe6,#2bc5b9);color:#042c30;font-size:14px;font-weight:850}
+.v8-mic:disabled,.v8-btn:disabled{opacity:.45}.v8-typed{display:flex;gap:8px;margin-top:11px}.v8-typed input{flex:1;min-width:0;border:1px solid #2f5063;border-radius:12px;background:#0c1e2b;color:#edffff;padding:12px 11px;font-size:13px}.v8-typed button{border:1px solid #56c9b4;background:#173e46;color:#d9fff5;border-radius:12px;padding:0 15px}
+.v8-note{font-size:10px;line-height:1.55;color:#8eaab7;margin:12px 3px 0}.v8-activate{display:block;text-align:center;font-size:12px;color:#83f6df;padding:7px;margin:5px 0 0;border:0;background:transparent;width:100%}
+@keyframes v8-breathe{0%,100%{transform:scale(1.015)}50%{transform:scale(1.038) translateY(2px)}}
+@keyframes v8-speak{0%,100%{transform:scale(1.02)}50%{transform:scale(1.045) translateY(-2px)}}
+@keyframes v8-bars{from{height:6px}to{height:26px}}
+@media(prefers-reduced-motion:reduce){.v8-stage img,.v8-wave span{animation:none!important}}
+@media(max-height:730px){.v8-stage{height:42dvh;min-height:245px}.v8-transcript{max-height:125px}}
+`;
+const style=document.createElement('style');style.textContent=css;document.head.append(style);
+const button=document.createElement('button');button.type='button';button.className='v8-entry';button.id='v8Open';button.innerHTML='<span><strong>◉ Conversación cara a cara</strong><small>Hablá, escuchá e interrumpí a tu avatar</small></span><span class="v8-arrow" aria-hidden="true">↗</span>';
+$('avatarFrame').insertAdjacentElement('afterend',button);
+const room=document.createElement('section');room.id='v8Room';room.className='v8-room';room.setAttribute('role','dialog');room.setAttribute('aria-modal','true');room.setAttribute('aria-label','Conversación cara a cara');room.dataset.phase='ready';
+room.innerHTML=`<div class="v8-inner">
+  <header class="v8-top"><div><span class="v8-label">AURA · CONVERSACIÓN EN VIVO 0.8</span><strong>Tu asistente, cara a cara</strong></div><button class="v8-close" id="v8Close" type="button">✕ Cerrar</button></header>
+  <div class="v8-stage" id="v8Stage" data-phase="ready"><img id="v8Portrait" alt="Avatar sintético de AURA"><span class="v8-chip">ANIMACIÓN FACIAL 2D</span><div class="v8-person"><strong id="v8Name">AURA</strong><span>IA local · Voz del dispositivo</span></div></div>
+  <div class="v8-wave" aria-hidden="true">${'<span></span>'.repeat(13)}</div><div class="v8-status" id="v8Status" role="status" aria-live="polite">Tocá Escuchar para hablar</div>
+  <div class="v8-transcript" id="v8Transcript"><p class="v8-question" id="v8Question">Tu voz aparecerá acá.</p><p class="v8-answer" id="v8Answer">La respuesta de AURA aparecerá acá.</p></div>
+  <div class="v8-actions"><button type="button" class="v8-mic" id="v8Mic">◉ Escuchar</button><button type="button" class="v8-btn" id="v8Stop">■ Detener</button><button type="button" class="v8-btn" id="v8Repeat">▷ Repetir</button></div>
+  <form class="v8-typed" id="v8Form"><input id="v8Input" type="text" maxlength="1800" autocomplete="off" placeholder="O escribí tu mensaje" aria-label="Mensaje para AURA"><button type="submit">Enviar</button></form>
+  <button id="v8Activate" class="v8-activate" type="button">Activar cerebro local desde la pantalla principal</button>
+  <p class="v8-note">Tocá Escuchar en cada turno: Safari puede limitar la escucha repetida. Si falla, escribí o usá el dictado del teclado. La voz del navegador y su reconocimiento no garantizan procesamiento local. El rostro sigue siendo animación 2D.</p></div>`;
+document.body.append(room);
+const Rec=window.SpeechRecognition||window.webkitSpeechRecognition;
+let open=false,phase='ready',recognizer=null,utterance=null,lipTimer=null,lastReply='',pending=false,assistantBaseline=0,awaitingAudio=false,recognized=false,speaking=false;
+const gender=()=>document.querySelector('[data-gender].chosen')?.dataset.gender||'femenino';
+function setPhase(p,label){phase=p;room.dataset.phase=p;$('v8Stage').dataset.phase=p;$('v8Status').textContent=label||({ready:'Tocá Escuchar para hablar',listening:'Te escucho…',thinking:'AURA está pensando…',speaking:'AURA está hablando…',error:'Usá el teclado como alternativa'}[p]||p)}
+function updatePortrait(n=0){$('v8Portrait').src=frame(gender(),n);$('v8Name').textContent=$('assistantName').value.trim()||'AURA'}
+function stopLips(){clearInterval(lipTimer);lipTimer=null;updatePortrait(0)}
+function lips(){stopLips();let i=0;lipTimer=setInterval(()=>{if(!open)return;updatePortrait([0,1,3,4,2,5,2,1][i++%8])},135)}
+function stopListening(){if(recognizer){const r=recognizer;recognizer=null;try{r.abort()}catch{}}}
+function stopSpeaking(){if(utterance){utterance.onend=null;utterance.onerror=null;utterance=null}speaking=false;if('speechSynthesis'in window){try{window.speechSynthesis.cancel()}catch{}}stopLips()}
+function stopAll(){stopListening();stopSpeaking();pending=false;awaitingAudio=false;setPhase('ready','Detenido. Tocá Escuchar para continuar')}
+function syncData(){updatePortrait(0);const isReady=!!($('statusTag')?.classList.contains('ready'));$('v8Activate').hidden=isReady}
+function show(){if(open)return;open=true;room.classList.add('is-open');document.body.style.overflow='hidden';syncData();$('v8Question').textContent='Tu voz aparecerá acá.';$('v8Answer').textContent='La respuesta de AURA aparecerá acá.';setPhase('ready',Rec?'Tocá Escuchar para hablar':'Dictado web no disponible; podés escribir');$('v8Close').focus()}
+function hide(){if(!open)return;stopAll();open=false;room.classList.remove('is-open');document.body.style.overflow='';button.focus()}
+function talk(text){lastReply=text;if(!open)return;if(!('speechSynthesis'in window)){setPhase('ready','La voz no está disponible; leé la respuesta.');return;}stopSpeaking();const u=new SpeechSynthesisUtterance(text.slice(0,1500));u.lang=$('accent').value||'es-AR';u.rate=Number($('voiceRate').value)||1;const vs=window.speechSynthesis.getVoices();u.voice=vs.find(v=>v.lang===u.lang)||vs.find(v=>v.lang.startsWith(u.lang.slice(0,2)))||null;utterance=u;let started=false;u.onstart=()=>{if(!open||utterance!==u)return;started=true;speaking=true;setPhase('speaking','AURA está hablando · tocá Detener para interrumpir');lips()};u.onend=()=>{if(utterance!==u)return;utterance=null;speaking=false;stopLips();setPhase('ready','Tu turno. Tocá Escuchar para continuar')};u.onerror=()=>{if(utterance!==u)return;utterance=null;speaking=false;stopLips();setPhase('ready','No pude reproducir voz. Podés leer o tocar Repetir.')};try{window.speechSynthesis.cancel();window.speechSynthesis.speak(u)}catch{setPhase('error','No se pudo reproducir la voz')}
+}
+function send(text){const message=String(text||'').trim();if(!message)return;stopListening();stopSpeaking();$('v8Question').textContent=message;$('v8Answer').textContent='Procesando…';assistantBaseline=document.querySelectorAll('#messages .message.assistant').length;pending=true;setPhase('thinking','AURA está pensando en tu iPhone…');$('messageInput').value=message;const form=$('messageForm');if(form.requestSubmit)form.requestSubmit();else $('sendBtn').click()}
+function watch(){if(!open||!pending)return;const nodes=document.querySelectorAll('#messages .message.assistant .bubble');if(nodes.length<=assistantBaseline)return;const answer=nodes[nodes.length-1]?.textContent?.trim()||'';if(!answer||answer==='Pensando en tu iPhone…')return;pending=false;lastReply=answer;$('v8Answer').textContent=answer;talk(answer)}
+const obs=new MutationObserver(watch);obs.observe($('messages'),{childList:true,subtree:true,characterData:true});
+function listen(){if(!open)return;if(pending){setPhase('thinking','AURA está respondiendo; podés interrumpir con Detener');return}stopSpeaking();stopListening();if(!Rec){setPhase('error','El reconocimiento no está disponible. Escribí o dictá con el teclado.');$('v8Input').focus();return}let r;try{r=new Rec();r.lang=$('accent').value||'es-AR';r.continuous=false;r.interimResults=true;recognizer=r;recognized=false;r.onresult=e=>{let final='';let partial='';for(let i=e.resultIndex;i<e.results.length;i++){const v=e.results[i];if(v.isFinal)final+=v[0].transcript;else partial+=v[0].transcript;}$('v8Question').textContent=(final||partial||'Te escucho…').trim();if(final.trim()&&!recognized){recognized=true;recognizer=null;send(final)}};r.onerror=e=>{if(recognizer!==r)return;recognizer=null;setPhase('error','Micrófono: '+(e.error||'error')+'. Probá el teclado.');};r.onend=()=>{if(recognizer===r){recognizer=null;if(!recognized)setPhase('ready','No recibí una frase. Tocá Escuchar otra vez.')}};setPhase('listening','Te escucho… hablá ahora');r.start()}catch(e){recognizer=null;setPhase('error','No se pudo abrir el micrófono; usá el teclado.')}}
+button.addEventListener('click',show);$('v8Close').addEventListener('click',hide);$('v8Mic').addEventListener('click',listen);$('v8Stop').addEventListener('click',stopAll);$('v8Repeat').addEventListener('click',()=>{if(lastReply)talk(lastReply);else talk(`Hola, soy ${$('assistantName').value||'AURA'}. Tocá Escuchar para hablar conmigo.`)});$('v8Activate').addEventListener('click',()=>{hide();$('activateBtn').scrollIntoView({behavior:'smooth',block:'center'});$('activateBtn').focus()});$('v8Form').addEventListener('submit',e=>{e.preventDefault();const value=$('v8Input').value.trim();if(!value)return;$('v8Input').value='';send(value)});document.addEventListener('keydown',e=>{if(e.key==='Escape'&&open)hide()});window.addEventListener('pagehide',stopAll);window.addEventListener('beforeunload',stopAll);
+})();
+</script></body></html>
