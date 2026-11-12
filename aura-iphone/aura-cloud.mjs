@@ -1,4 +1,5 @@
 import {timingSafeEqual} from 'node:crypto';
+import {generateWithFallback} from './aura-resilience.mjs';
 
 const requests=new Map();
 function send(res,status,data){
@@ -53,15 +54,29 @@ export async function handleAuraAPI(req,res,url){
       contents:messages,
       generationConfig:{maxOutputTokens:2048,thinkingConfig:{thinkingLevel:'low'}}
     };
-    const out=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+encodeURIComponent(safeModel)+':generateContent',{
-      method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':process.env.GEMINI_API_KEY},
-      body:JSON.stringify(content),signal:AbortSignal.timeout(20000)
+    const result=await generateWithFallback({
+      key:process.env.GEMINI_API_KEY,model:safeModel,
+      fallbackModel:process.env.GEMINI_FALLBACK_MODEL||'gemini-3.5-flash-lite',
+      content
     });
-    if(!out.ok){send(res,502,{error:out.status===429?'El proveedor llegó a su límite gratuito. Probá después.':out.status===404?'El modelo no está disponible en este proyecto. Hay que seleccionar uno habilitado.':'El proveedor de IA no pudo responder (código '+out.status+').'});return true;}
-    const json=await out.json(),answer=(json.candidates?.[0]?.content?.parts||[]).filter(p=>!p.thought).map(p=>p.text||'').join('').trim();
-    if(!answer){send(res,502,{error:'La IA no devolvió una respuesta de texto.'});return true;}
-    if(/(?:^|\n)\s*(?:yes,|no fake facts|reasoning|thinking|internal plan|system instruction|analysis:)/i.test(answer)||/^\s*(?:hello|i am|we should)\b/i.test(answer)){send(res,502,{error:'La IA generó una respuesta que no pasó el control de calidad. Probá de nuevo.'});return true;}
-    send(res,200,{answer:answer.slice(0,4000),engine:'cloud'});
+    if(!result.ok){
+      const messages={
+        quota:'Google alcanzó el límite de consultas del proyecto. Probá más tarde; no vamos a insistir para evitar exceder la cuota.',
+        unavailable:'Google está temporalmente saturado. AURA ya reintentó y probó el modelo alternativo. Volvé a intentarlo dentro de un minuto.',
+        credentials:'La clave de Google fue rechazada. Revisá la configuración privada de Render.',
+        request:'Google rechazó la solicitud. Revisaremos la configuración del modelo.',
+        empty:'Google no devolvió una respuesta de texto. Probá reformular la pregunta.',
+        provider:'Google no pudo procesar la consulta.'
+      };
+      console.warn('AURA_PROVIDER',{reason:result.reason,code:result.providerStatus||result.status,model:result.model});
+      send(res,result.status,{error:messages[result.reason]||messages.provider,retryable:result.reason==='unavailable'});
+      return true;
+    }
+    const answer=result.answer;
+    if(/(?:^|\n)\s*(?:yes,|no fake facts|reasoning|thinking|internal plan|system instruction|analysis:)/i.test(answer)||/^\s*(?:hello|i am|we should)\b/i.test(answer)){
+      send(res,502,{error:'La IA generó una respuesta que no pasó el control de calidad. Probá de nuevo.'});return true;
+    }
+    send(res,200,{answer:answer.slice(0,4000),engine:'cloud',model:result.model,fallbackUsed:result.fallback});
   }catch(e){
     const invalid=/JSON|grande/.test(String(e?.message))||e instanceof SyntaxError;
     send(res,invalid?400:502,{error:invalid?'Solicitud inválida':e?.name==='TimeoutError'?'La IA tardó demasiado en responder':'No se pudo completar la consulta.'});
