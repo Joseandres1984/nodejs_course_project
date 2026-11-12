@@ -19,6 +19,7 @@ const css=[
 ].join('');
 function boot(){
  const frame=$('avatarFrame');if(!frame||!$('face')||$('auraNeuralLab'))return;
+ document.title='AURA 1.5 · Laboratorio de avatar';
  const style=document.createElement('style');style.textContent=css;document.head.append(style);
  const panel=document.createElement('details');panel.id='auraNeuralLab';panel.className='aura-neural-lab';
  panel.innerHTML='<summary>Laboratorio de avatar · Video facial</summary><div class="aura-neural-inner">'+
@@ -55,6 +56,7 @@ function boot(){
  $('faceSwitch')?.addEventListener('click',()=>{if(active)original()});
  document.querySelectorAll('[data-gender]').forEach(b=>b.addEventListener('click',()=>{if(active)original()}));
  document.addEventListener('visibilitychange',()=>{if(document.hidden)video.pause()});
+ $('messageForm')?.addEventListener('submit',()=>{if(active)original()});
  window.addEventListener('pagehide',()=>{video.pause();if(src)URL.revokeObjectURL(src)});
  window.AuraNeuralLab={isPreview:()=>active,reset:original};
 }
