@@ -2,7 +2,7 @@
 (()=>{
 'use strict';
 const $=id=>document.getElementById(id);
-let prepared=null,processing=false;
+let prepared=null,processing=false,armed=false;
 const css=[
 '.aura-vision{margin:14px 0 18px;padding:0;background:linear-gradient(130deg,#0f2938,#0a1a29);border:1px solid #3e777b;border-radius:18px;overflow:hidden}',
 '.aura-vision summary{cursor:pointer;list-style:none;padding:16px;font-weight:750;font-size:15px;color:#d7fffa;display:flex;justify-content:space-between;gap:10px}',
@@ -25,14 +25,14 @@ const css=[
 ].join('');
 function setStatus(message){const el=$('auraVisionStatus');if(el)el.textContent=message;}
 function clear(){
- prepared=null;
+ prepared=null;armed=false;
  const preview=$('auraVisionPreview'),remove=$('auraVisionRemove'),send=$('auraVisionGo');
  if(preview){preview.removeAttribute('src');preview.hidden=true;}
  if(remove)remove.hidden=true;
  if(send)send.disabled=true;
  for(const id of ['auraVisionCamera','auraVisionFile']){const input=$(id);if(input)input.value='';}
 }
-function payload(){return prepared?{mimeType:prepared.mimeType,data:prepared.data}:null;}
+function payload(){if(!armed||!prepared)return null;armed=false;return {mimeType:prepared.mimeType,data:prepared.data};}
 function onSent(){
  clear();
  setStatus('Análisis recibido. AURA ya tiene la imagen y respondió en la conversación. La foto no se guardó en el historial.');
@@ -107,7 +107,7 @@ function init(){
   const txt=($('auraVisionQuestion').value||'').trim()||'Explicame qué aparece en esta imagen.';
   const input=$('messageInput'),form=$('messageForm');
   if(!input||!form){setStatus('No encuentro el chat de AURA. Recargá Safari.');return;}
-  input.value=txt;form.requestSubmit();
+  input.value=txt;armed=true;form.requestSubmit();
   setStatus('Consulta enviada. La respuesta aparecerá en Conversación. Si la red falla, conservaremos la foto para reintentar.');
  });
  window.AuraVision={payload,onSent,clear};
