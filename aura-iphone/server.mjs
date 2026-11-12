@@ -1,4 +1,5 @@
 import {createServer} from "node:http";
+import {handleAuraAPI} from './aura-cloud.mjs';
 import {readFile,stat} from "node:fs/promises";
 import {fileURLToPath} from "node:url";
 import {resolve,extname,sep} from "node:path";
@@ -8,6 +9,7 @@ const mime={".html":"text/html; charset=utf-8",".webmanifest":"application/manif
 createServer(async(req,res)=>{
 try{
   const url=new URL(req.url,"http://localhost");
+  if(await handleAuraAPI(req,res,url))return;
   if(url.pathname==="/healthz"){res.writeHead(200,{"Content-Type":"text/plain"});res.end("ok");return;}
   const rel=url.pathname==="/"?"/index.html":url.pathname;
   const file=resolve(root,"."+decodeURIComponent(rel));
