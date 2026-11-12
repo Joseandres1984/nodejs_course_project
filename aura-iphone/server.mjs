@@ -20,7 +20,7 @@ try{
   // Hotfix de conversación antes de cargar el estado guardado de Safari.
   if(file===resolve(root,"index.html")){
     const patch=await readFile(resolve(root,"aura-fix-12.js"),"utf8");
-    bytes=Buffer.from(bytes.toString("utf8").replace("</head>","<script>"+patch+"</script><script defer src=\"./aura-neural-lab-15.js?v=15\"></script></head>"));
+    bytes=Buffer.from(bytes.toString("utf8").replace("</head>","<script>"+patch+"</script><script defer src=\"./aura-neural-lab-15.js?v=15\"></script><script defer src=\"./aura-vision-16.js?v=16\"></script></head>"));
   }
   res.writeHead(200,{"Content-Type":mime[extname(file)]||"application/octet-stream","X-Content-Type-Options":"nosniff","Referrer-Policy":"no-referrer","Cache-Control":extname(file)===".html"?"no-store":"public,max-age=300"});
   res.end(bytes);
