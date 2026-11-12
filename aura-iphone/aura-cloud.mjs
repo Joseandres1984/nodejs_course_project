@@ -14,7 +14,7 @@ async function readJSON(req){
   let bytes=0, chunks=[];
   for await(const chunk of req){
     bytes+=chunk.length;
-    if(bytes>16384)throw Error('Solicitud demasiado grande');
+    if(bytes>5*1024*1024)throw Error('Solicitud demasiado grande');
     chunks.push(chunk);
   }
   return JSON.parse(Buffer.concat(chunks).toString('utf8'));
@@ -47,6 +47,26 @@ export async function handleAuraAPI(req,res,url){
     const messages=raw.filter(x=>x&&['user','assistant'].includes(x.role)&&typeof x.text==='string')
       .slice(-10).map(x=>({role:x.role==='assistant'?'model':'user',parts:[{text:x.text.slice(0,1600)}]}));
     if(!messages.length||messages.at(-1).role!=='user'){send(res,400,{error:'Falta la consulta del usuario'});return true;}
+    // Foto enviada explícitamente: validamos formato, firma y tamaño; no la almacenamos.
+    if(body.image!==undefined){
+      const image=body.image;
+      const allowed=['image/jpeg','image/png','image/webp'];
+      const data=image && typeof image.data==='string' ? image.data : '';
+      const mime=image && typeof image.mimeType==='string' ? image.mimeType : '';
+      if(!allowed.includes(mime)||data.length<100||data.length>4.3*1024*1024
+        ||data.length%4!==0||!/^[A-Za-z0-9+/]*={0,2}$/.test(data)){
+        send(res,400,{error:'La imagen no es válida o es demasiado grande (máximo 3 MB).'});return true;
+      }
+      const binary=Buffer.from(data,'base64');
+      const jpeg=binary[0]===0xff&&binary[1]===0xd8&&binary[2]===0xff;
+      const png=binary.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]));
+      const webp=binary.subarray(0,4).toString('ascii')==='RIFF'&&binary.subarray(8,12).toString('ascii')==='WEBP';
+      if(binary.length>3*1024*1024||binary.length<80
+        ||!((mime==='image/jpeg'&&jpeg)||(mime==='image/png'&&png)||(mime==='image/webp'&&webp))){
+        send(res,400,{error:'La foto no coincide con un formato de imagen admitido.'});return true;
+      }
+      messages[messages.length-1].parts.push({inlineData:{mimeType:mime,data}});
+    }
     const personality=String(body.personality||'Cálida y profesional').slice(0,70);
     const safeModel=/^gemini-[\w.-]{4,90}$/.test(process.env.GEMINI_MODEL||'')?process.env.GEMINI_MODEL:'gemini-3.5-flash-lite';
     const content={
