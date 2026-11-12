@@ -33,6 +33,12 @@ function clear(){
  for(const id of ['auraVisionCamera','auraVisionFile']){const input=$(id);if(input)input.value='';}
 }
 function payload(){if(!armed||!prepared)return null;armed=false;return {mimeType:prepared.mimeType,data:prepared.data};}
+function arm(){
+ if(!prepared){setStatus('Primero elegí una foto.');return false;}
+ if(!window.AuraBrain?.isCloud?.()){setStatus('Para analizar imágenes activá «Avanzado por internet». La foto no se envió.');return false;}
+ armed=true;return true;
+}
+async function prepareFile(file){await choose(file);return !!prepared;}
 function onSent(){
  clear();
  setStatus('Análisis recibido. AURA ya tiene la imagen y respondió en la conversación. La foto no se guardó en el historial.');
@@ -107,10 +113,11 @@ function init(){
   const txt=($('auraVisionQuestion').value||'').trim()||'Explicame qué aparece en esta imagen.';
   const input=$('messageInput'),form=$('messageForm');
   if(!input||!form){setStatus('No encuentro el chat de AURA. Recargá Safari.');return;}
-  input.value=txt;armed=true;form.requestSubmit();
+  if(!arm())return;
+  input.value=txt;form.requestSubmit();
   setStatus('Consulta enviada. La respuesta aparecerá en Conversación. Si la red falla, conservaremos la foto para reintentar.');
  });
- window.AuraVision={payload,onSent,clear};
+ window.AuraVision={payload,onSent,clear,prepareFile,arm};
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});else init();
 })();
