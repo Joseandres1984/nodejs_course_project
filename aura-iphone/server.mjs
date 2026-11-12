@@ -1,6 +1,7 @@
 import {createServer} from "node:http";
 import {handleAuraAPI} from './aura-cloud.mjs';
 import {runAuraDiagnostic} from './aura-diagnostic.mjs';
+import {runVisionDiagnostic} from './aura-vision-diag.mjs';
 import {readFile,stat} from "node:fs/promises";
 import {fileURLToPath} from "node:url";
 import {resolve,extname,sep} from "node:path";
@@ -25,4 +26,4 @@ try{
   res.writeHead(200,{"Content-Type":mime[extname(file)]||"application/octet-stream","X-Content-Type-Options":"nosniff","Referrer-Policy":"no-referrer","Cache-Control":extname(file)===".html"?"no-store":"public,max-age=300"});
   res.end(bytes);
 }catch{res.writeHead(404,{"Content-Type":"text/plain"});res.end("Not found");}
-}).listen(port,"0.0.0.0",()=>(console.log("AURA iPhone listening "+port),runAuraDiagnostic().catch(e=>console.error("AURA_DIAG fatal",e.message))));
+}).listen(port,"0.0.0.0",()=>(console.log("AURA iPhone listening "+port),runAuraDiagnostic().catch(e=>console.error("AURA_DIAG fatal",e.message)),runVisionDiagnostic().catch(e=>console.error("AURA_VISION_DIAG fatal",e.message))));
