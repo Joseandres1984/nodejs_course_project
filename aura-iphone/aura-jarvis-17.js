@@ -21,6 +21,9 @@ function boot(){
  const stage=$('v8Stage');
  if(!stage||$('j17Toggle'))return;
  const style=document.createElement('style');style.textContent=css;document.head.append(style);
+ document.title='AURA 1.7 · Cámara cara a cara';
+ const version=document.querySelector('.intro .eyebrow');if(version)version.textContent='EDICIÓN PERSONAL · iPHONE 1.7';
+ const roomVersion=document.querySelector('.v8-label');if(roomVersion)roomVersion.textContent='AURA · CONVERSACIÓN CARA A CARA 1.7';
  const bar=document.createElement('div');bar.className='j17-bar';bar.innerHTML='<button id="j17Toggle" type="button">◉ Mirar con AURA</button>';
  stage.insertAdjacentElement('afterend',bar);
  const panel=document.createElement('section');panel.id='j17Panel';panel.className='j17-panel';panel.hidden=true;
