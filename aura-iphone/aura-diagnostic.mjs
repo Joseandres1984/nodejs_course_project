@@ -15,17 +15,17 @@ export async function runAuraDiagnostic(){
       body:JSON.stringify({
         systemInstruction:{parts:[{text:'Sos AURA. Respondé con precisión en español argentino. No inventes hechos ni acciones.'}]},
         contents:[{role:'user',parts:[{text:prompts[i]}]}],
-        generationConfig:{temperature:0.35,maxOutputTokens:800}
+        generationConfig:{maxOutputTokens:2048,thinkingConfig:{thinkingLevel:'low'}}
       }),
       signal:AbortSignal.timeout(18000)
     });
     const payload=await result.json();
-    const answer=(payload.candidates?.[0]?.content?.parts||[]).map(p=>p.text||'').join('').trim();
+    const answer=(payload.candidates?.[0]?.content?.parts||[]).filter(p=>!p.thought).map(p=>p.text||'').join('').trim();
     const err=payload.error?.message||null;
     console.info("AURA_DIAG "+JSON.stringify({
        index:i+1,model,http_status:result.status,
-       valid_answer:result.ok && answer.length>30 && /[áéíóúñ]|soy|podés|negocio|servicio|plantillas/i.test(answer),
-       answer_preview:answer.slice(0,350),
+       valid_answer:result.ok && answer.length>30 && /[áéíóúñ]|soy|podés|negocio|servicio|plantillas/i.test(answer) && !/^\s*(yes|no fake facts|analysis|thinking)/i.test(answer),
+       answer_preview:answer.slice(0,450),
        failure:!result.ok ? String(err||'API error').slice(0,180):!answer?'No se recibió texto':null
     }));
    }catch(e){console.info("AURA_DIAG "+JSON.stringify({index:i+1,model,error:String(e?.message||e).slice(0,160)}));}
