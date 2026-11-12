@@ -13,7 +13,12 @@ try{
   const file=resolve(root,"."+decodeURIComponent(rel));
   if(!file.startsWith(root+sep))throw Error("invalid path");
   if(!(await stat(file)).isFile())throw Error("missing");
-  const bytes=await readFile(file);
+  let bytes=await readFile(file);
+  // Hotfix de conversación antes de cargar el estado guardado de Safari.
+  if(file===resolve(root,"index.html")){
+    const patch=await readFile(resolve(root,"aura-fix-12.js"),"utf8");
+    bytes=Buffer.from(bytes.toString("utf8").replace("</head>","<script>"+patch+"</script></head>"));
+  }
   res.writeHead(200,{"Content-Type":mime[extname(file)]||"application/octet-stream","X-Content-Type-Options":"nosniff","Referrer-Policy":"no-referrer","Cache-Control":extname(file)===".html"?"no-store":"public,max-age=300"});
   res.end(bytes);
 }catch{res.writeHead(404,{"Content-Type":"text/plain"});res.end("Not found");}
