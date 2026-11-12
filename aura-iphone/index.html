@@ -38,7 +38,7 @@
 <header class="topbar"><div class="brand"><span class="mark">A</span><div><strong>AURA</strong><small>PERSONAL INTELLIGENCE</small></div></div><div class="topright"><span class="status" id="statusTag"><span class="dot"></span> IA sin activar</span></div></header>
 <main>
 <section class="screen active" data-screen="chat" id="chatScreen">
-<div class="intro"><small class="eyebrow">EDICIÓN PERSONAL · iPHONE 0.9</small><h1>Tu IA, <em>cara a cara.</em></h1><p>Un rostro, una voz y un cerebro que puede vivir en tu celular.</p></div>
+<div class="intro"><small class="eyebrow">EDICIÓN PERSONAL · iPHONE 1.0</small><h1>Tu IA, <em>cara a cara.</em></h1><p>Un rostro, una voz y un cerebro que puede vivir en tu celular.</p></div>
 <div class="avatar-frame" id="avatarFrame"><div class="halo halo-one"></div><div class="halo halo-two"></div><img src="./assets/motion/femenino-0.webp" alt="Retrato sintético de AURA" id="face"/><div class="frame-top"><span><span class="pulse-point"></span> AURA PERSONAL</span><span id="faceMode">ANIMACIÓN 2D</span></div><div class="frame-bottom"><div><strong id="faceName">AURA</strong><span id="faceStyle">Cálida · Español argentino</span></div><button id="faceSwitch" class="glass-btn" type="button">Cambiar rostro</button></div></div>
 <div class="brain-box"><div class="brain-title"><div><small>ESTADO DEL CEREBRO</small><strong id="brainTitle">IA local disponible para instalar</strong><p id="brainSubtitle">No se descarga ningún modelo sin tocar Activar.</p></div><span class="brain-orb" aria-hidden="true"></span></div><div class="model-choices"><label for="modelChoice">Elegí el cerebro local</label><select id="modelChoice"><option value="light">Ligero · menor memoria, respuestas sencillas</option><option value="quality">Más capaz · requiere más memoria</option></select><small id="modelDetail">Se seleccionará una variante compatible cuando actives el modelo.</small></div><div class="progress" id="progressWrap" hidden><div class="bar" id="progressBar"></div></div><button class="primary" id="activateBtn" type="button">Activar cerebro en mi iPhone <span>↗</span></button><div class="brain-small">Modelo pequeño · Descarga inicial con Wi-Fi · Sin pago por mensaje · Compatibilidad sujeta al dispositivo</div></div>
 <section class="conversation"><div class="section-head"><strong>Conversación</strong><button id="clearBtn" type="button">Borrar chat</button></div><div id="messages" role="log" aria-live="polite"></div>
@@ -77,8 +77,8 @@ document.querySelectorAll('.nav-btn').forEach(b=>b.addEventListener('click',()=>
 function drawFace(){const f=$('face');const img=$('face');img.src=frame(state.gender);$('faceName').textContent=state.name;$('faceStyle').textContent=state.personality.split(' ')[0]+' · '+(state.accent==='es-AR'?'Argentina':state.accent);document.querySelectorAll('[data-gender]').forEach(b=>b.classList.toggle('chosen',b.dataset.gender===state.gender));}
 function startTalking(){stopTalking();$('avatarFrame').classList.add('talking');let i=0;talkingTimer=setInterval(()=>{frameIndex=[0,2,4,1,3,5,2,0][i++%8];drawFace()},115)}
 function stopTalking(){if(talkingTimer)clearInterval(talkingTimer);talkingTimer=null;frameIndex=0;$('avatarFrame').classList.remove('talking');drawFace();}
-function stopSpeech(){if('speechSynthesis' in window)speechSynthesis.cancel();stopTalking();}
-function speak(text){if(!('speechSynthesis' in window)){toast('El navegador no ofrece voz en este dispositivo.');return}stopSpeech();const u=new SpeechSynthesisUtterance(String(text||'').slice(0,1800));u.lang=state.accent;u.rate=Number(state.rate)||1;const voices=speechSynthesis.getVoices();u.voice=voices.find(v=>v.lang===state.accent)||voices.find(v=>v.lang.startsWith(state.accent.slice(0,2)))||null;u.onstart=startTalking;u.onend=stopTalking;u.onerror=stopTalking;speech=u;speechSynthesis.speak(u)}
+function stopSpeech(){window.AuraVoice?.stop();if(!window.AuraVoice&&'speechSynthesis' in window)speechSynthesis.cancel();stopTalking();}
+function speak(text){if(!window.AuraVoice){toast('Motor de voz no disponible. Recargá Safari.');return;}window.AuraVoice.speak(text,{onStart:startTalking,onEnd:stopTalking,onError:()=>toast('No se pudo reproducir la voz. Cambiá la voz en Mi avatar.')});}
 function appendMessage(role,text,store=true){const e=document.createElement('div');e.className='message '+role;const w=document.createElement('span');w.className='who';w.textContent=role==='user'?'VOS':state.name;const b=document.createElement('div');b.className='bubble';b.textContent=text;e.append(w,b);$('messages').append(e);$('messages').scrollTop=$('messages').scrollHeight;if(store){state.messages.push({role,text});state.messages=state.messages.slice(-20);persist()}return b;}
 function drawTasks(){const list=$('v9TaskList');if(!list)return;list.replaceChildren();const items=Array.isArray(state.tasks)?state.tasks:[];$('v9TaskCount').textContent=items.filter(x=>!x.done).length+' pendientes';if(!items.length){const p=document.createElement('p');p.className='muted';p.textContent='Todavía no tenés tareas. Creá la primera.';list.append(p);return;}items.forEach((t,i)=>{const row=document.createElement('div');row.className='v9-task'+(t.done?' done':'');const cb=document.createElement('input');cb.type='checkbox';cb.checked=t.done;cb.setAttribute('aria-label','Completar tarea '+(i+1));cb.addEventListener('change',()=>{t.done=cb.checked;persist();drawTasks()});const text=document.createElement('span');text.textContent=(i+1)+'. '+t.text;const remove=document.createElement('button');remove.type='button';remove.setAttribute('aria-label','Eliminar tarea '+(i+1));remove.textContent='✕';remove.addEventListener('click',()=>{state.tasks.splice(i,1);persist();drawTasks()});row.append(cb,text,remove);list.append(row);});}
 function addTask(value){const text=String(value||'').trim().slice(0,160);if(!text)return false;if(!Array.isArray(state.tasks))state.tasks=[];state.tasks.push({text,done:false});state.tasks=state.tasks.slice(-60);persist();drawTasks();return true;}
@@ -108,7 +108,7 @@ $('speakBtn').addEventListener('click',()=>{if(speechSynthesis?.speaking){stopSp
 document.querySelectorAll('[data-example]').forEach(b=>b.addEventListener('click',()=>{$('messageInput').value=b.dataset.example;pickScreen('chat');$('messageInput').focus()}));
 const Rec=window.SpeechRecognition||window.webkitSpeechRecognition;
 $('micBtn').addEventListener('click',()=>{if(!Rec){toast('Usá el micrófono del teclado del iPhone para dictar el mensaje.');$('messageInput').focus();return}try{if(recognizer){recognizer.stop();recognizer=null;return}const r=new Rec();r.lang=state.accent;r.continuous=false;r.interimResults=false;recognizer=r;$('micBtn').textContent='■ Detener';r.onresult=ev=>{$('messageInput').value=($('messageInput').value+' '+ev.results[0][0].transcript).trim();if(state.autoSendVoice){toast('Dictado listo. Enviando mensaje…');$('messageForm').requestSubmit()}else toast('Dictado listo. Revisá y enviá.')};r.onerror=ev=>toast('Dictado no disponible: '+(ev.error||'error'));r.onend=()=>{recognizer=null;$('micBtn').textContent='◉ Dictar'};r.start()}catch{toast('No se pudo iniciar el micrófono. Usá el teclado del iPhone.')}});
-$('messageForm').addEventListener('submit',async ev=>{ev.preventDefault();if(asking)return;const q=$('messageInput').value.trim();if(!q)return;$('messageInput').value='';appendMessage('user',q);const localAnswer=handlePersonalCommand(q);if(localAnswer!==null){appendMessage('assistant',localAnswer);lastAnswer=localAnswer;if(state.autoVoice)speak(localAnswer);return;}if(!engine){appendMessage('assistant','Todavía no activaste la IA local. Tocá «Activar cerebro en mi iPhone». Si Safari no admite el modelo, vas a ver el motivo.');return}asking=true;$('sendBtn').disabled=true;const waiting=appendMessage('assistant','Pensando en tu iPhone…',false);try{const history=state.messages.slice(-11).filter(m=>m.role==='assistant'||m.role==='user').map(m=>({role:m.role,content:m.text}));const instruction=`Sos ${state.name}, asistente personal. Respondés en ${state.accent}, con estilo ${state.personality}. Sos clara, útil, breve. No inventes haber accedido a servicios externos, archivos privados ni información actualizada. Recordá estas preferencias: ${state.memory.join(' | ').slice(0,950)}.`;const r=await engine.chat.completions.create({messages:[{role:'system',content:instruction},...history],temperature:.6,max_tokens:280});const answer=String(r.choices?.[0]?.message?.content||'No pude generar una respuesta.').trim();waiting.textContent=answer;lastAnswer=answer;state.messages.push({role:'assistant',text:answer});state.messages=state.messages.slice(-20);persist();if(state.autoVoice)speak(answer)}catch(e){waiting.textContent='El modelo local no pudo responder: '+String(e.message||e).slice(0,190)}finally{asking=false;$('sendBtn').disabled=false}});
+$('messageForm').addEventListener('submit',async ev=>{ev.preventDefault();if(asking)return;const q=$('messageInput').value.trim();if(!q)return;$('messageInput').value='';appendMessage('user',q);const localAnswer=handlePersonalCommand(q);if(localAnswer!==null){appendMessage('assistant',localAnswer);lastAnswer=localAnswer;if(state.autoVoice)speak(localAnswer);return;}if(!engine){appendMessage('assistant','Todavía no activaste la IA local. Tocá «Activar cerebro en mi iPhone». Si Safari no admite el modelo, vas a ver el motivo.');return}asking=true;$('sendBtn').disabled=true;const waiting=appendMessage('assistant','Pensando en tu iPhone…',false);try{const history=state.messages.slice(-11).filter(m=>m.role==='assistant'||m.role==='user').map(m=>({role:m.role,content:m.text}));const instruction=`Sos ${state.name}, una asistente personal. Respondé exclusivamente en español argentino natural, salvo que te pidan otro idioma. Usá el voseo y frases cortas, fáciles de escuchar. Sé clara, útil y concreta; evitá listas largas, tecnicismos, anglicismos, emoticonos y símbolos al hablar. No inventes datos, accesos externos ni acciones que no hiciste. No repitas la pregunta. Si no sabés algo, decilo. Estilo: ${state.personality}. Preferencias: ${state.memory.join(' | ').slice(0,950)}.`;const r=await engine.chat.completions.create({messages:[{role:'system',content:instruction},...history],temperature:.35,max_tokens:210});const answer=String(r.choices?.[0]?.message?.content||'No pude generar una respuesta.').trim();waiting.textContent=answer;lastAnswer=answer;state.messages.push({role:'assistant',text:answer});state.messages=state.messages.slice(-20);persist();if(state.autoVoice)speak(answer)}catch(e){waiting.textContent='El modelo local no pudo responder: '+String(e.message||e).slice(0,190)}finally{asking=false;$('sendBtn').disabled=false}});
 async function activate(){if(engine){toast('La IA ya está funcionando en este navegador.');return}if(loading)return;if(!navigator.gpu){setStatus('Sin WebGPU',false);$('brainTitle').textContent='Safari no habilitó WebGPU';$('brainSubtitle').textContent='No puedo ejecutar el modelo local. La voz y el avatar siguen disponibles.';toast('WebGPU no disponible. Verificá Safari/iOS 26 o superior.');return}loading=true;$('activateBtn').disabled=true;$('progressWrap').hidden=false;$('brainTitle').textContent='Descargando el cerebro local';$('brainSubtitle').textContent='Puede ocupar cientos de MB. Evitá cerrar Safari.';setStatus('Descargando modelo',false);try{const chosen=await chooseModel();const w=await import('https://esm.run/@mlc-ai/web-llm');let p=0;engine=await w.CreateMLCEngine(chosen,{initProgressCallback:r=>{const val=Number(r.progress)||0;if(Number.isFinite(val))p=Math.max(p,Math.round(val*100));$('progressBar').style.width=p+'%';$('brainSubtitle').textContent=(r.text||'Preparando modelo...').slice(0,125)}});$('brainTitle').textContent='Cerebro local activo';$('brainSubtitle').textContent='Las respuestas se generan en el iPhone sin API de pago.';$('activateBtn').textContent='IA activada ✓';$('modelChoice').disabled=true;setStatus('IA local activa',true);toast('AURA ya puede responder usando el modelo local.')}catch(e){console.error(e);engine=null;setStatus('IA no disponible',false);$('brainTitle').textContent='No se pudo ejecutar la IA local';$('brainSubtitle').textContent=String(e.message||e).slice(0,230);$('activateBtn').textContent='Volver a intentar';toast('El iPhone no pudo cargar el modelo. Podés seguir usando voz y avatar.')}finally{loading=false;$('activateBtn').disabled=false;setTimeout(()=>$('progressWrap').hidden=true,1800)}}
 $('activateBtn').addEventListener('click',activate);
 $('diagnoseBtn').addEventListener('click',async()=>{const label=$('compatStatus');label.textContent='Comprobando…';try{const a=await navigator.gpu?.requestAdapter();if(!a){label.textContent='WebGPU no disponible';return;}label.textContent=a.features?.has('shader-f16')?'WebGPU + f16 disponibles':'WebGPU disponible; modo compatible';}catch(e){label.textContent='No compatible: '+String(e.message||e).slice(0,70)}});
@@ -157,7 +157,7 @@ const button=document.createElement('button');button.type='button';button.classN
 $('avatarFrame').insertAdjacentElement('afterend',button);
 const room=document.createElement('section');room.id='v8Room';room.className='v8-room';room.setAttribute('role','dialog');room.setAttribute('aria-modal','true');room.setAttribute('aria-label','Conversación cara a cara');room.dataset.phase='ready';
 room.innerHTML=`<div class="v8-inner">
-  <header class="v8-top"><div><span class="v8-label">AURA · CONVERSACIÓN EN VIVO 0.9</span><strong>Tu asistente, cara a cara</strong></div><button class="v8-close" id="v8Close" type="button">✕ Cerrar</button></header>
+  <header class="v8-top"><div><span class="v8-label">AURA · CONVERSACIÓN EN VIVO 1.0</span><strong>Tu asistente, cara a cara</strong></div><button class="v8-close" id="v8Close" type="button">✕ Cerrar</button></header>
   <div class="v8-stage" id="v8Stage" data-phase="ready"><img id="v8Portrait" alt="Avatar sintético de AURA"><span class="v8-chip">ANIMACIÓN FACIAL 2D</span><div class="v8-person"><strong id="v8Name">AURA</strong><span>IA local · Voz del dispositivo</span></div></div>
   <div class="v8-wave" aria-hidden="true">${'<span></span>'.repeat(13)}</div><div class="v8-status" id="v8Status" role="status" aria-live="polite">Tocá Escuchar para hablar</div>
   <div class="v8-transcript" id="v8Transcript"><p class="v8-question" id="v8Question">Tu voz aparecerá acá.</p><p class="v8-answer" id="v8Answer">La respuesta de AURA aparecerá acá.</p></div>
@@ -174,12 +174,17 @@ function updatePortrait(n=0){$('v8Portrait').src=frame(gender(),n);$('v8Name').t
 function stopLips(){clearInterval(lipTimer);lipTimer=null;updatePortrait(0)}
 function lips(){stopLips();let i=0;lipTimer=setInterval(()=>{if(!open)return;updatePortrait([0,1,3,4,2,5,2,1][i++%8])},135)}
 function stopListening(){if(recognizer){const r=recognizer;recognizer=null;try{r.abort()}catch{}}}
-function stopSpeaking(){if(utterance){utterance.onend=null;utterance.onerror=null;utterance=null}speaking=false;if('speechSynthesis'in window){try{window.speechSynthesis.cancel()}catch{}}stopLips()}
+function stopSpeaking(){window.AuraVoice?.stop();if(utterance){utterance.onend=null;utterance.onerror=null;utterance=null}speaking=false;stopLips()}
 function stopAll(){autoTurn=false;autoSession++;clearTimeout(autoTimer);$('v9AutoTurn').checked=false;stopListening();stopSpeaking();pending=false;awaitingAudio=false;setPhase('ready','Detenido. Tocá Escuchar para continuar')}
 function syncData(){updatePortrait(0);const isReady=!!($('statusTag')?.classList.contains('ready'));$('v8Activate').hidden=isReady}
 function show(){if(open)return;open=true;room.classList.add('is-open');document.body.style.overflow='hidden';syncData();$('v8Question').textContent='Tu voz aparecerá acá.';$('v8Answer').textContent='La respuesta de AURA aparecerá acá.';setPhase('ready',Rec?'Tocá Escuchar para hablar':'Dictado web no disponible; podés escribir');$('v8Close').focus()}
 function hide(){if(!open)return;stopAll();open=false;room.classList.remove('is-open');document.body.style.overflow='';button.focus()}
-function talk(text){lastReply=text;if(!open)return;if(!('speechSynthesis'in window)){setPhase('ready','La voz no está disponible; leé la respuesta.');return;}stopSpeaking();const u=new SpeechSynthesisUtterance(text.slice(0,1500));u.lang=$('accent').value||'es-AR';u.rate=Number($('voiceRate').value)||1;const vs=window.speechSynthesis.getVoices();u.voice=vs.find(v=>v.lang===u.lang)||vs.find(v=>v.lang.startsWith(u.lang.slice(0,2)))||null;utterance=u;let started=false;u.onstart=()=>{if(!open||utterance!==u)return;started=true;speaking=true;setPhase('speaking','AURA está hablando · tocá Detener para interrumpir');lips()};u.onboundary=e=>{if(utterance!==u||!open||!speaking)return;if(e.name==='word'){const n=Math.abs((e.charIndex||0)%5)+1;updatePortrait(n)}};u.onend=()=>{if(utterance!==u)return;utterance=null;speaking=false;stopLips();setPhase('ready',autoTurn?'Retomando escucha…':'Tu turno. Tocá Escuchar para continuar');if(autoTurn&&open){const session=autoSession;clearTimeout(autoTimer);autoTimer=setTimeout(()=>{if(autoTurn&&open&&session===autoSession&&!pending&&!speaking)listen()},680)}};u.onerror=()=>{if(utterance!==u)return;utterance=null;speaking=false;stopLips();setPhase('ready','No pude reproducir voz. Podés leer o tocar Repetir.')};try{window.speechSynthesis.cancel();window.speechSynthesis.speak(u)}catch{setPhase('error','No se pudo reproducir la voz')}
+function talk(text){lastReply=text;if(!open)return;if(!window.AuraVoice){setPhase('error','Motor de voz no disponible; recargá Safari.');return;}stopSpeaking();const token={id:Date.now()};utterance=token;
+window.AuraVoice.speak(text,{
+ onStart:()=>{if(!open||utterance!==token)return;speaking=true;setPhase('speaking','AURA está hablando · tocá Detener para interrumpir');lips()},
+ onEnd:reason=>{if(utterance!==token)return;utterance=null;speaking=false;stopLips();if(reason!=='finished'){setPhase('ready','Voz detenida.');return;}setPhase('ready',autoTurn?'Retomando escucha…':'Tu turno. Tocá Escuchar para continuar');if(autoTurn&&open){const session=autoSession;clearTimeout(autoTimer);autoTimer=setTimeout(()=>{if(autoTurn&&open&&session===autoSession&&!pending&&!speaking)listen()},680)}},
+ onError:()=>{if(utterance!==token)return;utterance=null;speaking=false;stopLips();setPhase('error','La voz falló. Elegí otra en Mi avatar o usá la voz del iPhone.')}
+})
 }
 function send(text){const message=String(text||'').trim();if(!message)return;stopListening();stopSpeaking();$('v8Question').textContent=message;$('v8Answer').textContent='Procesando…';assistantBaseline=document.querySelectorAll('#messages .message.assistant').length;pending=true;setPhase('thinking','AURA está pensando en tu iPhone…');$('messageInput').value=message;const form=$('messageForm');if(form.requestSubmit)form.requestSubmit();else $('sendBtn').click()}
 function watch(){if(!open||!pending)return;const nodes=document.querySelectorAll('#messages .message.assistant .bubble');if(nodes.length<=assistantBaseline)return;const answer=nodes[nodes.length-1]?.textContent?.trim()||'';if(!answer||answer==='Pensando en tu iPhone…')return;pending=false;lastReply=answer;$('v8Answer').textContent=answer;talk(answer)}
@@ -187,4 +192,170 @@ const obs=new MutationObserver(watch);obs.observe($('messages'),{childList:true,
 function listen(){if(!open)return;if(pending){setPhase('thinking','AURA está respondiendo; podés interrumpir con Detener');return}stopSpeaking();stopListening();if(!Rec){setPhase('error','El reconocimiento no está disponible. Escribí o dictá con el teclado.');$('v8Input').focus();return}let r;try{r=new Rec();r.lang=$('accent').value||'es-AR';r.continuous=false;r.interimResults=true;recognizer=r;recognized=false;r.onresult=e=>{let final='';let partial='';for(let i=e.resultIndex;i<e.results.length;i++){const v=e.results[i];if(v.isFinal)final+=v[0].transcript;else partial+=v[0].transcript;}$('v8Question').textContent=(final||partial||'Te escucho…').trim();if(final.trim()&&!recognized){recognized=true;recognizer=null;send(final)}};r.onerror=e=>{if(recognizer!==r)return;recognizer=null;if(autoTurn){autoTurn=false;$('v9AutoTurn').checked=false;}setPhase('error','Micrófono: '+(e.error||'error')+'. Probá el teclado.');};r.onend=()=>{if(recognizer===r){recognizer=null;if(!recognized)setPhase('ready','No recibí una frase. Tocá Escuchar otra vez.')}};setPhase('listening','Te escucho… hablá ahora');r.start()}catch(e){recognizer=null;setPhase('error','No se pudo abrir el micrófono; usá el teclado.')}}
 $('v9AutoTurn').addEventListener('change',e=>{autoTurn=!!e.target.checked;autoSession++;clearTimeout(autoTimer);if(autoTurn){if(!Rec){autoTurn=false;e.target.checked=false;setPhase('error','Este Safari no ofrece dictado web. Usá el teclado.');return;}if(open&&!pending)listen();}else if(open){stopListening();setPhase('ready','Modo continuo desactivado. Tocá Escuchar cuando quieras.')}});button.addEventListener('click',show);$('v8Close').addEventListener('click',hide);$('v8Mic').addEventListener('click',listen);$('v8Stop').addEventListener('click',stopAll);$('v8Repeat').addEventListener('click',()=>{if(lastReply)talk(lastReply);else talk(`Hola, soy ${$('assistantName').value||'AURA'}. Tocá Escuchar para hablar conmigo.`)});$('v8Activate').addEventListener('click',()=>{hide();$('activateBtn').scrollIntoView({behavior:'smooth',block:'center'});$('activateBtn').focus()});$('v8Form').addEventListener('submit',e=>{e.preventDefault();const value=$('v8Input').value.trim();if(!value)return;$('v8Input').value='';send(value)});document.addEventListener('keydown',e=>{if(e.key==='Escape'&&open)hide()});window.addEventListener('pagehide',stopAll);window.addEventListener('beforeunload',stopAll);
 })();
-</script></body></html>
+</script><script>
+/* AURA 1.0 · Audio: shared voice layer; local browser TTS + opt-in Kokoro. */
+(() => {
+  'use strict';
+  const KEY='aura.voice.v10';
+  const MAX_TEXT=1700;
+  const MODEL='onnx-community/Kokoro-82M-v1.0-ONNX';
+  const KOKORO_LIBRARY='https://esm.sh/kokoro-js@1.2.1?bundle';
+  let saved={mode:'native',voiceURI:'auto',neuralVoice:'auto',rate:.95};
+  try{const v=JSON.parse(localStorage.getItem(KEY)||'null');if(v&&typeof v==='object')saved={...saved,...v};}catch{}
+  let current=null,sequence=0,neural=null,neuralLoading=null,audioEl=null,audioURL=null;
+  const byId=id=>document.getElementById(id);
+  const voiceList=()=>('speechSynthesis' in window?speechSynthesis.getVoices():[]);
+  const persist=()=>{try{localStorage.setItem(KEY,JSON.stringify(saved))}catch{}};
+  function getAccent(){return byId('accent')?.value||'es-AR'}
+  function voiceScore(voice,lang){
+    const v=(voice.name||'').toLowerCase();let s=0;
+    if(voice.lang.toLowerCase()===lang.toLowerCase())s+=100;
+    else if(voice.lang.slice(0,2).toLowerCase()===lang.slice(0,2).toLowerCase())s+=30;
+    else return -500;
+    if(/enhanced|premium|natural|neural|alta calidad|mejorada/i.test(v))s+=15;
+    if(/compact|eloquence|espeak|robot/i.test(v))s-=50;
+    if(voice.localService)s+=2;
+    return s;
+  }
+  function chooseVoice(lang=getAccent()){
+    const voices=voiceList();
+    if(saved.voiceURI!=='auto'){
+      const chosen=voices.find(v=>v.voiceURI===saved.voiceURI||(`${v.name}|${v.lang}`===saved.voiceURI));
+      if(chosen)return chosen;
+    }
+    return [...voices].sort((a,b)=>voiceScore(b,lang)-voiceScore(a,lang))[0]||null;
+  }
+  function refreshVoices(){
+    const list=byId('auraVoiceSelect');if(!list)return;
+    const voices=voiceList().filter(v=>v.lang.toLowerCase().startsWith(getAccent().slice(0,2).toLowerCase())).sort((a,b)=>voiceScore(b,getAccent())-voiceScore(a,getAccent()));
+    list.replaceChildren();
+    const auto=document.createElement('option');auto.value='auto';auto.textContent='Automática (mejor coincidencia)';list.append(auto);
+    for(const v of voices){const option=document.createElement('option');option.value=v.voiceURI||`${v.name}|${v.lang}`;option.textContent=`${v.name} · ${v.lang}`;list.append(option)}
+    list.value=saved.voiceURI;if(list.selectedIndex<0)list.value='auto';
+    const info=byId('auraVoiceCount');if(info)info.textContent=voices.length?`${voices.length} voces compatibles encontradas en este navegador.`:'Safari no muestra otras voces para este idioma. Probá el modo neuronal.';
+  }
+  function clean(text){
+    let out=String(text||'').slice(0,MAX_TEXT);
+    out=out.replace(/https?:\/\/\S+/gi,'un enlace').replace(/\[([^\]]+)\]\([^)]*\)/g,'$1');
+    out=out.replace(/[*_`#]+/g,'').replace(/\bUSD\s*([\d.,]+)/gi,'$1 dólares').replace(/\bUS\$\s*([\d.,]+)/gi,'$1 dólares');
+    out=out.replace(/\bIA\b/g,'inteligencia artificial').replace(/\bGPU\b/g,'procesador gráfico');
+    out=out.replace(/\bAURA\b/g,'Aura').replace(/[•|]+/g,'. ');
+    return out.replace(/\s+/g,' ').trim();
+  }
+  function segments(text){
+    const source=clean(text);const parts=[];let chunk='';
+    const sentences=source.match(/[^.!?;:]+[.!?;:]?\s*/g)||[source];
+    for(const sentence of sentences){
+      if((chunk+sentence).length>200&&chunk.trim()){parts.push(chunk.trim());chunk=''}
+      if(sentence.length<=200){chunk+=sentence;continue}
+      const words=sentence.trim().split(/\s+/);for(const word of words){if((chunk+' '+word).length>200&&chunk.trim()){parts.push(chunk.trim());chunk=''}chunk+=(chunk?' ':'')+word}
+    }
+    if(chunk.trim())parts.push(chunk.trim());return parts.slice(0,12);
+  }
+  function stop(){
+    sequence++;
+    const previous=current;current=null;
+    if(previous?.type==='native'){for(const u of previous.parts){u.onend=null;u.onerror=null;u.onstart=null}}
+    try{if('speechSynthesis'in window)speechSynthesis.cancel()}catch{}
+    if(audioEl){audioEl.onended=null;audioEl.onerror=null;audioEl.pause();audioEl=null}
+    if(audioURL){URL.revokeObjectURL(audioURL);audioURL=null}
+    previous?.onEnd?.('stopped');
+  }
+  function speakNative(text,opts={},seq=sequence){
+    if(!('speechSynthesis' in window)){opts.onError?.('Voz del navegador no disponible');return}
+    const list=segments(text);
+    if(!list.length){opts.onEnd?.('empty');return}
+    const chosen=chooseVoice();const rate=Number(saved.rate)||.95;const parts=[];
+    const token={type:'native',parts,onEnd:opts.onEnd};current=token;
+    let n=0,started=false;
+    const next=()=>{
+      if(sequence!==seq||current!==token)return;
+      if(n>=list.length){current=null;opts.onEnd?.('finished');return}
+      const u=new SpeechSynthesisUtterance(list[n++]);
+      if(chosen){u.voice=chosen;u.lang=chosen.lang}else{u.lang=getAccent()}
+      u.rate=Math.min(1.2,Math.max(.78,rate));u.pitch=1;u.volume=1;
+      parts.push(u);
+      u.onstart=()=>{if(sequence===seq&&!started){started=true;opts.onStart?.()}};
+      u.onend=()=>{if(sequence===seq)next()};
+      u.onerror=e=>{if(sequence!==seq)return;current=null;opts.onError?.(e?.error||'error');opts.onEnd?.('error')};
+      try{speechSynthesis.speak(u)}catch(e){current=null;opts.onError?.(e.message||'error');opts.onEnd?.('error')}
+    };
+    try{speechSynthesis.cancel()}catch{}
+    next();
+  }
+  function neuralVoice(){
+    if(saved.neuralVoice!=='auto')return saved.neuralVoice;
+    const kind=byId('avatarGender')?.value||document.querySelector('.chosen[data-gender]')?.dataset?.gender||'femenino';
+    return kind==='masculino'?'em_alex':'ef_dora';
+  }
+  async function loadNeural(){
+    if(neural)return neural;if(neuralLoading)return neuralLoading;
+    const el=byId('auraVoiceStatus');if(el)el.textContent='Descargando voz neuronal gratuita. Puede requerir varios cientos de MB y demorar en iPhone.';
+    neuralLoading=(async()=>{
+      const mod=await import(KOKORO_LIBRARY);
+      const tts=await mod.KokoroTTS.from_pretrained(MODEL,{dtype:'q8',device:'wasm'});
+      neural=tts;
+      if(el)el.textContent='Voz neuronal cargada. Se genera el audio en tu dispositivo.';
+      return tts;
+    })().catch(e=>{if(el)el.textContent='No pudo cargarse la voz neuronal: '+String(e.message||e).slice(0,90)+'. Podés usar la voz del iPhone.';throw e}).finally(()=>{neuralLoading=null});
+    return neuralLoading;
+  }
+  async function speakNeural(text,opts={},seq=sequence){
+    if(!neural){const status=byId('auraVoiceStatus');if(status)status.textContent='Primero tocá «Activar voz neuronal». Mientras tanto se usa la voz del iPhone.';speakNative(text,opts,seq);return}
+    const token={type:'neural',parts:[],onEnd:opts.onEnd};current=token;
+    const parts=segments(text).slice(0,7);const rate=Math.min(1.1,Math.max(.85,Number(saved.rate)||.95));
+    let started=false;
+    try{
+      for(const part of parts){
+        if(sequence!==seq||current!==token)return;
+        const output=await neural.generate(part,{voice:neuralVoice(),speed:rate});
+        if(sequence!==seq||current!==token)return;
+        const blob=output.toBlob();audioURL=URL.createObjectURL(blob);
+        audioEl=new Audio(audioURL);
+        await new Promise((resolve,reject)=>{
+          audioEl.onended=resolve;audioEl.onerror=()=>reject(Error('No se pudo reproducir audio neuronal'));
+          audioEl.play().then(()=>{if(!started){started=true;opts.onStart?.()}}).catch(reject);
+        });
+        if(audioURL){URL.revokeObjectURL(audioURL);audioURL=null}audioEl=null;
+      }
+      if(sequence===seq&&current===token){current=null;opts.onEnd?.('finished')}
+    }catch(e){if(sequence===seq){current=null;opts.onError?.(String(e.message||e));opts.onEnd?.('error')}}
+  }
+  function speak(text,opts={}){
+    stop();const seq=sequence;
+    if(saved.mode==='neural')speakNeural(text,opts,seq);
+    else speakNative(text,opts,seq);
+  }
+  function init(){
+    const accent=byId('accent');if(!accent)return;
+    const rate=byId('voiceRate');
+    const label=document.createElement('div');label.id='auraVoiceControls';label.style='padding:14px;border:1px solid #326575;border-radius:14px;background:#102637;margin:12px 0;display:grid;gap:10px';
+    label.innerHTML=`<strong style="color:#a6fff1">AURA · ESTUDIO DE VOZ 1.0</strong>
+      <label>Motor de voz<select id="auraVoiceMode"><option value="native">Voz del iPhone (rápida)</option><option value="neural">Voz neuronal local (experimental)</option></select></label>
+      <label>Elegir voz del dispositivo<select id="auraVoiceSelect"></select></label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><button id="auraRefreshVoices" class="secondary" type="button">Actualizar voces</button><button id="auraPreviewVoice" class="secondary" type="button">Escuchar prueba</button></div>
+      <label>Voz neuronal en español<select id="auraNeuralVoice"><option value="auto">Automática según avatar</option><option value="ef_dora">Dora · femenina</option><option value="em_alex">Alex · masculina</option><option value="em_santa">Santa · masculina</option></select></label>
+      <button id="auraLoadNeural" class="secondary" type="button">Activar voz neuronal gratis</button>
+      <small id="auraVoiceCount" style="color:#b2cfda"></small>
+      <small id="auraVoiceStatus" role="status" style="color:#b2cfda">La voz neuronal se descarga sólo con tu autorización. No usa API de pago. Puede no funcionar en Safari.</small>`;
+    rate?.closest('label')?.insertAdjacentElement('beforebegin',label);
+    byId('auraVoiceMode').value=saved.mode;
+    byId('auraNeuralVoice').value=saved.neuralVoice;
+    if(rate)rate.value=saved.rate;
+    refreshVoices();
+    accent.addEventListener('change',()=>{saved.voiceURI='auto';persist();refreshVoices()});
+    byId('auraVoiceMode').addEventListener('change',e=>{saved.mode=e.target.value;persist();stop()});
+    byId('auraNeuralVoice').addEventListener('change',e=>{saved.neuralVoice=e.target.value;persist()});
+    byId('auraVoiceSelect').addEventListener('change',e=>{saved.voiceURI=e.target.value;persist()});
+    rate?.addEventListener('input',()=>{saved.rate=Number(rate.value);persist()});
+    byId('auraRefreshVoices').addEventListener('click',refreshVoices);
+    byId('auraPreviewVoice').addEventListener('click',()=>speak('Hola, soy Aura. Ahora podés elegir cómo querés que suene mi voz. Voy a hablar más despacio y con frases más claras.',{onError:e=>{const s=byId('auraVoiceStatus');if(s)s.textContent=String(e)}}));
+    byId('auraLoadNeural').addEventListener('click',async()=>{const b=byId('auraLoadNeural');b.disabled=true;try{await loadNeural();saved.mode='neural';byId('auraVoiceMode').value='neural';persist()}catch{}finally{b.disabled=false}});
+    if('speechSynthesis' in window)speechSynthesis.addEventListener?.('voiceschanged',refreshVoices);
+  }
+  window.AuraVoice={speak,stop,refreshVoices,chooseVoice,clean,segments,init,loadNeural};
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();
+})();
+
+</script>
+</body></html>
