@@ -27,12 +27,14 @@ async function callCloud(state){
   if(!q.trim())throw Error('Falta la consulta.');
   if(!code)throw Error('El cerebro avanzado requiere un código de acceso privado. Todavía no está conectado.');
   const messages=(state?.messages||[]).filter(x=>x&&['user','assistant'].includes(x.role)&&typeof x.text==='string'&&!forbidden.test(normalize(x.text))).slice(-10);
+  const image=window.AuraVision?.payload?.() || null;
   const response=await fetch('./api/aura/chat',{method:'POST',cache:'no-store',
     headers:{'Content-Type':'application/json','x-aura-code':code},
-    body:JSON.stringify({messages,personality:state.personality})});
+    body:JSON.stringify({messages,personality:state.personality,...(image?{image}:{})})});
   const data=await response.json().catch(()=>({}));
   if(!response.ok)throw Error(data.error||'No se pudo conectar la IA avanzada.');
   if(isBad(q,data.answer))throw Error('El proveedor devolvió una respuesta que no pasó el control de calidad.');
+  if(image)window.AuraVision?.onSent?.();
   return data.answer;
 }
 async function respond(engine,state){
