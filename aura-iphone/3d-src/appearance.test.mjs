@@ -12,12 +12,10 @@ test('adapta el estilo al retrato sin borrar los morphs faciales', () => {
   model.add(shirt, face);
   const avatar = { renderer: { model, face: new Vector3(0, 1.5, 0), keyLight: { intensity: 4 }, fillLight: { intensity: 1 } } };
   assert.equal(refineFemaleLook(avatar), true);
-  assert.equal(shirt.material.color.getHexString(), '292c32');
-  assert.equal(face.material.color.getHexString(), 'ffefe6');
+  assert.equal(shirt.material.color.getHexString(), '17191d');
+  assert.equal(face.material.color.getHexString(), 'fff6ef');
   assert.equal(face.morphTargetDictionary.viseme_PP, 0);
   assert.deepEqual(face.morphTargetInfluences, [0, 0]);
-  const decorations = model.getObjectByName('AuraReferenceStyling');
-  assert.equal(decorations.children.length, 7);
-  assert.ok(decorations.getObjectByName('BlackTurtleneck'));
+  assert.equal(model.children.length, 2, 'no genera accesorios flotantes');
   assert.equal(refineFemaleLook({renderer: { model: null, face: null }}), false);
 });
