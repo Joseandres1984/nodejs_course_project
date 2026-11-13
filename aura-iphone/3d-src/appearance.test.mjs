@@ -17,6 +17,8 @@ test('adapta el estilo al retrato sin borrar los morphs faciales', () => {
   assert.equal(face.material.color.getHexString(), 'fff6ef');
   assert.equal(face.morphTargetDictionary.viseme_PP, 0);
   assert.deepEqual(face.morphTargetInfluences, [0, 0]);
+  assert.equal(avatar.renderer.keyLight.intensity, 2.55);
+  assert.equal(avatar.renderer.fillLight.intensity, 1.12);
   assert.equal(model.children.length, 2, 'no genera accesorios flotantes');
   assert.equal(refineFemaleLook({renderer: { model: null, face: null }}), false);
 });

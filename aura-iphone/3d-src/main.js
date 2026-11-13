@@ -11,7 +11,7 @@ const ASSETS = {
   masculino: new URL('./assets/3d/male.glb', import.meta.url).href,
 };
 const MODEL = new URL('./assets/3d/viseme-model.bin', import.meta.url).href;
-const PHOTO_FACE = new URL('./assets/3d/photo-face.webp', import.meta.url).href;
+const PHOTO_FACE = new URL('./assets/3d/photo-face.webp?v=36', import.meta.url).href;
 // Allow a quick no-deploy comparison with the original 3D atlas (?photo=off).
 const photoReferenceEnabled = new URLSearchParams(location.search).get('photo') !== 'off';
 const prefersReduced = () => window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ?? false;
