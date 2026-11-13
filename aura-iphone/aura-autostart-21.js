@@ -50,7 +50,7 @@ function render(info){
 function boot(){
   const mic=$('v8Mic'),stop=$('v8Stop');
   if(!mic||!$('v8Stage'))return;
-  document.querySelector('.v8-label')?.replaceChildren(document.createTextNode('AURA · CONVERSACIÓN PERSONAL 2.2'));
+  document.querySelector('.v8-label')?.replaceChildren(document.createTextNode('AURA · CONVERSACIÓN PERSONAL 2.3'));
   // Priorizar voz española sin modificar el historial ni activar descargas.
   const accent=$('accent');
   if(accent&&accent.value!=='es-AR'){
