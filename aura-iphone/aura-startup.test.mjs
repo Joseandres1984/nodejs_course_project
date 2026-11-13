@@ -72,5 +72,5 @@ test('AURA no activa conversación sin sesión autorizada',async()=>{
 
 test('el servidor inyecta el arranque en la respuesta HTML',()=>{
   const server=readFileSync(new URL('./server.mjs',import.meta.url),'utf8');
-  assert.ok(server.includes('aura-autostart-21.js?v=24'));
+  assert.ok(server.includes('aura-autostart-21.js?v=25'));
 });
