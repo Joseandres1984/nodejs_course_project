@@ -8,6 +8,7 @@ on:
       - 'feature/aura-presence-23-*'
       - 'feature/aura-microgestures-24-*'
       - 'feature/aura-facial-rig-25-*'
+      - 'feature/aura-dialogue-flow-26-*'
   pull_request:
     paths:
       - 'aura-iphone/**'
@@ -29,4 +30,4 @@ jobs:
           node --check aura-iphone/aura-presence-23.js
           node --check aura-iphone/server.mjs
       - name: Session and access tests
-        run: node --test aura-iphone/aura-session.test.mjs aura-iphone/aura-startup.test.mjs aura-iphone/aura-speed.test.mjs aura-iphone/aura-presence.test.mjs
+        run: node --test aura-iphone/aura-session.test.mjs aura-iphone/aura-startup.test.mjs aura-iphone/aura-speed.test.mjs aura-iphone/aura-presence.test.mjs aura-iphone/aura-dialogue.test.mjs

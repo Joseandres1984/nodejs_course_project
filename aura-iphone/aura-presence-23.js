@@ -1,4 +1,4 @@
-/* AURA 2.5 — ojos y cejas con microexpresiones independientes y movimientos discretos.
+/* AURA 2.6 — mirada estable durante el diálogo y microexpresiones naturales.
    Parpadeos breves y postura delicada. Sin cámara, librerías ni video externo. */
 (() => {
   'use strict';
@@ -179,7 +179,7 @@
       if(Math.abs(dx)+Math.abs(dy)<.075)continue;
       const def=f.eyes[i],patch=featurePatch(source,g,'eye',i,def);
       if(!patch)continue;
-      ctx.save();ctx.globalAlpha=.57;
+      ctx.save();ctx.globalAlpha=.40;
       ctx.drawImage(patch,def.cx-patch.width/2+dx,def.cy-patch.height/2+dy);
       ctx.restore();
     }
@@ -188,20 +188,20 @@
       if(Math.abs(lift)<.075)continue;
       const def=f.brows[i],patch=featurePatch(source,g,'brow',i,def);
       if(!patch)continue;
-      ctx.save();ctx.globalAlpha=.54;
+      ctx.save();ctx.globalAlpha=.40;
       ctx.drawImage(patch,def.cx-patch.width/2,def.cy-patch.height/2-lift);
       ctx.restore();
     }
   }
   function targetFor(phase){
     // No simula emociones arbitrarias: sólo atención, reflexión y habla.
-    if(phase==='listening')return {lx:.10,ly:0,rx:.06,ry:0,lb:.24,rb:.19};
-    if(phase==='thinking')return {lx:.80,ly:-.29,rx:.65,ry:-.25,lb:.74,rb:.30};
-    if(phase==='speaking')return {lx:.07,ly:0,rx:.04,ry:0,lb:.19,rb:.14};
+    if(phase==='listening')return {lx:.06,ly:0,rx:.04,ry:0,lb:.14,rb:.11};
+    if(phase==='thinking')return {lx:.50,ly:-.18,rx:.42,ry:-.14,lb:.45,rb:.22};
+    if(phase==='speaking')return {lx:.035,ly:0,rx:.025,ry:0,lb:.13,rb:.09};
     if(phase==='error')return {...ZERO};
-    const shift=(Math.random()-.5)*1.2;
-    return {lx:shift,ly:(Math.random()-.5)*.28,rx:shift*.9,ry:(Math.random()-.5)*.26,
-      lb:Math.random()*.18,rb:Math.random()*.16};
+    const shift=(Math.random()-.5)*.75;
+    return {lx:shift,ly:(Math.random()-.5)*.16,rx:shift*.88,ry:(Math.random()-.5)*.16,
+      lb:Math.random()*.10,rb:Math.random()*.08};
   }
   function clearRigScheduling(){
     if(rigTimer!==null)clearTimeout(rigTimer);
@@ -209,14 +209,14 @@
     rigTimer=null;rigFrame=null;
   }
   function scheduleRig(delay){
-    if(!active()||!rigEnabled()||rigTimer!==null||rigFrame!==null)return;
+    // Sólo se explora suavemente en reposo. Durante la escucha o habla se
+    // conserva el contacto visual, evitando sacudidas periódicas.
+    if(!active()||!rigEnabled()||rigTimer!==null||rigFrame!==null||rigPhase!=='ready')return;
     rigTimer=setTimeout(()=>{
       rigTimer=null;
-      const stage=$('v8Stage');
-      const phase=stage?.dataset?.phase||'ready';
-      rigPhase=phase;
-      moveRig(targetFor(phase),true);
-    },delay??(2100+Math.random()*2900));
+      if(!active()||!rigEnabled()||rigPhase!=='ready')return;
+      moveRig(targetFor('ready'),true);
+    },delay??(3300+Math.random()*3800));
   }
   function moveRig(target,returnHome=false){
     clearRigScheduling();
@@ -234,7 +234,7 @@
         rigFrame=null;
         if(returnHome){
           rigTimer=setTimeout(()=>{rigTimer=null;moveRig({...ZERO},false)},900+Math.random()*1100);
-        }else scheduleRig();
+        }else if(rigPhase==='ready')scheduleRig();
       }
     };
     rigFrame=requestAnimationFrame(frame);
@@ -242,7 +242,8 @@
   function setExpression(phase){
     rigPhase=['ready','listening','thinking','speaking','error'].includes(phase)?phase:'ready';
     if(!active()||!rigEnabled())return;
-    moveRig(targetFor(rigPhase),true);
+    // Una sola transición para escuchar, pensar y hablar; sin bucles nerviosos.
+    moveRig(targetFor(rigPhase),rigPhase==='ready');
   }
 
   function renderBlink(amount){
@@ -314,7 +315,7 @@
         clearRigScheduling();
         for(const key of Object.keys(ZERO))gaze[key]=0;
         renderBlink(blinkAmount);
-      }else scheduleRig(200);
+      }else if(rigPhase==='ready')scheduleRig(200);else setExpression(rigPhase);
     });
   }
   function boot(){
