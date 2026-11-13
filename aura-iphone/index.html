@@ -338,7 +338,7 @@ function stopSpeaking(){
   if(wasSpeaking)window.AuraVoice?.stop();
   stopLips();
 }
-function stopAll(){autoTurn=false;sessionStarted=false;autoSession++;clearTimeout(autoTimer);clearVoiceTimer();$('v9AutoTurn').checked=false;stopListening();stopSpeaking();window.AuraChatControl?.cancel?.();pending=false;awaitingAudio=false;setPhase('ready','Conversación finalizada. Tocá Comenzar para hablar de nuevo.')}
+function stopAll(){autoTurn=false;silenceRetry=0;sessionStarted=false;autoSession++;clearTimeout(autoTimer);clearVoiceTimer();$('v9AutoTurn').checked=false;stopListening();stopSpeaking();window.AuraChatControl?.cancel?.();pending=false;awaitingAudio=false;setPhase('ready','Conversación finalizada. Tocá Comenzar para hablar de nuevo.')}
 function syncData(){updatePortrait(0);const isReady=!!($('statusTag')?.classList.contains('ready'));$('v8Activate').hidden=isReady}
 function prepareVoice(){if(voiceReady)return true;voiceReady=!!window.AuraVoice?.unlock?.();if(voiceReady)$('v8EnableAudio').textContent='🔊 Probar sonido';return voiceReady}
 function show(auto=false){if(open)return;if(!auto)prepareVoice();open=true;room.classList.add('is-open');document.body.style.overflow='hidden';syncData();$('v8Question').textContent='Tu voz aparecerá acá.';$('v8Answer').textContent='La respuesta de AURA aparecerá acá.';setPhase('ready',Rec?'Tocá Comenzar conversación. Voy a escucharte y responderte con voz.':'Este navegador no admite voz. Abrí AURA desde Safari actualizado.');if(!auto)$('v8Close').focus()}
@@ -398,6 +398,18 @@ window.addEventListener('aura:chat-busy',()=>{
 window.addEventListener('aura:chat-cancelled',()=>{
   clearVoiceTimer();pending=false;
 });
+let silenceRetry=0;
+function scheduleSilenceRetry(){
+  if(!autoTurn||!open||document.hidden||silenceRetry>=1)return false;
+  silenceRetry++;
+  const session=autoSession;
+  clearTimeout(autoTimer);
+  setPhase('ready','No te escuché; sigo atenta…');
+  autoTimer=setTimeout(()=>{
+    if(autoTurn&&open&&!pending&&!speaking&&session===autoSession)listen();
+  },650);
+  return true;
+}
 function listen(){
   if(!open)return;
   if(pending||window.AuraChatControl?.isBusy?.()){
@@ -406,9 +418,21 @@ function listen(){
   clearTimeout(autoTimer);
   stopSpeaking();stopListening();
   if(!Rec){autoTurn=false;setPhase('error','Tu navegador no permite reconocimiento de voz. Abrí AURA desde Safari actualizado.');return}
-  let r;try{r=new Rec();r.lang=$('accent').value||'es-AR';r.continuous=false;r.interimResults=true;recognizer=r;recognized=false;r.onresult=e=>{let final='';let partial='';for(let i=e.resultIndex;i<e.results.length;i++){const v=e.results[i];if(v.isFinal)final+=v[0].transcript;else partial+=v[0].transcript;}$('v8Question').textContent=(final||partial||'Te escucho…').trim();if(final.trim()&&!recognized){recognized=true;try{r.stop?.()}catch{}recognizer=null;send(final)}};r.onerror=e=>{if(recognizer!==r)return;recognizer=null;if(autoTurn){autoTurn=false;$('v9AutoTurn').checked=false;}setPhase('error','No pude seguir escuchando ('+(e.error||'error')+'). Tocá Hablar otra vez.');};r.onend=()=>{if(recognizer===r){recognizer=null;if(!recognized)setPhase('ready','No recibí tu voz. Tocá Hablar otra vez.')}};setPhase('listening','Te escucho… hablá ahora');r.start()}catch(e){recognizer=null;setPhase('error','No se pudo abrir el micrófono; usá el teclado.')}}
+  let r;try{r=new Rec();r.lang=$('accent').value||'es-AR';r.continuous=false;r.interimResults=true;recognizer=r;recognized=false;r.onresult=e=>{let final='';let partial='';for(let i=e.resultIndex;i<e.results.length;i++){const v=e.results[i];if(v.isFinal)final+=v[0].transcript;else partial+=v[0].transcript;}$('v8Question').textContent=(final||partial||'Te escucho…').trim();if(final.trim()&&!recognized){recognized=true;silenceRetry=0;try{r.stop?.()}catch{}recognizer=null;send(final)}};r.onerror=e=>{
+    if(recognizer!==r)return;
+    recognizer=null;
+    if(e.error==='no-speech'&&scheduleSilenceRetry())return;
+    if(autoTurn){autoTurn=false;$('v9AutoTurn').checked=false;}
+    setPhase('error','El micrófono se detuvo ('+(e.error||'error')+'). Tocá Hablar para continuar.');
+  };
+  r.onend=()=>{
+    if(recognizer!==r)return;
+    recognizer=null;
+    if(!recognized&&!scheduleSilenceRetry())
+      setPhase('ready','No recibí tu voz. Tocá Hablar otra vez.');
+  };setPhase('listening','Te escucho… hablá ahora');r.start()}catch(e){recognizer=null;setPhase('error','No se pudo abrir el micrófono; usá el teclado.')}}
 $('v9AutoTurn').addEventListener('change',e=>{autoTurn=!!e.target.checked;autoSession++;clearTimeout(autoTimer);if(autoTurn){if(!Rec){autoTurn=false;e.target.checked=false;setPhase('error','Este Safari no ofrece dictado web. Usá el teclado.');return;}if(open&&!pending)listen();}else if(open){stopListening();setPhase('ready','Modo continuo desactivado. Tocá Escuchar cuando quieras.')}});button.addEventListener('click',()=>show(false));$('v8Close').addEventListener('click',hide);$('v8Mic').addEventListener('click',()=>{
-  prepareVoice();sessionStarted=true;autoTurn=!!Rec;
+  prepareVoice();sessionStarted=true;silenceRetry=0;autoTurn=!!Rec;
   $('v9AutoTurn').checked=autoTurn;autoSession++;
   clearTimeout(autoTimer);listen();
 });$('v8Stop').addEventListener('click',stopAll);$('v8Repeat').addEventListener('click',()=>{prepareVoice();if(lastReply)talk(lastReply);else talk(`Hola, soy ${$('assistantName').value||'AURA'}. Tocá Escuchar para hablar conmigo.`)});$('v8EnableAudio').addEventListener('click',()=>{prepareVoice();$('v8AutoSpeak').checked=true;const previous=lastReply;talk('Hola, soy Aura. Ahora podés escuchar mi voz desde el iPhone.');lastReply=previous;});$('v8Activate').addEventListener('click',()=>{hide();$('activateBtn').scrollIntoView({behavior:'smooth',block:'center'});$('activateBtn').focus()});$('v8Form').addEventListener('submit',e=>{e.preventDefault();prepareVoice();const value=$('v8Input').value.trim();if(!value)return;$('v8Input').value='';send(value)});document.addEventListener('keydown',e=>{if(e.key==='Escape'&&open)hide()});window.addEventListener('pagehide',stopAll);window.addEventListener('beforeunload',stopAll);
