@@ -77,7 +77,7 @@ function showLogin(){
   }
   loginDialog.hidden=false;loginDialog.style.display='grid';
 }
-async function callCloud(state){
+async function callCloud(state,options={}){
   const q=(state?.messages||[]).filter(m=>m.role==='user').at(-1)?.text||'';
   if(!q.trim())throw Error('Falta la consulta.');
   if(!authorized){
@@ -88,7 +88,7 @@ async function callCloud(state){
   const messages=(state?.messages||[]).filter(x=>x&&['user','assistant'].includes(x.role)&&typeof x.text==='string'&&!forbidden.test(normalize(x.text))).slice(-10);
   const image=window.AuraVision?.payload?.() || null;
   const response=await fetch('./api/aura/chat',{method:'POST',cache:'no-store',
-    credentials:'same-origin',headers:{'Content-Type':'application/json'},
+    signal:options.signal,credentials:'same-origin',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({messages,personality:state.personality,...(image?{image}:{})})});
   const data=await response.json().catch(()=>({}));
   if(response.status===401){authorized=false;showLogin();}
@@ -97,8 +97,8 @@ async function callCloud(state){
   if(image)window.AuraVision?.onSent?.();
   return data.answer;
 }
-async function respond(engine,state){
-  if(mode==='cloud')return callCloud(state);
+async function respond(engine,state,options={}){
+  if(mode==='cloud')return callCloud(state,options);
   if(!engine)throw Error('El cerebro local está desactivado. Entrá en el panel de IA y tocá «Activar cerebro».');
   const question=(state?.messages||[]).filter(x=>x.role==='user').at(-1)?.text||'';
   const answer=await window.AuraLanguage.respond(engine,state);

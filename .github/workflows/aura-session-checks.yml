@@ -4,6 +4,7 @@ on:
     branches:
       - 'feature/aura-persistent-session-*'
       - 'feature/aura-voice-ready-autostart-*'
+      - 'feature/aura-fast-chat-recovery-*'
   pull_request:
     paths:
       - 'aura-iphone/**'
@@ -19,8 +20,9 @@ jobs:
       - name: JavaScript syntax
         run: |
           node --check aura-iphone/aura-cloud.mjs
+          node --check aura-iphone/aura-resilience.mjs
           node --check aura-iphone/aura-brain-13.js
           node --check aura-iphone/aura-autostart-21.js
           node --check aura-iphone/server.mjs
       - name: Session and access tests
-        run: node --test aura-iphone/aura-session.test.mjs aura-iphone/aura-startup.test.mjs
+        run: node --test aura-iphone/aura-session.test.mjs aura-iphone/aura-startup.test.mjs aura-iphone/aura-speed.test.mjs
