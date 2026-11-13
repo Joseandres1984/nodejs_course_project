@@ -8,7 +8,7 @@ process.env.AURA_ACCESS_CODE='test-password-not-real';
 process.env.AURA_SESSION_SECRET='test-cookie-key-not-real';
 
 async function request(method,path,options={}){
-  const req=Readable.from(options.body===undefined?[]:[JSON.stringify(options.body)]);
+  const req=Readable.from(options.body===undefined?[]:[Buffer.from(JSON.stringify(options.body))]);
   req.method=method;
   req.headers={host:'aura.example.test',origin:'https://aura.example.test',...(options.headers||{})};
   req.socket={remoteAddress:options.ip||'127.0.0.1',encrypted:false};
