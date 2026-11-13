@@ -14,7 +14,7 @@ function newSession(){
 function validSession(req){
   const raw=String(req.headers.cookie||'').split(';').map(x=>x.trim()).find(x=>x.startsWith(COOKIE+'='));
   const token=raw?.slice(COOKIE.length+1)||'';
-  if(!/^v1\\.\\d{10,11}\\.[a-zA-Z0-9_-]{32}\\.[a-zA-Z0-9_-]{43}$/.test(token)||!sessionKey())return false;
+  if(!/^v1\.\d{10,11}\.[a-zA-Z0-9_-]{32}\.[a-zA-Z0-9_-]{43}$/.test(token)||!sessionKey())return false;
   const parts=token.split('.'),expires=Number(parts[1]),now=Math.floor(Date.now()/1000);
   if(expires<=now||expires>now+SESSION_SECONDS+60)return false;
   return equals(parts[3],signature(parts.slice(0,3).join('.')));
