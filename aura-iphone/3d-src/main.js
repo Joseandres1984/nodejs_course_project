@@ -25,46 +25,53 @@ let pendingAudio = false;
 let audioPlaying = false;
 let phase = 'ready';
 let gender = 'femenino';
-let stage, layer, button, oldBadge, originalFrame, originalPosition;
+let stage, mainFrame, room, layer, button, mainBadge, originalFrame, originalPosition;
 let requestId = 0;
-
-function canUse3D() {
-  try {
-    const canvas = document.createElement('canvas');
-    const gl = canvas.getContext('webgl2', { powerPreference: 'low-power' });
-    if (!gl) return false;
-    gl.getExtension('WEBGL_lose_context')?.loseContext();
-    return true;
-  } catch { return false; }
-}
 
 function injectStyles() {
   const style = document.createElement('style');
   style.id = 'aura3dStyles';
   style.textContent = `
-    #v8Stage .aura3d-layer{position:absolute;inset:0;z-index:1;opacity:0;pointer-events:none;transition:opacity .36s ease;background:radial-gradient(ellipse at 50% 40%,#234a56,#07131d 75%)}
-    #v8Stage.aura3d-live .aura3d-layer{opacity:1}
+    #v8Stage .aura3d-layer,#avatarFrame .aura3d-layer{position:absolute;inset:0;z-index:1;opacity:0;pointer-events:none;transition:opacity .36s ease;background:radial-gradient(ellipse at 50% 40%,#234a56,#07131d 75%)}
+    #v8Stage.aura3d-live .aura3d-layer,#avatarFrame.aura3d-live .aura3d-layer{opacity:1}
     #v8Stage.aura3d-live>img,#v8Stage.aura3d-live>canvas.aura23-eye-overlay,#v8Stage.aura3d-live>img.aura-motion-ghost{visibility:hidden!important;animation:none!important}
+    #avatarFrame.aura3d-live>img,#avatarFrame.aura3d-live>canvas.aura23-eye-overlay,#avatarFrame.aura3d-live>img.aura-motion-ghost{visibility:hidden!important;animation:none!important}
     #v8Stage .aura3d-toggle{z-index:4;max-width:70%;cursor:pointer;top:14px;right:13px;font:inherit;letter-spacing:.02em;touch-action:manipulation}
     #v8Stage .aura3d-toggle:focus-visible{outline:2px solid #f7fbff;outline-offset:3px}
-    #v8Stage .aura3d-layer>canvas{width:100%;height:100%;display:block}
+    #v8Stage .aura3d-layer>canvas,#avatarFrame .aura3d-layer>canvas{width:100%;height:100%;display:block}
+    #avatarFrame #faceMode.aura3d-main-toggle{cursor:pointer;border-radius:7px;padding:7px;border:1px solid #7cfde780;background:rgba(8,37,43,.72);font-size:9px;letter-spacing:.02em;text-align:center;max-width:56%}
+    #avatarFrame #faceMode.aura3d-main-toggle:focus-visible{outline:2px solid white;outline-offset:3px}
     #v8Stage.aura3d-live:after{z-index:2;background:linear-gradient(transparent 73%,rgba(4,15,26,.85))}
     #v8Stage .v8-person{z-index:3}
-    @media(prefers-reduced-motion:reduce){#v8Stage .aura3d-layer{transition:none}}
+    @media(prefers-reduced-motion:reduce){#v8Stage .aura3d-layer,#avatarFrame .aura3d-layer{transition:none}}
   `;
   document.head.appendChild(style);
 }
 
 function updateButton(label) {
-  if (!button) return;
-  button.textContent = label || (visible ? '3D activo · Ver foto' : 'Foto 2D · Activar 3D');
-  button.setAttribute('aria-pressed', String(visible));
+  const status = label || (visible ? '3D activo · Ver foto' : 'Foto 2D · Activar 3D');
+  if (button) {
+    button.textContent = status;
+    button.setAttribute('aria-pressed', String(visible));
+  }
+  if (mainBadge) {
+    mainBadge.textContent = label || (visible ? '● ROSTRO 3D · VER FOTO' : 'FOTO 2D · ACTIVAR 3D');
+    mainBadge.setAttribute('aria-pressed', String(visible));
+  }
+}
+
+function syncSurface() {
+  if (!layer || !stage || !mainFrame) return;
+  const target = room?.classList.contains('is-open') ? stage : mainFrame;
+  if (layer.parentElement !== target) target.insertBefore(layer, target.firstChild);
+  stage.classList.toggle('aura3d-live', visible && target === stage);
+  mainFrame.classList.toggle('aura3d-live', visible && target === mainFrame);
 }
 
 function show3D(value) {
   const wasVisible = visible;
   visible = !!value && !!instance && !loading;
-  stage?.classList.toggle('aura3d-live', visible);
+  syncSurface();
   // The 2D portrait is always preserved for low-end devices or errors.
   updateButton();
   if (visible && !wasVisible) animatePresence();
@@ -77,7 +84,6 @@ function applyPhase(value) {
 
 async function ensureInstance() {
   if (instance || loading) return;
-  if (!canUse3D()) { updateButton('3D no compatible · Usando foto'); return; }
   loading = true;
   updateButton('Preparando rostro 3D…');
   const gen = ++requestId;
@@ -114,9 +120,9 @@ async function ensureInstance() {
   } catch (error) {
     loading = false;
     if (avatar) avatar.dispose();
-    console.warn('AURA 3D: modo 2D seguro', error);
+    console.warn('AURA 3D: no se pudo iniciar WebGL o cargar el modelo', error);
     show3D(false);
-    updateButton('No cargó 3D · Reintentar');
+    updateButton('3D no disponible · Reintentar');
   }
 }
 
@@ -128,10 +134,10 @@ function animatePresence() {
     const t = performance.now() / 1000;
     const mul = prefersReduced() || !visible || document.hidden ? 0 : 1;
     const speaking = manual.active || audioPlaying || phase === 'speaking';
-    model.rotation.y = originalPosition.rotationY + mul * (Math.sin(t * .57) * .024 + (speaking ? .009 : 0));
-    model.rotation.x = originalPosition.rotationX + mul * Math.sin(t * .37) * .008;
-    model.position.y = originalPosition.y + mul * Math.sin(t * 1.16) * .0027;
-    model.position.x = originalPosition.x + mul * Math.sin(t * .45) * .002;
+    model.rotation.y = originalPosition.rotationY + mul * (Math.sin(t * .57) * .048 + (speaking ? .018 : 0));
+    model.rotation.x = originalPosition.rotationX + mul * Math.sin(t * .37) * .019;
+    model.position.y = originalPosition.y + mul * Math.sin(t * 1.16) * .004;
+    model.position.x = originalPosition.x + mul * Math.sin(t * .45) * .004;
   }
   requestAnimationFrame(animatePresence);
 }
@@ -145,9 +151,11 @@ function syncGender() {
 
 function mount() {
   stage = document.getElementById('v8Stage');
-  if (!stage || document.getElementById('aura3dToggle')) return;
+  mainFrame = document.getElementById('avatarFrame');
+  room = document.getElementById('v8Room');
+  if (!stage || !mainFrame || document.getElementById('aura3dToggle')) return;
   injectStyles();
-  oldBadge = stage.querySelector('.v8-chip');
+  const oldBadge = stage.querySelector('.v8-chip');
   button = document.createElement('button');
   button.id = 'aura3dToggle';
   button.type = 'button';
@@ -158,9 +166,9 @@ function mount() {
   layer = document.createElement('div');
   layer.className = 'aura3d-layer';
   layer.setAttribute('aria-hidden', 'true');
-  stage.insertBefore(layer, stage.firstChild);
+  syncSurface();
 
-  button.addEventListener('click', async () => {
+  async function toggleMode() {
     if (loading) return;
     if (visible) {
       persist(false);
@@ -173,7 +181,20 @@ function mount() {
       if (instance) show3D(true);
       else await ensureInstance();
     }
-  });
+  }
+  button.addEventListener('click', toggleMode);
+  mainBadge = document.getElementById('faceMode');
+  if (mainBadge) {
+    mainBadge.classList.add('aura3d-main-toggle');
+    mainBadge.setAttribute('role', 'button');
+    mainBadge.setAttribute('tabindex', '0');
+    mainBadge.setAttribute('aria-label', 'Alternar rostro 3D y fotografía 2D');
+    mainBadge.addEventListener('click', toggleMode);
+    mainBadge.addEventListener('keydown', event => {
+      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); toggleMode(); }
+    });
+  }
+  if (room) new MutationObserver(syncSurface).observe(room, { attributes: true, attributeFilter: ['class'] });
   new MutationObserver(() => applyPhase(stage.dataset.phase || 'ready'))
     .observe(stage, { attributes: true, attributeFilter: ['data-phase'] });
   const genderChooser = document.querySelector('.avatar-options');

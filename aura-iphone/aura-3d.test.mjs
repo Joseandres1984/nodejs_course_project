@@ -36,12 +36,15 @@ test('la integración mantiene ambos avatares locales y salida 2D segura', () =>
   const server = readFileSync(new URL('server.mjs', base), 'utf8');
   const html = readFileSync(new URL('index.html', base), 'utf8');
   const source = readFileSync(new URL('3d-src/main.js', base), 'utf8');
-  assert.ok(server.includes('aura-3d.bundle.js?v=31'));
+  assert.ok(server.includes('aura-3d.bundle.js?v=32'));
   assert.ok(server.includes('".glb":"model/gltf-binary"'));
   assert.ok(html.includes('window.Aura3D?.beginSpeech?.(lastReply)'));
   assert.ok(html.includes('await window.Aura3D.speakAudio(blob)'));
   assert.ok(source.includes('instance.speak(blob)'));
-  assert.ok(source.includes('stage?.classList.toggle(\'aura3d-live\', visible)'));
+  assert.ok(source.includes("mainFrame.classList.toggle('aura3d-live'"));
+  assert.ok(source.includes("stage.classList.toggle('aura3d-live'"));
+  assert.ok(source.includes('new MutationObserver(syncSurface)'));
+  assert.ok(!source.includes('canUse3D()'), 'el WebGL se intenta sin falso negativo previo');
   for (const f of ['female.glb', 'male.glb']) {
     const content = readFileSync(new URL('assets/3d/' + f, base));
     assert.equal(content.toString('ascii', 0, 4), 'glTF');
