@@ -1,7 +1,40 @@
-import {timingSafeEqual} from 'node:crypto';
+import {timingSafeEqual,randomBytes,createHmac} from 'node:crypto';
 import {generateWithFallback} from './aura-resilience.mjs';
 
 const requests=new Map();
+const failedLogins=new Map();
+const SESSION_SECONDS=30*24*60*60;
+const COOKIE='aura_session';
+function sessionKey(){return process.env.AURA_SESSION_SECRET||process.env.AURA_ACCESS_CODE||'';}
+function signature(data){return createHmac('sha256',sessionKey()).update(data).digest('base64url');}
+function newSession(){
+  const payload='v1.'+Math.floor(Date.now()/1000+SESSION_SECONDS)+'.'+randomBytes(24).toString('base64url');
+  return payload+'.'+signature(payload);
+}
+function validSession(req){
+  const raw=String(req.headers.cookie||'').split(';').map(x=>x.trim()).find(x=>x.startsWith(COOKIE+'='));
+  const token=raw?.slice(COOKIE.length+1)||'';
+  if(!/^v1\\.\\d{10,11}\\.[a-zA-Z0-9_-]{32}\\.[a-zA-Z0-9_-]{43}$/.test(token)||!sessionKey())return false;
+  const parts=token.split('.'),expires=Number(parts[1]),now=Math.floor(Date.now()/1000);
+  if(expires<=now||expires>now+SESSION_SECONDS+60)return false;
+  return equals(parts[3],signature(parts.slice(0,3).join('.')));
+}
+function cookieOptions(req,clear=false){
+  const secure=req.socket.encrypted||String(req.headers['x-forwarded-proto']||'').split(',')[0].trim()==='https';
+  return COOKIE+'='+ (clear?'':newSession())+'; Path=/api/aura; HttpOnly; SameSite=Strict; '+(clear?'Max-Age=0':'Max-Age='+SESSION_SECONDS)+(secure?'; Secure':'');
+}
+function sameOrigin(req){
+  const origin=req.headers.origin;
+  if(!origin)return true;
+  try{return new URL(origin).host===req.headers.host;}catch{return false;}
+}
+function loginAllowed(ip){
+  const now=Date.now(),x=failedLogins.get(ip)||{since:now,tries:0};
+  if(now-x.since>15*60*1000){x.since=now;x.tries=0;}
+  x.tries++;failedLogins.set(ip,x);
+  if(failedLogins.size>2048)for(const [key,val] of failedLogins){if(now-val.since>15*60*1000)failedLogins.delete(key);}
+  return x.tries<=8;
+}
 function send(res,status,data){
   res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});
   res.end(JSON.stringify(data));
@@ -31,14 +64,30 @@ export async function handleAuraAPI(req,res,url){
   if(!url.pathname.startsWith('/api/aura/'))return false;
   const enabled=!!(process.env.GEMINI_API_KEY&&process.env.AURA_ACCESS_CODE);
   if(url.pathname==='/api/aura/status'&&req.method==='GET'){
-    send(res,200,{advancedConfigured:enabled,localAvailable:true});
+    send(res,200,{advancedConfigured:enabled,localAvailable:true,sessionActive:enabled&&validSession(req)});
+    return true;
+  }
+  if(req.method==='POST'&&!sameOrigin(req)){send(res,403,{error:'Origen no autorizado'});return true;}
+  if(url.pathname==='/api/aura/login'&&req.method==='POST'){
+    if(!enabled){send(res,503,{error:'La conexión avanzada todavía no está configurada.'});return true;}
+    const ip=String(req.socket.remoteAddress||'').slice(0,100);
+    if(!loginAllowed(ip)){send(res,429,{error:'Demasiados intentos. Probá de nuevo dentro de 15 minutos.'});return true;}
+    let submitted='';
+    try{submitted=String((await readJSON(req)).code||'').slice(0,200);}catch{send(res,400,{error:'Solicitud inválida'});return true;}
+    if(!equals(submitted,process.env.AURA_ACCESS_CODE)){send(res,401,{error:'El código privado no coincide.'});return true;}
+    failedLogins.delete(ip);
+    res.setHeader('Set-Cookie',cookieOptions(req));
+    send(res,200,{sessionActive:true,expiresInDays:30});
+    return true;
+  }
+  if(url.pathname==='/api/aura/logout'&&req.method==='POST'){
+    res.setHeader('Set-Cookie',cookieOptions(req,true));
+    send(res,200,{sessionActive:false});
     return true;
   }
   if(url.pathname!=='/api/aura/chat'||req.method!=='POST'){send(res,404,{error:'No encontrado'});return true;}
   if(!enabled){send(res,503,{error:'El cerebro avanzado todavía no está conectado. Se necesita una clave del proveedor y una contraseña privada en el servidor.'});return true;}
-  const origin=req.headers.origin;
-  if(origin){try{if(new URL(origin).host!==req.headers.host){send(res,403,{error:'Origen no autorizado'});return true;}}catch{send(res,403,{error:'Origen no autorizado'});return true;}}
-  if(!equals(req.headers['x-aura-code'],process.env.AURA_ACCESS_CODE)){send(res,401,{error:'Código privado incorrecto'});return true;}
+  if(!validSession(req)){send(res,401,{error:'Necesitás conectar AURA una sola vez para usar el cerebro avanzado.'});return true;}
   const ip=String(req.socket.remoteAddress||'').slice(0,100);
   if(!quota(ip)){send(res,429,{error:'Alcanzaste el límite de solicitudes de este prototipo.'});return true;}
   try{
