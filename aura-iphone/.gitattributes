@@ -1,0 +1,2 @@
+# The esbuild bundle embeds upstream GLSL shader strings. Their spacing is intentional.
+aura-3d.bundle.js -whitespace
