@@ -1,4 +1,4 @@
-/* AURA 2.3 — presencia facial sutil sobre los fotogramas originales.
+/* AURA 2.4 — microgestos extremadamente discretos sobre los fotogramas originales.
    Parpadeos breves y postura delicada. Sin cámara, librerías ni video externo. */
 (() => {
   'use strict';
@@ -20,17 +20,18 @@
   };
   const overlays=new Map();
   const sources=new Map();
+  const eyelidCache=new Map();
   let timer=null,frameId=null,disposed=false,blinkCount=0;
   const reduce=window.matchMedia?.('(prefers-reduced-motion: reduce)');
   const style=document.createElement('style');
   style.id='aura23Styles';
   style.textContent=[
-    '@keyframes aura23Presence{0%,100%{transform:translate3d(0,0,0) scale(1.017) rotate(0deg)}26%{transform:translate3d(.6px,.2px,0) scale(1.021) rotate(.12deg)}52%{transform:translate3d(-.6px,1px,0) scale(1.023) rotate(-.1deg)}76%{transform:translate3d(.4px,.1px,0) scale(1.019) rotate(.09deg)}}',
-    '@keyframes aura23Listen{0%,100%{transform:translate3d(0,0,0) scale(1.023) rotate(.09deg)}50%{transform:translate3d(-.4px,-.5px,0) scale(1.025) rotate(-.1deg)}}',
-    '@keyframes aura23Speak{0%,100%{transform:translate3d(0,0,0) scale(1.021) rotate(0deg)}50%{transform:translate3d(.7px,-.8px,0) scale(1.026) rotate(.13deg)}}',
-    '.aura23-enabled #v8Stage>img,.aura23-enabled #v8Stage>canvas.aura23-eye-overlay,.aura23-enabled #avatarFrame>img,.aura23-enabled #avatarFrame>canvas.aura23-eye-overlay{animation:aura23Presence 8.4s ease-in-out infinite!important;transform-origin:50% 38%;}',
-    '.aura23-enabled #v8Stage[data-phase="listening"]>img,.aura23-enabled #v8Stage[data-phase="listening"]>canvas.aura23-eye-overlay{animation:aura23Listen 6.8s ease-in-out infinite!important;}',
-    '.aura23-enabled #v8Stage[data-phase="speaking"]>img,.aura23-enabled #v8Stage[data-phase="speaking"]>canvas.aura23-eye-overlay,.aura23-enabled #avatarFrame.talking>img,.aura23-enabled #avatarFrame.talking>canvas.aura23-eye-overlay{animation:aura23Speak 3.7s ease-in-out infinite!important;}',
+    '@keyframes aura23Presence{0%,100%{transform:translate3d(0,0,0) scale(1.010) rotate(0deg)}26%{transform:translate3d(.16px,.08px,0) scale(1.011) rotate(.025deg)}52%{transform:translate3d(-.14px,.32px,0) scale(1.012) rotate(-.025deg)}76%{transform:translate3d(.12px,.04px,0) scale(1.011) rotate(.018deg)}}',
+    '@keyframes aura23Listen{0%,100%{transform:translate3d(0,0,0) scale(1.011) rotate(.018deg)}50%{transform:translate3d(-.14px,-.20px,0) scale(1.012) rotate(-.018deg)}}',
+    '@keyframes aura23Speak{0%,100%{transform:translate3d(0,0,0) scale(1.011) rotate(0deg)}50%{transform:translate3d(.18px,-.24px,0) scale(1.013) rotate(.025deg)}}',
+    '.aura23-enabled #v8Stage>img,.aura23-enabled #v8Stage>canvas.aura23-eye-overlay,.aura23-enabled #avatarFrame>img,.aura23-enabled #avatarFrame>canvas.aura23-eye-overlay{animation:aura23Presence 13.5s ease-in-out infinite!important;transform-origin:50% 38%;}',
+    '.aura23-enabled #v8Stage[data-phase="listening"]>img,.aura23-enabled #v8Stage[data-phase="listening"]>canvas.aura23-eye-overlay{animation:aura23Listen 10.4s ease-in-out infinite!important;}',
+    '.aura23-enabled #v8Stage[data-phase="speaking"]>img,.aura23-enabled #v8Stage[data-phase="speaking"]>canvas.aura23-eye-overlay,.aura23-enabled #avatarFrame.talking>img,.aura23-enabled #avatarFrame.talking>canvas.aura23-eye-overlay{animation:aura23Speak 7.8s ease-in-out infinite!important;}',
     '#v8Stage>canvas.aura23-eye-overlay,#avatarFrame>canvas.aura23-eye-overlay{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center 31%;pointer-events:none;z-index:1;opacity:1;}',
     '#avatarFrame>canvas.aura23-eye-overlay{object-position:center 34%;}',
     '@media(prefers-reduced-motion:reduce){.aura23-enabled #v8Stage>img,.aura23-enabled #v8Stage>canvas.aura23-eye-overlay,.aura23-enabled #avatarFrame>img,.aura23-enabled #avatarFrame>canvas.aura23-eye-overlay{animation:none!important;}}'
@@ -86,36 +87,40 @@
   function clearEyes(){
     for(const item of overlays.values())item.ctx?.clearRect(0,0,item.canvas.width,item.canvas.height);
   }
-  function drawEye(ctx,source,eye,amount,g){
-    const w=eye.w+18,h=eye.h+12,x=Math.round(eye.cx-w/2),y=Math.round(eye.cy-h/2);
+  function eyelidPatch(source,eye,g){
+    const key=g+':'+eye.cx+':'+eye.cy;
+    const cached=eyelidCache.get(key);
+    if(cached?.src===source.src)return cached.canvas;
+    const w=eye.w+8,h=eye.h+5;
+    const x=Math.round(eye.cx-w/2);
     const scratch=document.createElement('canvas');
     scratch.width=w;scratch.height=h;
     const c=scratch.getContext('2d',{alpha:true});
-    if(!c)return;
-    // Reconstruir párpados desde la propia textura de piel del rostro.
-    c.drawImage(source,x,eye.skinY,w,9,0,0,w,h);
+    if(!c)return null;
+    // Solo una muestra de piel de la misma foto; se prepara una vez por ojo.
+    c.drawImage(source.img,x,eye.skinY,w,7,0,0,w,h);
     c.globalCompositeOperation='destination-in';
     c.save();
-    c.translate(w/2,h/2);c.scale(1,h/w);
-    const mask=c.createRadialGradient(0,0,w*.21,0,0,w*.50);
+    c.translate(w/2,h/2);
+    c.scale(1,h/w);
+    const mask=c.createRadialGradient(0,0,w*.14,0,0,w*.49);
     mask.addColorStop(0,'rgba(0,0,0,1)');
-    mask.addColorStop(.62,'rgba(0,0,0,.93)');
+    mask.addColorStop(.44,'rgba(0,0,0,.79)');
     mask.addColorStop(1,'rgba(0,0,0,0)');
-    c.fillStyle=mask;c.beginPath();c.arc(0,0,w*.51,0,Math.PI*2);c.fill();
+    c.fillStyle=mask;
+    c.beginPath();c.arc(0,0,w*.50,0,Math.PI*2);c.fill();
     c.restore();
     c.globalCompositeOperation='source-over';
+    eyelidCache.set(key,{src:source.src,canvas:scratch});
+    return scratch;
+  }
+  function drawEye(ctx,source,eye,amount,g){
+    const patch=eyelidPatch(source,eye,g);
+    if(!patch)return;
     ctx.save();
-    ctx.globalAlpha=Math.min(.98,amount);
-    ctx.drawImage(scratch,x,y);
-    if(amount>.44){
-      ctx.globalAlpha=Math.pow(amount,2)*.53;
-      ctx.strokeStyle=g==='femenino'?'#76564b':'#55463d';
-      ctx.lineWidth=1.3;ctx.lineCap='round';
-      ctx.beginPath();
-      ctx.moveTo(eye.cx-eye.w*.34,eye.cy+2);
-      ctx.quadraticCurveTo(eye.cx,eye.cy+5,eye.cx+eye.w*.34,eye.cy+2);
-      ctx.stroke();
-    }
+    // En vez de tapar los ojos por completo, apenas los suaviza durante ~150 ms.
+    ctx.globalAlpha=Math.min(.58,Math.max(0,amount)*.58);
+    ctx.drawImage(patch,Math.round(eye.cx-patch.width/2),Math.round(eye.cy-patch.height/2));
     ctx.restore();
   }
   function renderBlink(amount){
@@ -136,23 +141,23 @@
         canvas.height=source.img.naturalHeight;
       }
       ctx.clearRect(0,0,canvas.width,canvas.height);
-      for(const eye of eyes[g]||eyes.femenino)drawEye(ctx,source.img,eye,amount,g);
+      for(const eye of eyes[g]||eyes.femenino)drawEye(ctx,source,eye,amount,g);
     }
   }
   function blink(){
     if(!active())return;
-    const start=performance.now(),duration=145+Math.random()*50;
+    const start=performance.now(),duration=125+Math.random()*45;
     blinkCount++;
     function step(now){
       if(!active()){clearEyes();frameId=null;return}
       const t=Math.min(1,(now-start)/duration);
-      // Dos cierres suaves, con una apertura breve y sin pulso robótico.
-      const amount=Math.pow(Math.sin(Math.PI*t),1.7);
+      // Cierre muy corto, con una transición suave sin gestos exagerados.
+      const amount=Math.pow(Math.sin(Math.PI*t),2.2);
       renderBlink(amount);
       if(t<1){frameId=requestAnimationFrame(step)}
       else{
         frameId=null;clearEyes();
-        schedule(Math.random()<.16?190:undefined);
+        schedule(Math.random()<.05?320:undefined);
       }
     }
     frameId=requestAnimationFrame(step);
@@ -162,7 +167,7 @@
     sourceFor(gender());
     timer=setTimeout(()=>{
       timer=null;blink();
-    },delay??(2400+Math.random()*4300));
+    },delay??(4500+Math.random()*4700));
   }
   function addControl(){
     if($('aura23Gestures'))return;
@@ -170,7 +175,7 @@
     if(!panel)return;
     const label=document.createElement('label');
     label.style.cssText='display:flex;gap:9px;align-items:flex-start;font-size:12px;color:#caefeb;margin-top:12px;line-height:1.5';
-    label.innerHTML='<input id="aura23Gestures" type="checkbox" style="width:18px;height:18px;accent-color:#73f4dc;flex:none" checked><span>Gestos delicados de AURA <small style="display:block;color:#9db7bf">Parpadeos y movimiento sutil al escuchar, pensar y hablar. Podés desactivarlos.</small></span>';
+    label.innerHTML='<input id="aura23Gestures" type="checkbox" style="width:18px;height:18px;accent-color:#73f4dc;flex:none" checked><span>Gestos delicados de AURA <small style="display:block;color:#9db7bf">Microparpadeos y respiración muy discreta. Podés desactivarlos.</small></span>';
     panel.append(label);
     const box=$('aura23Gestures');box.checked=enabled();
     box.addEventListener('change',()=>setEnabled(box.checked));
