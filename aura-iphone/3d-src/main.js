@@ -11,6 +11,9 @@ const ASSETS = {
   masculino: new URL('./assets/3d/male.glb', import.meta.url).href,
 };
 const MODEL = new URL('./assets/3d/viseme-model.bin', import.meta.url).href;
+const PHOTO_FACE = new URL('./assets/3d/photo-face.webp', import.meta.url).href;
+// Allow a quick no-deploy comparison with the original 3D atlas (?photo=off).
+const photoReferenceEnabled = new URLSearchParams(location.search).get('photo') !== 'off';
 const prefersReduced = () => window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ?? false;
 const selectedGender = () => document.querySelector('[data-gender].chosen')?.dataset.gender || 'femenino';
 const storedPreference = () => {
@@ -101,7 +104,7 @@ async function ensureInstance() {
     if (gen !== requestId) { avatar.dispose(); return; }
     instance = avatar;
     instance.setStatus(phase === 'thinking' ? 'thinking' : 'listening');
-    if (gender === 'femenino') refineFemaleLook(avatar);
+    if (gender === 'femenino') refineFemaleLook(avatar, photoReferenceEnabled ? PHOTO_FACE : null);
     // The pinned MIT SDK intentionally keeps its render callback internal.
     // v0.3.0's instance method is extendable; native Safari TTS needs this
     // bridge because speechSynthesis never exposes its audio waveform.
@@ -149,7 +152,7 @@ function syncGender() {
   if (!instance || gender === next) return;
   gender = next;
   instance.setAvatar(ASSETS[next])
-    .then(() => { if (next === 'femenino' && instance) refineFemaleLook(instance); })
+    .then(() => { if (next === 'femenino' && instance) refineFemaleLook(instance, photoReferenceEnabled ? PHOTO_FACE : null); })
     .catch(() => updateButton('No cargó el rostro · Foto 2D'));
 }
 

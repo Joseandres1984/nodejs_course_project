@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { Group, Mesh, BoxGeometry, MeshStandardMaterial, Vector3 } from 'three';
 import { refineFemaleLook } from './appearance.js';
 
@@ -18,4 +19,14 @@ test('adapta el estilo al retrato sin borrar los morphs faciales', () => {
   assert.deepEqual(face.morphTargetInfluences, [0, 0]);
   assert.equal(model.children.length, 2, 'no genera accesorios flotantes');
   assert.equal(refineFemaleLook({renderer: { model: null, face: null }}), false);
+});
+
+test('usa textura del retrato en WebP sin tocar los blendshapes', () => {
+  const image = readFileSync(new URL('../assets/3d/photo-face.webp', import.meta.url));
+  assert.ok(image.length > 25_000);
+  assert.equal(image.toString('ascii', 0, 4), 'RIFF');
+  assert.equal(image.toString('ascii', 8, 12), 'WEBP');
+  const source = readFileSync(new URL('appearance.js', import.meta.url), 'utf8');
+  assert.ok(source.includes('texture.flipY = false'));
+  assert.ok(source.includes("if (!mat?.name?.endsWith('_head')) continue"));
 });
