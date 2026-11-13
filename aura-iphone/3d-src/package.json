@@ -1,0 +1,16 @@
+{
+  "name": "aura-3d-browser-build",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "esbuild main.js --bundle --minify --format=esm --platform=browser --target=es2020 --outfile=../aura-3d.bundle.js"
+  },
+  "dependencies": {
+    "@interviewflowai/talking-avatar": "0.3.0",
+    "three": "0.186.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}
