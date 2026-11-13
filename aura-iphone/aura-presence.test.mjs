@@ -109,12 +109,12 @@ test('preferencia off desactiva gestos sin alterar cara a cara ni voz',()=>{
   assert.equal(app.timeouts.size,0);
 });
 
-test('la app sirve AURA 2.5 en Safari y conserva el rostro principal',()=>{
+test('la app sirve AURA 2.6 en Safari y conserva el rostro principal',()=>{
   const server=readFileSync(new URL('./server.mjs',import.meta.url),'utf8');
   const autorun=readFileSync(new URL('./aura-autostart-21.js',import.meta.url),'utf8');
-  assert.ok(server.includes('aura-presence-23.js?v=25'));
-  assert.ok(server.includes('aura-autostart-21.js?v=25'));
-  assert.ok(autorun.includes('CONVERSACIÓN PERSONAL 2.5'));
+  assert.ok(server.includes('aura-presence-23.js?v=26'));
+  assert.ok(server.includes('aura-autostart-21.js?v=26'));
+  assert.ok(autorun.includes('CONVERSACIÓN PERSONAL 2.6'));
 });
 
 test('parpadeos sucesivos reutilizan los párpados y evitan crear canvas por frame',()=>{
