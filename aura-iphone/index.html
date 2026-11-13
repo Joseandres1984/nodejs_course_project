@@ -172,13 +172,17 @@ $('speakBtn').addEventListener('click',()=>{if(speechSynthesis?.speaking){stopSp
 document.querySelectorAll('[data-example]').forEach(b=>b.addEventListener('click',()=>{$('messageInput').value=b.dataset.example;pickScreen('chat');$('messageInput').focus()}));
 const Rec=window.SpeechRecognition||window.webkitSpeechRecognition;
 $('micBtn').addEventListener('click',()=>{if(!Rec){toast('Usá el micrófono del teclado del iPhone para dictar el mensaje.');$('messageInput').focus();return}try{if(recognizer){recognizer.stop();recognizer=null;return}const r=new Rec();r.lang=state.accent;r.continuous=false;r.interimResults=false;recognizer=r;$('micBtn').textContent='■ Detener';r.onresult=ev=>{$('messageInput').value=($('messageInput').value+' '+ev.results[0][0].transcript).trim();if(state.autoSendVoice){toast('Dictado listo. Enviando mensaje…');$('messageForm').requestSubmit()}else toast('Dictado listo. Revisá y enviá.')};r.onerror=ev=>toast('Dictado no disponible: '+(ev.error||'error'));r.onend=()=>{recognizer=null;$('micBtn').textContent='◉ Dictar'};r.start()}catch{toast('No se pudo iniciar el micrófono. Usá el teclado del iPhone.')}});
-let activeChatRequest=0,activeChatAbort=null;
+let activeChatRequest=0,activeChatAbort=null,activeWaitingBubble=null;
 window.AuraChatControl={
   isBusy:()=>asking,
   cancel:()=>{
+    if(!asking)return;
     activeChatRequest++;
     try{activeChatAbort?.abort()}catch{}
     activeChatAbort=null;
+    if(activeWaitingBubble&&activeWaitingBubble.textContent==='Pensando en tu iPhone…')
+      activeWaitingBubble.textContent='Respuesta interrumpida.';
+    activeWaitingBubble=null;
     asking=false;
     $('sendBtn').disabled=false;
     window.dispatchEvent(new Event('aura:chat-cancelled'));
@@ -207,6 +211,7 @@ $('messageForm').addEventListener('submit',async ev=>{
   activeChatAbort=controller;
   asking=true;$('sendBtn').disabled=true;
   const waiting=appendMessage('assistant','Pensando en tu iPhone…',false);
+  activeWaitingBubble=waiting;
   let timeoutHandle;
   try{
     // No dejar que una API lenta o una conexión cortada bloquee el micrófono.
@@ -232,7 +237,7 @@ $('messageForm').addEventListener('submit',async ev=>{
   }finally{
     clearTimeout(timeoutHandle);
     if(requestId===activeChatRequest){
-      activeChatAbort=null;asking=false;$('sendBtn').disabled=false;
+      activeChatAbort=null;activeWaitingBubble=null;asking=false;$('sendBtn').disabled=false;
     }
   }
 });
@@ -320,12 +325,19 @@ document.body.append(room);
 const Rec=window.SpeechRecognition||window.webkitSpeechRecognition;
 let open=false,phase='ready',recognizer=null,utterance=null,lipTimer=null,lastReply='',pending=false,assistantBaseline=0,awaitingAudio=false,recognized=false,speaking=false,autoTurn=false,autoTimer=null,autoSession=0,voiceReady=false,voiceWatchdog=null,sessionStarted=false;
 const gender=()=>document.querySelector('[data-gender].chosen')?.dataset.gender||'femenino';
-function setPhase(p,label){phase=p;room.dataset.phase=p;$('v8Stage').dataset.phase=p;$('v8Status').textContent=label||({ready:'Tocá Comenzar para hablar',listening:'Te escucho…',thinking:'AURA está pensando…',speaking:'AURA está hablando…',error:'Tocá Hablar otra vez'}[p]||p);const mic=$('v8Mic');if(mic)mic.textContent=p==='listening'?'◉ Te escucho…':p==='thinking'?'◌ Preparando respuesta…':p==='speaking'?'◉ Interrumpir y hablar':sessionStarted?'◉ Hablar otra vez':'◉ Comenzar conversación'}
+function setPhase(p,label){phase=p;room.dataset.phase=p;$('v8Stage').dataset.phase=p;$('v8Status').textContent=label||({ready:'Tocá Comenzar para hablar',listening:'Te escucho…',thinking:'AURA está pensando…',speaking:'AURA está hablando…',error:'Tocá Hablar otra vez'}[p]||p);const mic=$('v8Mic');if(mic)mic.textContent=p==='listening'?'◉ Te escucho…':p==='thinking'?'◉ Interrumpir y hablar':p==='speaking'?'◉ Interrumpir y hablar':sessionStarted?'◉ Hablar otra vez':'◉ Comenzar conversación'}
 function updatePortrait(n=0){$('v8Portrait').src=frame(gender(),n);$('v8Name').textContent=$('assistantName').value.trim()||'AURA'}
 function stopLips(){clearInterval(lipTimer);lipTimer=null;window.AuraMotion?.stop('v8Portrait');updatePortrait(0)}
 function lips(){stopLips();if(window.AuraMotion){window.AuraMotion.start('v8Portrait',lastReply);return}let i=0;lipTimer=setInterval(()=>{if(!open)return;updatePortrait([0,1,3,4,2,5,2,1][i++%8])},135)}
 function stopListening(){if(recognizer){const r=recognizer;recognizer=null;try{r.abort()}catch{}}}
-function stopSpeaking(){clearTimeout(voiceWatchdog);voiceWatchdog=null;if(utterance||speaking)window.AuraVoice?.stop();utterance=null;speaking=false;stopLips()}
+function stopSpeaking(){
+  clearTimeout(voiceWatchdog);voiceWatchdog=null;
+  const wasSpeaking=!!(utterance||speaking);
+  // Invalidar el turno ANTES de detener audio: Safari puede disparar onEnd sincrónicamente.
+  utterance=null;speaking=false;
+  if(wasSpeaking)window.AuraVoice?.stop();
+  stopLips();
+}
 function stopAll(){autoTurn=false;sessionStarted=false;autoSession++;clearTimeout(autoTimer);clearVoiceTimer();$('v9AutoTurn').checked=false;stopListening();stopSpeaking();window.AuraChatControl?.cancel?.();pending=false;awaitingAudio=false;setPhase('ready','Conversación finalizada. Tocá Comenzar para hablar de nuevo.')}
 function syncData(){updatePortrait(0);const isReady=!!($('statusTag')?.classList.contains('ready'));$('v8Activate').hidden=isReady}
 function prepareVoice(){if(voiceReady)return true;voiceReady=!!window.AuraVoice?.unlock?.();if(voiceReady)$('v8EnableAudio').textContent='🔊 Probar sonido';return voiceReady}
@@ -333,22 +345,29 @@ function show(auto=false){if(open)return;if(!auto)prepareVoice();open=true;room.
 function hide(){if(!open)return;stopAll();open=false;room.classList.remove('is-open');document.body.style.overflow='';button.focus()}
 function talk(text){lastReply=text;if(!open)return;if(!window.AuraVoice){setPhase('error','Motor de voz no disponible; recargá Safari.');return;}stopSpeaking();const token={id:Date.now()};utterance=token;
 window.AuraVoice.speak(text,{
- onStart:()=>{if(!open||utterance!==token)return;speaking=true;setPhase('speaking','AURA está hablando · tocá Detener para interrumpir');lips()},
+ onStart:()=>{if(!open||utterance!==token)return;speaking=true;setPhase('speaking','AURA está hablando · tocá el micrófono para interrumpir');lips()},
  onBoundary:e=>window.AuraMotion?.word('v8Portrait',e),
  onLevel:v=>window.AuraMotion?.level('v8Portrait',v),
- onEnd:reason=>{if(utterance!==token)return;clearTimeout(voiceWatchdog);voiceWatchdog=null;utterance=null;speaking=false;stopLips();if(reason==='error'){setPhase('error','La voz falló. Tocá «Activar sonido» para probar de nuevo.');return;}if(reason!=='finished'){setPhase('ready','Voz detenida.');return;}setPhase('ready',autoTurn?'Retomando escucha…':'Tu turno. Tocá Escuchar para continuar');if(autoTurn&&open){const session=autoSession;clearTimeout(autoTimer);autoTimer=setTimeout(()=>{if(autoTurn&&open&&session===autoSession&&!pending&&!speaking)listen()},680)}},
+ onEnd:reason=>{if(utterance!==token)return;clearTimeout(voiceWatchdog);voiceWatchdog=null;utterance=null;speaking=false;stopLips();if(reason==='error'){setPhase('error','La voz falló. Tocá «Activar sonido» para probar de nuevo.');return;}if(reason!=='finished'){setPhase('ready','Voz detenida.');return;}setPhase('ready',autoTurn?'Retomando escucha…':'Tu turno. Tocá Escuchar para continuar');if(autoTurn&&open){const session=autoSession;clearTimeout(autoTimer);autoTimer=setTimeout(()=>{if(autoTurn&&open&&session===autoSession&&!pending&&!speaking)listen()},420)}},
  onError:()=>{if(utterance!==token)return;clearTimeout(voiceWatchdog);voiceWatchdog=null;utterance=null;speaking=false;stopLips();setPhase('error','La voz falló. Tocá «Activar sonido» o cambiá la voz en Mi avatar.')}
 });
-voiceWatchdog=setTimeout(()=>{if(open&&utterance===token&&!speaking){setPhase('error','El iPhone no inició el audio. Tocá «Activar sonido» y subí el volumen.')};},3000)
+voiceWatchdog=setTimeout(()=>{
+  if(open&&utterance===token&&!speaking){
+    stopSpeaking();
+    setPhase('error','El iPhone no inició el audio. Tocá «Activar sonido» y volvé a intentar.');
+  }
+},5000)
 }
 let voiceWaitTimer=null;
 function clearVoiceTimer(){if(voiceWaitTimer!==null){clearTimeout(voiceWaitTimer);voiceWaitTimer=null;}}
 function send(text){
   const message=String(text||'').trim();
   if(!message)return;
+  // La pregunta más reciente tiene prioridad; se puede conversar sin cerrar la sala.
   if(pending||window.AuraChatControl?.isBusy?.()){
-    setPhase('thinking','AURA está terminando la respuesta anterior. Tocá Terminar para reiniciar.');
-    return;
+    clearVoiceTimer();
+    pending=false;
+    window.AuraChatControl?.cancel?.();
   }
   stopListening();stopSpeaking();
   $('v8Question').textContent=message;
@@ -379,8 +398,20 @@ window.addEventListener('aura:chat-busy',()=>{
 window.addEventListener('aura:chat-cancelled',()=>{
   clearVoiceTimer();pending=false;
 });
-function listen(){if(!open)return;if(pending){setPhase('thinking','AURA está respondiendo; podés interrumpir con Detener');return}stopSpeaking();stopListening();if(!Rec){autoTurn=false;setPhase('error','Tu navegador no permite reconocimiento de voz. Abrí AURA desde Safari actualizado.');return}let r;try{r=new Rec();r.lang=$('accent').value||'es-AR';r.continuous=false;r.interimResults=true;recognizer=r;recognized=false;r.onresult=e=>{let final='';let partial='';for(let i=e.resultIndex;i<e.results.length;i++){const v=e.results[i];if(v.isFinal)final+=v[0].transcript;else partial+=v[0].transcript;}$('v8Question').textContent=(final||partial||'Te escucho…').trim();if(final.trim()&&!recognized){recognized=true;try{r.stop?.()}catch{}recognizer=null;send(final)}};r.onerror=e=>{if(recognizer!==r)return;recognizer=null;if(autoTurn){autoTurn=false;$('v9AutoTurn').checked=false;}setPhase('error','No pude seguir escuchando ('+(e.error||'error')+'). Tocá Hablar otra vez.');};r.onend=()=>{if(recognizer===r){recognizer=null;if(!recognized)setPhase('ready','No recibí tu voz. Tocá Hablar otra vez.')}};setPhase('listening','Te escucho… hablá ahora');r.start()}catch(e){recognizer=null;setPhase('error','No se pudo abrir el micrófono; usá el teclado.')}}
-$('v9AutoTurn').addEventListener('change',e=>{autoTurn=!!e.target.checked;autoSession++;clearTimeout(autoTimer);if(autoTurn){if(!Rec){autoTurn=false;e.target.checked=false;setPhase('error','Este Safari no ofrece dictado web. Usá el teclado.');return;}if(open&&!pending)listen();}else if(open){stopListening();setPhase('ready','Modo continuo desactivado. Tocá Escuchar cuando quieras.')}});button.addEventListener('click',()=>show(false));$('v8Close').addEventListener('click',hide);$('v8Mic').addEventListener('click',()=>{prepareVoice();sessionStarted=true;autoTurn=!!Rec;$('v9AutoTurn').checked=autoTurn;autoSession++;clearTimeout(autoTimer);listen()});$('v8Stop').addEventListener('click',stopAll);$('v8Repeat').addEventListener('click',()=>{prepareVoice();if(lastReply)talk(lastReply);else talk(`Hola, soy ${$('assistantName').value||'AURA'}. Tocá Escuchar para hablar conmigo.`)});$('v8EnableAudio').addEventListener('click',()=>{prepareVoice();$('v8AutoSpeak').checked=true;const previous=lastReply;talk('Hola, soy Aura. Ahora podés escuchar mi voz desde el iPhone.');lastReply=previous;});$('v8Activate').addEventListener('click',()=>{hide();$('activateBtn').scrollIntoView({behavior:'smooth',block:'center'});$('activateBtn').focus()});$('v8Form').addEventListener('submit',e=>{e.preventDefault();prepareVoice();const value=$('v8Input').value.trim();if(!value)return;$('v8Input').value='';send(value)});document.addEventListener('keydown',e=>{if(e.key==='Escape'&&open)hide()});window.addEventListener('pagehide',stopAll);window.addEventListener('beforeunload',stopAll);
+function listen(){
+  if(!open)return;
+  if(pending||window.AuraChatControl?.isBusy?.()){
+    clearVoiceTimer();pending=false;window.AuraChatControl?.cancel?.();
+  }
+  clearTimeout(autoTimer);
+  stopSpeaking();stopListening();
+  if(!Rec){autoTurn=false;setPhase('error','Tu navegador no permite reconocimiento de voz. Abrí AURA desde Safari actualizado.');return}
+  let r;try{r=new Rec();r.lang=$('accent').value||'es-AR';r.continuous=false;r.interimResults=true;recognizer=r;recognized=false;r.onresult=e=>{let final='';let partial='';for(let i=e.resultIndex;i<e.results.length;i++){const v=e.results[i];if(v.isFinal)final+=v[0].transcript;else partial+=v[0].transcript;}$('v8Question').textContent=(final||partial||'Te escucho…').trim();if(final.trim()&&!recognized){recognized=true;try{r.stop?.()}catch{}recognizer=null;send(final)}};r.onerror=e=>{if(recognizer!==r)return;recognizer=null;if(autoTurn){autoTurn=false;$('v9AutoTurn').checked=false;}setPhase('error','No pude seguir escuchando ('+(e.error||'error')+'). Tocá Hablar otra vez.');};r.onend=()=>{if(recognizer===r){recognizer=null;if(!recognized)setPhase('ready','No recibí tu voz. Tocá Hablar otra vez.')}};setPhase('listening','Te escucho… hablá ahora');r.start()}catch(e){recognizer=null;setPhase('error','No se pudo abrir el micrófono; usá el teclado.')}}
+$('v9AutoTurn').addEventListener('change',e=>{autoTurn=!!e.target.checked;autoSession++;clearTimeout(autoTimer);if(autoTurn){if(!Rec){autoTurn=false;e.target.checked=false;setPhase('error','Este Safari no ofrece dictado web. Usá el teclado.');return;}if(open&&!pending)listen();}else if(open){stopListening();setPhase('ready','Modo continuo desactivado. Tocá Escuchar cuando quieras.')}});button.addEventListener('click',()=>show(false));$('v8Close').addEventListener('click',hide);$('v8Mic').addEventListener('click',()=>{
+  prepareVoice();sessionStarted=true;autoTurn=!!Rec;
+  $('v9AutoTurn').checked=autoTurn;autoSession++;
+  clearTimeout(autoTimer);listen();
+});$('v8Stop').addEventListener('click',stopAll);$('v8Repeat').addEventListener('click',()=>{prepareVoice();if(lastReply)talk(lastReply);else talk(`Hola, soy ${$('assistantName').value||'AURA'}. Tocá Escuchar para hablar conmigo.`)});$('v8EnableAudio').addEventListener('click',()=>{prepareVoice();$('v8AutoSpeak').checked=true;const previous=lastReply;talk('Hola, soy Aura. Ahora podés escuchar mi voz desde el iPhone.');lastReply=previous;});$('v8Activate').addEventListener('click',()=>{hide();$('activateBtn').scrollIntoView({behavior:'smooth',block:'center'});$('activateBtn').focus()});$('v8Form').addEventListener('submit',e=>{e.preventDefault();prepareVoice();const value=$('v8Input').value.trim();if(!value)return;$('v8Input').value='';send(value)});document.addEventListener('keydown',e=>{if(e.key==='Escape'&&open)hide()});window.addEventListener('pagehide',stopAll);window.addEventListener('beforeunload',stopAll);
 // El rostro es la primera pantalla. Safari solicita el gesto del usuario para habilitar micrófono y audio.
 setTimeout(()=>show(true),0);
 })();
