@@ -12,7 +12,7 @@ function readAnswer(data) {
 // transport y pause son inyectables para probar errores sin llamar a Google.
 export async function generateWithFallback({
   key, model, fallbackModel = 'gemini-3.5-flash-lite', content,
-  transport = fetch, pause = sleep, timeoutMs = 16000
+  transport = fetch, pause = sleep, timeoutMs = 6500
 }) {
   const primary = modelName(model) || 'gemini-3.5-flash';
   const fallback = modelName(fallbackModel) || 'gemini-3.5-flash-lite';
@@ -21,9 +21,9 @@ export async function generateWithFallback({
   for (let index = 0; index < candidates.length; index++) {
     const chosen = candidates[index];
     if (isCooling(chosen)) continue;
-    const attempts = index === 0 ? 2 : 1;
+    // Una sola consulta por modelo: evitar esperas de 40-50 segundos en el iPhone.
+    const attempts = 1;
     for (let tryNumber = 0; tryNumber < attempts; tryNumber++) {
-      if (tryNumber > 0) await pause(600 + Math.floor(Math.random() * 450));
       lastModel = chosen;
       let response;
       try {
