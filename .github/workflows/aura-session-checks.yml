@@ -6,6 +6,7 @@ on:
       - 'feature/aura-voice-ready-autostart-*'
       - 'feature/aura-fast-chat-recovery-*'
       - 'feature/aura-presence-23-*'
+      - 'feature/aura-microgestures-24-*'
   pull_request:
     paths:
       - 'aura-iphone/**'
