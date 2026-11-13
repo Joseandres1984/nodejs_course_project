@@ -1,0 +1,24 @@
+name: AURA session checks
+on:
+  push:
+    branches:
+      - 'feature/aura-persistent-session-*'
+  pull_request:
+    paths:
+      - 'aura-iphone/**'
+      - '.github/workflows/aura-session-checks.yml'
+jobs:
+  session:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: JavaScript syntax
+        run: |
+          node --check aura-iphone/aura-cloud.mjs
+          node --check aura-iphone/aura-brain-13.js
+          node --check aura-iphone/server.mjs
+      - name: Session and access tests
+        run: node --test aura-iphone/aura-session.test.mjs
