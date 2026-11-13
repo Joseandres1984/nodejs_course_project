@@ -63,17 +63,17 @@ function showLogin(){
       try{
         await login(loginDialog.querySelector('#auraSessionCode').value.trim());
         loginDialog.querySelector('#auraSessionCode').value='';
-        loginDialog.hidden=true;
+        loginDialog.hidden=true;loginDialog.style.display='none';
         const status=document.getElementById('auraBrain13Status');
         if(status)status.textContent='Sesión segura activa. AURA está conectada y lista para conversar.';
         const access=document.getElementById('auraBrain13Access');if(access)access.hidden=true;
       }catch(err){error.textContent=err.message||'No se pudo conectar AURA.';}
       finally{btn.disabled=false;}
     });
-    loginDialog.querySelector('#auraSessionLater').addEventListener('click',()=>{loginDialog.hidden=true;});
+    loginDialog.querySelector('#auraSessionLater').addEventListener('click',()=>{loginDialog.hidden=true;loginDialog.style.display='none';});
     document.body.append(loginDialog);
   }
-  loginDialog.hidden=false;
+  loginDialog.hidden=false;loginDialog.style.display='grid';
 }
 async function callCloud(state){
   const q=(state?.messages||[]).filter(m=>m.role==='user').at(-1)?.text||'';
