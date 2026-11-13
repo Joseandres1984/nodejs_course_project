@@ -7,6 +7,7 @@ on:
       - 'feature/aura-fast-chat-recovery-*'
       - 'feature/aura-presence-23-*'
       - 'feature/aura-microgestures-24-*'
+      - 'feature/aura-facial-rig-25-*'
   pull_request:
     paths:
       - 'aura-iphone/**'
