@@ -133,3 +133,42 @@ test('AURA mantiene gestos mínimos en lugar de inclinaciones visibles o parpade
   assert.ok(code.includes('4500+Math.random()*4700'));
   assert.ok(code.includes('duration=125+Math.random()*45'));
 });
+
+test('los ojos y las cejas responden independientemente al estado de reflexión',()=>{
+  const app=createRuntime();
+  app.window.AuraPresence.expression('thinking');
+  const frames=[...app.raf.values()];
+  assert.ok(frames.length>0,'debe iniciar una transición suave');
+  app.raf.clear();
+  frames[0](510);
+  const state=app.window.AuraPresence.state();
+  assert.equal(state.phase,'thinking');
+  assert.notEqual(state.features.lx,state.features.rx);
+  assert.notEqual(state.features.lb,state.features.rb);
+  assert.ok(state.features.lb<=1&&state.features.rx<=1,'los desplazamientos son menores a un píxel');
+  assert.ok(app.draws()>0,'debe pintar parches faciales independientes');
+  const cached=app.canvases();
+  app.window.AuraPresence.expression('speaking');
+  const speakFrames=[...app.raf.values()];
+  app.raf.clear();speakFrames[0](510);
+  assert.equal(app.canvases(),cached,'reutiliza los parches de ojos y cejas');
+});
+
+test('gestos faciales independientes respetan movimiento reducido y desactivación global',()=>{
+  const reduced=createRuntime({reduced:true});
+  reduced.window.AuraPresence.expression('thinking');
+  assert.equal(reduced.raf.size,0);
+  assert.equal(reduced.draws(),0);
+  const disabled=createRuntime({switchOff:true});
+  disabled.window.AuraPresence.expression('speaking');
+  assert.equal(disabled.raf.size,0);
+  assert.equal(disabled.draws(),0);
+});
+
+test('los gestos no necesitan acceso a cámara, micrófono ni APIs de pago',()=>{
+  assert.ok(code.includes('featurePatch(source,g,part,index,def)'));
+  assert.ok(code.includes("rigPhase='ready'"));
+  assert.ok(!code.includes('getUserMedia('));
+  assert.ok(!code.includes('fetch('));
+  assert.ok(!code.includes('createObjectURL('));
+});
