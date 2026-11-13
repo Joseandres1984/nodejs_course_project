@@ -58,7 +58,7 @@ const quota=ip=>{
   if(now-x.day>86400000){x.day=now;x.total=0;}
   x.min++;x.total++;requests.set(ip,x);
   if(requests.size>2048){for(const [k,v] of requests){if(now-v.day>86400000)requests.delete(k);}}
-  return x.min<=6&&x.total<=80;
+  return x.min<=12&&x.total<=150;
 };
 export async function handleAuraAPI(req,res,url){
   if(!url.pathname.startsWith('/api/aura/'))return false;
@@ -121,8 +121,9 @@ export async function handleAuraAPI(req,res,url){
     const content={
       systemInstruction:{parts:[{text:'Sos AURA, un asistente personal. Respondé siempre en español argentino claro, con voseo. Priorizá utilidad, pertinencia y precisión. No inventes accesos, acciones realizadas ni datos. Sé breve salvo que el usuario pida detalles. Personalidad: '+personality}]},
       contents:messages,
-      generationConfig:{maxOutputTokens:2048,thinkingConfig:{thinkingLevel:'low'}}
+      generationConfig:{maxOutputTokens:body.image?1100:600,thinkingConfig:{thinkingLevel:'low'}}
     };
+    const startedAt=Date.now();
     const result=await generateWithFallback({
       key:process.env.GEMINI_API_KEY,model:safeModel,
       fallbackModel:process.env.GEMINI_FALLBACK_MODEL||'gemini-3.5-flash-lite',
@@ -137,10 +138,11 @@ export async function handleAuraAPI(req,res,url){
         empty:'Google no devolvió una respuesta de texto. Probá reformular la pregunta.',
         provider:'Google no pudo procesar la consulta.'
       };
-      console.warn('AURA_PROVIDER',{reason:result.reason,code:result.providerStatus||result.status,model:result.model});
+      console.warn('AURA_PROVIDER',{reason:result.reason,code:result.providerStatus||result.status,model:result.model,elapsedMs:Date.now()-startedAt});
       send(res,result.status,{error:messages[result.reason]||messages.provider,retryable:result.reason==='unavailable'});
       return true;
     }
+    console.info('AURA_CHAT_OK',{model:result.model,elapsedMs:Date.now()-startedAt,fallback:result.fallback});
     const answer=result.answer;
     if(/(?:^|\n)\s*(?:yes,|no fake facts|reasoning|thinking|internal plan|system instruction|analysis:)/i.test(answer)||/^\s*(?:hello|i am|we should)\b/i.test(answer)){
       send(res,502,{error:'La IA generó una respuesta que no pasó el control de calidad. Probá de nuevo.'});return true;
