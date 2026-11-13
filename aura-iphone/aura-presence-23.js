@@ -1,4 +1,4 @@
-/* AURA 2.4 — microgestos extremadamente discretos sobre los fotogramas originales.
+/* AURA 2.5 — ojos y cejas con microexpresiones independientes y movimientos discretos.
    Parpadeos breves y postura delicada. Sin cámara, librerías ni video externo. */
 (() => {
   'use strict';
@@ -21,6 +21,25 @@
   const overlays=new Map();
   const sources=new Map();
   const eyelidCache=new Map();
+  const RIG_KEY='aura.face.rig.v25';
+  const featureCache=new Map();
+  const features={
+    femenino:{
+      eyes:[{cx:318,cy:249,w:66,h:31},{cx:434,cy:246,w:65,h:30}],
+      brows:[{cx:318,cy:213,w:92,h:25},{cx:434,cy:208,w:90,h:25}]
+    },
+    masculino:{
+      eyes:[{cx:294,cy:232,w:63,h:29},{cx:405,cy:230,w:63,h:29}],
+      brows:[{cx:291,cy:203,w:88,h:28},{cx:409,cy:201,w:88,h:28}]
+    }
+  };
+  const ZERO={lx:0,ly:0,rx:0,ry:0,lb:0,rb:0};
+  let rigTimer=null,rigFrame=null,phaseObserver=null,rigPhase='ready',blinkAmount=0;
+  const gaze={...ZERO};
+  const rigEnabled=()=>{
+    try{return localStorage.getItem(RIG_KEY)!=='off'}catch{return true}
+  };
+
   let timer=null,frameId=null,disposed=false,blinkCount=0;
   const reduce=window.matchMedia?.('(prefers-reduced-motion: reduce)');
   const style=document.createElement('style');
@@ -47,8 +66,13 @@
   }
   function updateEnabled(){
     document.documentElement.classList.toggle('aura23-enabled',enabled()&&supportsMotion());
-    if(!active()){clearTimeout(timer);timer=null;cancelAnimationFrame(frameId);frameId=null;clearEyes();return}
-    schedule();
+    if(!active()){
+      clearTimeout(timer);timer=null;cancelAnimationFrame(frameId);frameId=null;
+      clearRigScheduling();
+      for(const key of Object.keys(ZERO))gaze[key]=0;
+      blinkAmount=0;clearEyes();return;
+    }
+    schedule();scheduleRig();
   }
   function gender(){
     return document.querySelector('[data-gender].chosen')?.dataset.gender||'femenino';
@@ -123,6 +147,104 @@
     ctx.drawImage(patch,Math.round(eye.cx-patch.width/2),Math.round(eye.cy-patch.height/2));
     ctx.restore();
   }
+
+  function featurePatch(source,g,part,index,def){
+    const key=g+':'+part+':'+index;
+    const cached=featureCache.get(key);
+    if(cached?.src===source.src)return cached.canvas;
+    const canvas=document.createElement('canvas');
+    canvas.width=def.w;canvas.height=def.h;
+    const ctx=canvas.getContext('2d',{alpha:true});
+    if(!ctx)return null;
+    const x=Math.round(def.cx-def.w/2),y=Math.round(def.cy-def.h/2);
+    ctx.drawImage(source.img,x,y,def.w,def.h,0,0,def.w,def.h);
+    ctx.globalCompositeOperation='destination-in';
+    ctx.save();ctx.translate(def.w/2,def.h/2);ctx.scale(1,def.h/def.w);
+    const fade=ctx.createRadialGradient(0,0,def.w*.14,0,0,def.w*.51);
+    fade.addColorStop(0,'rgba(0,0,0,.98)');
+    fade.addColorStop(.65,'rgba(0,0,0,.89)');
+    fade.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=fade;ctx.beginPath();ctx.arc(0,0,def.w*.52,0,Math.PI*2);ctx.fill();
+    ctx.restore();ctx.globalCompositeOperation='source-over';
+    featureCache.set(key,{src:source.src,canvas});
+    return canvas;
+  }
+  function paintRig(ctx,source,g){
+    if(!rigEnabled())return;
+    const f=features[g];
+    if(!f)return;
+    const eyeValues=[[gaze.lx,gaze.ly],[gaze.rx,gaze.ry]];
+    for(let i=0;i<2;i++){
+      const dx=eyeValues[i][0],dy=eyeValues[i][1];
+      if(Math.abs(dx)+Math.abs(dy)<.075)continue;
+      const def=f.eyes[i],patch=featurePatch(source,g,'eye',i,def);
+      if(!patch)continue;
+      ctx.save();ctx.globalAlpha=.57;
+      ctx.drawImage(patch,def.cx-patch.width/2+dx,def.cy-patch.height/2+dy);
+      ctx.restore();
+    }
+    for(let i=0;i<2;i++){
+      const lift=i===0?gaze.lb:gaze.rb;
+      if(Math.abs(lift)<.075)continue;
+      const def=f.brows[i],patch=featurePatch(source,g,'brow',i,def);
+      if(!patch)continue;
+      ctx.save();ctx.globalAlpha=.54;
+      ctx.drawImage(patch,def.cx-patch.width/2,def.cy-patch.height/2-lift);
+      ctx.restore();
+    }
+  }
+  function targetFor(phase){
+    // No simula emociones arbitrarias: sólo atención, reflexión y habla.
+    if(phase==='listening')return {lx:.10,ly:0,rx:.06,ry:0,lb:.24,rb:.19};
+    if(phase==='thinking')return {lx:.80,ly:-.29,rx:.65,ry:-.25,lb:.74,rb:.30};
+    if(phase==='speaking')return {lx:.07,ly:0,rx:.04,ry:0,lb:.19,rb:.14};
+    if(phase==='error')return {...ZERO};
+    const shift=(Math.random()-.5)*1.2;
+    return {lx:shift,ly:(Math.random()-.5)*.28,rx:shift*.9,ry:(Math.random()-.5)*.26,
+      lb:Math.random()*.18,rb:Math.random()*.16};
+  }
+  function clearRigScheduling(){
+    if(rigTimer!==null)clearTimeout(rigTimer);
+    if(rigFrame!==null)cancelAnimationFrame(rigFrame);
+    rigTimer=null;rigFrame=null;
+  }
+  function scheduleRig(delay){
+    if(!active()||!rigEnabled()||rigTimer!==null||rigFrame!==null)return;
+    rigTimer=setTimeout(()=>{
+      rigTimer=null;
+      const stage=$('v8Stage');
+      const phase=stage?.dataset?.phase||'ready';
+      rigPhase=phase;
+      moveRig(targetFor(phase),true);
+    },delay??(2100+Math.random()*2900));
+  }
+  function moveRig(target,returnHome=false){
+    clearRigScheduling();
+    if(!active()||!rigEnabled())return;
+    const from={...gaze},begin=performance.now(),duration=300+Math.random()*130;
+    for(const key of Object.keys(ZERO))target[key]=Math.max(-1.0,Math.min(1.0,Number(target[key])||0));
+    const frame=now=>{
+      if(!active()||!rigEnabled()){rigFrame=null;return}
+      const t=Math.min(1,Math.max(0,(now-begin)/duration));
+      const ease=t*t*(3-2*t);
+      for(const key of Object.keys(ZERO))gaze[key]=from[key]+(target[key]-from[key])*ease;
+      renderBlink(blinkAmount);
+      if(t<1)rigFrame=requestAnimationFrame(frame);
+      else{
+        rigFrame=null;
+        if(returnHome){
+          rigTimer=setTimeout(()=>{rigTimer=null;moveRig({...ZERO},false)},900+Math.random()*1100);
+        }else scheduleRig();
+      }
+    };
+    rigFrame=requestAnimationFrame(frame);
+  }
+  function setExpression(phase){
+    rigPhase=['ready','listening','thinking','speaking','error'].includes(phase)?phase:'ready';
+    if(!active()||!rigEnabled())return;
+    moveRig(targetFor(rigPhase),true);
+  }
+
   function renderBlink(amount){
     if(!active())return;
     const g=gender(),source=sourceFor(g);
@@ -141,7 +263,8 @@
         canvas.height=source.img.naturalHeight;
       }
       ctx.clearRect(0,0,canvas.width,canvas.height);
-      for(const eye of eyes[g]||eyes.femenino)drawEye(ctx,source,eye,amount,g);
+      paintRig(ctx,source,g);
+      if(amount>.015)for(const eye of eyes[g]||eyes.femenino)drawEye(ctx,source,eye,amount,g);
     }
   }
   function blink(){
@@ -153,10 +276,11 @@
       const t=Math.min(1,(now-start)/duration);
       // Cierre muy corto, con una transición suave sin gestos exagerados.
       const amount=Math.pow(Math.sin(Math.PI*t),2.2);
+      blinkAmount=amount;
       renderBlink(amount);
       if(t<1){frameId=requestAnimationFrame(step)}
       else{
-        frameId=null;clearEyes();
+        frameId=null;blinkAmount=0;renderBlink(0);
         schedule(Math.random()<.05?320:undefined);
       }
     }
@@ -179,17 +303,48 @@
     panel.append(label);
     const box=$('aura23Gestures');box.checked=enabled();
     box.addEventListener('change',()=>setEnabled(box.checked));
+    const eyeToggle=document.createElement('label');
+    eyeToggle.style.cssText='display:flex;gap:9px;align-items:flex-start;font-size:12px;color:#caefeb;margin-top:8px;line-height:1.5';
+    eyeToggle.innerHTML='<input id="aura25Eyes" type="checkbox" style="width:18px;height:18px;accent-color:#73f4dc;flex:none" checked><span>Mirada y cejas naturales <small style="display:block;color:#9db7bf">Microexpresiones independientes, experimentales y muy discretas.</small></span>';
+    panel.append(eyeToggle);
+    const eyeBox=$('aura25Eyes');eyeBox.checked=rigEnabled();
+    eyeBox.addEventListener('change',()=>{
+      try{localStorage.setItem(RIG_KEY,eyeBox.checked?'on':'off')}catch{}
+      if(!eyeBox.checked){
+        clearRigScheduling();
+        for(const key of Object.keys(ZERO))gaze[key]=0;
+        renderBlink(blinkAmount);
+      }else scheduleRig(200);
+    });
   }
   function boot(){
     ensureCanvas('face');
     ensureCanvas('v8Portrait');
     addControl();
+    const stage=$('v8Stage');
+    const Observer=window.MutationObserver;
+    if(stage&&Observer){
+      phaseObserver=new Observer(()=>{
+        const next=stage.dataset?.phase||'ready';
+        if(next!==rigPhase)setExpression(next);
+      });
+      phaseObserver.observe(stage,{attributes:true,attributeFilter:['data-phase']});
+    }
     updateEnabled();
   }
   document.addEventListener('visibilitychange',updateEnabled);
   reduce?.addEventListener?.('change',updateEnabled);
-  window.addEventListener('pagehide',()=>{disposed=true;clearTimeout(timer);cancelAnimationFrame(frameId);clearEyes()});
-  window.AuraPresence={enable:setEnabled,isEnabled:enabled,blink:()=>{clearTimeout(timer);timer=null;blink()},state:()=>({active:active(),blinkCount,overlays:overlays.size})};
+  window.addEventListener('pagehide',()=>{
+    disposed=true;clearTimeout(timer);cancelAnimationFrame(frameId);clearRigScheduling();
+    phaseObserver?.disconnect?.();clearEyes();
+  });
+  window.AuraPresence={
+    enable:setEnabled,isEnabled:enabled,
+    blink:()=>{clearTimeout(timer);timer=null;blink()},
+    expression:setExpression,
+    gazeEnabled:rigEnabled,
+    state:()=>({active:active(),blinkCount,overlays:overlays.size,phase:rigPhase,features:{...gaze},rigEnabled:rigEnabled()})
+  };
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});
   else boot();
 })();
