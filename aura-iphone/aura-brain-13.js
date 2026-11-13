@@ -2,6 +2,7 @@
 (() => {
 'use strict';
 const MODE_KEY='aura.brain.mode.v13',CODE_KEY='aura.private.code.v13';
+const AUTO_PREF_KEY='aura.brain.autorun.v21';
 let mode='local',code='',authorized=false,explicitMode=false,loginDialog=null;
 try{
   const saved=localStorage.getItem(MODE_KEY);
@@ -25,7 +26,7 @@ function isBad(question,answer){
   return false;
 }
 async function getStatus(){
-  try{const response=await fetch('./api/aura/status',{cache:'no-store'});if(!response.ok)throw Error('Error de estado');return await response.json();}
+  try{const response=await fetch('./api/aura/status',{cache:'no-store',credentials:'same-origin'});if(!response.ok)throw Error('Error de estado');return await response.json();}
   catch{return {advancedConfigured:false,connectionError:true};}
 }
 
@@ -37,6 +38,7 @@ async function login(pass){
   authorized=true;
   code='';
   try{sessionStorage.removeItem(CODE_KEY);}catch{}
+  window.dispatchEvent(new Event('aura:session-changed'));
   return data;
 }
 function showLogin(){
@@ -123,13 +125,33 @@ function render(){
   select.value=mode;
   function draw(){
     access.hidden=mode!=='cloud';
-    if(mode==='local'){status.textContent='Modo local experimental: puede equivocarse. Las respuestas incoherentes se rechazan cuando se detectan; no está garantizada su precisión.';}
-    else{status.textContent='Cerebro avanzado seleccionado. Comprobando conexión privada...';}
+    if(mode==='local'){status.textContent='Modo local experimental: se activa manualmente solo si lo elegís.';}
+    else{status.textContent='Preparando automáticamente el cerebro avanzado...';}
+  }
+  function publishBrainState(data){
+    const configured=!!data.advancedConfigured;
+    const ready=mode==='cloud'&&configured&&authorized;
+    const tag=$('statusTag'),title=$('brainTitle'),subtitle=$('brainSubtitle');
+    if(tag){
+      tag.classList.toggle('ready',ready);
+      // La etiqueta anterior estaba ligada solo al modelo WebGPU y era confusa.
+      tag.textContent=ready?'● Cerebro listo':configured?'● Cerebro esperando acceso':'● Cerebro no conectado';
+    }
+    if(title)title.textContent=ready?'Cerebro avanzado listo para hablar':configured?'Cerebro avanzado disponible':'Cerebro avanzado sin configurar';
+    if(subtitle)subtitle.textContent=ready?'Se inicia automáticamente con tu sesión. No necesitás instalar ni activar un modelo local.':configured?'Conectalo una vez para empezar a hablar.':'Revisá la configuración del proveedor de IA.';
+    const activation=$('v8Activate');if(activation)activation.hidden=ready;
+    window.dispatchEvent(new CustomEvent('aura:brain-status',{detail:{
+      ready,configured,authorized:ready,mode,connectionError:!!data.connectionError
+    }}));
   }
   select.addEventListener('change',()=>{
     mode=select.value;explicitMode=true;
-    try{localStorage.setItem(MODE_KEY,mode);sessionStorage.setItem(MODE_KEY,mode)}catch{}
-    draw();if(mode==='cloud')check();
+    try{
+      localStorage.setItem(MODE_KEY,mode);
+      localStorage.setItem(AUTO_PREF_KEY,mode==='cloud'?'on':'off');
+      sessionStorage.setItem(MODE_KEY,mode);
+    }catch{}
+    draw();check();
   });
   $('auraBrain13Save').addEventListener('click',async()=>{
     const value=$('auraBrain13Code').value.trim();
@@ -139,22 +161,34 @@ function render(){
   });
   async function check(){
     const data=await getStatus();
-    if(!explicitMode&&data.advancedConfigured){
-      mode='cloud';select.value=mode;
-      try{localStorage.setItem(MODE_KEY,mode)}catch{}
+    const auto=(()=>{try{return localStorage.getItem(AUTO_PREF_KEY)!=='off'}catch{return true}})();
+    // En cada apertura, la conexión avanzada se reanuda sola (sin descargar WebGPU).
+    // Un usuario que luego elija explícitamente modo local conserva esa preferencia.
+    if(auto&&data.advancedConfigured){
+      mode='cloud';select.value='cloud';
+      try{localStorage.setItem(MODE_KEY,'cloud')}catch{}
     }
     authorized=!!data.sessionActive;
-    if(!authorized&&code&&data.advancedConfigured){
+    if(mode==='cloud'&&!authorized&&code&&data.advancedConfigured){
       try{await login(code);}
       catch(e){console.warn('No se pudo migrar la sesión anterior.');}
       finally{code='';try{sessionStorage.removeItem(CODE_KEY)}catch{}}
     }
     draw();
-    if(mode!=='cloud')return;
-    if(!data.advancedConfigured){status.textContent='La IA avanzada todavía no está configurada en el servidor.';return;}
-    if(authorized){access.hidden=true;status.textContent='Sesión segura activa. AURA está conectada y lista para conversar.';}
-    else{access.hidden=false;status.textContent='Para comenzar, conectá AURA una sola vez.';showLogin();}
+    if(mode==='cloud'){
+      if(!data.advancedConfigured)status.textContent='La IA avanzada todavía no está configurada en el servidor.';
+      else if(authorized){
+        access.hidden=true;
+        status.textContent='Cerebro avanzado listo. Se recuperó tu sesión de forma automática.';
+      }else{
+        access.hidden=false;
+        status.textContent='Conectá el código una vez para comenzar.';
+        showLogin();
+      }
+    }
+    publishBrainState(data);
   }
+  window.addEventListener('aura:session-changed',check);
   draw();check();
 }
 document.addEventListener('DOMContentLoaded',render);
