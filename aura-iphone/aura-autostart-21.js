@@ -1,4 +1,4 @@
-/* AURA 2.1 — iniciar con cerebro avanzado y conversación cara a cara.
+/* AURA 2.2 — iniciar con cerebro avanzado y conversación cara a cara.
    Safari puede requerir un gesto real para activar voz y micrófono. */
 (() => {
 'use strict';
@@ -50,7 +50,7 @@ function render(info){
 function boot(){
   const mic=$('v8Mic'),stop=$('v8Stop');
   if(!mic||!$('v8Stage'))return;
-  document.querySelector('.v8-label')?.replaceChildren(document.createTextNode('AURA · CONVERSACIÓN PERSONAL 2.1'));
+  document.querySelector('.v8-label')?.replaceChildren(document.createTextNode('AURA · CONVERSACIÓN PERSONAL 2.2'));
   // Priorizar voz española sin modificar el historial ni activar descargas.
   const accent=$('accent');
   if(accent&&accent.value!=='es-AR'){
