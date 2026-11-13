@@ -57,9 +57,10 @@ export function refineFemaleLook(avatar, photoTextureUrl) {
     }).catch(error => console.warn('AURA: textura fotográfica no disponible; conservando cara original', error));
   }
 
-  // Preserve an intimate photographic portrait instead of harsh studio light.
+  // The reference photograph already contains studio highlights. Softer
+  // PBR illumination prevents re-lighting them into bright painted patches.
   const renderer = avatar.renderer;
-  renderer.keyLight.intensity = 3.1;
-  renderer.fillLight.intensity = 1.25;
+  renderer.keyLight.intensity = 2.55;
+  renderer.fillLight.intensity = 1.12;
   return true;
 }
