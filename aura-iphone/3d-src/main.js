@@ -4,6 +4,7 @@
 import { TalkingAvatar } from '@interviewflowai/talking-avatar';
 import { createSpanishLipSync } from '../aura-3d-visemes.mjs';
 import { refineFemaleLook } from './appearance.js';
+import { createFacialPresence } from './presence.js';
 
 const PREFERENCE = 'aura.3d.enabled.v1';
 const ASSETS = {
@@ -22,6 +23,7 @@ const storedPreference = () => {
 const persist = (value) => { try { localStorage.setItem(PREFERENCE, value ? 'on' : 'off'); } catch {} };
 
 const manual = createSpanishLipSync();
+const facialPresence = createFacialPresence();
 let instance = null;
 let visible = false;
 let loading = false;
@@ -136,11 +138,14 @@ function animatePresence() {
   // Gentle full 3D head movement, with stable eye-level framing.
   const model = instance.renderer?.model;
   if (model && originalPosition) {
-    const t = performance.now() / 1000;
-    const mul = prefersReduced() || !visible || document.hidden ? 0 : 1;
+    const now = performance.now();
+    const t = now / 1000;
+    const reduced = prefersReduced() || !visible || document.hidden;
+    const mul = reduced ? 0 : 1;
     const speaking = manual.active || audioPlaying || phase === 'speaking';
-    model.rotation.y = originalPosition.rotationY + mul * (Math.sin(t * .57) * .048 + (speaking ? .018 : 0));
-    model.rotation.x = originalPosition.rotationX + mul * Math.sin(t * .37) * .019;
+    const gaze = facialPresence.update(instance.renderer, { timeMs: now, speaking, reduced });
+    model.rotation.y = originalPosition.rotationY + mul * (Math.sin(t * .57) * .048 + (speaking ? .018 : 0)) + gaze.yaw;
+    model.rotation.x = originalPosition.rotationX + mul * (Math.sin(t * .37) * .019 + (speaking ? Math.sin(t * 2.2) * .012 : 0)) + gaze.pitch;
     model.position.y = originalPosition.y + mul * Math.sin(t * 1.16) * .004;
     model.position.x = originalPosition.x + mul * Math.sin(t * .45) * .004;
   }
@@ -151,6 +156,7 @@ function syncGender() {
   const next = selectedGender();
   if (!instance || gender === next) return;
   gender = next;
+  facialPresence.reset();
   instance.setAvatar(ASSETS[next])
     .then(() => { if (next === 'femenino' && instance) refineFemaleLook(instance, photoReferenceEnabled ? PHOTO_FACE : null); })
     .catch(() => updateButton('No cargó el rostro · Foto 2D'));
@@ -183,6 +189,7 @@ function mount() {
       show3D(false);
       instance?.dispose();
       instance = null;
+      facialPresence.reset();
     } else {
       persist(true);
       if (instance) show3D(true);
