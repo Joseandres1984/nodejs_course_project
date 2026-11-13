@@ -1,7 +1,7 @@
 /* AURA personal look. Keep the model's 67 original facial morph targets intact.
-   The reference photo needs a new head mesh for a faithful likeness.
-   Until then, use discreet material styling only: experimental hair strands,
-   earrings and neckline primitives proved disconnected on the real iPhone. */
+   Uses a baked frontal image projection, keeping the skinned geometry and
+   articulated eyes, teeth and lips intact. No paid services at runtime. */
+import { SRGBColorSpace, TextureLoader } from 'three';
 
 const TONES = {
   clothing: '#17191d',
@@ -9,7 +9,7 @@ const TONES = {
   hair: '#b2a29b',
 };
 
-export function refineFemaleLook(avatar) {
+export function refineFemaleLook(avatar, photoTextureUrl) {
   const scene = avatar?.renderer?.model;
   if (!scene) return false;
 
@@ -31,6 +31,31 @@ export function refineFemaleLook(avatar) {
     child.material = Array.isArray(child.material)
       ? child.material.map(customize) : customize(child.material);
   });
+
+  // The color atlas is pre-baked from the selected AURA portrait. Texture
+  // replacement does not modify the GLB's mesh, armature or 67 blendshapes.
+  // A failed image request simply leaves the original 3D face in place.
+  if (photoTextureUrl && typeof document !== 'undefined') {
+    new TextureLoader().loadAsync(photoTextureUrl).then(texture => {
+      if (!scene.parent || avatar.renderer?.model !== scene) {
+        texture.dispose();
+        return;
+      }
+      texture.flipY = false; // glTF UV orientation differs from DOM images.
+      texture.colorSpace = SRGBColorSpace;
+      texture.anisotropy = 4;
+      texture.needsUpdate = true;
+      scene.traverse(child => {
+        if (!child.isMesh) return;
+        const mats = Array.isArray(child.material) ? child.material : [child.material];
+        for (const mat of mats) {
+          if (!mat?.name?.endsWith('_head')) continue;
+          mat.map = texture;
+          mat.needsUpdate = true;
+        }
+      });
+    }).catch(error => console.warn('AURA: textura fotográfica no disponible; conservando cara original', error));
+  }
 
   // Preserve an intimate photographic portrait instead of harsh studio light.
   const renderer = avatar.renderer;
