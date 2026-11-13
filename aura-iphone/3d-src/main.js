@@ -3,6 +3,7 @@
    Neural audio: acoustic visemes. Native iPhone speech: approximate Spanish visemes. */
 import { TalkingAvatar } from '@interviewflowai/talking-avatar';
 import { createSpanishLipSync } from '../aura-3d-visemes.mjs';
+import { refineFemaleLook } from './appearance.js';
 
 const PREFERENCE = 'aura.3d.enabled.v1';
 const ASSETS = {
@@ -100,6 +101,7 @@ async function ensureInstance() {
     if (gen !== requestId) { avatar.dispose(); return; }
     instance = avatar;
     instance.setStatus(phase === 'thinking' ? 'thinking' : 'listening');
+    if (gender === 'femenino') refineFemaleLook(avatar);
     // The pinned MIT SDK intentionally keeps its render callback internal.
     // v0.3.0's instance method is extendable; native Safari TTS needs this
     // bridge because speechSynthesis never exposes its audio waveform.
@@ -146,7 +148,9 @@ function syncGender() {
   const next = selectedGender();
   if (!instance || gender === next) return;
   gender = next;
-  instance.setAvatar(ASSETS[next]).catch(() => updateButton('No cargó el rostro · Foto 2D'));
+  instance.setAvatar(ASSETS[next])
+    .then(() => { if (next === 'femenino' && instance) refineFemaleLook(instance); })
+    .catch(() => updateButton('No cargó el rostro · Foto 2D'));
 }
 
 function mount() {
