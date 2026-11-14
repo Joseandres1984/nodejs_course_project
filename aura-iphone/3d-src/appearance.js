@@ -5,16 +5,64 @@ import { SRGBColorSpace, TextureLoader } from 'three';
 
 const TONES = {
   clothing: '#17191d',
-  skin: '#fff6ef',
+  skin: '#f9f0e9',
   hair: '#b2a29b',
 };
 
-export function refineFemaleLook(avatar, photoTextureUrl) {
+const smoothstep = (a, b, value) => {
+  const t = Math.max(0, Math.min(1, (value - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+};
+
+// Rocketbox's head uses a local Z-up space, roughly Z=.59 (chin) to 1
+// (forehead). Small proportion adjustments are safe in that local frame;
+// deforming the rig, UVs or the relative facial morph targets is not.
+export function sculptPortraitHead(mesh) {
+  if (!mesh?.isSkinnedMesh || mesh.userData.auraPortraitSculpt === 'v39') return false;
+  const position = mesh.geometry?.attributes?.position;
+  if (!position || position.itemSize !== 3 || position.count < 3) return false;
+
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+  for (let i = 0; i < position.count; i++) {
+    const z = position.getZ(i);
+    minZ = Math.min(minZ, z);
+    maxZ = Math.max(maxZ, z);
+  }
+  // Do not sculpt unexpected/custom avatars with another coordinate frame.
+  if (minZ < .5 || maxZ > 1.08 || maxZ < .66) return false;
+
+  const geometry = mesh.geometry.clone();
+  const vertices = geometry.attributes.position;
+  for (let i = 0; i < vertices.count; i++) {
+    const x = vertices.getX(i);
+    const y = vertices.getY(i);
+    const z = vertices.getZ(i);
+    const jaw = 1 - smoothstep(.66, .855, z);
+    const cheek = smoothstep(.745, .815, z) * (1 - smoothstep(.86, .925, z));
+    // Narrow the lower jaw smoothly, retain a gentle cheek contour, and
+    // leave the upper face/eyelids untouched for reliable blinking.
+    vertices.setXYZ(i, x * (1 - .052 * jaw + .009 * cheek), y, z);
+  }
+  vertices.needsUpdate = true;
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+  // geometry.clone() also preserves skinIndices, skinWeights, UVs and all
+  // 67 morph target position buffers, including visemes and eyelid motion.
+  mesh.geometry = geometry;
+  mesh.userData.auraPortraitSculpt = 'v39';
+  return true;
+}
+
+export function refineFemaleLook(avatar, photoTextureUrl, { sculpt = true } = {}) {
   const scene = avatar?.renderer?.model;
   if (!scene) return false;
 
   scene.traverse(child => {
     if (!child.isMesh) return;
+    const head = (Array.isArray(child.material) ? child.material : [child.material])
+      .some(material => material?.name?.endsWith('_head'));
+    if (sculpt && head) sculptPortraitHead(child);
     const customize = material => {
       if (!material?.isMeshStandardMaterial) return material;
       const name = material.name || '';
@@ -25,7 +73,7 @@ export function refineFemaleLook(avatar, photoTextureUrl) {
       if (name.endsWith('_body')) copy.color.set(TONES.clothing);
       else if (name.endsWith('_head')) copy.color.set(TONES.skin);
       else copy.color.set(TONES.hair);
-      copy.roughness = name.endsWith('_head') ? .82 : .94;
+      copy.roughness = name.endsWith('_head') ? .89 : .94;
       return copy;
     };
     child.material = Array.isArray(child.material)
@@ -60,7 +108,7 @@ export function refineFemaleLook(avatar, photoTextureUrl) {
   // The reference photograph already contains studio highlights. Softer
   // PBR illumination prevents re-lighting them into bright painted patches.
   const renderer = avatar.renderer;
-  renderer.keyLight.intensity = 2.55;
-  renderer.fillLight.intensity = 1.12;
+  renderer.keyLight.intensity = 2.42;
+  renderer.fillLight.intensity = 1.08;
   return true;
 }

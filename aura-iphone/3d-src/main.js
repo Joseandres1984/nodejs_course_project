@@ -12,9 +12,12 @@ const ASSETS = {
   masculino: new URL('./assets/3d/male.glb', import.meta.url).href,
 };
 const MODEL = new URL('./assets/3d/viseme-model.bin', import.meta.url).href;
-const PHOTO_FACE = new URL('./assets/3d/photo-face.webp?v=36', import.meta.url).href;
-// Allow a quick no-deploy comparison with the original 3D atlas (?photo=off).
-const photoReferenceEnabled = new URLSearchParams(location.search).get('photo') !== 'off';
+const PHOTO_FACE = new URL('./assets/3d/photo-face.webp?v=39', import.meta.url).href;
+const search = new URLSearchParams(location.search);
+// Reversible on-device A/B checks: ?shape=classic restores the original
+// head proportions; ?photo=off compares the source texture independently.
+const photoReferenceEnabled = search.get('photo') !== 'off';
+const portraitSculptEnabled = search.get('shape') !== 'classic';
 const prefersReduced = () => window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ?? false;
 const selectedGender = () => document.querySelector('[data-gender].chosen')?.dataset.gender || 'femenino';
 const storedPreference = () => {
@@ -106,7 +109,7 @@ async function ensureInstance() {
     if (gen !== requestId) { avatar.dispose(); return; }
     instance = avatar;
     instance.setStatus(phase === 'thinking' ? 'thinking' : 'listening');
-    if (gender === 'femenino') refineFemaleLook(avatar, photoReferenceEnabled ? PHOTO_FACE : null);
+    if (gender === 'femenino') refineFemaleLook(avatar, photoReferenceEnabled ? PHOTO_FACE : null, { sculpt: portraitSculptEnabled });
     // The pinned MIT SDK intentionally keeps its render callback internal.
     // v0.3.0's instance method is extendable; native Safari TTS needs this
     // bridge because speechSynthesis never exposes its audio waveform.
@@ -160,7 +163,7 @@ function syncGender() {
   gender = next;
   facialPresence.reset();
   instance.setAvatar(ASSETS[next])
-    .then(() => { if (next === 'femenino' && instance) refineFemaleLook(instance, photoReferenceEnabled ? PHOTO_FACE : null); })
+    .then(() => { if (next === 'femenino' && instance) refineFemaleLook(instance, photoReferenceEnabled ? PHOTO_FACE : null, { sculpt: portraitSculptEnabled }); })
     .catch(() => updateButton('No cargó el rostro · Foto 2D'));
 }
 
