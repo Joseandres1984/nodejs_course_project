@@ -12,16 +12,17 @@ const ASSETS = {
   masculino: new URL('./assets/3d/male.glb', import.meta.url).href,
 };
 const MODEL = new URL('./assets/3d/viseme-model.bin', import.meta.url).href;
-const PHOTO_FACE_V5 = new URL('./assets/3d/photo-face-v5.webp?v=40', import.meta.url).href;
+const PHOTO_FACE_V5 = new URL('./assets/3d/photo-face-v5.webp?v=41', import.meta.url).href;
 const PHOTO_FACE_CLASSIC = new URL('./assets/3d/photo-face.webp?v=39', import.meta.url).href;
 const search = new URLSearchParams(location.search);
 // Reversible on-device A/B checks: ?shape=classic restores the original
-// head proportions; ?identity=classic restores the previous texture;
-// ?photo=off compares the source material independently.
+// head proportions; ?identity=experimental previews the generated atlas;
+// ?photo=off compares the source material independently. The generated atlas
+// has imperfect UV lip/eye alignment, so keep the stable atlas as default.
 const photoReferenceEnabled = search.get('photo') !== 'off';
 const portraitSculptEnabled = search.get('shape') !== 'classic';
 const photoReference = photoReferenceEnabled
-  ? (search.get('identity') === 'classic' ? PHOTO_FACE_CLASSIC : PHOTO_FACE_V5)
+  ? (search.get('identity') === 'experimental' ? PHOTO_FACE_V5 : PHOTO_FACE_CLASSIC)
   : null;
 const prefersReduced = () => window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ?? false;
 const selectedGender = () => document.querySelector('[data-gender].chosen')?.dataset.gender || 'femenino';

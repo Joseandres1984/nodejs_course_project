@@ -84,13 +84,13 @@ test('usa textura del retrato en WebP sin tocar los blendshapes', () => {
   assert.ok(source.includes("if (!mat?.name?.endsWith('_head')) continue"));
 });
 
-test('v5 incorpora un atlas de identidad nuevo y conserva la comparación anterior', () => {
+test('atlas experimental se conserva, pero el modo normal protege la boca y los ojos', () => {
   const image = readFileSync(new URL('../assets/3d/photo-face-v5.webp', import.meta.url));
   assert.ok(image.length > 100_000 && image.length < 500_000);
   assert.equal(image.toString('ascii', 0, 4), 'RIFF');
   assert.equal(image.toString('ascii', 8, 12), 'WEBP');
   const source = readFileSync(new URL('main.js', import.meta.url), 'utf8');
-  assert.ok(source.includes("photo-face-v5.webp?v=40"));
-  assert.ok(source.includes("search.get('identity') === 'classic'"));
+  assert.ok(source.includes("photo-face-v5.webp?v=41"));
+  assert.ok(source.includes("search.get('identity') === 'experimental' ? PHOTO_FACE_V5 : PHOTO_FACE_CLASSIC"));
   assert.ok(source.includes("search.get('photo') !== 'off'"));
 });
