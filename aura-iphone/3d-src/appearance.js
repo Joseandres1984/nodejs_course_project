@@ -5,7 +5,7 @@ import { SRGBColorSpace, TextureLoader } from 'three';
 
 const TONES = {
   clothing: '#17191d',
-  skin: '#f9f0e9',
+  skin: '#fff9f3',
   hair: '#b2a29b',
 };
 
@@ -73,7 +73,7 @@ export function refineFemaleLook(avatar, photoTextureUrl, { sculpt = true } = {}
       if (name.endsWith('_body')) copy.color.set(TONES.clothing);
       else if (name.endsWith('_head')) copy.color.set(TONES.skin);
       else copy.color.set(TONES.hair);
-      copy.roughness = name.endsWith('_head') ? .89 : .94;
+      copy.roughness = name.endsWith('_head') ? .93 : .94;
       return copy;
     };
     child.material = Array.isArray(child.material)
@@ -108,7 +108,7 @@ export function refineFemaleLook(avatar, photoTextureUrl, { sculpt = true } = {}
   // The reference photograph already contains studio highlights. Softer
   // PBR illumination prevents re-lighting them into bright painted patches.
   const renderer = avatar.renderer;
-  renderer.keyLight.intensity = 2.42;
-  renderer.fillLight.intensity = 1.08;
+  renderer.keyLight.intensity = 2.3;
+  renderer.fillLight.intensity = 1.02;
   return true;
 }
