@@ -14,11 +14,11 @@ test('adapta el estilo al retrato sin borrar los morphs faciales', () => {
   const avatar = { renderer: { model, face: new Vector3(0, 1.5, 0), keyLight: { intensity: 4 }, fillLight: { intensity: 1 } } };
   assert.equal(refineFemaleLook(avatar), true);
   assert.equal(shirt.material.color.getHexString(), '17191d');
-  assert.equal(face.material.color.getHexString(), 'f9f0e9');
+  assert.equal(face.material.color.getHexString(), 'fff9f3');
   assert.equal(face.morphTargetDictionary.viseme_PP, 0);
   assert.deepEqual(face.morphTargetInfluences, [0, 0]);
-  assert.equal(avatar.renderer.keyLight.intensity, 2.42);
-  assert.equal(avatar.renderer.fillLight.intensity, 1.08);
+  assert.equal(avatar.renderer.keyLight.intensity, 2.3);
+  assert.equal(avatar.renderer.fillLight.intensity, 1.02);
   assert.equal(model.children.length, 2, 'no genera accesorios flotantes');
   assert.equal(refineFemaleLook({renderer: { model: null, face: null }}), false);
 });
@@ -82,4 +82,15 @@ test('usa textura del retrato en WebP sin tocar los blendshapes', () => {
   const source = readFileSync(new URL('appearance.js', import.meta.url), 'utf8');
   assert.ok(source.includes('texture.flipY = false'));
   assert.ok(source.includes("if (!mat?.name?.endsWith('_head')) continue"));
+});
+
+test('v5 incorpora un atlas de identidad nuevo y conserva la comparación anterior', () => {
+  const image = readFileSync(new URL('../assets/3d/photo-face-v5.webp', import.meta.url));
+  assert.ok(image.length > 100_000 && image.length < 500_000);
+  assert.equal(image.toString('ascii', 0, 4), 'RIFF');
+  assert.equal(image.toString('ascii', 8, 12), 'WEBP');
+  const source = readFileSync(new URL('main.js', import.meta.url), 'utf8');
+  assert.ok(source.includes("photo-face-v5.webp?v=40"));
+  assert.ok(source.includes("search.get('identity') === 'classic'"));
+  assert.ok(source.includes("search.get('photo') !== 'off'"));
 });
