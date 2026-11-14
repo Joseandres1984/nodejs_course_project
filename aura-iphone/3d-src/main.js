@@ -121,6 +121,7 @@ async function ensureInstance() {
       y: avatar.renderer?.model?.position.y || 0,
       rotationX: avatar.renderer?.model?.rotation.x || 0,
       rotationY: avatar.renderer?.model?.rotation.y || 0,
+      rotationZ: avatar.renderer?.model?.rotation.z || 0,
     };
     loading = false;
     show3D(storedPreference());
@@ -135,7 +136,7 @@ async function ensureInstance() {
 
 function animatePresence() {
   if (!instance || !stage || !visible) return;
-  // Gentle full 3D head movement, with stable eye-level framing.
+  // Small irregular speaking nods and eye focus; avoid mechanical head loops.
   const model = instance.renderer?.model;
   if (model && originalPosition) {
     const now = performance.now();
@@ -143,11 +144,12 @@ function animatePresence() {
     const reduced = prefersReduced() || !visible || document.hidden;
     const mul = reduced ? 0 : 1;
     const speaking = manual.active || audioPlaying || phase === 'speaking';
-    const gaze = facialPresence.update(instance.renderer, { timeMs: now, speaking, reduced });
-    model.rotation.y = originalPosition.rotationY + mul * (Math.sin(t * .57) * .048 + (speaking ? .018 : 0)) + gaze.yaw;
-    model.rotation.x = originalPosition.rotationX + mul * (Math.sin(t * .37) * .019 + (speaking ? Math.sin(t * 2.2) * .012 : 0)) + gaze.pitch;
-    model.position.y = originalPosition.y + mul * Math.sin(t * 1.16) * .004;
-    model.position.x = originalPosition.x + mul * Math.sin(t * .45) * .004;
+    const gaze = facialPresence.update(instance.renderer, { timeMs: now, speaking, reduced, phase });
+    model.rotation.y = originalPosition.rotationY + gaze.yaw + mul * Math.sin(t * .41) * .014;
+    model.rotation.x = originalPosition.rotationX + gaze.pitch + gaze.nod + mul * Math.sin(t * .31) * .007;
+    model.rotation.z = originalPosition.rotationZ + mul * Math.sin(t * .26) * .003;
+    model.position.y = originalPosition.y + mul * Math.sin(t * .92) * .003;
+    model.position.x = originalPosition.x + mul * Math.sin(t * .39) * .002;
   }
   requestAnimationFrame(animatePresence);
 }
