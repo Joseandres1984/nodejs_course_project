@@ -36,7 +36,7 @@ test('la integración mantiene ambos avatares locales y salida 2D segura', () =>
   const server = readFileSync(new URL('server.mjs', base), 'utf8');
   const html = readFileSync(new URL('index.html', base), 'utf8');
   const source = readFileSync(new URL('3d-src/main.js', base), 'utf8');
-  assert.ok(server.includes('aura-3d.bundle.js?v=38'));
+  assert.ok(server.includes('aura-3d.bundle.js?v=39'));
   assert.ok(server.includes('".glb":"model/gltf-binary"'));
   assert.ok(html.includes('window.Aura3D?.beginSpeech?.(lastReply)'));
   assert.ok(html.includes('await window.Aura3D.speakAudio(blob)'));
