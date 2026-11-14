@@ -21,7 +21,7 @@ try{
   // Hotfix de conversación antes de cargar el estado guardado de Safari.
   if(file===resolve(root,"index.html")){
     const patch=await readFile(resolve(root,"aura-fix-12.js"),"utf8");
-    bytes=Buffer.from(bytes.toString("utf8").replace('src="./aura-brain-13.js"','src="./aura-brain-13.js?v=22"').replace("</head>","<script>"+patch+"</script><script defer src=\"./aura-neural-lab-15.js?v=15\"></script><script defer src=\"./aura-vision-16.js?v=16\"></script><script defer src=\"./aura-jarvis-17.js?v=17\"></script><script defer src=\"./aura-autostart-21.js?v=26\"></script><script defer src=\"./aura-presence-23.js?v=26\"></script><script type=\"module\" src=\"./aura-3d.bundle.js?v=40\"></script></head>"));
+    bytes=Buffer.from(bytes.toString("utf8").replace('src="./aura-brain-13.js"','src="./aura-brain-13.js?v=22"').replace("</head>","<script>"+patch+"</script><script defer src=\"./aura-neural-lab-15.js?v=15\"></script><script defer src=\"./aura-vision-16.js?v=16\"></script><script defer src=\"./aura-jarvis-17.js?v=17\"></script><script defer src=\"./aura-autostart-21.js?v=26\"></script><script defer src=\"./aura-presence-23.js?v=26\"></script><script type=\"module\" src=\"./aura-3d.bundle.js?v=41\"></script></head>"));
   }
   res.writeHead(200,{"Content-Type":mime[extname(file)]||"application/octet-stream","X-Content-Type-Options":"nosniff","Referrer-Policy":"no-referrer","Cache-Control":extname(file)===".html"?"no-store":"public,max-age=300"});
   res.end(bytes);
