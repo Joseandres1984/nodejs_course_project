@@ -31,6 +31,8 @@ test('Malla nueva solo se activa con visual=personal; mantiene fallback 2D y ava
   const source = readFileSync(new URL('./main.js', import.meta.url), 'utf8');
   const shader = readFileSync(new URL('./cinema.js', import.meta.url), 'utf8');
   assert.ok(source.includes("search.get('visual') === 'personal'"));
+  assert.ok(source.includes('if (personalMode) return true'), 'el enlace personal fuerza el arranque aunque Safari recuerde foto 2D');
+  assert.ok(source.includes('Falló 3D ('), 'un error de WebGL no debe confundirse con una foto activada');
   assert.ok(source.includes('new TalkingAvatar'));
   assert.ok(source.includes('show3D(false)'));
   assert.ok(shader.includes('createPersonalFaceGeometry'));
