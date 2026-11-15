@@ -74,6 +74,31 @@ test('admite posiciones cuantizadas del GLB y rechaza otros esqueletos', () => {
   assert.equal(sculptPortraitHead(unrelated), false, 'no altera un avatar en otro espacio local');
 });
 
+test('estudio 3D modifica mandíbula y nariz sin modificar UVs ni visemas', () => {
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new Float32BufferAttribute([
+    .065, 0, .65, .015, 0, .76, .065, 0, .97,
+  ], 3));
+  geometry.setAttribute('uv', new Float32BufferAttribute([0, 0, .5, .5, 1, 1], 2));
+  geometry.morphAttributes.position = [new Float32BufferAttribute([
+    0, 0, .01, 0, 0, .02, 0, 0, .03,
+  ], 3)];
+  geometry.morphTargetsRelative = true;
+  const sourceJaw = geometry.attributes.position.getX(0);
+  const stable = new SkinnedMesh(geometry, new MeshStandardMaterial());
+  const preview = new SkinnedMesh(geometry, new MeshStandardMaterial());
+  assert.equal(sculptPortraitHead(stable), true);
+  assert.equal(sculptPortraitHead(preview, { profile: 'study' }), true);
+  assert.ok(preview.geometry.attributes.position.getX(0) < stable.geometry.attributes.position.getX(0));
+  assert.ok(preview.geometry.attributes.position.getX(1) < stable.geometry.attributes.position.getX(1));
+  assert.equal(preview.geometry.attributes.position.getX(2), geometry.attributes.position.getX(2));
+  assert.equal(preview.geometry.attributes.uv.getX(1), geometry.attributes.uv.getX(1));
+  assert.equal(preview.geometry.morphAttributes.position[0].getZ(1), geometry.morphAttributes.position[0].getZ(1));
+  assert.equal(preview.userData.auraPortraitSculpt, 'portrait-study-v42');
+  assert.equal(sculptPortraitHead(preview, { profile: 'study' }), false);
+  assert.equal(geometry.attributes.position.getX(0), sourceJaw, 'no modifica el recurso original');
+});
+
 test('usa textura del retrato en WebP sin tocar los blendshapes', () => {
   const image = readFileSync(new URL('../assets/3d/photo-face.webp', import.meta.url));
   assert.ok(image.length > 25_000);
@@ -93,4 +118,6 @@ test('atlas experimental se conserva, pero el modo normal protege la boca y los 
   assert.ok(source.includes("photo-face-v5.webp?v=41"));
   assert.ok(source.includes("search.get('identity') === 'experimental' ? PHOTO_FACE_V5 : PHOTO_FACE_CLASSIC"));
   assert.ok(source.includes("search.get('photo') !== 'off'"));
+  assert.ok(source.includes("search.get('portrait') === 'study'"));
+  assert.ok(source.includes("profile: portraitStudy ? 'study' : 'classic'"));
 });
