@@ -5,6 +5,7 @@ import { TalkingAvatar } from '@interviewflowai/talking-avatar';
 import { createSpanishLipSync } from '../aura-3d-visemes.mjs';
 import { refineFemaleLook } from './appearance.js';
 import { createFacialPresence } from './presence.js';
+import { createCinemaAvatar } from './cinema.js';
 
 const PREFERENCE = 'aura.3d.enabled.v1';
 const ASSETS = {
@@ -26,6 +27,9 @@ const portraitStudy = search.get('portrait') === 'study';
 // Separate opt-in lighting test. Never changes the default appearance, GLB,
 // reference atlas, audio or the device pixel ratio.
 const studioGraphics = search.get('graphics') === 'studio';
+// Photo-depth experiment: actual WebGL mesh with a photoreal source image.
+// It is 2.5D, not a photogrammetric reconstruction of a full head.
+const cinemaMode = search.get('visual') === 'cine';
 const photoReference = photoReferenceEnabled
   ? (search.get('identity') === 'experimental' ? PHOTO_FACE_V5 : PHOTO_FACE_CLASSIC)
   : null;
@@ -69,13 +73,13 @@ function injectStyles() {
 }
 
 function updateButton(label) {
-  const status = label || (visible ? (studioGraphics ? '3D estudio · Ver foto' : portraitStudy ? '3D prueba · Ver foto' : '3D activo · Ver foto') : 'Foto 2D · Activar 3D');
+  const status = label || (visible ? (cinemaMode ? 'Cine 3D · Ver foto' : studioGraphics ? '3D estudio · Ver foto' : portraitStudy ? '3D prueba · Ver foto' : '3D activo · Ver foto') : 'Foto 2D · Activar 3D');
   if (button) {
     button.textContent = status;
     button.setAttribute('aria-pressed', String(visible));
   }
   if (mainBadge) {
-    mainBadge.textContent = label || (visible ? (studioGraphics ? '● ROSTRO 3D · ESTUDIO' : portraitStudy ? '● ROSTRO 3D · PRUEBA' : '● ROSTRO 3D · VER FOTO') : 'FOTO 2D · ACTIVAR 3D');
+    mainBadge.textContent = label || (visible ? (cinemaMode ? '● ROSTRO · CINE EXPERIMENTAL' : studioGraphics ? '● ROSTRO 3D · ESTUDIO' : portraitStudy ? '● ROSTRO 3D · PRUEBA' : '● ROSTRO 3D · VER FOTO') : 'FOTO 2D · ACTIVAR 3D');
     mainBadge.setAttribute('aria-pressed', String(visible));
   }
 }
@@ -110,17 +114,23 @@ async function ensureInstance() {
   let avatar;
   try {
     gender = selectedGender();
-    avatar = new TalkingAvatar({
-      container: layer,
-      avatarUrl: ASSETS[gender],
-      modelUrl: MODEL,
-      onError(error) { console.warn('AURA 3D:', error.message || error); },
-    });
+    avatar = cinemaMode && gender === 'femenino'
+      ? createCinemaAvatar({
+        container: layer,
+        imageAssets: window.AURA_ASSETS,
+        onError(error) { console.warn('AURA Cine:', error.message || error); },
+      })
+      : new TalkingAvatar({
+        container: layer,
+        avatarUrl: ASSETS[gender],
+        modelUrl: MODEL,
+        onError(error) { console.warn('AURA 3D:', error.message || error); },
+      });
     await avatar.ready;
     if (gen !== requestId) { avatar.dispose(); return; }
     instance = avatar;
     instance.setStatus(phase === 'thinking' ? 'thinking' : 'listening');
-    if (gender === 'femenino') refineFemaleLook(avatar, photoReference, {
+    if (gender === 'femenino' && !cinemaMode) refineFemaleLook(avatar, photoReference, {
       sculpt: portraitSculptEnabled, profile: portraitStudy ? 'study' : 'classic', graphics: studioGraphics ? 'studio' : 'classic',
     });
     // The pinned MIT SDK intentionally keeps its render callback internal.
@@ -172,6 +182,20 @@ function animatePresence() {
 
 function syncGender() {
   const next = selectedGender();
+  if (cinemaMode) {
+    if (next !== 'femenino' && instance) {
+      endSpeech();
+      show3D(false);
+      instance.dispose();
+      instance = null;
+      facialPresence.reset();
+      updateButton('Foto 2D · Retrato Cine solo femenino');
+    } else if (next === 'femenino' && !instance && !loading && storedPreference()) {
+      ensureInstance();
+    }
+    gender = next;
+    return;
+  }
   if (!instance || gender === next) return;
   gender = next;
   facialPresence.reset();
