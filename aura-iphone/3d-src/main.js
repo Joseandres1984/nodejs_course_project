@@ -29,7 +29,8 @@ const portraitStudy = search.get('portrait') === 'study';
 const studioGraphics = search.get('graphics') === 'studio';
 // Photo-depth experiment: actual WebGL mesh with a photoreal source image.
 // It is 2.5D, not a photogrammetric reconstruction of a full head.
-const cinemaMode = search.get('visual') === 'cine';
+const personalMode = search.get('visual') === 'personal';
+const cinemaMode = personalMode || search.get('visual') === 'cine';
 const photoReference = photoReferenceEnabled
   ? (search.get('identity') === 'experimental' ? PHOTO_FACE_V5 : PHOTO_FACE_CLASSIC)
   : null;
@@ -73,13 +74,13 @@ function injectStyles() {
 }
 
 function updateButton(label) {
-  const status = label || (visible ? (cinemaMode ? 'Cine 3D · Ver foto' : studioGraphics ? '3D estudio · Ver foto' : portraitStudy ? '3D prueba · Ver foto' : '3D activo · Ver foto') : 'Foto 2D · Activar 3D');
+  const status = label || (visible ? (personalMode ? '3D personal · Ver foto' : cinemaMode ? 'Cine 3D · Ver foto' : studioGraphics ? '3D estudio · Ver foto' : portraitStudy ? '3D prueba · Ver foto' : '3D activo · Ver foto') : 'Foto 2D · Activar 3D');
   if (button) {
     button.textContent = status;
     button.setAttribute('aria-pressed', String(visible));
   }
   if (mainBadge) {
-    mainBadge.textContent = label || (visible ? (cinemaMode ? '● ROSTRO · CINE EXPERIMENTAL' : studioGraphics ? '● ROSTRO 3D · ESTUDIO' : portraitStudy ? '● ROSTRO 3D · PRUEBA' : '● ROSTRO 3D · VER FOTO') : 'FOTO 2D · ACTIVAR 3D');
+    mainBadge.textContent = label || (visible ? (personalMode ? '● ROSTRO 3D · MALLA PERSONAL' : cinemaMode ? '● ROSTRO · CINE EXPERIMENTAL' : studioGraphics ? '● ROSTRO 3D · ESTUDIO' : portraitStudy ? '● ROSTRO 3D · PRUEBA' : '● ROSTRO 3D · VER FOTO') : 'FOTO 2D · ACTIVAR 3D');
     mainBadge.setAttribute('aria-pressed', String(visible));
   }
 }
@@ -118,6 +119,7 @@ async function ensureInstance() {
       ? createCinemaAvatar({
         container: layer,
         imageAssets: window.AURA_ASSETS,
+        personalMesh: personalMode,
         onError(error) { console.warn('AURA Cine:', error.message || error); },
       })
       : new TalkingAvatar({

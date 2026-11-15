@@ -2,10 +2,11 @@
    reconstruct a full head from one picture. The original licensed portrait
    remains the source of the skin, eyes, hair and clothing. No remote service. */
 import {
-  CanvasTexture, Group, LinearFilter, Mesh, MeshBasicMaterial,
+  CanvasTexture, DoubleSide, Group, LinearFilter, Mesh, MeshBasicMaterial,
   OrthographicCamera, PlaneGeometry, Scene, SRGBColorSpace,
   TextureLoader, WebGLRenderer,
 } from 'three';
+import { createPersonalFaceGeometry } from './personal-face.js';
 
 const FRAME = 'femenino';
 const IMAGE_ASPECT = 720 / 960;
@@ -54,7 +55,8 @@ function makeFeatherMap() {
   return map;
 }
 
-export function createCinemaAvatar({ container, imageAssets = window.AURA_ASSETS, onError = () => {} }) {
+export function createCinemaAvatar({ container, imageAssets = window.AURA_ASSETS,
+  onError = () => {}, personalMesh = false }) {
   const missing = IMAGE_KEYS.filter(key => !String(imageAssets?.[key] || '').startsWith('data:image/'));
   if (missing.length) throw new Error(`AURA Cine: falta retrato original (${missing.join(', ')})`);
 
@@ -79,6 +81,8 @@ export function createCinemaAvatar({ container, imageAssets = window.AURA_ASSETS
   let faceRest = null;
   let eyeWeights = null;
   let lastEyePose = null;
+  let lastMouthPose = -1;
+  let mouthWeights = null;
   let faceMaterial = null;
   let backgroundMaterial = null;
   let alphaMap = null;
@@ -195,16 +199,25 @@ export function createCinemaAvatar({ container, imageAssets = window.AURA_ASSETS
         const squint = reduced ? 0 : ((values.eyeSquintLeft || 0) + (values.eyeSquintRight || 0)) * .5;
         if (!lastEyePose || Math.abs(lastEyePose.gaze - gaze) > .0001
           || Math.abs(lastEyePose.squint - squint) > .006
-          || Math.abs(lastEyePose.blink - blink) > .025) {
+          || Math.abs(lastEyePose.blink - blink) > .025
+          || (personalMesh && Math.abs(lastMouthPose - amount) > .025)) {
           const position = model.geometry.attributes.position;
           for (let i = 0; i < position.count; i++) {
             const eyes = eyeWeights[i];
             position.setX(i, faceRest[i * 3] + eyes * gaze);
-            position.setY(i, faceRest[i * 3 + 1]
-              - (faceRest[i * 3 + 1] - .484) * eyes * (.12 * squint + .44 * blink));
+            const restY = faceRest[i * 3 + 1];
+            const eyeMovement = (restY - .484) * eyes * (.12 * squint + .64 * blink);
+            // Keep the lips photographic while their landmark vertices move
+            // gently with speech. A tiny asymmetric jaw motion avoids the
+            // stretched, frightening smile of the old generic 3D rig.
+            const mouthMovement = personalMesh && mouthWeights
+              ? mouthWeights[i] * amount * (restY < .251 ? -.008 : .003)
+              : 0;
+            position.setY(restY - eyeMovement + mouthMovement);
           }
           position.needsUpdate = true;
           lastEyePose = { gaze, squint, blink };
+          lastMouthPose = amount;
         }
       }
     }
@@ -227,24 +240,31 @@ export function createCinemaAvatar({ container, imageAssets = window.AURA_ASSETS
       backgroundMesh.renderOrder = 0;
       backdrop.add(backgroundMesh);
 
-      const geometry = new PlaneGeometry(IMAGE_WIDTH, IMAGE_HEIGHT, 78, 104);
+      const geometry = personalMesh
+        ? createPersonalFaceGeometry(IMAGE_WIDTH, IMAGE_HEIGHT)
+        : new PlaneGeometry(IMAGE_WIDTH, IMAGE_HEIGHT, 78, 104);
       const points = geometry.attributes.position;
       const uv = geometry.attributes.uv;
-      for (let i = 0; i < points.count; i++) {
-        points.setZ(i, faceDepthAt(uv.getX(i), uv.getY(i)));
+      if (!personalMesh) {
+        for (let i = 0; i < points.count; i++) {
+          points.setZ(i, faceDepthAt(uv.getX(i), uv.getY(i)));
+        }
       }
       points.needsUpdate = true;
       faceRest = Float32Array.from(points.array);
       eyeWeights = new Float32Array(points.count);
+      mouthWeights = personalMesh ? new Float32Array(points.count) : null;
       for (let i = 0; i < points.count; i++) {
         const u = uv.getX(i), top = 1 - uv.getY(i);
         eyeWeights[i] = Math.min(1, gaussian(u - .447, top - .258, .064, .041)
           + gaussian(u - .581, top - .258, .064, .041));
+        if (mouthWeights) mouthWeights[i] = gaussian(u - .54, top - .374, .086, .027);
       }
       geometry.computeVertexNormals();
       faceMaterial = new MeshBasicMaterial({
         map: frames[0], alphaMap, transparent: true,
-        depthWrite: false, toneMapped: false, opacity: 1,
+        depthWrite: false, depthTest: !personalMesh, side: DoubleSide,
+        toneMapped: false, opacity: 1,
       });
       model = new Mesh(geometry, faceMaterial);
       model.renderOrder = 1;
