@@ -6,6 +6,7 @@ import { createSpanishLipSync } from '../aura-3d-visemes.mjs';
 import { refineFemaleLook } from './appearance.js';
 import { createFacialPresence } from './presence.js';
 import { createCinemaAvatar } from './cinema.js';
+import { projectPhotoOntoRig } from './rigged-photo.js';
 
 const PREFERENCE = 'aura.3d.enabled.v1';
 const ASSETS = {
@@ -30,6 +31,8 @@ const studioGraphics = search.get('graphics') === 'studio';
 // Photo-depth experiment: actual WebGL mesh with a photoreal source image.
 // It is 2.5D, not a photogrammetric reconstruction of a full head.
 const personalMode = search.get('visual') === 'personal';
+// Unlike the previous photo plane, this is a complete articulated 3D model.
+const riggedMode = search.get('visual') === 'rigged';
 const cinemaMode = personalMode || search.get('visual') === 'cine';
 const photoReference = photoReferenceEnabled
   ? (search.get('identity') === 'experimental' ? PHOTO_FACE_V5 : PHOTO_FACE_CLASSIC)
@@ -40,7 +43,7 @@ const storedPreference = () => {
   // An explicit ?visual=personal link is a deliberate request to SEE the
   // new avatar. Ignore a stale 'off' preference from an earlier comparison;
   // otherwise Safari silently keeps displaying the same 2D photograph.
-  if (personalMode) return true;
+  if (personalMode || riggedMode) return true;
   try { return localStorage.getItem(PREFERENCE) !== 'off'; } catch { return true; }
 };
 const persist = (value) => { try { localStorage.setItem(PREFERENCE, value ? 'on' : 'off'); } catch {} };
@@ -57,6 +60,7 @@ let gender = 'femenino';
 let stage, mainFrame, room, layer, button, mainBadge, originalFrame, originalPosition;
 let requestId = 0;
 let last3DError = '';
+let rigPhotoApplied = false;
 
 function injectStyles() {
   const style = document.createElement('style');
@@ -79,13 +83,13 @@ function injectStyles() {
 }
 
 function updateButton(label) {
-  const status = label || (visible ? (personalMode ? '3D personal · Ver foto' : cinemaMode ? 'Cine 3D · Ver foto' : studioGraphics ? '3D estudio · Ver foto' : portraitStudy ? '3D prueba · Ver foto' : '3D activo · Ver foto') : 'Foto 2D · Activar 3D');
+  const status = label || (visible ? (riggedMode ? (rigPhotoApplied ? '3D humano · Ver foto' : '3D humano · Foto sin ajustar') : personalMode ? '3D personal · Ver foto' : cinemaMode ? 'Cine 3D · Ver foto' : studioGraphics ? '3D estudio · Ver foto' : portraitStudy ? '3D prueba · Ver foto' : '3D activo · Ver foto') : 'Foto 2D · Activar 3D');
   if (button) {
     button.textContent = status;
     button.setAttribute('aria-pressed', String(visible));
   }
   if (mainBadge) {
-    mainBadge.textContent = label || (visible ? (personalMode ? '● ROSTRO 3D · MALLA PERSONAL' : cinemaMode ? '● ROSTRO · CINE EXPERIMENTAL' : studioGraphics ? '● ROSTRO 3D · ESTUDIO' : portraitStudy ? '● ROSTRO 3D · PRUEBA' : '● ROSTRO 3D · VER FOTO') : 'FOTO 2D · ACTIVAR 3D');
+    mainBadge.textContent = label || (visible ? (riggedMode ? (rigPhotoApplied ? '● AVATAR 3D · MODELO COMPLETO' : '● AVATAR 3D · FOTO SIN AJUSTAR') : personalMode ? '● ROSTRO 3D · MALLA PERSONAL' : cinemaMode ? '● ROSTRO · CINE EXPERIMENTAL' : studioGraphics ? '● ROSTRO 3D · ESTUDIO' : portraitStudy ? '● ROSTRO 3D · PRUEBA' : '● ROSTRO 3D · VER FOTO') : 'FOTO 2D · ACTIVAR 3D');
     mainBadge.setAttribute('aria-pressed', String(visible));
   }
 }
@@ -116,6 +120,7 @@ async function ensureInstance() {
   if (instance || loading) return;
   loading = true;
   last3DError = '';
+  rigPhotoApplied = false;
   updateButton('Preparando rostro 3D…');
   const gen = ++requestId;
   let avatar;
@@ -136,11 +141,20 @@ async function ensureInstance() {
       });
     await avatar.ready;
     if (gen !== requestId) { avatar.dispose(); return; }
+    if (riggedMode) {
+      avatar.renderer?.renderer?.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+    }
     instance = avatar;
     instance.setStatus(phase === 'thinking' ? 'thinking' : 'listening');
-    if (gender === 'femenino' && !cinemaMode) refineFemaleLook(avatar, photoReference, {
-      sculpt: portraitSculptEnabled, profile: portraitStudy ? 'study' : 'classic', graphics: studioGraphics ? 'studio' : 'classic',
+    if (gender === 'femenino' && !cinemaMode) refineFemaleLook(avatar, riggedMode ? null : photoReference, {
+      sculpt: portraitSculptEnabled, profile: (portraitStudy || riggedMode) ? 'study' : 'classic', graphics: (studioGraphics || riggedMode) ? 'studio' : 'classic',
     });
+    if (gender === 'femenino' && riggedMode) {
+      const matched = await projectPhotoOntoRig(avatar, window.AURA_ASSETS)
+        .catch(error => { console.warn('AURA Rigged: fotografía no proyectada', error); return false; });
+      rigPhotoApplied = matched;
+      if (!matched) console.warn('AURA Rigged: mostrando cabeza 3D original');
+    }
     // The pinned MIT SDK intentionally keeps its render callback internal.
     // v0.3.0's instance method is extendable; native Safari TTS needs this
     // bridge because speechSynthesis never exposes its audio waveform.
@@ -183,7 +197,7 @@ function animatePresence() {
     const mul = reduced ? 0 : 1;
     const speaking = manual.active || audioPlaying || phase === 'speaking';
     const gaze = facialPresence.update(instance.renderer, { timeMs: now, speaking, reduced, phase, portraitStudy, studioGraphics });
-    model.rotation.y = originalPosition.rotationY + gaze.yaw + mul * Math.sin(t * .41) * .014;
+    model.rotation.y = originalPosition.rotationY + gaze.yaw + mul * Math.sin(t * .41) * (riggedMode ? .027 : .014);
     model.rotation.x = originalPosition.rotationX + gaze.pitch + gaze.nod + mul * Math.sin(t * .31) * .007;
     model.rotation.z = originalPosition.rotationZ + mul * Math.sin(t * .26) * .003;
     model.position.y = originalPosition.y + mul * Math.sin(t * .92) * .003;
@@ -317,7 +331,8 @@ window.Aura3D = {
   audioFailed() { pendingAudio = false; },
   setStatus: applyPhase,
   state() { return { visible, loaded: !!instance, loading, gender, phase,
-    visual: personalMode ? 'personal' : cinemaMode ? 'cine' : 'classic',
+    visual: riggedMode ? 'rigged' : personalMode ? 'personal' : cinemaMode ? 'cine' : 'classic',
+    rigPhotoApplied,
     error: last3DError, manual: manual.active, audioPlaying }; },
 };
 
