@@ -73,3 +73,18 @@ test('modo estudio entorna los párpados sin afectar el parpadeo original', () =
   studyController.update(studyRenderer, { timeMs: 920, portraitStudy: true, reduced: true });
   assert.equal(reference.eyeSquintLeft, 0, 'respeta movimiento reducido');
 });
+
+test('studio mantiene ojos menos abiertos y sonrisa pequeña sin interferir visemas', () => {
+  const shapes = {};
+  const renderer = { setMorph(name, value) { shapes[name] = value; } };
+  const controller = createFacialPresence(() => .5);
+  for (let t = 0; t < 1500; t += 20) {
+    controller.update(renderer, { timeMs: t, portraitStudy: true, studioGraphics: true });
+  }
+  assert.ok(shapes.eyeSquintLeft >= .19 && shapes.eyeSquintLeft < .22);
+  assert.ok(shapes.eyeSquintRight < shapes.eyeSquintLeft);
+  assert.ok(shapes.mouthSmileLeft > 0 && shapes.mouthSmileLeft < .06);
+  for (const protectedMorph of ['eyeBlinkLeft', 'eyeBlinkRight', 'jawOpen', 'viseme_aa']) {
+    assert.equal(shapes[protectedMorph], undefined);
+  }
+});

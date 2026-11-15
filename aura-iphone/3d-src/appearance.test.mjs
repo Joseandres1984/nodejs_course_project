@@ -23,6 +23,25 @@ test('adapta el estilo al retrato sin borrar los morphs faciales', () => {
   assert.equal(refineFemaleLook({renderer: { model: null, face: null }}), false);
 });
 
+test('gráficos studio suavizan iluminación y piel sin modificar el modo normal', () => {
+  const model = new Group();
+  const head = new Mesh(new BoxGeometry(), new MeshStandardMaterial({ name: 'f020_head' }));
+  model.add(head);
+  const webgl = { toneMappingExposure: .95 };
+  const renderer = {
+    model, keyLight: { intensity: 4 }, fillLight: { intensity: 1 },
+    scene: { environmentIntensity: .35 }, renderer: webgl,
+  };
+  assert.equal(refineFemaleLook({ renderer }, null, { graphics: 'studio', sculpt: false }), true);
+  assert.equal(head.material.color.getHexString(), 'f5eeeb');
+  assert.equal(head.material.roughness, .96);
+  assert.equal(renderer.keyLight.intensity, 1.48);
+  assert.equal(renderer.fillLight.intensity, .82);
+  assert.equal(renderer.scene.environmentIntensity, .26);
+  assert.equal(webgl.toneMappingExposure, .89);
+  assert.equal(head.geometry.attributes.position.count, 24, 'no reemplaza la malla');
+});
+
 test('esculpe solo la mandíbula sin perder piel, UV ni visemas', () => {
   const geometry = new BufferGeometry();
   geometry.setAttribute('position', new Float32BufferAttribute([
@@ -119,5 +138,6 @@ test('atlas experimental se conserva, pero el modo normal protege la boca y los 
   assert.ok(source.includes("search.get('identity') === 'experimental' ? PHOTO_FACE_V5 : PHOTO_FACE_CLASSIC"));
   assert.ok(source.includes("search.get('photo') !== 'off'"));
   assert.ok(source.includes("search.get('portrait') === 'study'"));
+  assert.ok(source.includes("search.get('graphics') === 'studio'"));
   assert.ok(source.includes("profile: portraitStudy ? 'study' : 'classic'"));
 });

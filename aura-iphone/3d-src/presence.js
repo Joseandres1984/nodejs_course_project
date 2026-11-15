@@ -21,7 +21,7 @@ export function createFacialPresence(random = Math.random) {
   let nodStrength = 0;
   let wasSpeaking = false;
 
-  function update(renderer, { timeMs, speaking = false, reduced = false, phase = 'ready', portraitStudy = false } = {}) {
+  function update(renderer, { timeMs, speaking = false, reduced = false, phase = 'ready', portraitStudy = false, studioGraphics = false } = {}) {
     if (!renderer || !Number.isFinite(timeMs)) return { yaw: 0, pitch: 0, nod: 0 };
     const elapsed = lastTime === null ? 0.016 : clamp((timeMs - lastTime) / 1000, 0, .08);
     lastTime = timeMs;
@@ -38,8 +38,9 @@ export function createFacialPresence(random = Math.random) {
 
     if (wasSpeaking !== speaking) nextExpression = 0;
     if (!reduced && timeMs >= nextExpression) {
-      smileTarget = (portraitStudy ? (speaking ? .039 : .059) : (speaking ? .023 : .033))
-        + random() * (portraitStudy ? .014 : .021);
+      smileTarget = studioGraphics ? (speaking ? .028 : .038) + random() * .012
+        : (portraitStudy ? (speaking ? .039 : .059) : (speaking ? .023 : .033))
+          + random() * (portraitStudy ? .014 : .021);
       nextExpression = timeMs + 2600 + random() * 3300;
     }
     smile = reduced ? 0 : approach(smile, smileTarget, elapsed, .65);
@@ -78,8 +79,8 @@ export function createFacialPresence(random = Math.random) {
       eyeLookUpRight: up,
       eyeLookDownLeft: down,
       eyeLookDownRight: down,
-      eyeSquintLeft: reduced ? 0 : (portraitStudy ? (speaking ? .115 : .145) : (speaking ? .055 : .070)) + smile * .19,
-      eyeSquintRight: reduced ? 0 : (portraitStudy ? (speaking ? .105 : .135) : (speaking ? .055 : .070)) + smile * .19,
+      eyeSquintLeft: reduced ? 0 : (studioGraphics ? (speaking ? .165 : .198) : portraitStudy ? (speaking ? .115 : .145) : (speaking ? .055 : .070)) + smile * .19,
+      eyeSquintRight: reduced ? 0 : (studioGraphics ? (speaking ? .155 : .188) : portraitStudy ? (speaking ? .105 : .135) : (speaking ? .055 : .070)) + smile * .19,
       cheekSquintLeft: reduced ? 0 : smile * .32,
       cheekSquintRight: reduced ? 0 : smile * .32,
       mouthSmileLeft: reduced ? 0 : smile * .98,
