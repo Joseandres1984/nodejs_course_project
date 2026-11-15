@@ -37,6 +37,10 @@ const photoReference = photoReferenceEnabled
 const prefersReduced = () => window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ?? false;
 const selectedGender = () => document.querySelector('[data-gender].chosen')?.dataset.gender || 'femenino';
 const storedPreference = () => {
+  // An explicit ?visual=personal link is a deliberate request to SEE the
+  // new avatar. Ignore a stale 'off' preference from an earlier comparison;
+  // otherwise Safari silently keeps displaying the same 2D photograph.
+  if (personalMode) return true;
   try { return localStorage.getItem(PREFERENCE) !== 'off'; } catch { return true; }
 };
 const persist = (value) => { try { localStorage.setItem(PREFERENCE, value ? 'on' : 'off'); } catch {} };
@@ -52,6 +56,7 @@ let phase = 'ready';
 let gender = 'femenino';
 let stage, mainFrame, room, layer, button, mainBadge, originalFrame, originalPosition;
 let requestId = 0;
+let last3DError = '';
 
 function injectStyles() {
   const style = document.createElement('style');
@@ -110,6 +115,7 @@ function applyPhase(value) {
 async function ensureInstance() {
   if (instance || loading) return;
   loading = true;
+  last3DError = '';
   updateButton('Preparando rostro 3D…');
   const gen = ++requestId;
   let avatar;
@@ -156,9 +162,13 @@ async function ensureInstance() {
   } catch (error) {
     loading = false;
     if (avatar) avatar.dispose();
+    last3DError = String(error?.message || error);
     console.warn('AURA 3D: no se pudo iniciar WebGL o cargar el modelo', error);
     show3D(false);
-    updateButton('3D no disponible · Reintentar');
+    const shortReason = /webgl|context|gpu/i.test(last3DError) ? 'WebGL'
+      : /image|retrato|texture|canvas|foto/i.test(last3DError) ? 'imagen'
+        : 'modelo';
+    updateButton(`Falló 3D (${shortReason}) · Reintentar`);
   }
 }
 
@@ -306,7 +316,9 @@ window.Aura3D = {
   speakAudio,
   audioFailed() { pendingAudio = false; },
   setStatus: applyPhase,
-  state() { return { visible, loaded: !!instance, loading, gender, phase, manual: manual.active, audioPlaying }; },
+  state() { return { visible, loaded: !!instance, loading, gender, phase,
+    visual: personalMode ? 'personal' : cinemaMode ? 'cine' : 'classic',
+    error: last3DError, manual: manual.active, audioPlaying }; },
 };
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount, { once: true });
