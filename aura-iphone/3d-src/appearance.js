@@ -9,6 +9,16 @@ const TONES = {
   hair: '#b2a29b',
 };
 
+// The 1024px reference atlas already has photographed shadows and highlights.
+// A gentler studio profile reduces baked-light + PBR double illumination.
+const STUDIO = Object.freeze({
+  skin: '#f5eeeb',
+  keyIntensity: 1.48,
+  fillIntensity: 0.82,
+  environmentIntensity: 0.26,
+  exposure: 0.89,
+});
+
 const smoothstep = (a, b, value) => {
   const t = Math.max(0, Math.min(1, (value - a) / (b - a)));
   return t * t * (3 - 2 * t);
@@ -61,9 +71,10 @@ export function sculptPortraitHead(mesh, { profile = 'classic' } = {}) {
   return true;
 }
 
-export function refineFemaleLook(avatar, photoTextureUrl, { sculpt = true, profile = 'classic' } = {}) {
+export function refineFemaleLook(avatar, photoTextureUrl, { sculpt = true, profile = 'classic', graphics = 'classic' } = {}) {
   const scene = avatar?.renderer?.model;
   if (!scene) return false;
+  const studio = graphics === 'studio';
 
   scene.traverse(child => {
     if (!child.isMesh) return;
@@ -78,9 +89,9 @@ export function refineFemaleLook(avatar, photoTextureUrl, { sculpt = true, profi
       // The source model wears a grey pinstripe suit. Darken its fabric so
       // the silhouette recalls the reference's black turtleneck instead.
       if (name.endsWith('_body')) copy.color.set(TONES.clothing);
-      else if (name.endsWith('_head')) copy.color.set(TONES.skin);
+      else if (name.endsWith('_head')) copy.color.set(studio ? STUDIO.skin : TONES.skin);
       else copy.color.set(TONES.hair);
-      copy.roughness = name.endsWith('_head') ? .93 : .94;
+      copy.roughness = name.endsWith('_head') ? (studio ? .96 : .93) : .94;
       return copy;
     };
     child.material = Array.isArray(child.material)
@@ -98,7 +109,7 @@ export function refineFemaleLook(avatar, photoTextureUrl, { sculpt = true, profi
       }
       texture.flipY = false; // glTF UV orientation differs from DOM images.
       texture.colorSpace = SRGBColorSpace;
-      texture.anisotropy = 4;
+      texture.anisotropy = Math.min(8, avatar.renderer?.renderer?.capabilities?.getMaxAnisotropy?.() || 4);
       texture.needsUpdate = true;
       scene.traverse(child => {
         if (!child.isMesh) return;
@@ -115,7 +126,11 @@ export function refineFemaleLook(avatar, photoTextureUrl, { sculpt = true, profi
   // The reference photograph already contains studio highlights. Softer
   // PBR illumination prevents re-lighting them into bright painted patches.
   const renderer = avatar.renderer;
-  renderer.keyLight.intensity = 2.3;
-  renderer.fillLight.intensity = 1.02;
+  renderer.keyLight.intensity = studio ? STUDIO.keyIntensity : 2.3;
+  renderer.fillLight.intensity = studio ? STUDIO.fillIntensity : 1.02;
+  if (studio) {
+    if (renderer.scene) renderer.scene.environmentIntensity = STUDIO.environmentIntensity;
+    if (renderer.renderer) renderer.renderer.toneMappingExposure = STUDIO.exposure;
+  }
   return true;
 }

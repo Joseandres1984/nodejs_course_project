@@ -23,6 +23,9 @@ const photoReferenceEnabled = search.get('photo') !== 'off';
 const portraitSculptEnabled = search.get('shape') !== 'classic';
 // Opt-in study only. Production's familiar face remains the default.
 const portraitStudy = search.get('portrait') === 'study';
+// Separate opt-in lighting test. Never changes the default appearance, GLB,
+// reference atlas, audio or the device pixel ratio.
+const studioGraphics = search.get('graphics') === 'studio';
 const photoReference = photoReferenceEnabled
   ? (search.get('identity') === 'experimental' ? PHOTO_FACE_V5 : PHOTO_FACE_CLASSIC)
   : null;
@@ -66,13 +69,13 @@ function injectStyles() {
 }
 
 function updateButton(label) {
-  const status = label || (visible ? (portraitStudy ? '3D prueba · Ver foto' : '3D activo · Ver foto') : 'Foto 2D · Activar 3D');
+  const status = label || (visible ? (studioGraphics ? '3D estudio · Ver foto' : portraitStudy ? '3D prueba · Ver foto' : '3D activo · Ver foto') : 'Foto 2D · Activar 3D');
   if (button) {
     button.textContent = status;
     button.setAttribute('aria-pressed', String(visible));
   }
   if (mainBadge) {
-    mainBadge.textContent = label || (visible ? (portraitStudy ? '● ROSTRO 3D · PRUEBA' : '● ROSTRO 3D · VER FOTO') : 'FOTO 2D · ACTIVAR 3D');
+    mainBadge.textContent = label || (visible ? (studioGraphics ? '● ROSTRO 3D · ESTUDIO' : portraitStudy ? '● ROSTRO 3D · PRUEBA' : '● ROSTRO 3D · VER FOTO') : 'FOTO 2D · ACTIVAR 3D');
     mainBadge.setAttribute('aria-pressed', String(visible));
   }
 }
@@ -118,7 +121,7 @@ async function ensureInstance() {
     instance = avatar;
     instance.setStatus(phase === 'thinking' ? 'thinking' : 'listening');
     if (gender === 'femenino') refineFemaleLook(avatar, photoReference, {
-      sculpt: portraitSculptEnabled, profile: portraitStudy ? 'study' : 'classic',
+      sculpt: portraitSculptEnabled, profile: portraitStudy ? 'study' : 'classic', graphics: studioGraphics ? 'studio' : 'classic',
     });
     // The pinned MIT SDK intentionally keeps its render callback internal.
     // v0.3.0's instance method is extendable; native Safari TTS needs this
@@ -157,7 +160,7 @@ function animatePresence() {
     const reduced = prefersReduced() || !visible || document.hidden;
     const mul = reduced ? 0 : 1;
     const speaking = manual.active || audioPlaying || phase === 'speaking';
-    const gaze = facialPresence.update(instance.renderer, { timeMs: now, speaking, reduced, phase, portraitStudy });
+    const gaze = facialPresence.update(instance.renderer, { timeMs: now, speaking, reduced, phase, portraitStudy, studioGraphics });
     model.rotation.y = originalPosition.rotationY + gaze.yaw + mul * Math.sin(t * .41) * .014;
     model.rotation.x = originalPosition.rotationX + gaze.pitch + gaze.nod + mul * Math.sin(t * .31) * .007;
     model.rotation.z = originalPosition.rotationZ + mul * Math.sin(t * .26) * .003;
@@ -175,7 +178,7 @@ function syncGender() {
   instance.setAvatar(ASSETS[next])
     .then(() => {
       if (next === 'femenino' && instance) refineFemaleLook(instance, photoReference, {
-        sculpt: portraitSculptEnabled, profile: portraitStudy ? 'study' : 'classic',
+        sculpt: portraitSculptEnabled, profile: portraitStudy ? 'study' : 'classic', graphics: studioGraphics ? 'studio' : 'classic',
       });
     })
     .catch(() => updateButton('No cargó el rostro · Foto 2D'));
