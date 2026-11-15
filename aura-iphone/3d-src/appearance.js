@@ -17,8 +17,8 @@ const smoothstep = (a, b, value) => {
 // Rocketbox's head uses a local Z-up space, roughly Z=.59 (chin) to 1
 // (forehead). Small proportion adjustments are safe in that local frame;
 // deforming the rig, UVs or the relative facial morph targets is not.
-export function sculptPortraitHead(mesh) {
-  if (!mesh?.isSkinnedMesh || mesh.userData.auraPortraitSculpt === 'v39') return false;
+export function sculptPortraitHead(mesh, { profile = 'classic' } = {}) {
+  if (!mesh?.isSkinnedMesh || mesh.userData.auraPortraitSculpt) return false;
   const position = mesh.geometry?.attributes?.position;
   if (!position || position.itemSize !== 3 || position.count < 3) return false;
 
@@ -34,15 +34,22 @@ export function sculptPortraitHead(mesh) {
 
   const geometry = mesh.geometry.clone();
   const vertices = geometry.attributes.position;
+  const study = profile === 'study';
   for (let i = 0; i < vertices.count; i++) {
     const x = vertices.getX(i);
     const y = vertices.getY(i);
     const z = vertices.getZ(i);
     const jaw = 1 - smoothstep(.66, .855, z);
     const cheek = smoothstep(.745, .815, z) * (1 - smoothstep(.86, .925, z));
-    // Narrow the lower jaw smoothly, retain a gentle cheek contour, and
-    // leave the upper face/eyelids untouched for reliable blinking.
-    vertices.setXYZ(i, x * (1 - .052 * jaw + .009 * cheek), y, z);
+    // The opt-in portrait study gently narrows the lower jaw and nose bridge,
+    // emphasizing the cheeks of AURA's original photograph. It does not
+    // stretch the eye sockets or alter viseme / eyelid morph target buffers.
+    const nose = study
+      ? (1 - smoothstep(.019, .042, Math.abs(x)))
+        * smoothstep(.69, .745, z) * (1 - smoothstep(.79, .845, z)) : 0;
+    const width = 1 - (study ? .108 : .052) * jaw
+      + (study ? .023 : .009) * cheek - .027 * nose;
+    vertices.setXYZ(i, x * width, y, z);
   }
   vertices.needsUpdate = true;
   geometry.computeBoundingBox();
@@ -50,11 +57,11 @@ export function sculptPortraitHead(mesh) {
   // geometry.clone() also preserves skinIndices, skinWeights, UVs and all
   // 67 morph target position buffers, including visemes and eyelid motion.
   mesh.geometry = geometry;
-  mesh.userData.auraPortraitSculpt = 'v39';
+  mesh.userData.auraPortraitSculpt = study ? 'portrait-study-v42' : 'v39';
   return true;
 }
 
-export function refineFemaleLook(avatar, photoTextureUrl, { sculpt = true } = {}) {
+export function refineFemaleLook(avatar, photoTextureUrl, { sculpt = true, profile = 'classic' } = {}) {
   const scene = avatar?.renderer?.model;
   if (!scene) return false;
 
@@ -62,7 +69,7 @@ export function refineFemaleLook(avatar, photoTextureUrl, { sculpt = true } = {}
     if (!child.isMesh) return;
     const head = (Array.isArray(child.material) ? child.material : [child.material])
       .some(material => material?.name?.endsWith('_head'));
-    if (sculpt && head) sculptPortraitHead(child);
+    if (sculpt && head) sculptPortraitHead(child, { profile });
     const customize = material => {
       if (!material?.isMeshStandardMaterial) return material;
       const name = material.name || '';

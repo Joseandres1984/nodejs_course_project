@@ -55,3 +55,21 @@ test('mirada de atención más estable y ausencia de gestos en movimiento reduci
   assert.equal(shapes.eyeLookDownLeft, 0);
   assert.equal(shapes.mouthSmileRight, 0);
 });
+
+test('modo estudio entorna los párpados sin afectar el parpadeo original', () => {
+  const reference = {}, stable = {};
+  const studyController = createFacialPresence(() => .5);
+  const stableController = createFacialPresence(() => .5);
+  const studyRenderer = { setMorph(name, value) { reference[name] = value; } };
+  const stableRenderer = { setMorph(name, value) { stable[name] = value; } };
+  for (let t = 0; t <= 900; t += 20) {
+    studyController.update(studyRenderer, { timeMs: t, portraitStudy: true });
+    stableController.update(stableRenderer, { timeMs: t });
+  }
+  assert.ok(reference.eyeSquintLeft > stable.eyeSquintLeft + .06);
+  assert.ok(reference.eyeSquintRight > stable.eyeSquintRight + .05);
+  assert.ok(reference.mouthSmileLeft > stable.mouthSmileLeft);
+  assert.equal(reference.eyeBlinkLeft, undefined, 'el SDK conserva los parpadeos');
+  studyController.update(studyRenderer, { timeMs: 920, portraitStudy: true, reduced: true });
+  assert.equal(reference.eyeSquintLeft, 0, 'respeta movimiento reducido');
+});
