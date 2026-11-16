@@ -8,6 +8,7 @@ import { createFacialPresence } from './presence.js';
 import { createNaturalMotion } from './natural-motion.js';
 import { createCinemaAvatar } from './cinema.js';
 import { projectPhotoOntoRig } from './rigged-photo.js';
+import { softenRiggedVisemes } from './rigged-lips.js';
 
 const PREFERENCE = 'aura.3d.enabled.v1';
 const ASSETS = {
@@ -34,6 +35,9 @@ const studioGraphics = search.get('graphics') === 'studio';
 const personalMode = search.get('visual') === 'personal';
 // Unlike the previous photo plane, this is a complete articulated 3D model.
 const riggedMode = search.get('visual') === 'rigged';
+// Independent comparisons for photo seams and lip articulation.
+const includeFaceDetails = search.get('rigskin') !== 'classic';
+const naturalRigLips = riggedMode && search.get('mouth') !== 'classic';
 // ?motion=classic preserves the exact previous head animation for comparison.
 const naturalMotionEnabled = riggedMode && search.get('motion') !== 'classic';
 const cinemaMode = personalMode || search.get('visual') === 'cine';
@@ -154,7 +158,7 @@ async function ensureInstance() {
       sculpt: portraitSculptEnabled, profile: (portraitStudy || riggedMode) ? 'study' : 'classic', graphics: (studioGraphics || riggedMode) ? 'studio' : 'classic',
     });
     if (gender === 'femenino' && riggedMode) {
-      const matched = await projectPhotoOntoRig(avatar, window.AURA_ASSETS)
+      const matched = await projectPhotoOntoRig(avatar, window.AURA_ASSETS, { includeFaceDetails })
         .catch(error => { console.warn('AURA Rigged: fotografía no proyectada', error); return false; });
       rigPhotoApplied = matched;
       if (!matched) console.warn('AURA Rigged: mostrando cabeza 3D original');
@@ -164,9 +168,14 @@ async function ensureInstance() {
     // bridge because speechSynthesis never exposes its audio waveform.
     if (typeof avatar.frameNow === 'function') {
       originalFrame = avatar.frameNow.bind(avatar);
-      avatar.frameNow = () => manual.active
-        ? { visemes: manual.frame(), mode: 'speaking' }
-        : originalFrame();
+      avatar.frameNow = () => {
+        const frame = manual.active
+          ? { visemes: manual.frame(), mode: 'speaking' }
+          : originalFrame();
+        if (!naturalRigLips) return frame;
+        const visemes = softenRiggedVisemes(frame.visemes);
+        return visemes === frame.visemes ? frame : { ...frame, visemes };
+      };
     }
     originalPosition = {
       x: avatar.renderer?.model?.position.x || 0,
@@ -349,6 +358,7 @@ window.Aura3D = {
   state() { return { visible, loaded: !!instance, loading, gender, phase,
     visual: riggedMode ? 'rigged' : personalMode ? 'personal' : cinemaMode ? 'cine' : 'classic',
     rigPhotoApplied, motion: naturalMotionEnabled ? 'natural' : 'classic',
+    rigskin: includeFaceDetails ? 'complete' : 'classic', mouth: naturalRigLips ? 'soft' : 'classic',
     error: last3DError, manual: manual.active, audioPlaying }; },
 };
 

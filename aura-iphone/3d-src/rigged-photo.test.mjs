@@ -33,4 +33,19 @@ test('El modo 3D humano utiliza modelo completo y articulado; la foto frontal pe
   assert.ok(shader.includes('auraPhotoWeight'));
   assert.ok(shader.includes('model.getObjectByName'));
   assert.ok(shader.includes('getVertexPosition'));
+  assert.ok(shader.includes('includeFaceDetails'), 'corrige las piezas pequeñas de nariz y labios');
+  assert.ok(shader.includes('Math.ceil(position.count * .12)'), 'cobertura proporcional a cada submalla');
+});
+
+test('el modelo real tiene detalles faciales pequeños que ya no deben quedar sin textura', () => {
+  const binary = readFileSync(new URL('../assets/3d/female.glb', import.meta.url));
+  const jsonLength = binary.readUInt32LE(12);
+  const gltf = JSON.parse(binary.subarray(20, 20 + jsonLength).toString('utf8'));
+  const headSizes = gltf.meshes.flatMap(mesh => mesh.primitives)
+    .filter(primitive => gltf.materials[primitive.material]?.name?.endsWith('_head'))
+    .map(primitive => gltf.accessors[primitive.attributes.POSITION].count);
+  assert.ok(headSizes.some(count => count < 100), 'la nariz o los labios son submallas separadas');
+  const source = readFileSync(new URL('./rigged-photo.js', import.meta.url), 'utf8');
+  assert.ok(!source.includes('|| mesh.geometry.attributes.position.count < 500'),
+    'los detalles pequeños no pueden eliminarse incondicionalmente');
 });
