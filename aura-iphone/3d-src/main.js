@@ -5,6 +5,7 @@ import { TalkingAvatar } from '@interviewflowai/talking-avatar';
 import { createSpanishLipSync } from '../aura-3d-visemes.mjs';
 import { refineFemaleLook } from './appearance.js';
 import { createFacialPresence } from './presence.js';
+import { createNaturalMotion } from './natural-motion.js';
 import { createCinemaAvatar } from './cinema.js';
 import { projectPhotoOntoRig } from './rigged-photo.js';
 
@@ -33,6 +34,8 @@ const studioGraphics = search.get('graphics') === 'studio';
 const personalMode = search.get('visual') === 'personal';
 // Unlike the previous photo plane, this is a complete articulated 3D model.
 const riggedMode = search.get('visual') === 'rigged';
+// ?motion=classic preserves the exact previous head animation for comparison.
+const naturalMotionEnabled = riggedMode && search.get('motion') !== 'classic';
 const cinemaMode = personalMode || search.get('visual') === 'cine';
 const photoReference = photoReferenceEnabled
   ? (search.get('identity') === 'experimental' ? PHOTO_FACE_V5 : PHOTO_FACE_CLASSIC)
@@ -50,6 +53,7 @@ const persist = (value) => { try { localStorage.setItem(PREFERENCE, value ? 'on'
 
 const manual = createSpanishLipSync();
 const facialPresence = createFacialPresence();
+const naturalMotion = createNaturalMotion();
 let instance = null;
 let visible = false;
 let loading = false;
@@ -188,7 +192,6 @@ async function ensureInstance() {
 
 function animatePresence() {
   if (!instance || !stage || !visible) return;
-  // Small irregular speaking nods and eye focus; avoid mechanical head loops.
   const model = instance.renderer?.model;
   if (model && originalPosition) {
     const now = performance.now();
@@ -197,11 +200,21 @@ function animatePresence() {
     const mul = reduced ? 0 : 1;
     const speaking = manual.active || audioPlaying || phase === 'speaking';
     const gaze = facialPresence.update(instance.renderer, { timeMs: now, speaking, reduced, phase, portraitStudy, studioGraphics });
-    model.rotation.y = originalPosition.rotationY + gaze.yaw + mul * Math.sin(t * .41) * (riggedMode ? .027 : .014);
-    model.rotation.x = originalPosition.rotationX + gaze.pitch + gaze.nod + mul * Math.sin(t * .31) * .007;
-    model.rotation.z = originalPosition.rotationZ + mul * Math.sin(t * .26) * .003;
-    model.position.y = originalPosition.y + mul * Math.sin(t * .92) * .003;
-    model.position.x = originalPosition.x + mul * Math.sin(t * .39) * .002;
+    if (naturalMotionEnabled) {
+      const pose = naturalMotion.update({ timeMs: now, speaking, phase, reduced,
+        hidden: document.hidden, eyeYaw: gaze.yaw, eyePitch: gaze.pitch, speechNod: gaze.nod });
+      model.rotation.y = originalPosition.rotationY + pose.yaw;
+      model.rotation.x = originalPosition.rotationX + pose.pitch;
+      model.rotation.z = originalPosition.rotationZ + pose.roll;
+      model.position.y = originalPosition.y + pose.lift;
+      model.position.x = originalPosition.x + pose.shift;
+    } else {
+      model.rotation.y = originalPosition.rotationY + gaze.yaw + mul * Math.sin(t * .41) * (riggedMode ? .027 : .014);
+      model.rotation.x = originalPosition.rotationX + gaze.pitch + gaze.nod + mul * Math.sin(t * .31) * .007;
+      model.rotation.z = originalPosition.rotationZ + mul * Math.sin(t * .26) * .003;
+      model.position.y = originalPosition.y + mul * Math.sin(t * .92) * .003;
+      model.position.x = originalPosition.x + mul * Math.sin(t * .39) * .002;
+    }
   }
   requestAnimationFrame(animatePresence);
 }
@@ -215,6 +228,7 @@ function syncGender() {
       instance.dispose();
       instance = null;
       facialPresence.reset();
+      naturalMotion.reset();
       updateButton('Foto 2D · Retrato Cine solo femenino');
     } else if (next === 'femenino' && !instance && !loading && storedPreference()) {
       ensureInstance();
@@ -225,6 +239,7 @@ function syncGender() {
   if (!instance || gender === next) return;
   gender = next;
   facialPresence.reset();
+  naturalMotion.reset();
   instance.setAvatar(ASSETS[next])
     .then(() => {
       if (next === 'femenino' && instance) refineFemaleLook(instance, photoReference, {
@@ -262,6 +277,7 @@ function mount() {
       instance?.dispose();
       instance = null;
       facialPresence.reset();
+      naturalMotion.reset();
     } else {
       persist(true);
       if (instance) show3D(true);
@@ -332,7 +348,7 @@ window.Aura3D = {
   setStatus: applyPhase,
   state() { return { visible, loaded: !!instance, loading, gender, phase,
     visual: riggedMode ? 'rigged' : personalMode ? 'personal' : cinemaMode ? 'cine' : 'classic',
-    rigPhotoApplied,
+    rigPhotoApplied, motion: naturalMotionEnabled ? 'natural' : 'classic',
     error: last3DError, manual: manual.active, audioPlaying }; },
 };
 
