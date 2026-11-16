@@ -55,7 +55,7 @@ function screenPoint(world, camera) {
   return { x: (1 + ndc.x) / 2, y: (1 - ndc.y) / 2 };
 }
 
-export async function projectPhotoOntoRig(avatar, imageAssets = window.AURA_ASSETS) {
+export async function projectPhotoOntoRig(avatar, imageAssets = window.AURA_ASSETS, { includeFaceDetails = true } = {}) {
   const renderer = avatar?.renderer;
   const model = renderer?.model, camera = renderer?.camera;
   if (!model || !camera || !String(imageAssets?.[imageAssetKey] || '').startsWith('data:image/')) {
@@ -81,7 +81,12 @@ export async function projectPhotoOntoRig(avatar, imageAssets = window.AURA_ASSE
     if (!mesh?.isSkinnedMesh || !mesh.geometry?.attributes?.normal) return;
     const baseMaterial = mesh.material;
     if (Array.isArray(baseMaterial) || !baseMaterial?.name?.endsWith('_head')
-      || !baseMaterial.isMeshStandardMaterial || mesh.geometry.attributes.position.count < 500) return;
+      || !baseMaterial.isMeshStandardMaterial) return;
+
+    // Small _head primitives are separate facial details (including nose and
+    // mouth geometry). Ignoring them left the underlying low-res material
+    // visible as sharp, contrasting triangular patches over the photograph.
+    if (!includeFaceDetails && mesh.geometry.attributes.position.count < 500) return;
 
     const geometry = mesh.geometry.clone();
     const position = geometry.attributes.position;
@@ -103,7 +108,10 @@ export async function projectPhotoOntoRig(avatar, imageAssets = window.AURA_ASSE
       weights[i] = weight;
       if (weight > .4) influence++;
     }
-    if (influence < 30) { geometry.dispose(); return; }
+    // A 59-vertex lip or 72-vertex nose can never meet the former 30-vertex
+    // visibility threshold reliably. Scale it to the mesh's own size.
+    const minimumCoverage = Math.min(30, Math.max(5, Math.ceil(position.count * .12)));
+    if (influence < minimumCoverage) { geometry.dispose(); return; }
 
     geometry.setAttribute('auraPhotoUv', new Float32BufferAttribute(photoUv, 2));
     geometry.setAttribute('auraPhotoWeight', new Float32BufferAttribute(weights, 1));
@@ -133,7 +141,7 @@ export async function projectPhotoOntoRig(avatar, imageAssets = window.AURA_ASSE
           diffuseColor *= mix(baseTexel, photoTexel, clamp(vAuraPhotoWeight, 0.0, 0.94));
           #endif`);
     };
-    material.customProgramCacheKey = () => 'aura-rigged-personal-photo-v47';
+    material.customProgramCacheKey = () => 'aura-rigged-personal-photo-v49';
     geometry.computeBoundingSphere();
     mesh.geometry = geometry;
     mesh.material = material;
