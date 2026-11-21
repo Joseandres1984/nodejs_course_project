@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "esbuild": "^0.28.2",
+    "posthog-js": "^1.445.5"
+  }
+}
