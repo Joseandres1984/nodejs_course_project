@@ -67,7 +67,7 @@
         <button class="save-button" type="button" data-save="${p.asin}" aria-pressed="${isSaved}" aria-label="${isSaved ? "Quitar de favoritos" : "Guardar en favoritos"}: ${escape(p.displayName)}">${icon("heart")}</button>
         <button class="quick-view" type="button" data-detail="${p.asin}">Vista rápida</button>
       </div>
-      <div class="product-info"><span class="product-collection">${escape(p.collection)}</span><h3 class="product-title"><button class="title-button" type="button" data-detail="${p.asin}">${escape(p.displayName)}</button></h3><p class="product-feature">${escape(p.feature)}</p><div class="product-footer"><p class="price-note">${icon("external")} Precio actual en Amazon</p><a class="amazon-link" href="${amazonUrl(p)}" target="_blank" rel="sponsored nofollow noopener" aria-label="Ver ${escape(p.displayName)} en Amazon (abre otra pestaña)">Ver en Amazon ${icon("external")}</a></div></div>
+      <div class="product-info"><span class="product-collection">${escape(p.collection)}</span><h3 class="product-title"><button class="title-button" type="button" data-detail="${p.asin}">${escape(p.displayName)}</button></h3><p class="product-feature">${escape(p.feature)}</p><div class="product-footer"><p class="price-note">${icon("external")} Precio actual en Amazon</p><a class="amazon-link" data-position="catalog_card" href="${amazonUrl(p)}" target="_blank" rel="sponsored nofollow noopener" aria-label="Ver ${escape(p.displayName)} en Amazon (abre otra pestaña)">Ver en Amazon ${icon("external")}</a></div></div>
     </article>`;
   }
 
@@ -118,7 +118,7 @@
     if (!p) return;
     currentProduct = p;
     lastDialogTrigger = trigger;
-    document.getElementById("dialog-body").innerHTML = `<div class="dialog-grid"><div class="dialog-image"><img src="${escape(p.art)}" alt="Imagen ilustrativa de ${escape(p.displayName)}" width="400" height="440"></div><div class="dialog-content"><span class="eyebrow gold">${escape(p.collection)} · Selección LUMEN</span><h2 id="dialog-title">${escape(p.displayName)}</h2><p class="dialog-benefit">${escape(p.benefit)}</p><p class="description">${escape(p.description)}</p><a class="amazon-link" href="${amazonUrl(p)}" target="_blank" rel="sponsored nofollow noopener" aria-label="Ver ${escape(p.displayName)} en Amazon (abre otra pestaña)">Ver precio en Amazon ${icon("external")}</a><button class="dialog-save" type="button" data-save="${p.asin}" aria-pressed="${saved.has(p.asin)}">${icon("heart")}<span data-save-text>Guardar para después</span></button><p class="dialog-disclaimer">Imagen ilustrativa. Revisá el producto exacto, sus variantes, la disponibilidad y el envío en Amazon. Enlace de afiliado.</p></div></div>`;
+    document.getElementById("dialog-body").innerHTML = `<div class="dialog-grid"><div class="dialog-image"><img src="${escape(p.art)}" alt="Imagen ilustrativa de ${escape(p.displayName)}" width="400" height="440"></div><div class="dialog-content"><span class="eyebrow gold">${escape(p.collection)} · Selección LUMEN</span><h2 id="dialog-title">${escape(p.displayName)}</h2><p class="dialog-benefit">${escape(p.benefit)}</p><p class="description">${escape(p.description)}</p><a class="amazon-link" data-position="quick_view" href="${amazonUrl(p)}" target="_blank" rel="sponsored nofollow noopener" aria-label="Ver ${escape(p.displayName)} en Amazon (abre otra pestaña)">Ver precio en Amazon ${icon("external")}</a><button class="dialog-save" type="button" data-save="${p.asin}" aria-pressed="${saved.has(p.asin)}">${icon("heart")}<span data-save-text>Guardar para después</span></button><p class="dialog-disclaimer">Imagen ilustrativa. Revisá el producto exacto, sus variantes, la disponibilidad y el envío en Amazon. Enlace de afiliado.</p></div></div>`;
     updateSavedControls();
     dialog.showModal();
     document.body.style.overflow = "hidden";
@@ -166,5 +166,9 @@
     } catch { /* Keep this visit's selection when browser storage is unavailable. */ }
   });
   document.getElementById("year").textContent = new Date().getFullYear();
+  // Direct links from Instagram can focus on one real catalog product.
+  const productId = new URLSearchParams(location.search).get("producto");
+  if (productId && byId.has(productId)) search.value = byId.get(productId).displayName;
   render();
+  if (productId && byId.has(productId)) document.getElementById("catalogo").scrollIntoView({behavior: "instant"});
 })();
