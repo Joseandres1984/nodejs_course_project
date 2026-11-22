@@ -13,6 +13,7 @@
   <link rel="preconnect" href="https://i.ytimg.com">
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="stylesheet" href="./styles.css">
+  <script src="./films-extra.js" defer></script>
   <script src="./app.js" defer></script>
 </head>
 <body>
@@ -60,16 +61,22 @@
         <div class="spotlight-content"><span class="pill">CINE ABIERTO · SIN SUSCRIPCIÓN</span><h2>Grandes historias.<br><em>Sin barreras.</em></h2><p>Películas de autores independientes que podés reproducir gratis, con créditos y licencias visibles.</p><button type="button" class="outline-button" data-view="cine">Descubrir cine abierto <span aria-hidden="true">↗</span></button></div>
       </section>
       <section id="openSection" class="rail-section" aria-labelledby="openTitle"><div class="section-head"><div><p class="eyebrow">REPRODUCCIÓN EN LUMEN PLAY</p><h2 id="openTitle">Cine para ver ahora<span class="period">.</span></h2><p class="section-subtitle">Obras abiertas de Blender Studio y Blender Foundation.</p></div><button type="button" class="text-link" data-view="cine">Explorar catálogo <span aria-hidden="true">↗</span></button></div><div id="openRail" class="film-rail"></div></section>
-      <section id="newSection" class="rail-section" aria-labelledby="newTitle"><div class="section-head"><div><p class="eyebrow">TÍTULOS RECIENTES PARA DESCUBRIR</p><h2 id="newTitle">Lo mejor del cine reciente<span class="period">.</span></h2><p class="section-subtitle">Accedé a opciones legales para ver cada título en Argentina.</p></div><button type="button" class="text-link" data-view="estrenos">Ver destacadas <span aria-hidden="true">↗</span></button></div><div id="newRail" class="film-rail"></div></section>
+      <section id="yearSection" class="rail-section" aria-labelledby="yearTitle"><div class="section-head"><div><p class="eyebrow">NOVEDADES DE ESTE AÑO</p><h2 id="yearTitle">Películas de 2026<span class="period">.</span></h2><p class="section-subtitle">Descubrí estrenos y consultá dónde verlos legalmente en Argentina.</p></div><button type="button" class="text-link" data-view="estrenos">Más películas <span aria-hidden="true">↗</span></button></div><div id="yearRail" class="film-rail"></div></section>
+      <section id="newSection" class="rail-section" aria-labelledby="newTitle"><div class="section-head"><div><p class="eyebrow">TÍTULOS RECIENTES PARA DESCUBRIR</p><h2 id="newTitle">Lo mejor del cine reciente<span class="period">.</span></h2><p class="section-subtitle">Títulos de distintas épocas y géneros: la disponibilidad se consulta en servicios oficiales.</p></div><button type="button" class="text-link" data-view="estrenos">Ver destacadas <span aria-hidden="true">↗</span></button></div><div id="newRail" class="film-rail"></div></section>
       <section id="allSection" class="catalog-section" aria-labelledby="catalogTitle">
         <div class="section-head catalog-heading"><div><p class="eyebrow">TU PRÓXIMA PELÍCULA</p><h2 id="catalogTitle">Explorá el catálogo<span class="period">.</span></h2></div><span id="resultCount" class="result-count"></span></div>
         <div class="filters" role="group" aria-label="Filtrar películas" id="filters">
           <button class="filter active" type="button" data-filter="Todo">Todo</button>
           <button class="filter" type="button" data-filter="Cine abierto">Cine abierto</button>
           <button class="filter" type="button" data-filter="Destacadas">Destacadas</button>
+          <button class="filter" type="button" data-filter="Estrenos 2026">Estrenos 2026</button>
           <button class="filter" type="button" data-filter="Fantasía">Fantasía</button>
           <button class="filter" type="button" data-filter="Ciencia ficción">Ciencia ficción</button>
           <button class="filter" type="button" data-filter="Animación">Animación</button>
+          <button class="filter" type="button" data-filter="Familia">Familia</button>
+          <button class="filter" type="button" data-filter="Acción">Acción</button>
+          <button class="filter" type="button" data-filter="Suspenso">Suspenso</button>
+          <button class="filter" type="button" data-filter="Comedia">Comedia</button>
           <button class="filter" type="button" data-filter="Drama">Drama</button>
         </div>
         <div id="catalogGrid" class="catalog-grid"></div>
