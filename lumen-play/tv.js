@@ -9,6 +9,25 @@
   var lastFocus=null;
   var isIOS=/iPhone|iPad|iPod/i.test(navigator.userAgent)||(/Macintosh/i.test(navigator.userAgent)&&navigator.maxTouchPoints>1);
   var supportsWebCast=!isIOS&&/Chrome|Chromium|Edg|OPR|CrMo/i.test(navigator.userAgent);
+  // Las aplicaciones con navegador interno no siempre habilitan AirPlay.
+  var likelyIOSBrowser=/Safari/i.test(navigator.userAgent) && !/CriOS|FxiOS|EdgiOS|OPiOS/i.test(navigator.userAgent);
+  var guide=$("#tvGuide");
+  function showMirrorGuide(){
+    if(!isIOS){note("La duplicación de pantalla guiada está pensada para iPhone/iPad. En Android usá las opciones del sistema o Google Cast.");return;}
+    guide.classList.remove("hidden");
+    note("El selector Duplicar pantalla se abre desde el Centro de control del iPhone, no desde una página web. Seguí las instrucciones que aparecen abajo.");
+    if(typeof guide.scrollIntoView==="function")guide.scrollIntoView({behavior:"smooth",block:"nearest"});
+  }
+  $("#tvMirror").addEventListener("click",showMirrorGuide);
+  function compatibleChoices(){
+    var video=videoElement();
+    $("#tvMirrorChoice").classList.toggle("hidden",!isIOS);
+    $("#tvCastChoice").classList.toggle("hidden",!supportsWebCast);
+    $("#tvAirplayChoice").classList.toggle("hidden",!(isIOS||typeof video.webkitShowPlaybackTargetPicker==="function"));
+    var mode=isIOS?"iPhone / iPad":supportsWebCast?"Chrome compatible con Google Cast":"Navegador sin Cast Web Sender";
+    var playing=playerIsOpen()?(embeddedIsOpen()?" · película en reproductor integrado":" · película en video HTML5"):" · elegí una película";
+    $("#tvDeviceInfo").textContent="Detectado: "+mode+playing+".";
+  }
   var bridge=function(){return window.LUMEN_PLAY_TV||null;};
   function note(text){status.textContent=text;}
   function currentMovie(){
@@ -30,11 +49,15 @@
     lastFocus=document.activeElement;
     overlay.classList.remove("hidden");
     document.body.style.overflow="hidden";
+    compatibleChoices();
+    guide.classList.add("hidden");
     var m=currentMovie();
-    if(!m||!playerIsOpen())note("Elegí un largometraje y tocá Reproducir. Después elegí AirPlay o Chromecast, según tu equipo.");
-    else note("Película seleccionada: "+m.title+". Elegí un método compatible con tu teléfono y televisor.");
-    if(isIOS&&!videoElement().webkitShowPlaybackTargetPicker){
-      note("En iPhone, utilizá Safari para AirPlay. Si esta película usa un reproductor incrustado, probá abrir LUMEN Play en el navegador de la TV.");
+    if(isIOS){
+      note("En iPhone, la primera opción es Duplicar pantalla hacia una TV con AirPlay. Google Cast no puede iniciarse desde esta web. Abrí LUMEN Play en Safari si el navegador interno limita el video.");
+    }else if(!m||!playerIsOpen()){
+      note("Elegí un largometraje y tocá Reproducir. Después elegí una conexión compatible.");
+    }else {
+      note("Película seleccionada: "+m.title+". Elegí una conexión compatible.");
     }
     setRemoteUI();
     $("#tvClose").focus();
@@ -60,14 +83,18 @@
   $("#tvCopy").addEventListener("click",function(){
     var url=location.origin+"/?tv=1";
     if(navigator.clipboard&&navigator.clipboard.writeText){
-      navigator.clipboard.writeText(url).then(function(){note("Dirección copiada. Abrila en el navegador de tu Smart TV.");},
+      navigator.clipboard.writeText(url).then(function(){note(isIOS?"Dirección copiada. Podés pegarla en Safari del iPhone o escribirla en el navegador de la TV.":"Dirección copiada. Abrila en el navegador de tu Smart TV.");},
       function(){note("Escribí en el navegador de la TV: "+location.host);});
     }else note("Escribí en el navegador de la TV: "+location.host);
   });
   $("#tvAirPlay").addEventListener("click",function(){
     var m=currentMovie(),video=videoElement();
     if(!m||!playerIsOpen()){note("Primero seleccioná una película y abrí su reproductor.");return;}
-    if(embeddedIsOpen()){note("Este título usa un reproductor incrustado que no ofrece AirPlay desde nuestro botón. Si su reproductor incluye AirPlay, usalo; si no, abrí LUMEN Play en la TV.");return;}
+    if(embeddedIsOpen()){
+      if(isIOS){showMirrorGuide();note("Este video se reproduce dentro de una ventana integrada; el botón AirPlay de LUMEN no puede controlarla. Usá Duplicar pantalla en un televisor AirPlay compatible.");}
+      else note("El video usa un reproductor integrado que no controlamos desde el botón AirPlay. Si no tiene su propio icono AirPlay, abrí la web en la TV.");
+      return;
+    }
     if(typeof video.webkitShowPlaybackTargetPicker==="function"){
       try{video.webkitShowPlaybackTargetPicker();note("Seleccioná tu televisor AirPlay en el selector de Safari. Ambos equipos deben usar la misma red Wi-Fi.");}
       catch(err){note("No se pudo abrir AirPlay. Probá reproducir primero el video en Safari.");}
@@ -78,7 +105,8 @@
       function(){note("No hay un dispositivo compatible disponible desde este navegador.");});
       return;
     }
-    note("AirPlay no está disponible en este navegador. En iPhone abrí LUMEN Play desde Safari y usá un televisor compatible con AirPlay.");
+    if(isIOS)showMirrorGuide();
+    else note("AirPlay no está disponible en este navegador; probá Safari en un dispositivo Apple.");
   });
   function publicStream(m){
     if(!m)return null;
@@ -170,6 +198,7 @@
     document.head.appendChild(sdk);
   }
   // El modo TV permite operar con control remoto mediante tabulador/foco visible.
+  compatibleChoices();
   if(new URLSearchParams(location.search).get("tv")==="1"){
     document.body.classList.add("tv-mode");
   }
