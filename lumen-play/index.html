@@ -53,7 +53,7 @@
     </section>
 
     <div class="main-content">
-      <div class="announcement"><span class="announcement-star">✦</span><div><strong>Solo películas completas.</strong><span> Acá vas a encontrar largometrajes de 60 minutos o más, reproducibles dentro de LUMEN Play.</span></div><button id="exploreBtn" type="button" aria-label="Explorar cine abierto">Explorar <span aria-hidden="true">→</span></button></div>
+      <div class="announcement"><span class="announcement-star">✦</span><div><strong>Solo películas completas.</strong><span> Ahora tenés nueve largometrajes de 60 minutos o más, todos con reproducción dentro de LUMEN Play.</span></div><button id="exploreBtn" type="button" aria-label="Explorar cine abierto">Explorar <span aria-hidden="true">→</span></button></div>
       <section id="continueSection" class="rail-section hidden" aria-labelledby="continueTitle"><div class="section-head"><div><p class="eyebrow">VOLVÉ A TU HISTORIA</p><h2 id="continueTitle">Continuar viendo</h2></div></div><div id="continueRail" class="film-rail"></div></section>
       <section id="featureMoviesSection" class="rail-section" aria-labelledby="featureMoviesTitle">
         <div class="section-head">
@@ -61,7 +61,7 @@
           <button type="button" class="text-link" data-filter="Películas completas">Ver todas <span aria-hidden="true">↗</span></button>
         </div>
         <div id="featureMoviesRail" class="film-rail"></div>
-        <p class="film-legal-note">Fuentes originales · Verificá la calidad disponible, los créditos y las licencias de cada película. No incluye películas comerciales sin autorización.</p>
+        <p class="film-legal-note">Películas de larga duración con fuentes y licencias identificadas. Algunos títulos son exclusivamente para exhibición no comercial y dependen de servidores externos.</p>
       </section>
       <section class="spotlight">
         <div class="spotlight-photo"></div><div class="spotlight-fade"></div>
@@ -69,19 +69,16 @@
       </section>
       <section id="allSection" class="catalog-section" aria-labelledby="catalogTitle">
         <div class="section-head catalog-heading"><div><p class="eyebrow">TU PRÓXIMA PELÍCULA</p><h2 id="catalogTitle">Explorá el catálogo<span class="period">.</span></h2></div><span id="resultCount" class="result-count"></span></div>
-        <div class="filters" role="group" aria-label="Filtrar películas" id="filters">
-          <button class="filter active" type="button" data-filter="Todo">Todo</button>
-          
+        <div class="filters" role="group" aria-label="Filtrar largometrajes" id="filters">
+          <button class="filter active" type="button" data-filter="Todo">Todas</button>
           <button class="filter" type="button" data-filter="Películas completas">Largometrajes (+60 min)</button>
-          
-          
-          
-          <button class="filter" type="button" data-filter="Animación">Animación</button>
-          
-          
-          
+          <button class="filter" type="button" data-filter="Ciencia ficción">Ciencia ficción</button>
+          <button class="filter" type="button" data-filter="Terror">Terror</button>
+          <button class="filter" type="button" data-filter="Fantasía">Fantasía</button>
           <button class="filter" type="button" data-filter="Documental">Documental</button>
+          <button class="filter" type="button" data-filter="Animación">Animación</button>
           <button class="filter" type="button" data-filter="Drama">Drama</button>
+          <button class="filter" type="button" data-filter="Suspenso">Suspenso</button>
         </div>
         <div id="catalogGrid" class="catalog-grid"></div>
         <div id="emptyState" class="empty-state hidden"><div class="empty-art">◇</div><h3>No encontramos películas con ese filtro.</h3><p>Probá otra palabra o explorá todo el catálogo.</p><button id="clearFilters" class="secondary-button" type="button">Ver todo</button></div>
