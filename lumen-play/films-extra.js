@@ -1,5 +1,72 @@
-/* Catálogo adicional. Cada película comercial abre una búsqueda de disponibilidad legal en Argentina. */
+/* Catálogo adicional de LUMEN Play. Las películas comerciales derivan a su proveedor legal. */
 window.LUMEN_EXTRA_FILMS = [
+  {
+    "id": "paywall2018",
+    "title": "Paywall: The Business of Scholarship",
+    "year": 2018,
+    "duration": "1 h 05 min",
+    "minutes": 65,
+    "genre": "Documental",
+    "kind": "Drama",
+    "category": "open",
+    "desc": "Un documental sobre el negocio de las publicaciones científicas y el acceso abierto al conocimiento. Dirigido por Jason Schmitt.",
+    "image": "https://upload.wikimedia.org/wikipedia/commons/5/5e/Paywall_documentary_poster.jpg",
+    "author": "Jason Schmitt / Paywall The Movie",
+    "credit": "Licencia Creative Commons Atribución 4.0 Internacional (CC BY 4.0). Dirección: Jason Schmitt. Archivo original alojado en Internet Archive; puede requerir buena conexión por su tamaño.",
+    "origin": "https://archive.org/details/PaywallTheBusinessOfScholarshipFinalMovieMastered",
+    "sources": [
+      {
+        "name": "MP4 · original (7,2 GB)",
+        "url": "https://archive.org/download/PaywallTheBusinessOfScholarshipFinalMovieMastered/Paywall%20The%20Business%20of%20Scholarship%20Final%20Movie%20Mastered.mp4"
+      }
+    ]
+  },
+  {
+    "id": "valkaama2010",
+    "title": "Valkaama",
+    "year": 2010,
+    "duration": "1 h 33 min",
+    "minutes": 93,
+    "genre": "Drama",
+    "kind": "Aventura",
+    "category": "open",
+    "desc": "Una travesía independiente por Finlandia en busca de un lugar mítico que promete un nuevo comienzo. Producción colectiva de Tim Baumann y su equipo.",
+    "image": "https://images.unsplash.com/photo-1500534623283-312aade485b7?auto=format&fit=crop&w=900&q=75",
+    "author": "Tim Baumann y equipo Valkaama",
+    "credit": "Película de código abierto bajo CC BY-SA 3.0. Equipo Valkaama / valkaama.com. Se muestra una copia embebida desde YouTube; afiche ilustrativo, no oficial. El original 1080p del autor usa MKV.",
+    "origin": "https://www.valkaama.com/index.php?l=en&page=valkaama",
+    "embed": "https://www.youtube-nocookie.com/embed/4CDHiTs_YCA?rel=0&playsinline=1",
+    "sources": []
+  },
+  {
+    "id": "sita2008",
+    "title": "Sita Sings the Blues",
+    "year": 2008,
+    "duration": "1 h 22 min",
+    "minutes": 82,
+    "genre": "Animación",
+    "kind": "Musical",
+    "category": "open",
+    "desc": "Nina Paley reinventa el Ramayana combinando música, mitología y una historia de amor contemporánea.",
+    "image": "https://www.sitasingstheblues.com/SitaEPressKit/SitaGoddessPosterA1.png",
+    "author": "Nina Paley",
+    "credit": "Obra visual liberada por Nina Paley con CC0. Atención: algunas canciones tienen derechos separados; se enlaza exclusivamente la versión íntegra difundida por la autora en Internet Archive. No se autorizan usos independientes de esas canciones.",
+    "origin": "https://www.sitasingstheblues.com/watch.html",
+    "sources": [
+      {
+        "name": "MP4 · versión liviana (~485 MB)",
+        "url": "https://archive.org/download/Sita_Sings_the_Blues/Sita_Sings_the_Blues.mp4"
+      },
+      {
+        "name": "HD · 720p (~2,4 GB)",
+        "url": "https://archive.org/download/Sita_Sings_the_Blues/Sita_Sings_the_Blues_720p.mp4"
+      },
+      {
+        "name": "Full HD · 1080p (~4 GB)",
+        "url": "https://archive.org/download/Sita_Sings_the_Blues/Sita_Sings_the_Blues_1080p.mp4"
+      }
+    ]
+  },
   {
     "id": "singularity26",
     "title": "Singularity",
