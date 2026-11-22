@@ -25,6 +25,11 @@
   var local = [];
   var state = {filter:"Todo",view:"inicio",query:"",active:null,subtitle:null,toastTimer:null,lastProgress:0};
   var video = $("#player");
+  // Puente público de solo lectura para el módulo TV. No expone claves ni videos locales.
+  window.LUMEN_PLAY_TV = {
+    getMovie:function(){return byId[state.active]||null;},
+    getVideo:function(){return video;}
+  };
   function showToast(message){
     var el=$("#toast");el.textContent=message;el.classList.add("show");
     clearTimeout(state.toastTimer);state.toastTimer=setTimeout(function(){el.classList.remove("show");},2600);
@@ -97,7 +102,7 @@
     $("#searchOverlay").classList.add("hidden");restoreBody();
   }
   function restoreBody(){
-    if(["#searchOverlay","#detailsOverlay","#playerOverlay","#libraryOverlay"].every(function(id){return $(id).classList.contains("hidden");}))document.body.style.overflow="";
+    if(["#searchOverlay","#detailsOverlay","#playerOverlay","#libraryOverlay","#tvOverlay"].every(function(id){return $(id).classList.contains("hidden");}))document.body.style.overflow="";
   }
   function openDetails(id){
     var m=byId[id];if(!m)return;
