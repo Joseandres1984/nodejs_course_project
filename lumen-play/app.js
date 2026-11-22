@@ -46,7 +46,7 @@
     var saved=favorites.has(m.id), tracked=progress[m.id],pct=(tracked && tracked.duration>0)?Math.max(0,Math.min(100,100*tracked.position/tracked.duration)):0;
     return '<article class="film-card" tabindex="0" role="button" aria-label="Ver información de '+html(m.title)+'" data-id="'+html(m.id)+'">' +
       '<div class="poster"><img loading="lazy" src="'+html(m.image)+'" alt="Imagen de '+html(m.title)+'" referrerpolicy="no-referrer">' +
-      '<span class="card-label '+(m.category==="open"?"open":"")+'">'+(m.category==="open"?"CINE ABIERTO":"DESTACADA")+'</span>' +
+      '<span class="card-label '+(m.category==="open"?"open":"")+'">'+(m.category==="open"?"CINE ABIERTO":m.year===2026?"ESTRENO 2026":"DESTACADA")+'</span>' +
       '<div class="poster-bottom"><span class="poster-min">'+html(m.year)+' · '+html(m.duration)+'</span><span class="card-play" aria-hidden="true">▶</span></div>' +
       (continueMode?'<div class="progress-track"><span style="width:'+pct.toFixed(1)+'%"></span></div>':'')+'</div>' +
       '<div class="card-info"><div><h3 class="card-title">'+html(m.title)+'</h3><p class="card-sub">'+html(m.genre)+' · '+(m.category==="open"?(m.sources&&m.sources.length?"Reproducir gratis":"Ver gratis en Blender"):"Ver opciones")+'</p></div>' +
@@ -66,8 +66,9 @@
     return items;
   }
   function render(){
-    renderRail("#featuredRail",[byId.charge,byId.spring,byId.sintel,byId.sprite,byId.tears,byId.wingit]);
-    renderRail("#openRail",film.filter(function(m){return m.category==="open";}));
+    renderRail("#featuredRail",[byId.singularity26,byId.charge,byId.spring,byId.sintel,byId.sprite,byId.tears,byId.wingit]);
+    renderRail("#openRail",film.filter(function(m){return m.category==="open";}).sort(function(a,b){return b.year-a.year;}));
+    renderRail("#yearRail",film.filter(function(m){return m.category==="new" && m.year===2026;}));
     renderRail("#newRail",film.filter(function(m){return m.category==="new";}).sort(function(a,b){return b.year-a.year;}));
     var continuable=Object.keys(progress).filter(function(id){return byId[id] && progress[id].position>7 && progress[id].duration && progress[id].position<progress[id].duration-7;}).map(function(id){return byId[id];});
     $("#continueSection").classList.toggle("hidden",!continuable.length);
