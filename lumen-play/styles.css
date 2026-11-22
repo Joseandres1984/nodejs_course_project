@@ -60,3 +60,11 @@
 .tv-disclaimer{font-size:11px;line-height:1.6;color:#8e9baa;margin:14px 0 0}
 .tv-mode .topbar{position:relative}.tv-mode .hero{min-height:550px}.tv-mode button:focus-visible,.tv-mode a:focus-visible,.tv-mode .film-card:focus-visible{outline:4px solid #f3c27b;outline-offset:4px}
 @media(max-width:650px){.tv-nav-button{padding:9px;border-radius:10px}.tv-nav-button svg{width:20px;height:20px}.tv-nav-button span{display:none}.tv-player-button{margin-left:auto;padding:8px 10px}.tv-player-button span{font-size:11px}.tv-panel{padding:23px 17px 20px}.tv-choice{padding:11px;grid-template-columns:31px 1fr}.tv-choice-icon{width:31px;height:31px}.tv-overlay{padding:9px}.tv-intro{margin-right:0}}
+
+/* Diagnóstico de compatibilidad y guía AirPlay para iPhone. */
+.tv-device-info{display:inline-flex;align-items:center;gap:6px;font-size:11px;color:#f4c88b;border:1px solid rgba(244,200,139,.27);border-radius:20px;padding:7px 12px;margin:0 0 14px;background:rgba(244,200,139,.06);line-height:1.5}
+.tv-guide{background:rgba(50,100,130,.18);border:1px solid rgba(125,186,207,.55);border-radius:13px;padding:14px 16px;margin:12px 0}
+.tv-guide h3{color:#ecf4fa;font:750 16px 'Outfit',sans-serif;margin:0 0 9px}
+.tv-guide p{font-size:12px;color:#d5e2ea;line-height:1.7;margin:0 0 8px}
+.tv-guide p:last-child{margin:0}
+.tv-guide strong{color:#fff}
