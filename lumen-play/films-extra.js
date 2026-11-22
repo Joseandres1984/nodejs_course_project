@@ -1,4 +1,4 @@
-/* Catálogo adicional de LUMEN Play. Las películas comerciales derivan a su proveedor legal. */
+/* Biblioteca curada: solo las obras autorizadas con reproducción integrada se mostrarán. */
 window.LUMEN_EXTRA_FILMS = [
   {
     "id": "paywall2018",
@@ -12,7 +12,7 @@ window.LUMEN_EXTRA_FILMS = [
     "desc": "Un documental sobre el negocio de las publicaciones científicas y el acceso abierto al conocimiento. Dirigido por Jason Schmitt.",
     "image": "https://upload.wikimedia.org/wikipedia/commons/5/5e/Paywall_documentary_poster.jpg",
     "author": "Jason Schmitt / Paywall The Movie",
-    "credit": "Licencia CC BY 4.0. Dirección: Jason Schmitt. Video publicado por Paywall The Movie en Vimeo; también disponible en alta resolución en Internet Archive.",
+    "credit": "Jason Schmitt / Paywall The Movie · CC BY 4.0. Reproductor incrustado de Vimeo, sin redirección a otra aplicación.",
     "origin": "https://archive.org/details/PaywallTheBusinessOfScholarshipFinalMovieMastered",
     "sources": [
       {
@@ -34,7 +34,7 @@ window.LUMEN_EXTRA_FILMS = [
     "desc": "Una travesía independiente por Finlandia en busca de un lugar mítico que promete un nuevo comienzo. Producción colectiva de Tim Baumann y su equipo.",
     "image": "https://images.unsplash.com/photo-1500534623283-312aade485b7?auto=format&fit=crop&w=900&q=75",
     "author": "Tim Baumann y equipo Valkaama",
-    "credit": "Película de código abierto bajo CC BY-SA 3.0. Equipo Valkaama / valkaama.com. Se muestra una copia embebida desde YouTube; afiche ilustrativo, no oficial. El original 1080p del autor usa MKV.",
+    "credit": "Tim Baumann y equipo Valkaama · CC BY-SA 3.0. Se reproduce en un reproductor incrustado en LUMEN Play; sin enlaces para abrir la aplicación de YouTube.",
     "origin": "https://www.valkaama.com/index.php?l=en&page=valkaama",
     "embed": "https://www.youtube-nocookie.com/embed/4CDHiTs_YCA?rel=0&playsinline=1",
     "sources": []
@@ -51,19 +51,19 @@ window.LUMEN_EXTRA_FILMS = [
     "desc": "Nina Paley reinventa el Ramayana combinando música, mitología y una historia de amor contemporánea.",
     "image": "https://www.sitasingstheblues.com/SitaEPressKit/SitaGoddessPosterA1.png",
     "author": "Nina Paley",
-    "credit": "Obra visual liberada por Nina Paley con CC0. Atención: algunas canciones tienen derechos separados; se enlaza exclusivamente la versión íntegra difundida por la autora en Internet Archive. No se autorizan usos independientes de esas canciones.",
+    "credit": "Nina Paley · CC BY-SA 3.0 (según la página oficial). Algunas canciones tienen derechos independientes. Reproducción a partir de archivos publicados por la autora.",
     "origin": "https://www.sitasingstheblues.com/watch.html",
     "sources": [
       {
-        "name": "MP4 · versión liviana (~485 MB)",
-        "url": "https://archive.org/download/Sita_Sings_the_Blues/Sita_Sings_the_Blues.mp4"
+        "name": "SD · 480p (aprox. 1,4 GB)",
+        "url": "https://archive.org/download/Sita_Sings_the_Blues/Sita_Sings_the_Blues_480p_2150kbps.mp4"
       },
       {
-        "name": "HD · 720p (~2,4 GB)",
+        "name": "HD · 720p",
         "url": "https://archive.org/download/Sita_Sings_the_Blues/Sita_Sings_the_Blues_720p.mp4"
       },
       {
-        "name": "Full HD · 1080p (~4 GB)",
+        "name": "Full HD · 1080p",
         "url": "https://archive.org/download/Sita_Sings_the_Blues/Sita_Sings_the_Blues_1080p.mp4"
       }
     ]
@@ -80,9 +80,15 @@ window.LUMEN_EXTRA_FILMS = [
     "desc": "Una criatura espacial busca refugio después de un evento cósmico.",
     "image": "https://images.unsplash.com/photo-1446776811953-b23d57bd21aa?auto=format&fit=crop&w=900&q=75",
     "author": "Blender Studio / Blender Foundation",
-    "credit": "Obra abierta de Blender: reproducir en la fuente oficial y consultar allí los créditos y licencias.",
+    "credit": "Producción abierta de Blender. Reproducción directamente en LUMEN Play desde fuentes oficiales y repositorios abiertos; consultar condiciones de atribución en la ficha de origen.",
     "origin": "https://studio.blender.org/projects/singularity/",
-    "sources": []
+    "sources": [
+      {
+        "name": "4K · WebM",
+        "url": "https://commons.wikimedia.org/wiki/Special:Redirect/file/SINGULARITY_-_Blender_Open_Movie-full_movie.webm",
+        "webm": true
+      }
+    ]
   },
   {
     "id": "hero18",
@@ -96,9 +102,15 @@ window.LUMEN_EXTRA_FILMS = [
     "desc": "Un cortometraje visual creado con Grease Pencil y animación 2D.",
     "image": "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?auto=format&fit=crop&w=900&q=75",
     "author": "Blender Studio / Blender Foundation",
-    "credit": "Obra abierta de Blender: reproducir en la fuente oficial y consultar allí los créditos y licencias.",
+    "credit": "Producción abierta de Blender. Reproducción directamente en LUMEN Play desde fuentes oficiales y repositorios abiertos; consultar condiciones de atribución en la ficha de origen.",
     "origin": "https://studio.blender.org/projects/hero/",
-    "sources": []
+    "sources": [
+      {
+        "name": "HD · WebM",
+        "url": "https://commons.wikimedia.org/wiki/Special:Redirect/file/HERO_-_Blender_Open_Movie-full_movie.webm",
+        "webm": true
+      }
+    ]
   },
   {
     "id": "dweebs17",
@@ -112,9 +124,15 @@ window.LUMEN_EXTRA_FILMS = [
     "desc": "Un perro encantador vive las aventuras de un barrio de los años cincuenta.",
     "image": "https://images.unsplash.com/photo-1485846234645-a62644f84728?auto=format&fit=crop&w=900&q=75",
     "author": "Blender Studio / Blender Foundation",
-    "credit": "Obra abierta de Blender: reproducir en la fuente oficial y consultar allí los créditos y licencias.",
+    "credit": "Producción abierta de Blender. Reproducción directamente en LUMEN Play desde fuentes oficiales y repositorios abiertos; consultar condiciones de atribución en la ficha de origen.",
     "origin": "https://studio.blender.org/projects/dailydweebs/",
-    "sources": []
+    "sources": [
+      {
+        "name": "4K · WebM",
+        "url": "https://commons.wikimedia.org/wiki/Special:Redirect/file/The_Daily_Dweebs_-_Blender_Open_Movie-full_movie.webm",
+        "webm": true
+      }
+    ]
   },
   {
     "id": "glass15",
@@ -128,9 +146,14 @@ window.LUMEN_EXTRA_FILMS = [
     "desc": "Dos críticos de arte encuentran distintas perspectivas en una misma obra.",
     "image": "https://images.unsplash.com/photo-1513364776144-60967b0f800f?auto=format&fit=crop&w=900&q=75",
     "author": "Blender Studio / Blender Foundation",
-    "credit": "Obra abierta de Blender: reproducir en la fuente oficial y consultar allí los créditos y licencias.",
+    "credit": "Producción abierta de Blender. Reproducción directamente en LUMEN Play desde fuentes oficiales y repositorios abiertos; consultar condiciones de atribución en la ficha de origen.",
     "origin": "https://studio.blender.org/projects/glass-half/",
-    "sources": []
+    "sources": [
+      {
+        "name": "HD · 720p",
+        "url": "https://video.blender.org/static/webseed/64222c8a-c4c7-4b3b-9850-7fb2078edcf6-720.mp4"
+      }
+    ]
   },
   {
     "id": "cosmos15",
@@ -144,9 +167,14 @@ window.LUMEN_EXTRA_FILMS = [
     "desc": "Una oveja desesperada entra en una aventura surrealista que cambiará su vida.",
     "image": "https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?auto=format&fit=crop&w=900&q=75",
     "author": "Blender Studio / Blender Foundation",
-    "credit": "Obra abierta de Blender: reproducir en la fuente oficial y consultar allí los créditos y licencias.",
+    "credit": "Producción abierta de Blender. Reproducción directamente en LUMEN Play desde fuentes oficiales y repositorios abiertos; consultar condiciones de atribución en la ficha de origen.",
     "origin": "https://studio.blender.org/projects/cosmos-laundromat/",
-    "sources": []
+    "sources": [
+      {
+        "name": "HD · 720p",
+        "url": "https://video.blender.org/static/webseed/f507dfdc-e73e-45a4-9778-d758cbe1ce96-720.mp4"
+      }
+    ]
   },
   {
     "id": "caminandes2",
@@ -160,9 +188,14 @@ window.LUMEN_EXTRA_FILMS = [
     "desc": "Koro vuelve a desafiar la Patagonia en una aventura de humor.",
     "image": "https://images.unsplash.com/photo-1500534623283-312aade485b7?auto=format&fit=crop&w=900&q=75",
     "author": "Blender Studio / Blender Foundation",
-    "credit": "Obra abierta de Blender: reproducir en la fuente oficial y consultar allí los créditos y licencias.",
+    "credit": "Producción abierta de Blender. Reproducción directamente en LUMEN Play desde fuentes oficiales y repositorios abiertos; consultar condiciones de atribución en la ficha de origen.",
     "origin": "https://studio.blender.org/projects/caminandes-2/",
-    "sources": []
+    "sources": [
+      {
+        "name": "HD · 720p",
+        "url": "https://video.blender.org/static/webseed/fb70d459-48d2-4db5-adba-813c84f9200a-720.mp4"
+      }
+    ]
   },
   {
     "id": "elephants06",
@@ -176,9 +209,14 @@ window.LUMEN_EXTRA_FILMS = [
     "desc": "Dos personajes atraviesan una máquina misteriosa en el primer Open Movie de Blender.",
     "image": "https://images.unsplash.com/photo-1534447677768-be436bb09401?auto=format&fit=crop&w=900&q=75",
     "author": "Blender Studio / Blender Foundation",
-    "credit": "Obra abierta de Blender: reproducir en la fuente oficial y consultar allí los créditos y licencias.",
+    "credit": "Producción abierta de Blender. Reproducción directamente en LUMEN Play desde fuentes oficiales y repositorios abiertos; consultar condiciones de atribución en la ficha de origen.",
     "origin": "https://studio.blender.org/projects/elephants-dream/",
-    "sources": []
+    "sources": [
+      {
+        "name": "HD · 720p",
+        "url": "https://video.blender.org/static/webseed/cccc3e60-0291-4ecc-aa56-39b2e2c7d0d5-720.mp4"
+      }
+    ]
   },
   {
     "id": "proyectofin",
