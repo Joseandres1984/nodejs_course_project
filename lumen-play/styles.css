@@ -31,3 +31,32 @@
 .player-origin a{font-size:12px;color:#e8b576;text-decoration:underline;text-underline-offset:3px}
 .player-origin a:hover{color:#fff}
 @media(max-width:620px){.embedded-player{inset:0}.film-legal-note{font-size:10px}}
+
+
+/* Salida inalámbrica: AirPlay, Google Cast y Smart TV. */
+.tv-nav-button,.tv-player-button{display:inline-flex;align-items:center;justify-content:center;gap:8px;color:#fff;background:rgba(239,183,100,.12);border:1px solid rgba(239,183,100,.5);border-radius:999px;padding:10px 15px;font-size:12px;font-weight:800;white-space:nowrap;cursor:pointer}
+.tv-nav-button:hover,.tv-player-button:hover{background:rgba(239,183,100,.25);border-color:#f2c27b}
+.tv-nav-button svg{width:19px;height:19px;flex-shrink:0}
+.tv-player-button{margin-left:auto;font-size:13px}
+.tv-overlay{position:fixed;inset:0;z-index:125;display:grid;place-items:center;padding:20px;background:rgba(3,5,9,.91);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);overflow-y:auto}
+.tv-panel{width:min(680px,100%);max-height:calc(100dvh - 40px);overflow-y:auto;background:linear-gradient(160deg,#212935,#11151d 62%);border:1px solid rgba(255,255,255,.16);border-radius:22px;padding:clamp(21px,4vw,36px);position:relative;box-shadow:0 24px 90px rgba(0,0,0,.6)}
+.tv-close{position:absolute;right:18px;top:16px;background:#303844;border:1px solid #4a5260;color:#fff;width:35px;height:35px;border-radius:50%;font-size:15px;cursor:pointer}
+.tv-eyebrow{font-size:10px;letter-spacing:2.4px;font-weight:800;color:#f2bc73;margin:0 0 12px}
+.tv-panel h2{font:800 clamp(27px,5vw,39px)/1.12 'Outfit',sans-serif;margin:0 0 10px;color:#fff}
+.tv-intro{font-size:13px;line-height:1.7;color:#bac4d0;margin:0 35px 18px 0}
+.tv-choices{display:grid;gap:11px}
+.tv-choice{display:grid;grid-template-columns:36px 1fr;gap:13px;padding:15px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.09);border-radius:13px}
+.tv-choice-icon{display:grid;place-items:center;background:rgba(233,183,104,.17);border-radius:9px;width:36px;height:36px;color:#f0bf7e;font-size:21px}
+.tv-choice h3{margin:0 0 6px;color:#fff;font:750 16px 'Outfit',sans-serif}
+.tv-choice p{color:#b4beca;font-size:12px;line-height:1.55;margin:0 0 10px}
+.tv-choice .tv-url{overflow-wrap:anywhere;color:#efc88b;font-size:13px;letter-spacing:.15px;margin:0 0 10px}
+.tv-choice-btn,.tv-remote button{background:#eeb86b;color:#11161c;font-size:12px;font-weight:800;border:1px solid #eeb86b;border-radius:8px;padding:10px 13px;cursor:pointer}
+.tv-choice-btn:hover,.tv-remote button:hover{filter:brightness(1.1)}
+.tv-choice-secondary{background:transparent;color:#f4c684;border-color:#b2894f}
+.tv-status{min-height:38px;border-left:2px solid #eeb86b;background:rgba(238,184,107,.08);font-size:12px;line-height:1.6;color:#f1e0c9;padding:10px 13px;margin:16px 0 0}
+.tv-remote{display:flex;flex-wrap:wrap;gap:9px;align-items:center;padding:12px;margin:12px 0 0;border-radius:9px;border:1px solid #657e89}
+.tv-remote span{font-size:12px;color:#d0e7dc;font-weight:800;flex:1}
+.tv-remote button{padding:8px 10px}
+.tv-disclaimer{font-size:11px;line-height:1.6;color:#8e9baa;margin:14px 0 0}
+.tv-mode .topbar{position:relative}.tv-mode .hero{min-height:550px}.tv-mode button:focus-visible,.tv-mode a:focus-visible,.tv-mode .film-card:focus-visible{outline:4px solid #f3c27b;outline-offset:4px}
+@media(max-width:650px){.tv-nav-button{padding:9px;border-radius:10px}.tv-nav-button svg{width:20px;height:20px}.tv-nav-button span{display:none}.tv-player-button{margin-left:auto;padding:8px 10px}.tv-player-button span{font-size:11px}.tv-panel{padding:23px 17px 20px}.tv-choice{padding:11px;grid-template-columns:31px 1fr}.tv-choice-icon{width:31px;height:31px}.tv-overlay{padding:9px}.tv-intro{margin-right:0}}
