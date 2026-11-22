@@ -39,6 +39,31 @@ Edición web en español. El catálogo contiene exclusivamente películas de **a
 - `index.html`, `styles.css`: interfaz responsive.
 - `sw.js`, `manifest.webmanifest`, `icon.svg`: PWA; solo se cachea la estructura, no las películas.
 
+
+## Módulo inalámbrico para TV — Wi-Fi (22/11/2026)
+
+Se sumaron botones **Ver en TV** en el encabezado y el reproductor con tres caminos:
+
+1. **AirPlay**: en iPhone/iPad Safari, usar video HTML5 con `webkitShowPlaybackTargetPicker` y el atributo `x-webkit-airplay="allow"`. Requiere un Apple TV o Smart TV compatible con AirPlay, en la misma red Wi-Fi. En películas con iframe el botón de LUMEN no puede controlar AirPlay directamente; se puede intentar Duplicar pantalla desde Centro de control (función del sistema, no de la web).
+2. **Google Cast**: en Chrome compatible de Android o computadora, el módulo `tv.js` carga el SDK Web Sender, utiliza el receptor multimedia predeterminado de Google Cast (sin registrar un receptor personalizado), solicita una sesión y envía el video directo público MP4/WebM mediante `LoadRequest`. Controles básicos de pausar/reanudar y desconectar en el panel. **No funciona Google Cast desde Safari/Chrome en iPhone**, por limitación del SDK Web Sender. Las películas que solo ofrecen un iframe, sin una URL MP4 pública, no pueden enviarse con este método.
+3. **Navegador Smart TV**: ingresar `https://lumen-play-premium.onrender.com/?tv=1` desde el navegador integrado del televisor. Se aplica un modo de foco y navegación por teclado/control remoto. No vincula automáticamente el teléfono a la TV ni promete funciones de control remoto bidireccional.
+
+### Condiciones y limitaciones
+- El dispositivo emisor y receptor deben estar en la **misma red Wi-Fi** (sin aislamiento de clientes ni red de invitados incompatible).
+- El archivo reproducido en TV depende de la disponibilidad y codificación de la fuente pública. Un MP4 válido en el celular puede fallar en el Chromecast o navegador de la TV. La conexión y el streaming completos requieren pruebas con equipos reales.
+- Los iframes de YouTube, Vimeo o Internet Archive pueden tener restricciones de proveedor. La versión web no controla las opciones AirPlay/Cast internas de estos reproductores.
+- Los videos locales cargados como `blob:` no son accesibles desde un Chromecast (no existe URL pública).
+- El SDK de Google se carga solo en navegadores potencialmente compatibles y desde HTTPS; no se carga en iPhone.
+- El botón Cast usa el receptor multimedia genérico sin app ID personalizado. No crea una conexión directa entre el navegador y cualquier TV; requiere un dispositivo Google Cast real.
+- `tv.js` y las opciones del panel no eluden DRM ni licencias, y no se redistribuye contenido comercial sin permiso.
+
+### Prueba manual
+1. En iPhone Safari, reproducir MP4 y pulsar Ver en TV → Elegir TV con AirPlay con Apple TV/televisor AirPlay en el mismo Wi-Fi.
+2. En Android Chrome o Chrome desktop, reproducir una película con MP4 público y pulsar Ver en TV → Buscar dispositivos Cast. Seleccionar el receptor y verificar reproducción, controles y desconexión.
+3. Intentar Cast con Valkaama (iframe sin MP4), comprobar mensaje claro, sin falsas conexiones.
+4. Abrir la web en el navegador de una Smart TV y navegar con control remoto.
+5. Verificar cierre de panel y reproductor y que no se abren ventanas externas.
+
 ## Lista de verificación
 
 1. Confirmar nueve fichas y duraciones >=60 min, sin cortos.
