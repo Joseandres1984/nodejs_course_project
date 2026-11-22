@@ -95,7 +95,7 @@
     if(view==="inicio")window.scrollTo({top:0,behavior:"smooth"});
     else $("#allSection").scrollIntoView({behavior:"smooth",block:"start"});
   }
-  function setFilter(filter){state.filter=filter;if(state.view==="lista")state.view="inicio";render();$("#allSection").scrollIntoView({behavior:"smooth"});}
+  function setFilter(filter){state.filter=filter;state.query="";if(state.view==="lista")state.view="inicio";render();$("#allSection").scrollIntoView({behavior:"smooth"});}
   function toggleFavorite(id){
     if(!byId[id])return;
     if(favorites.has(id)){favorites.delete(id);showToast("Quitada de tu lista");}else{favorites.add(id);showToast("Agregada a tu lista");}
@@ -287,7 +287,7 @@
   video.addEventListener("timeupdate",function(){if(Date.now()-state.lastProgress>4000){captureProgress();state.lastProgress=Date.now();}});
   video.addEventListener("pause",captureProgress);
   video.addEventListener("ended",function(){if(byId[state.active]){delete progress[state.active];write("lumen-play-progress-v2",progress);}showToast("¡Terminaste de ver esta historia!");});
-  video.addEventListener("error",function(){if(!$("#playerOverlay").classList.contains("hidden"))$("#playerError").classList.remove("hidden");});
+  video.addEventListener("error",function(){var m=byId[state.active];if(m && m.embed)return;if(!$("#playerOverlay").classList.contains("hidden"))$("#playerError").classList.remove("hidden");});
   video.addEventListener("loadeddata",function(){$("#playerError").classList.add("hidden");});
   $("#privacyBtn").addEventListener("click",function(){window.alert("Privacidad en LUMEN Play: los videos que elegís de tu equipo se reproducen localmente y no se suben a nuestro servidor. Los favoritos y el progreso se guardan en el navegador mediante almacenamiento local. Cuando abrís servicios externos, rigen sus propias políticas. Esta versión no incluye cuentas ni seguimiento de perfiles.");});
   window.addEventListener("pagehide",function(){captureProgress();local.forEach(function(f){URL.revokeObjectURL(f.url);});});
