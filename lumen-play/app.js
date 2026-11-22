@@ -153,37 +153,67 @@
     var canWebm=!!video.canPlayType('video/webm; codecs="vp9"') || !!video.canPlayType("video/webm");
     return (m.sources||[]).filter(function(s){return !s.webm||canWebm;});
   }
+  // Cambiar a un reproductor incrustado sin abrir otra pestaña ni aplicación.
+  function activateEmbed(m){
+    if(!m.embed)return false;
+    video.pause();
+    video.removeAttribute("src");
+    video.load();
+    var embedBox=$("#embeddedPlayer");
+    embedBox.replaceChildren();
+    embedBox.classList.remove("hidden");
+    video.classList.add("hidden");
+    $(".player-controls").classList.add("hidden");
+    $("#playerError").classList.add("hidden");
+    var iframe=document.createElement("iframe");
+    iframe.title="Reproductor integrado de "+m.title;
+    iframe.src=m.embed;
+    iframe.loading="eager";
+    iframe.setAttribute("allow","autoplay; encrypted-media; picture-in-picture; fullscreen");
+    iframe.setAttribute("referrerpolicy","strict-origin-when-cross-origin");
+    iframe.setAttribute("sandbox","allow-scripts allow-same-origin allow-presentation");
+    iframe.allowFullscreen=true;
+    embedBox.appendChild(iframe);
+    return true;
+  }
   function openPlayer(m){
     closeDetails();
     if(!$("#libraryOverlay").classList.contains("hidden"))closeLibrary();
-    state.active=m.id;state.lastProgress=0;
-    $("#playerTitle").textContent=m.title;$("#playerCredit").textContent=m.author||"LUMEN Play";
+    state.active=m.id;
+    state.lastProgress=0;
+    $("#playerTitle").textContent=m.title;
+    $("#playerCredit").textContent=m.author||"LUMEN Play";
     $("#playerLicense").textContent=m.credit||"";
     $("#playerError").classList.add("hidden");
-    var embedBox=$("#embeddedPlayer");
-    embedBox.replaceChildren();
-    embedBox.classList.toggle("hidden",!m.embed);
-    video.classList.toggle("hidden",!!m.embed);
-    $(".player-controls").classList.toggle("hidden",!!m.embed);
+    $("#embeddedPlayer").replaceChildren();
+    $("#embeddedPlayer").classList.add("hidden");
+    video.classList.remove("hidden");
+    $(".player-controls").classList.remove("hidden");
     var sources=availableSources(m),quality=$("#playerQuality");
     quality.innerHTML="";
-    sources.forEach(function(s,i){var opt=document.createElement("option");opt.value=String(i);opt.textContent=s.name;quality.appendChild(opt);});
-    $("#playerOverlay").classList.remove("hidden");document.body.style.overflow="hidden";
-    video.playbackRate=1;$("#playerSpeed").value="1";
-    if(m.embed){
-      video.pause();video.removeAttribute("src");video.load();
-      var iframe=document.createElement("iframe");
-      iframe.title="Reproductor de "+m.title;
-      iframe.src=m.embed;
-      iframe.setAttribute("allow","accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture; fullscreen");
-      iframe.setAttribute("referrerpolicy","strict-origin-when-cross-origin");
-      iframe.setAttribute("sandbox","allow-scripts allow-same-origin allow-presentation");
-      iframe.allowFullscreen=true;
-      embedBox.appendChild(iframe);
+    sources.forEach(function(item,i){
+      var opt=document.createElement("option");
+      opt.value=String(i);
+      opt.textContent=item.name;
+      quality.appendChild(opt);
+    });
+    $("#playerOverlay").classList.remove("hidden");
+    document.body.style.overflow="hidden";
+    video.playbackRate=1;
+    $("#playerSpeed").value="1";
+    // Preferir HTML5 para cambiar calidad, subtítulos, historial y pantalla completa.
+    // Si la fuente original falla se activa el iframe permitido como alternativa interna.
+    if(m.embed && (!m.nativePreferred || !sources.length)){
+      activateEmbed(m);
       return;
     }
-    if(!sources.length){video.removeAttribute("src");video.load();$("#playerError").classList.remove("hidden");return;}
-    changeSource(sources[0].url, byId[m.id] && progress[m.id] ? progress[m.id].position : 0, true);
+    if(!sources.length){
+      video.removeAttribute("src");
+      video.load();
+      $("#playerError").classList.remove("hidden");
+      return;
+    }
+    changeSource(sources[0].url, byId[m.id] && progress[m.id]?progress[m.id].position:0, true);
   }
   function changeSource(url,time,autoPlay){
     video.pause();video.src=url;video.load();
@@ -204,7 +234,7 @@
     restoreBody();render();
   }
   function captureProgress(){
-    var m=byId[state.active];if(!m || m.category!=="open" || m.embed || !isFinite(video.currentTime) || !isFinite(video.duration))return;
+    var m=byId[state.active];if(!m || m.category!=="open" || !$("#embeddedPlayer").classList.contains("hidden") || !isFinite(video.currentTime) || !isFinite(video.duration))return;
     var duration=video.duration||m.minutes*60;
     if(video.currentTime>2){progress[m.id]={position:video.currentTime,duration:duration,at:Date.now()};write("lumen-play-progress-v2",progress);}
   }
@@ -279,9 +309,17 @@
   video.addEventListener("timeupdate",function(){if(Date.now()-state.lastProgress>4000){captureProgress();state.lastProgress=Date.now();}});
   video.addEventListener("pause",captureProgress);
   video.addEventListener("ended",function(){if(byId[state.active]){delete progress[state.active];write("lumen-play-progress-v2",progress);}showToast("¡Terminaste de ver esta historia!");});
-  video.addEventListener("error",function(){var m=byId[state.active];if(m && m.embed)return;if(!$("#playerOverlay").classList.contains("hidden"))$("#playerError").classList.remove("hidden");});
+  video.addEventListener("error",function(){
+    if($("#playerOverlay").classList.contains("hidden"))return;
+    var m=byId[state.active];
+    if(m && m.embed && $("#embeddedPlayer").classList.contains("hidden")){
+      if(activateEmbed(m))showToast("Probando reproductor alternativo sin salir de LUMEN");
+      return;
+    }
+    if(!m || !m.embed)$("#playerError").classList.remove("hidden");
+  });
   video.addEventListener("loadeddata",function(){$("#playerError").classList.add("hidden");});
-  $("#privacyBtn").addEventListener("click",function(){window.alert("Privacidad en LUMEN Play: los videos que elegís de tu equipo se reproducen localmente y no se suben a nuestro servidor. Los favoritos y el progreso se guardan en el navegador mediante almacenamiento local. Cuando abrís servicios externos, rigen sus propias políticas. Esta versión no incluye cuentas ni seguimiento de perfiles.");});
+  $("#privacyBtn").addEventListener("click",function(){window.alert("Privacidad de LUMEN Play: los videos de tu dispositivo se reproducen localmente y nunca se suben a nuestro servidor. Los favoritos y el progreso se guardan en este navegador. Los largometrajes se sirven desde fuentes de sus autores o archivos abiertos mediante video HTML5 o reproductores incrustados. LUMEN Play no incluye cuentas ni registra perfiles.");});
   window.addEventListener("pagehide",function(){captureProgress();local.forEach(function(f){URL.revokeObjectURL(f.url);});});
   if("serviceWorker" in navigator && location.protocol==="https:"){window.addEventListener("load",function(){navigator.serviceWorker.register("./sw.js").catch(function(){});});}
   render();
