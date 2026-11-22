@@ -25,6 +25,7 @@
     {id:"traindreams",title:"Sueños de trenes",year:2025,duration:"1 h 42 min",minutes:102,genre:"Drama",category:"new",kind:"Drama",desc:"La historia íntima de una vida entre los cambios del mundo y la belleza de lo cotidiano.",image:"https://images.unsplash.com/photo-1473448912268-2022ce9509d8?auto=format&fit=crop&w=900&q=80",author:"Película comercial",credit:"Título comercial. Imagen ilustrativa. Ver disponibilidad en servicios oficiales.",origin:"https://www.netflix.com/search?q=Train%20Dreams"},
     {id:"kpop",title:"Las guerreras K-pop",year:2025,duration:"1 h 35 min",minutes:95,genre:"Animación",category:"new",kind:"Fantasía",desc:"Un grupo musical con una vida secreta debe defender al mundo de fuerzas sobrenaturales.",image:"https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&w=900&q=80",author:"Película comercial",credit:"Título comercial. Imagen ilustrativa. Ver disponibilidad en servicios oficiales.",origin:"https://www.netflix.com/search?q=KPop%20Demon%20Hunters"}
   ];
+  film.push.apply(film, window.LUMEN_EXTRA_FILMS || []);
   var byId = {};
   film.forEach(function(m){byId[m.id] = m;});
   var $ = function(sel){return document.querySelector(sel);};
@@ -48,7 +49,7 @@
       '<span class="card-label '+(m.category==="open"?"open":"")+'">'+(m.category==="open"?"CINE ABIERTO":"DESTACADA")+'</span>' +
       '<div class="poster-bottom"><span class="poster-min">'+html(m.year)+' · '+html(m.duration)+'</span><span class="card-play" aria-hidden="true">▶</span></div>' +
       (continueMode?'<div class="progress-track"><span style="width:'+pct.toFixed(1)+'%"></span></div>':'')+'</div>' +
-      '<div class="card-info"><div><h3 class="card-title">'+html(m.title)+'</h3><p class="card-sub">'+html(m.genre)+' · '+(m.category==="open"?"Reproducir gratis":"Ver opciones")+'</p></div>' +
+      '<div class="card-info"><div><h3 class="card-title">'+html(m.title)+'</h3><p class="card-sub">'+html(m.genre)+' · '+(m.category==="open"?(m.sources&&m.sources.length?"Reproducir gratis":"Ver gratis en Blender"):"Ver opciones")+'</p></div>' +
       '<button class="card-save '+(saved?"saved":"")+'" data-fav="'+html(m.id)+'" type="button" aria-label="'+(saved?"Quitar de mi lista":"Agregar a mi lista")+'">'+(saved?"♥":"♡")+'</button></div></article>';
   }
   function renderRail(id,items,mode){
@@ -59,6 +60,7 @@
     if(state.view==="lista")items=items.filter(function(m){return favorites.has(m.id);});
     else if(state.filter==="Cine abierto")items=items.filter(function(m){return m.category==="open";});
     else if(state.filter==="Destacadas")items=items.filter(function(m){return m.category==="new";});
+    else if(state.filter==="Estrenos 2026")items=items.filter(function(m){return m.year===2026;});
     else if(state.filter!=="Todo")items=items.filter(function(m){return m.genre===state.filter || m.kind===state.filter;});
     if(state.query){var q=state.query.toLocaleLowerCase("es");items=items.filter(function(m){return [m.title,m.genre,m.kind,m.desc,m.author,String(m.year)].join(" ").toLocaleLowerCase("es").indexOf(q)!==-1;});}
     return items;
@@ -66,7 +68,7 @@
   function render(){
     renderRail("#featuredRail",[byId.charge,byId.spring,byId.sintel,byId.sprite,byId.tears,byId.wingit]);
     renderRail("#openRail",film.filter(function(m){return m.category==="open";}));
-    renderRail("#newRail",film.filter(function(m){return m.category==="new";}));
+    renderRail("#newRail",film.filter(function(m){return m.category==="new";}).sort(function(a,b){return b.year-a.year;}));
     var continuable=Object.keys(progress).filter(function(id){return byId[id] && progress[id].position>7 && progress[id].duration && progress[id].position<progress[id].duration-7;}).map(function(id){return byId[id];});
     $("#continueSection").classList.toggle("hidden",!continuable.length);
     renderRail("#continueRail",continuable,true);
@@ -111,12 +113,12 @@
     var m=byId[id];if(!m)return;
     state.active=id;
     $("#detailImage").style.backgroundImage='linear-gradient(0deg,rgba(20,24,33,.4),transparent),url("'+m.image+'")';
-    $("#detailTag").textContent=m.category==="open"?"CINE ABIERTO · REPRODUCCIÓN GRATIS":"CINE RECIENTE · PLATAFORMA OFICIAL";
+    $("#detailTag").textContent=m.category==="open"?(m.sources&&m.sources.length?"CINE ABIERTO · REPRODUCCIÓN GRATIS":"CINE ABIERTO · VER EN BLENDER"):"PELÍCULA COMERCIAL · PLATAFORMA OFICIAL";
     $("#detailTitle").textContent=m.title;
     $("#detailMeta").textContent=m.year+" · "+m.duration+" · "+m.genre+" · "+(m.category==="open"?"Blender":"Ver disponibilidad");
     $("#detailDescription").textContent=m.desc;
     $("#detailCredit").textContent=m.credit;
-    $("#detailWatch").textContent=m.category==="open"?"▶ Reproducir gratis":"↗ Dónde verla";
+    $("#detailWatch").textContent=m.category==="open"?(m.sources&&m.sources.length?"▶ Reproducir gratis":"↗ Ver gratis en Blender"):"↗ Dónde verla";
     updateDetailFavorite();
     $("#detailsOverlay").classList.remove("hidden");document.body.style.overflow="hidden";$("#detailsClose").focus();
   }
@@ -154,7 +156,7 @@
   }
   function playMovie(id){
     var m=byId[id];if(!m)return;
-    if(m.category==="new"){window.open(m.origin,"_blank","noopener,noreferrer");return;}
+    if(m.category==="new" || (m.category==="open" && !(m.sources&&m.sources.length))){window.open(m.origin,"_blank","noopener,noreferrer");return;}
     openPlayer(m);
   }
   function availableSources(m){
