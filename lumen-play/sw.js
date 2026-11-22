@@ -1,4 +1,4 @@
-const CACHE = "lumen-play-shell-20261122-v2";
+const CACHE = "lumen-play-shell-20261122-v3";
 const SHELL = ["./", "./index.html", "./styles.css", "./app.js", "./films-extra.js", "./manifest.webmanifest", "./icon.svg"];
 self.addEventListener("install", event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL)).then(() => self.skipWaiting()));
