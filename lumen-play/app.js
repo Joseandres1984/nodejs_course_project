@@ -263,6 +263,12 @@
   $("#libraryOverlay").addEventListener("click",function(ev){if(ev.target===this)closeLibrary();});
   $("#localFiles").addEventListener("change",function(){addLocalFiles(this.files);this.value="";});
   $("#playerClose").addEventListener("click",closePlayer);
+  $("#playerFallback").addEventListener("click",function(){
+    var m=byId[state.active];
+    if(m){openPlayer(m);return;}
+    $("#playerError").classList.add("hidden");
+    video.load();video.play().catch(function(){$("#playerError").classList.remove("hidden");});
+  });
   $("#playerQuality").addEventListener("change",function(){
     var m=byId[state.active]||local.find(function(f){return f.id===state.active;});
     if(!m)return;
