@@ -23,7 +23,9 @@
     var video=videoElement();
     $("#tvMirrorChoice").classList.toggle("hidden",!isIOS);
     $("#tvCastChoice").classList.toggle("hidden",!supportsWebCast);
-    $("#tvAirplayChoice").classList.toggle("hidden",!(isIOS||typeof video.webkitShowPlaybackTargetPicker==="function"));
+    // No ofrecer selector AirPlay de HTML5 sobre un iframe ajeno.
+    var canAirplay=playerIsOpen() && !embeddedIsOpen() && typeof video.webkitShowPlaybackTargetPicker==="function";
+    $("#tvAirplayChoice").classList.toggle("hidden",!canAirplay);
     var mode=isIOS?"iPhone / iPad":supportsWebCast?"Chrome compatible con Google Cast":"Navegador sin Cast Web Sender";
     var playing=playerIsOpen()?(embeddedIsOpen()?" · película en reproductor integrado":" · película en video HTML5"):" · elegí una película";
     $("#tvDeviceInfo").textContent="Detectado: "+mode+playing+".";
@@ -53,7 +55,8 @@
     guide.classList.add("hidden");
     var m=currentMovie();
     if(isIOS){
-      note("En iPhone, la primera opción es Duplicar pantalla hacia una TV con AirPlay. Google Cast no puede iniciarse desde esta web. Abrí LUMEN Play en Safari si el navegador interno limita el video.");
+      note("En iPhone, usá Duplicar pantalla en una TV compatible con AirPlay; este navegador no puede hacerlo automáticamente. Si abriste LUMEN dentro de otra app, probá Safari.");
+      guide.classList.remove("hidden");
     }else if(!m||!playerIsOpen()){
       note("Elegí un largometraje y tocá Reproducir. Después elegí una conexión compatible.");
     }else {
@@ -111,16 +114,12 @@
   function publicStream(m){
     if(!m)return null;
     var v=videoElement(),usingHTML5=playerIsOpen()&&!embeddedIsOpen();
-    var url=usingHTML5?(v.currentSrc||v.src):"";
+    // No enviar al Chromecast una dirección adivinada desde una película en iframe;
+    // esa URL nunca se verificó en este reproductor y suele fallar en el receptor.
+    if(!usingHTML5||v.error||v.readyState<1)return null;
+    var url=v.currentSrc||v.src;
     if(!/^https:\/\//i.test(url))url="";
-    if(!url){
-      var sources=m.sources||[];
-      for(var i=0;i<sources.length;i++){
-        if(/^https:\/\//i.test(sources[i].url||"")&&/\.(mp4|webm|m3u8)(\?|$)/i.test(sources[i].url)){
-          url=sources[i].url;break;
-        }
-      }
-    }
+    // El video debe estar cargado en HTML5 antes de abrir el selector Cast.
     if(!url||!/^https:\/\//i.test(url))return null;
     var mime=/\.webm(\?|$)/i.test(url)?"video/webm":/\.m3u8(\?|$)/i.test(url)?"application/x-mpegURL":"video/mp4";
     return {url:url,type:mime,time:usingHTML5&&isFinite(v.currentTime)?Math.max(0,v.currentTime):0};
@@ -151,7 +150,7 @@
     if(!castReady||!castContext){note("Chromecast todavía no está disponible. Revisá que uses Chrome, estés en Wi-Fi y tengas Google Cast habilitado.");return;}
     var m=currentMovie();
     if(!m||!playerIsOpen()){note("Primero abrí la película que querés ver y después volvé a tocar Ver en TV.");return;}
-    if(!publicStream(m)){note("Esta película no ofrece un archivo directo compatible con Cast. Probá desde el navegador de tu TV.");return;}
+    if(!publicStream(m)){note("Para transmitir con Cast, primero reproducí un MP4 compatible en LUMEN. Los reproductores integrados de terceros no permiten enviar el video desde este módulo. Como alternativa abrí LUMEN Play en el navegador de la TV.");return;}
     try{
       var session=castContext.getCurrentSession();
       if(!session){note("Buscando Chromecast o Google TV en tu red…");await castContext.requestSession();session=castContext.getCurrentSession();}
