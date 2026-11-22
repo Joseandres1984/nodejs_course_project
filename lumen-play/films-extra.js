@@ -12,14 +12,15 @@ window.LUMEN_EXTRA_FILMS = [
     "desc": "Un documental sobre el negocio de las publicaciones científicas y el acceso abierto al conocimiento. Dirigido por Jason Schmitt.",
     "image": "https://upload.wikimedia.org/wikipedia/commons/5/5e/Paywall_documentary_poster.jpg",
     "author": "Jason Schmitt / Paywall The Movie",
-    "credit": "Licencia Creative Commons Atribución 4.0 Internacional (CC BY 4.0). Dirección: Jason Schmitt. Archivo original alojado en Internet Archive; puede requerir buena conexión por su tamaño.",
+    "credit": "Licencia CC BY 4.0. Dirección: Jason Schmitt. Video publicado por Paywall The Movie en Vimeo; también disponible en alta resolución en Internet Archive.",
     "origin": "https://archive.org/details/PaywallTheBusinessOfScholarshipFinalMovieMastered",
     "sources": [
       {
         "name": "MP4 · original (7,2 GB)",
         "url": "https://archive.org/download/PaywallTheBusinessOfScholarshipFinalMovieMastered/Paywall%20The%20Business%20of%20Scholarship%20Final%20Movie%20Mastered.mp4"
       }
-    ]
+    ],
+    "embed": "https://player.vimeo.com/video/273358286?dnt=1&title=0&byline=0"
   },
   {
     "id": "valkaama2010",
