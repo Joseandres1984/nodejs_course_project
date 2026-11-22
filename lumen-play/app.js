@@ -46,10 +46,10 @@
     var saved=favorites.has(m.id), tracked=progress[m.id],pct=(tracked && tracked.duration>0)?Math.max(0,Math.min(100,100*tracked.position/tracked.duration)):0;
     return '<article class="film-card" tabindex="0" role="button" aria-label="Ver información de '+html(m.title)+'" data-id="'+html(m.id)+'">' +
       '<div class="poster"><img loading="lazy" src="'+html(m.image)+'" alt="Imagen de '+html(m.title)+'" referrerpolicy="no-referrer">' +
-      '<span class="card-label '+(m.category==="open"?"open":"")+'">'+(m.category==="open"?"CINE ABIERTO":m.year===2026?"ESTRENO 2026":"DESTACADA")+'</span>' +
+      '<span class="card-label '+(m.category==="open"?"open":"")+'">'+(m.category==="open"?(m.minutes>=60?"PELÍCULA COMPLETA":"CINE ABIERTO"):m.year===2026?"ESTRENO 2026":"DESTACADA")+'</span>' +
       '<div class="poster-bottom"><span class="poster-min">'+html(m.year)+' · '+html(m.duration)+'</span><span class="card-play" aria-hidden="true">▶</span></div>' +
       (continueMode?'<div class="progress-track"><span style="width:'+pct.toFixed(1)+'%"></span></div>':'')+'</div>' +
-      '<div class="card-info"><div><h3 class="card-title">'+html(m.title)+'</h3><p class="card-sub">'+html(m.genre)+' · '+(m.category==="open"?(m.sources&&m.sources.length?"Reproducir gratis":"Ver gratis en Blender"):"Ver opciones")+'</p></div>' +
+      '<div class="card-info"><div><h3 class="card-title">'+html(m.title)+'</h3><p class="card-sub">'+html(m.genre)+' · '+(m.category==="open"?((m.sources&&m.sources.length)||m.embed?"Reproducir gratis":"Ver gratis en Blender"):"Ver opciones")+'</p></div>' +
       '<button class="card-save '+(saved?"saved":"")+'" data-fav="'+html(m.id)+'" type="button" aria-label="'+(saved?"Quitar de mi lista":"Agregar a mi lista")+'">'+(saved?"♥":"♡")+'</button></div></article>';
   }
   function renderRail(id,items,mode){
@@ -59,6 +59,7 @@
     var items=film.slice();
     if(state.view==="lista")items=items.filter(function(m){return favorites.has(m.id);});
     else if(state.filter==="Cine abierto")items=items.filter(function(m){return m.category==="open";});
+    else if(state.filter==="Películas completas")items=items.filter(function(m){return m.category==="open" && m.minutes>=60;});
     else if(state.filter==="Destacadas")items=items.filter(function(m){return m.category==="new";});
     else if(state.filter==="Estrenos 2026")items=items.filter(function(m){return m.year===2026;});
     else if(state.filter!=="Todo")items=items.filter(function(m){return m.genre===state.filter || m.kind===state.filter;});
@@ -68,6 +69,7 @@
   function render(){
     renderRail("#featuredRail",[byId.singularity26,byId.charge,byId.spring,byId.sintel,byId.sprite,byId.tears,byId.wingit]);
     renderRail("#openRail",film.filter(function(m){return m.category==="open";}).sort(function(a,b){return b.year-a.year;}));
+    renderRail("#featureMoviesRail",film.filter(function(m){return m.category==="open" && m.minutes>=60;}).sort(function(a,b){return b.year-a.year;}));
     renderRail("#yearRail",film.filter(function(m){return m.category==="new" && m.year===2026;}));
     renderRail("#newRail",film.filter(function(m){return m.category==="new";}).sort(function(a,b){return b.year-a.year;}));
     var continuable=Object.keys(progress).filter(function(id){return byId[id] && progress[id].position>7 && progress[id].duration && progress[id].position<progress[id].duration-7;}).map(function(id){return byId[id];});
@@ -114,12 +116,12 @@
     var m=byId[id];if(!m)return;
     state.active=id;
     $("#detailImage").style.backgroundImage='linear-gradient(0deg,rgba(20,24,33,.4),transparent),url("'+m.image+'")';
-    $("#detailTag").textContent=m.category==="open"?(m.sources&&m.sources.length?"CINE ABIERTO · REPRODUCCIÓN GRATIS":"CINE ABIERTO · VER EN BLENDER"):"PELÍCULA COMERCIAL · PLATAFORMA OFICIAL";
+    $("#detailTag").textContent=m.category==="open"?(m.sources&&m.sources.length||m.embed?"CINE ABIERTO · REPRODUCCIÓN GRATIS":"CINE ABIERTO · VER EN EL ORIGEN"):"PELÍCULA COMERCIAL · PLATAFORMA OFICIAL";
     $("#detailTitle").textContent=m.title;
-    $("#detailMeta").textContent=m.year+" · "+m.duration+" · "+m.genre+" · "+(m.category==="open"?"Blender":"Ver disponibilidad");
+    $("#detailMeta").textContent=m.year+" · "+m.duration+" · "+m.genre+" · "+(m.category==="open"?m.author:"Ver disponibilidad");
     $("#detailDescription").textContent=m.desc;
     $("#detailCredit").textContent=m.credit;
-    $("#detailWatch").textContent=m.category==="open"?(m.sources&&m.sources.length?"▶ Reproducir gratis":"↗ Ver gratis en Blender"):"↗ Dónde verla";
+    $("#detailWatch").textContent=m.category==="open"?((m.sources&&m.sources.length)||m.embed?"▶ Reproducir gratis":"↗ Ver gratis en el origen"):"↗ Dónde verla";
     updateDetailFavorite();
     $("#detailsOverlay").classList.remove("hidden");document.body.style.overflow="hidden";$("#detailsClose").focus();
   }
@@ -157,7 +159,7 @@
   }
   function playMovie(id){
     var m=byId[id];if(!m)return;
-    if(m.category==="new" || (m.category==="open" && !(m.sources&&m.sources.length))){window.open(m.origin,"_blank","noopener,noreferrer");return;}
+    if(m.category==="new" || (m.category==="open" && !(m.sources&&m.sources.length) && !m.embed)){window.open(m.origin,"_blank","noopener,noreferrer");return;}
     openPlayer(m);
   }
   function availableSources(m){
@@ -171,12 +173,29 @@
     $("#playerTitle").textContent=m.title;$("#playerCredit").textContent=m.author||"LUMEN Play";
     $("#playerLicense").textContent=m.credit||"";
     $("#playerFallback").href=m.origin||REPO;
+    $("#playerOrigin").href=m.origin||REPO;
     $("#playerError").classList.add("hidden");
+    var embedBox=$("#embeddedPlayer");
+    embedBox.replaceChildren();
+    embedBox.classList.toggle("hidden",!m.embed);
+    video.classList.toggle("hidden",!!m.embed);
+    $(".player-controls").classList.toggle("hidden",!!m.embed);
     var sources=availableSources(m),quality=$("#playerQuality");
     quality.innerHTML="";
     sources.forEach(function(s,i){var opt=document.createElement("option");opt.value=String(i);opt.textContent=s.name;quality.appendChild(opt);});
     $("#playerOverlay").classList.remove("hidden");document.body.style.overflow="hidden";
     video.playbackRate=1;$("#playerSpeed").value="1";
+    if(m.embed){
+      video.pause();video.removeAttribute("src");video.load();
+      var iframe=document.createElement("iframe");
+      iframe.title="Reproductor de "+m.title;
+      iframe.src=m.embed;
+      iframe.setAttribute("allow","accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture; fullscreen");
+      iframe.setAttribute("referrerpolicy","strict-origin-when-cross-origin");
+      iframe.allowFullscreen=true;
+      embedBox.appendChild(iframe);
+      return;
+    }
     if(!sources.length){video.removeAttribute("src");video.load();$("#playerError").classList.remove("hidden");return;}
     changeSource(sources[0].url, byId[m.id] && progress[m.id] ? progress[m.id].position : 0, true);
   }
@@ -188,6 +207,10 @@
   function closePlayer(){
     if($("#playerOverlay").classList.contains("hidden"))return;
     captureProgress();
+    $("#embeddedPlayer").replaceChildren();
+    $("#embeddedPlayer").classList.add("hidden");
+    $(".player-controls").classList.remove("hidden");
+    video.classList.remove("hidden");
     video.pause();video.removeAttribute("src");video.load();
     if(state.subtitle){URL.revokeObjectURL(state.subtitle);state.subtitle=null;}
     $$("#player track").forEach(function(el){el.remove();});
@@ -195,7 +218,7 @@
     restoreBody();render();
   }
   function captureProgress(){
-    var m=byId[state.active];if(!m || m.category!=="open" || !isFinite(video.currentTime) || !isFinite(video.duration))return;
+    var m=byId[state.active];if(!m || m.category!=="open" || m.embed || !isFinite(video.currentTime) || !isFinite(video.duration))return;
     var duration=video.duration||m.minutes*60;
     if(video.currentTime>2){progress[m.id]={position:video.currentTime,duration:duration,at:Date.now()};write("lumen-play-progress-v2",progress);}
   }
