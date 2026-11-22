@@ -56,6 +56,14 @@
       <div class="announcement"><span class="announcement-star">✦</span><div><strong>Una sala de cine sin complicaciones.</strong><span> Cortometrajes abiertos en el reproductor, películas actuales en sus plataformas oficiales y tus propios archivos.</span></div><button id="exploreBtn" type="button" aria-label="Explorar cine abierto">Explorar <span aria-hidden="true">→</span></button></div>
       <section id="continueSection" class="rail-section hidden" aria-labelledby="continueTitle"><div class="section-head"><div><p class="eyebrow">VOLVÉ A TU HISTORIA</p><h2 id="continueTitle">Continuar viendo</h2></div></div><div id="continueRail" class="film-rail"></div></section>
       <section id="discoverSection" class="rail-section" aria-labelledby="discoverTitle"><div class="section-head"><div><p class="eyebrow">ELEGIDAS PARA VOS</p><h2 id="discoverTitle">Historias que atrapan<span class="period">.</span></h2><p class="section-subtitle">Un catálogo curado para encontrar algo diferente.</p></div><button type="button" class="text-link" data-view="cine">Ver todo <span aria-hidden="true">↗</span></button></div><div id="featuredRail" class="film-rail"></div></section>
+      <section id="featureMoviesSection" class="rail-section" aria-labelledby="featureMoviesTitle">
+        <div class="section-head">
+          <div><p class="eyebrow">LARGOMETRAJES ABIERTOS · DURACIÓN COMPLETA</p><h2 id="featureMoviesTitle">Películas completas para ver<span class="period">.</span></h2><p class="section-subtitle">Reproducción desde archivos publicados por sus autores o reproductores oficiales. Sin suscripción.</p></div>
+          <button type="button" class="text-link" data-filter="Películas completas">Ver todas <span aria-hidden="true">↗</span></button>
+        </div>
+        <div id="featureMoviesRail" class="film-rail"></div>
+        <p class="film-legal-note">Fuentes originales · Verificá la calidad disponible, los créditos y las licencias de cada película. No incluye películas comerciales sin autorización.</p>
+      </section>
       <section class="spotlight">
         <div class="spotlight-photo"></div><div class="spotlight-fade"></div>
         <div class="spotlight-content"><span class="pill">CINE ABIERTO · SIN SUSCRIPCIÓN</span><h2>Grandes historias.<br><em>Sin barreras.</em></h2><p>Películas de autores independientes que podés reproducir gratis, con créditos y licencias visibles.</p><button type="button" class="outline-button" data-view="cine">Descubrir cine abierto <span aria-hidden="true">↗</span></button></div>
@@ -68,6 +76,7 @@
         <div class="filters" role="group" aria-label="Filtrar películas" id="filters">
           <button class="filter active" type="button" data-filter="Todo">Todo</button>
           <button class="filter" type="button" data-filter="Cine abierto">Cine abierto</button>
+          <button class="filter" type="button" data-filter="Películas completas">Películas completas</button>
           <button class="filter" type="button" data-filter="Destacadas">Destacadas</button>
           <button class="filter" type="button" data-filter="Estrenos 2026">Estrenos 2026</button>
           <button class="filter" type="button" data-filter="Fantasía">Fantasía</button>
@@ -109,8 +118,8 @@
 
   <div id="playerOverlay" class="player-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="playerTitle">
     <div class="player-top"><button id="playerClose" type="button" aria-label="Cerrar reproductor" class="player-back">← <span>Volver</span></button><div><h2 id="playerTitle"></h2><span id="playerCredit"></span></div></div>
-    <div class="player-stage"><video id="player" controls playsinline preload="metadata" controlsList="nodownload" aria-label="Reproductor de LUMEN Play"></video><div id="playerError" class="player-error hidden"><h3>No se pudo cargar este video.</h3><p>La fuente puede estar temporalmente disponible solo en su sitio original.</p><a id="playerFallback" href="https://studio.blender.org/films/" target="_blank" rel="noopener noreferrer" class="secondary-button">Ver en la fuente original ↗</a></div></div>
-    <div class="player-bottom"><div class="player-controls"><label for="playerQuality">Calidad <select id="playerQuality"></select></label><label for="playerSpeed">Velocidad <select id="playerSpeed"><option value="0.75">0,75×</option><option value="1" selected>Normal</option><option value="1.25">1,25×</option><option value="1.5">1,5×</option><option value="2">2×</option></select></label><label class="caption-upload" for="subtitleInput">＋ Subtítulos .vtt</label><input id="subtitleInput" type="file" accept=".vtt,text/vtt" class="sr-only"><button id="fullscreenBtn" class="player-action" type="button">Pantalla completa ⛶</button></div><p id="playerLicense"></p></div>
+    <div class="player-stage"><div id="embeddedPlayer" class="embedded-player hidden" aria-label="Reproductor de video externo"></div><video id="player" controls playsinline preload="metadata" controlsList="nodownload" aria-label="Reproductor de LUMEN Play"></video><div id="playerError" class="player-error hidden"><h3>No se pudo cargar este video.</h3><p>La fuente puede estar temporalmente disponible solo en su sitio original.</p><a id="playerFallback" href="https://studio.blender.org/films/" target="_blank" rel="noopener noreferrer" class="secondary-button">Ver en la fuente original ↗</a></div></div>
+    <div class="player-bottom"><div class="player-controls"><label for="playerQuality">Calidad <select id="playerQuality"></select></label><label for="playerSpeed">Velocidad <select id="playerSpeed"><option value="0.75">0,75×</option><option value="1" selected>Normal</option><option value="1.25">1,25×</option><option value="1.5">1,5×</option><option value="2">2×</option></select></label><label class="caption-upload" for="subtitleInput">＋ Subtítulos .vtt</label><input id="subtitleInput" type="file" accept=".vtt,text/vtt" class="sr-only"><button id="fullscreenBtn" class="player-action" type="button">Pantalla completa ⛶</button></div><p id="playerLicense"></p><p class="player-origin"><a id="playerOrigin" href="https://studio.blender.org/films/" target="_blank" rel="noopener noreferrer">Página oficial y créditos ↗</a></p></div>
   </div>
 
   <div id="libraryOverlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="libraryModalTitle">
