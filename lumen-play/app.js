@@ -2,22 +2,22 @@
 (function () {
   "use strict";
   var REPO = "https://studio.blender.org/films/";
-  var MP4 = "https://video.blender.org/download/web-videos/";
+  var MP4 = "https://video.blender.org/static/webseed/";
   var COMMONS = "https://commons.wikimedia.org/wiki/Special:Redirect/file/";
   var thumb = function(id){ return "https://i.ytimg.com/vi/" + id + "/hqdefault.jpg"; };
   var still = function(id){ return "https://i.ytimg.com/vi/" + id + "/maxresdefault.jpg"; };
   var cc = "Cine abierto · CC BY · Blender Studio / Blender Foundation. Créditos y licencias en la página del proyecto original.";
   var film = [
-    {id:"charge",title:"Charge",year:2022,duration:"4 min",minutes:4,genre:"Ciencia ficción",category:"open",kind:"Animación",desc:"En un mundo que se queda sin energía, un hombre lucha por su última oportunidad de sobrevivir.",image:still("UXqq0ZvbOnk"),author:"Blender Studio",credit:cc,origin:"https://studio.blender.org/projects/charge/",sources:[{name:"HD · 1080p",url:MP4+"04da454b-9893-4184-98f3-248d00625efe-1080.mp4"},{name:"4K · WebM",url:COMMONS+"Charge_-_Blender_Open_Movie-full_movie.webm",webm:true}]},
+    {id:"charge",title:"Charge",year:2022,duration:"4 min",minutes:4,genre:"Ciencia ficción",category:"open",kind:"Animación",desc:"En un mundo que se queda sin energía, un hombre lucha por su última oportunidad de sobrevivir.",image:still("UXqq0ZvbOnk"),author:"Blender Studio",credit:cc,origin:"https://studio.blender.org/projects/charge/",sources:[{name:"4K · WebM",url:COMMONS+"Charge_-_Blender_Open_Movie-full_movie.webm",webm:true}]},
     {id:"spring",title:"Spring",year:2019,duration:"8 min",minutes:8,genre:"Fantasía",category:"open",kind:"Animación",desc:"Una pastora, su perro y un mundo ancestral despiertan en una conmovedora historia sin diálogos.",image:still("WhWc3b3KhnY"),author:"Blender Animation Studio",credit:cc,origin:"https://studio.blender.org/projects/spring/",sources:[{name:"HD · 720p",url:MP4+"3d95fb3d-c866-42c8-9db1-fe82f48ccb95-720.mp4"},{name:"2K · WebM",url:COMMONS+"Spring_-_Blender_Open_Movie.webm",webm:true}]},
     {id:"sintel",title:"Sintel",year:2010,duration:"15 min",minutes:15,genre:"Fantasía",category:"open",kind:"Animación",desc:"Una joven recorre un mundo helado buscando al pequeño dragón que una vez salvó.",image:thumb("eRsGyueVLvQ"),author:"Blender Foundation",credit:cc,origin:"https://studio.blender.org/films/sintel/",sources:[{name:"HD · 720p",url:MP4+"0eb052d0-fd51-43e6-aa33-ecdbf77a5d40-720.mp4"}]},
-    {id:"sprite",title:"Sprite Fright",year:2021,duration:"10 min",minutes:10,genre:"Comedia",category:"open",kind:"Animación",desc:"Un grupo de adolescentes descubre que el bosque esconde sorpresas tan divertidas como inquietantes.",image:thumb("_cMxraX_5RE"),author:"Blender Studio",credit:cc,origin:"https://studio.blender.org/films/sprite-fright/",sources:[{name:"HD · 720p",url:MP4+"a69d68a5-a0e0-4a80-9d66-49f093c97aaf-720.mp4"},{name:"2K · WebM",url:COMMONS+"Sprite_Fright_-_Blender_Open_Movie-full_movie.webm",webm:true}]},
+    {id:"sprite",title:"Sprite Fright",year:2021,duration:"10 min",minutes:10,genre:"Comedia",category:"open",kind:"Animación",desc:"Un grupo de adolescentes descubre que el bosque esconde sorpresas tan divertidas como inquietantes.",image:thumb("_cMxraX_5RE"),author:"Blender Studio",credit:cc,origin:"https://studio.blender.org/films/sprite-fright/",sources:[{name:"HD · 720p",url:"https://video.blender.org/download/videos/a69d68a5-a0e0-4a80-9d66-49f093c97aaf-720.mp4"},{name:"2K · WebM",url:COMMONS+"Sprite_Fright_-_Blender_Open_Movie-full_movie.webm",webm:true}]},
     {id:"tears",title:"Tears of Steel",year:2012,duration:"12 min",minutes:12,genre:"Ciencia ficción",category:"open",kind:"Acción",desc:"Ámsterdam está bajo ataque y los recuerdos de una vieja historia podrían salvar el futuro.",image:thumb("R6MlUcmOul8"),author:"Blender Institute",credit:cc,origin:"https://studio.blender.org/films/tears-of-steel/",sources:[{name:"HD · 720p",url:MP4+"8533ea43-4271-4a57-9694-e9d0b35e1aa1-720.mp4"},{name:"4K · WebM",url:COMMONS+"Tears_of_Steel_in_4k_-_Official_Blender_Foundation_release.webm",webm:true}]},
     {id:"bunny",title:"Big Buck Bunny",year:2008,duration:"10 min",minutes:10,genre:"Comedia",category:"open",kind:"Animación",desc:"Un conejo gigante le da una inolvidable lección a tres pequeños abusones.",image:thumb("YE7VzlLtp-4"),author:"Blender Foundation",credit:cc,origin:"https://studio.blender.org/films/big-buck-bunny/",sources:[{name:"HD · 720p",url:MP4+"bf1f3fb5-b119-4f9f-9930-8e20e892b898-720.mp4"}]},
-    {id:"wingit",title:"Wing It!",year:2023,duration:"4 min",minutes:4,genre:"Comedia",category:"open",kind:"Animación",desc:"Un gato, un ratón y un invento volador protagonizan una aventura desopilante.",image:thumb("u9lj-c29dxI"),author:"Blender Studio",credit:cc,origin:"https://studio.blender.org/films/wing-it/",sources:[{name:"HD · 1080p",url:MP4+"bd0084a5-1d26-4816-ab5e-1bad9e2fb990-1080.mp4"}]},
-    {id:"agent",title:"Agent 327",year:2017,duration:"4 min",minutes:4,genre:"Comedia",category:"open",kind:"Acción",desc:"Un agente secreto entra a una barbería y empieza una misión tan peligrosa como absurda.",image:thumb("mN0zPOpADL4"),author:"Blender Studio",credit:cc,origin:"https://studio.blender.org/films/agent-327/",sources:[{name:"HD · MP4",url:MP4+"264ff760-803e-430e-8d81-15648e904183-804.mp4"}]},
-    {id:"caminandes",title:"Caminandes: Llamigos",year:2016,duration:"3 min",minutes:3,genre:"Comedia",category:"open",kind:"Animación",desc:"Dos llamas y el césped patagónico: una rivalidad pequeña con consecuencias gigantes.",image:thumb("SkVqJ1SGeL0"),author:"Blender Studio",credit:cc,origin:"https://studio.blender.org/films/caminandes-3/",sources:[{name:"HD · 1080p",url:MP4+"23f3ef79-15dc-44c5-aa45-cf92e78a4509-1080.mp4"}]},
-    {id:"coffee",title:"Coffee Run",year:2020,duration:"3 min",minutes:3,genre:"Drama",category:"open",kind:"Animación",desc:"Un café, un recuerdo y un torbellino de sentimientos en apenas tres minutos.",image:thumb("PVGeM40dABA"),author:"Blender Studio",credit:cc,origin:"https://studio.blender.org/films/coffee-run/",sources:[{name:"Full HD · WebM",url:COMMONS+"Coffee_Run_-_Blender_Open_Movie-full_movie.webm",webm:true}]},
+    {id:"wingit",title:"Wing It!",year:2023,duration:"4 min",minutes:4,genre:"Comedia",category:"open",kind:"Animación",desc:"Un gato, un ratón y un invento volador protagonizan una aventura desopilante.",image:thumb("u9lj-c29dxI"),author:"Blender Studio",credit:cc,origin:"https://studio.blender.org/films/wing-it/",sources:[{name:"HD · WebM",url:COMMONS+"WING_IT%21_-_Blender_Open_Movie-full_movie.webm",webm:true}]},
+    {id:"agent",title:"Agent 327",year:2017,duration:"4 min",minutes:4,genre:"Comedia",category:"open",kind:"Acción",desc:"Un agente secreto entra a una barbería y empieza una misión tan peligrosa como absurda.",image:thumb("mN0zPOpADL4"),author:"Blender Studio",credit:cc,origin:"https://studio.blender.org/films/agent-327/",sources:[{name:"HD · MP4",url:MP4+"264ff760-803e-430e-8d81-15648e904183-720.mp4"}]},
+    {id:"caminandes",title:"Caminandes: Llamigos",year:2016,duration:"3 min",minutes:3,genre:"Comedia",category:"open",kind:"Animación",desc:"Dos llamas y el césped patagónico: una rivalidad pequeña con consecuencias gigantes.",image:thumb("SkVqJ1SGeL0"),author:"Blender Studio",credit:cc,origin:"https://studio.blender.org/films/caminandes-3/",sources:[{name:"HD · 720p",url:MP4+"23f3ef79-15dc-44c5-aa45-cf92e78a4509-720.mp4"}]},
+    {id:"coffee",title:"Coffee Run",year:2020,duration:"3 min",minutes:3,genre:"Drama",category:"open",kind:"Animación",desc:"Un café, un recuerdo y un torbellino de sentimientos en apenas tres minutos.",image:thumb("PVGeM40dABA"),author:"Blender Studio",credit:cc,origin:"https://studio.blender.org/films/coffee-run/",sources:[{name:"HD · 720p",url:MP4+"ff8fe61b-026f-4f07-b66b-2a790d6f6ab1-720.mp4"}]},
     {id:"f1",title:"F1: la película",year:2025,duration:"2 h 35 min",minutes:155,genre:"Acción",category:"new",kind:"Drama",desc:"Un veterano piloto vuelve al circuito para ayudar a un equipo de Fórmula 1 a conseguir lo imposible.",image:"https://images.unsplash.com/photo-1503376780353-7e6692767b70?auto=format&fit=crop&w=900&q=80",author:"Película comercial",credit:"Título comercial. Imagen ilustrativa. LUMEN Play no aloja ni transmite esta película.",origin:"https://www.justwatch.com/ar/buscar?q=F1"},
     {id:"sinners",title:"Los pecadores",year:2025,duration:"2 h 17 min",minutes:137,genre:"Terror",category:"new",kind:"Drama",desc:"Dos hermanos regresan a su tierra natal y encuentran una amenaza aún más oscura.",image:"https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&w=900&q=80",author:"Película comercial",credit:"Título comercial. Imagen ilustrativa. Ver disponibilidad en servicios oficiales.",origin:"https://www.justwatch.com/ar/pelicula/pecadores"},
     {id:"onebattle",title:"Una batalla tras otra",year:2025,duration:"2 h 41 min",minutes:161,genre:"Acción",category:"new",kind:"Drama",desc:"Un hombre se ve obligado a volver a un mundo turbulento cuando su pasado golpea de nuevo.",image:"https://images.unsplash.com/photo-1485846234645-a62644f84728?auto=format&fit=crop&w=900&q=80",author:"Película comercial",credit:"Título comercial. Imagen ilustrativa. Ver disponibilidad en servicios oficiales.",origin:"https://www.justwatch.com/ar/buscar?q=Una%20batalla%20tras%20otra"},
@@ -26,6 +26,9 @@
     {id:"kpop",title:"Las guerreras K-pop",year:2025,duration:"1 h 35 min",minutes:95,genre:"Animación",category:"new",kind:"Fantasía",desc:"Un grupo musical con una vida secreta debe defender al mundo de fuerzas sobrenaturales.",image:"https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&w=900&q=80",author:"Película comercial",credit:"Título comercial. Imagen ilustrativa. Ver disponibilidad en servicios oficiales.",origin:"https://www.netflix.com/search?q=KPop%20Demon%20Hunters"}
   ];
   film.push.apply(film, window.LUMEN_EXTRA_FILMS || []);
+  // MODO REPRODUCCIÓN INTERNA: nunca mostrar títulos que lleven a servicios externos.
+  var supportsWebm=!!document.createElement("video").canPlayType("video/webm");
+  film=film.filter(function(m){return m.category==="open" && (Boolean(m.embed) || (m.sources||[]).some(function(src){return !!src.url && (!src.webm || supportsWebm);}));});
   var byId = {};
   film.forEach(function(m){byId[m.id] = m;});
   var $ = function(sel){return document.querySelector(sel);};
@@ -60,14 +63,14 @@
     if(state.view==="lista")items=items.filter(function(m){return favorites.has(m.id);});
     else if(state.filter==="Cine abierto")items=items.filter(function(m){return m.category==="open";});
     else if(state.filter==="Películas completas")items=items.filter(function(m){return m.category==="open" && m.minutes>=60;});
-    else if(state.filter==="Destacadas")items=items.filter(function(m){return m.category==="new";});
+    else if(state.filter==="Destacadas")items=items.filter(function(m){return m.minutes>=60;});
     else if(state.filter==="Estrenos 2026")items=items.filter(function(m){return m.year===2026;});
     else if(state.filter!=="Todo")items=items.filter(function(m){return m.genre===state.filter || m.kind===state.filter;});
     if(state.query){var q=state.query.toLocaleLowerCase("es");items=items.filter(function(m){return [m.title,m.genre,m.kind,m.desc,m.author,String(m.year)].join(" ").toLocaleLowerCase("es").indexOf(q)!==-1;});}
     return items;
   }
   function render(){
-    renderRail("#featuredRail",[byId.singularity26,byId.charge,byId.spring,byId.sintel,byId.sprite,byId.tears,byId.wingit]);
+    renderRail("#featuredRail",["spring","sintel","sprite","bunny","paywall2018","sita2008","charge","cosmos15"].map(function(id){return byId[id];}).filter(Boolean));
     renderRail("#openRail",film.filter(function(m){return m.category==="open";}).sort(function(a,b){return b.year-a.year;}));
     renderRail("#featureMoviesRail",film.filter(function(m){return m.category==="open" && m.minutes>=60;}).sort(function(a,b){return b.year-a.year;}));
     renderRail("#yearRail",film.filter(function(m){return m.category==="new" && m.year===2026;}));
@@ -82,14 +85,14 @@
     $("#catalogTitle").innerHTML=state.view==="lista"?"Mi lista<span class=\"period\">.</span>":state.query?"Resultados de búsqueda<span class=\"period\">.</span>":"Explorá el catálogo<span class=\"period\">.</span>";
     $$(".filter").forEach(function(b){b.classList.toggle("active",b.dataset.filter===state.filter);});
     $$("[data-view]").forEach(function(b){b.classList.toggle("active",b.dataset.view===state.view);});
-    $("#heroFav").textContent=favorites.has("charge")?"✓":"＋";
-    $("#heroFav").classList.toggle("selected",favorites.has("charge"));
-    $("#heroFav").setAttribute("aria-label",favorites.has("charge")?"Quitar Charge de mi lista":"Agregar Charge a mi lista");
+    $("#heroFav").textContent=favorites.has("spring")?"✓":"＋";
+    $("#heroFav").classList.toggle("selected",favorites.has("spring"));
+    $("#heroFav").setAttribute("aria-label",favorites.has("spring")?"Quitar Spring de mi lista":"Agregar Spring a mi lista");
   }
   function setView(view){
     state.view=view;state.query="";
     if(view==="cine")state.filter="Cine abierto";
-    else if(view==="estrenos")state.filter="Destacadas";
+    else if(view==="estrenos")state.filter="Películas completas";
     else state.filter="Todo";
     render();
     if(view==="inicio")window.scrollTo({top:0,behavior:"smooth"});
@@ -116,12 +119,12 @@
     var m=byId[id];if(!m)return;
     state.active=id;
     $("#detailImage").style.backgroundImage='linear-gradient(0deg,rgba(20,24,33,.4),transparent),url("'+m.image+'")';
-    $("#detailTag").textContent=m.category==="open"?(m.sources&&m.sources.length||m.embed?"CINE ABIERTO · REPRODUCCIÓN GRATIS":"CINE ABIERTO · VER EN EL ORIGEN"):"PELÍCULA COMERCIAL · PLATAFORMA OFICIAL";
+    $("#detailTag").textContent=m.minutes>=60?"PELÍCULA COMPLETA · REPRODUCCIÓN EN LUMEN":"CINE ABIERTO · REPRODUCCIÓN EN LUMEN";
     $("#detailTitle").textContent=m.title;
-    $("#detailMeta").textContent=m.year+" · "+m.duration+" · "+m.genre+" · "+(m.category==="open"?m.author:"Ver disponibilidad");
+    $("#detailMeta").textContent=m.year+" · "+m.duration+" · "+m.genre+" · "+m.author;
     $("#detailDescription").textContent=m.desc;
     $("#detailCredit").textContent=m.credit;
-    $("#detailWatch").textContent=m.category==="open"?((m.sources&&m.sources.length)||m.embed?"▶ Reproducir gratis":"↗ Ver gratis en el origen"):"↗ Dónde verla";
+    $("#detailWatch").textContent="▶ Reproducir acá";
     updateDetailFavorite();
     $("#detailsOverlay").classList.remove("hidden");document.body.style.overflow="hidden";$("#detailsClose").focus();
   }
@@ -159,7 +162,7 @@
   }
   function playMovie(id){
     var m=byId[id];if(!m)return;
-    if(m.category==="new" || (m.category==="open" && !(m.sources&&m.sources.length) && !m.embed)){window.open(m.origin,"_blank","noopener,noreferrer");return;}
+    if(!m.embed && !availableSources(m).length){showToast("Este título no tiene video compatible");return;}
     openPlayer(m);
   }
   function availableSources(m){
@@ -172,8 +175,6 @@
     state.active=m.id;state.lastProgress=0;
     $("#playerTitle").textContent=m.title;$("#playerCredit").textContent=m.author||"LUMEN Play";
     $("#playerLicense").textContent=m.credit||"";
-    $("#playerFallback").href=m.origin||REPO;
-    $("#playerOrigin").href=m.origin||REPO;
     $("#playerError").classList.add("hidden");
     var embedBox=$("#embeddedPlayer");
     embedBox.replaceChildren();
@@ -192,6 +193,7 @@
       iframe.src=m.embed;
       iframe.setAttribute("allow","accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture; fullscreen");
       iframe.setAttribute("referrerpolicy","strict-origin-when-cross-origin");
+      iframe.setAttribute("sandbox","allow-scripts allow-same-origin allow-presentation");
       iframe.allowFullscreen=true;
       embedBox.appendChild(iframe);
       return;
@@ -247,9 +249,9 @@
   $("#searchOverlay").addEventListener("click",function(ev){if(ev.target===this)closeSearch();});
   $("#searchInput").addEventListener("input",function(){state.query=this.value.trim();state.filter="Todo";state.view="inicio";render();});
   $("#searchInput").addEventListener("keydown",function(ev){if(ev.key==="Enter"){closeSearch();$("#allSection").scrollIntoView({behavior:"smooth"});}});
-  $("#heroPlay").addEventListener("click",function(){playMovie("charge");});
-  $("#heroMore").addEventListener("click",function(){openDetails("charge");});
-  $("#heroFav").addEventListener("click",function(){toggleFavorite("charge");});
+  $("#heroPlay").addEventListener("click",function(){playMovie("spring");});
+  $("#heroMore").addEventListener("click",function(){openDetails("spring");});
+  $("#heroFav").addEventListener("click",function(){toggleFavorite("spring");});
   $("#exploreBtn").addEventListener("click",function(){setView("cine");});
   $("#detailsClose").addEventListener("click",closeDetails);
   $("#detailsOverlay").addEventListener("click",function(ev){if(ev.target===this)closeDetails();});
