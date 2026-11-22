@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#080a10">
+  <meta name="description" content="LUMEN Play: cine independiente abierto, películas destacadas y tu videoteca personal. Una experiencia cinematográfica para todos.">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta property="og:title" content="LUMEN Play — El cine vive acá">
+  <meta property="og:description" content="Descubrí cine abierto, títulos destacados y tu propia biblioteca.">
+  <title>LUMEN Play — Cine para descubrir</title>
+  <link rel="preconnect" href="https://i.ytimg.com">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="stylesheet" href="./styles.css">
+  <script src="./app.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#main">Saltar al contenido</a>
+  <header class="topbar">
+    <a class="brand" href="#inicio" aria-label="LUMEN Play, volver al inicio"><span class="brand-mark" aria-hidden="true">L</span><span>LUMEN<span class="brand-play">PLAY</span></span></a>
+    <nav class="nav" aria-label="Navegación principal">
+      <button class="nav-link active" data-view="inicio" type="button">Inicio</button>
+      <button class="nav-link" data-view="cine" type="button">Cine abierto</button>
+      <button class="nav-link" data-view="estrenos" type="button">Destacadas</button>
+      <button class="nav-link" data-view="lista" type="button">Mi lista</button>
+    </nav>
+    <div class="top-actions">
+      <button id="searchBtn" class="icon-button" type="button" aria-label="Buscar películas" title="Buscar"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.6" cy="10.6" r="6.2"></circle><path d="m15.4 15.4 5 5"></path></svg></button>
+      <button id="libraryBtn" class="library-button" type="button" title="Abrir mi biblioteca"><span class="library-symbol" aria-hidden="true">▣</span><span>Mi biblioteca</span></button>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="hero" id="hero" aria-labelledby="heroTitle">
+      <div id="heroPhoto" class="hero-photo"></div>
+      <div class="hero-tint"></div>
+      <div class="hero-inner">
+        <div class="hero-eyebrow"><span class="live-dot"></span> CINE QUE VALE LA PENA VER</div>
+        <div class="hero-kicker">EXCLUSIVO EN CINE ABIERTO</div>
+        <h1 id="heroTitle">CHARGE<span class="hero-period">.</span></h1>
+        <p class="hero-description">En un futuro donde la energía se agota, una última chispa puede cambiarlo todo.</p>
+        <div class="hero-meta"><span class="meta-hd">4K disponible</span><span>2022</span><span>4 min</span><span>Ciencia ficción</span><span class="meta-license">Creative Commons</span></div>
+        <div class="hero-actions">
+          <button id="heroPlay" class="primary-button" type="button"><span class="play-icon" aria-hidden="true"></span> Reproducir gratis</button>
+          <button id="heroMore" class="secondary-button" type="button">Más información</button>
+          <button id="heroFav" class="circle-button" type="button" aria-label="Agregar a mi lista" title="Mi lista">＋</button>
+        </div>
+        <p class="hero-credit">Una producción de Blender Studio · Reproducción autorizada con atribución</p>
+      </div>
+      <div class="hero-edge"></div>
+    </section>
+
+    <div class="main-content">
+      <div class="announcement"><span class="announcement-star">✦</span><div><strong>Una sala de cine sin complicaciones.</strong><span> Cortometrajes abiertos en el reproductor, películas actuales en sus plataformas oficiales y tus propios archivos.</span></div><button id="exploreBtn" type="button" aria-label="Explorar cine abierto">Explorar <span aria-hidden="true">→</span></button></div>
+      <section id="continueSection" class="rail-section hidden" aria-labelledby="continueTitle"><div class="section-head"><div><p class="eyebrow">VOLVÉ A TU HISTORIA</p><h2 id="continueTitle">Continuar viendo</h2></div></div><div id="continueRail" class="film-rail"></div></section>
+      <section id="discoverSection" class="rail-section" aria-labelledby="discoverTitle"><div class="section-head"><div><p class="eyebrow">ELEGIDAS PARA VOS</p><h2 id="discoverTitle">Historias que atrapan<span class="period">.</span></h2><p class="section-subtitle">Un catálogo curado para encontrar algo diferente.</p></div><button type="button" class="text-link" data-view="cine">Ver todo <span aria-hidden="true">↗</span></button></div><div id="featuredRail" class="film-rail"></div></section>
+      <section class="spotlight">
+        <div class="spotlight-photo"></div><div class="spotlight-fade"></div>
+        <div class="spotlight-content"><span class="pill">CINE ABIERTO · SIN SUSCRIPCIÓN</span><h2>Grandes historias.<br><em>Sin barreras.</em></h2><p>Películas de autores independientes que podés reproducir gratis, con créditos y licencias visibles.</p><button type="button" class="outline-button" data-view="cine">Descubrir cine abierto <span aria-hidden="true">↗</span></button></div>
+      </section>
+      <section id="openSection" class="rail-section" aria-labelledby="openTitle"><div class="section-head"><div><p class="eyebrow">REPRODUCCIÓN EN LUMEN PLAY</p><h2 id="openTitle">Cine para ver ahora<span class="period">.</span></h2><p class="section-subtitle">Obras abiertas de Blender Studio y Blender Foundation.</p></div><button type="button" class="text-link" data-view="cine">Explorar catálogo <span aria-hidden="true">↗</span></button></div><div id="openRail" class="film-rail"></div></section>
+      <section id="newSection" class="rail-section" aria-labelledby="newTitle"><div class="section-head"><div><p class="eyebrow">TÍTULOS RECIENTES PARA DESCUBRIR</p><h2 id="newTitle">Lo mejor del cine reciente<span class="period">.</span></h2><p class="section-subtitle">Accedé a opciones legales para ver cada título en Argentina.</p></div><button type="button" class="text-link" data-view="estrenos">Ver destacadas <span aria-hidden="true">↗</span></button></div><div id="newRail" class="film-rail"></div></section>
+      <section id="allSection" class="catalog-section" aria-labelledby="catalogTitle">
+        <div class="section-head catalog-heading"><div><p class="eyebrow">TU PRÓXIMA PELÍCULA</p><h2 id="catalogTitle">Explorá el catálogo<span class="period">.</span></h2></div><span id="resultCount" class="result-count"></span></div>
+        <div class="filters" role="group" aria-label="Filtrar películas" id="filters">
+          <button class="filter active" type="button" data-filter="Todo">Todo</button>
+          <button class="filter" type="button" data-filter="Cine abierto">Cine abierto</button>
+          <button class="filter" type="button" data-filter="Destacadas">Destacadas</button>
+          <button class="filter" type="button" data-filter="Fantasía">Fantasía</button>
+          <button class="filter" type="button" data-filter="Ciencia ficción">Ciencia ficción</button>
+          <button class="filter" type="button" data-filter="Animación">Animación</button>
+          <button class="filter" type="button" data-filter="Drama">Drama</button>
+        </div>
+        <div id="catalogGrid" class="catalog-grid"></div>
+        <div id="emptyState" class="empty-state hidden"><div class="empty-art">◇</div><h3>No encontramos películas con ese filtro.</h3><p>Probá otra palabra o explorá todo el catálogo.</p><button id="clearFilters" class="secondary-button" type="button">Ver todo</button></div>
+      </section>
+      <section id="librarySection" class="personal-section" aria-labelledby="libraryTitle">
+        <div class="personal-graphic" aria-hidden="true"><span class="shelf-card shelf-one"></span><span class="shelf-card shelf-two"></span><span class="shelf-card shelf-three"></span></div>
+        <div class="personal-content"><p class="eyebrow">TU COLECCIÓN PRIVADA</p><h2 id="libraryTitle">Tus películas.<br><em>Tu espacio.</em></h2><p>Elegí videos de tu dispositivo y reproducilos directamente en LUMEN Play. Los archivos permanecen en tu equipo: no se suben a un servidor.</p><button id="libraryOpen" class="primary-button" type="button">Abrir mi biblioteca <span aria-hidden="true">↗</span></button><span class="privacy-note">Privada por diseño · Sin registro para tu biblioteca local</span></div>
+      </section>
+      <section class="partners" aria-labelledby="partnersTitle"><p class="eyebrow">MÁS FORMAS DE DISFRUTAR</p><h2 id="partnersTitle">El cine no termina acá.</h2><div class="partners-grid"><a href="https://pluto.tv/" target="_blank" rel="noopener noreferrer"><strong>pluto<span>tv</span></strong><small>TV y películas gratis con anuncios ↗</small></a><a href="https://watch.plex.tv/" target="_blank" rel="noopener noreferrer"><strong>PLEX</strong><small>Películas y series según región ↗</small></a><a href="https://www.justwatch.com/ar" target="_blank" rel="noopener noreferrer"><strong>JustWatch</strong><small>Dónde ver títulos actuales ↗</small></a><a href="https://studio.blender.org/films/" target="_blank" rel="noopener noreferrer"><strong>blender<span>studio</span></strong><small>Conocé a los autores ↗</small></a></div></section>
+    </div>
+  </main>
+
+  <footer class="footer"><div class="footer-top"><a class="brand footer-brand" href="#inicio"><span class="brand-mark" aria-hidden="true">L</span><span>LUMEN<span class="brand-play">PLAY</span></span></a><span>El cine vive acá.</span></div><p>LUMEN Play es una plataforma independiente de descubrimiento de cine abierto. El contenido de terceros se reproduce en sus respectivas plataformas. Las imágenes de títulos comerciales son ilustrativas. La disponibilidad, calidad y condiciones de reproducción dependen del proveedor.</p><div class="footer-links"><a href="https://studio.blender.org/films/" target="_blank" rel="noopener noreferrer">Autores y licencias</a><button id="privacyBtn" type="button">Privacidad</button><span>© 2026 LUMEN Play</span></div></footer>
+  <nav class="bottom-nav" aria-label="Navegación móvil">
+    <button type="button" data-view="inicio" class="active"><span aria-hidden="true">⌂</span>Inicio</button>
+    <button type="button" data-view="cine"><span aria-hidden="true">▷</span>Cine</button>
+    <button type="button" id="mobileSearch"><span aria-hidden="true">⌕</span>Buscar</button>
+    <button type="button" data-view="lista"><span aria-hidden="true">♡</span>Mi lista</button>
+    <button type="button" id="mobileLibrary"><span aria-hidden="true">▣</span>Biblioteca</button>
+  </nav>
+
+  <div id="searchOverlay" class="search-overlay hidden" role="dialog" aria-modal="true" aria-label="Buscar">
+    <div class="search-sheet"><div class="search-top"><span>BUSCAR EN LUMEN PLAY</span><button id="searchClose" aria-label="Cerrar búsqueda" class="icon-button" type="button">✕</button></div><div class="search-field"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.6" cy="10.6" r="6.2"></circle><path d="m15.4 15.4 5 5"></path></svg><input id="searchInput" type="search" placeholder="Buscá una historia, un género..." autocomplete="off"></div><p class="search-hint">Probá “fantasía”, “Blender”, “F1” o “drama”.</p></div>
+  </div>
+
+  <div id="detailsOverlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="detailTitle">
+    <div class="detail-modal"><button id="detailsClose" type="button" class="modal-close" aria-label="Cerrar">✕</button><div class="detail-image" id="detailImage"></div><div class="detail-content"><div class="eyebrow" id="detailTag"></div><h2 id="detailTitle"></h2><p class="detail-meta" id="detailMeta"></p><p id="detailDescription"></p><p class="detail-credit" id="detailCredit"></p><div class="detail-actions"><button id="detailWatch" class="primary-button" type="button"></button><button id="detailFav" class="secondary-button" type="button">＋ Mi lista</button></div></div></div>
+  </div>
+
+  <div id="playerOverlay" class="player-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="playerTitle">
+    <div class="player-top"><button id="playerClose" type="button" aria-label="Cerrar reproductor" class="player-back">← <span>Volver</span></button><div><h2 id="playerTitle"></h2><span id="playerCredit"></span></div></div>
+    <div class="player-stage"><video id="player" controls playsinline preload="metadata" controlsList="nodownload" aria-label="Reproductor de LUMEN Play"></video><div id="playerError" class="player-error hidden"><h3>No se pudo cargar este video.</h3><p>La fuente puede estar temporalmente disponible solo en su sitio original.</p><a id="playerFallback" href="https://studio.blender.org/films/" target="_blank" rel="noopener noreferrer" class="secondary-button">Ver en la fuente original ↗</a></div></div>
+    <div class="player-bottom"><div class="player-controls"><label for="playerQuality">Calidad <select id="playerQuality"></select></label><label for="playerSpeed">Velocidad <select id="playerSpeed"><option value="0.75">0,75×</option><option value="1" selected>Normal</option><option value="1.25">1,25×</option><option value="1.5">1,5×</option><option value="2">2×</option></select></label><label class="caption-upload" for="subtitleInput">＋ Subtítulos .vtt</label><input id="subtitleInput" type="file" accept=".vtt,text/vtt" class="sr-only"><button id="fullscreenBtn" class="player-action" type="button">Pantalla completa ⛶</button></div><p id="playerLicense"></p></div>
+  </div>
+
+  <div id="libraryOverlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="libraryModalTitle">
+    <div class="library-modal"><button id="libraryClose" type="button" class="modal-close" aria-label="Cerrar">✕</button><p class="eyebrow">BIBLIOTECA LOCAL</p><h2 id="libraryModalTitle">Tu cine personal.</h2><p>Reproducí archivos MP4, WebM y otros formatos admitidos por tu navegador. Tus videos nunca se suben a LUMEN Play.</p><label for="localFiles" class="upload-zone"><span aria-hidden="true">＋</span><strong>Agregar videos de mi dispositivo</strong><small>Podés elegir varios archivos · No se cargan a ningún servidor</small></label><input id="localFiles" type="file" accept="video/*,audio/*" multiple class="sr-only"><div id="localList" class="local-list"><p class="muted">Todavía no agregaste archivos en esta sesión.</p></div><p class="library-warning">Por privacidad, los archivos locales deben seleccionarse nuevamente al cerrar y reabrir la página.</p></div>
+  </div>
+  <div id="toast" class="toast" aria-live="polite"></div>
+</body>
+</html>
