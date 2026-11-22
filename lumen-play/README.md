@@ -1,4 +1,12 @@
-# LUMEN Play 2.0 — edición premium
+# LUMEN Play 2.0 — reproducción dentro de la aplicación
+
+## Regla de reproducción interna (22/11/2026)
+**No se muestran películas comerciales ni fichas sin una fuente de video utilizable dentro de LUMEN Play.** El catálogo visible filtra los títulos sin licencias/fuentes internas. El botón Reproducir no abre pestañas ni aplicaciones ajenas. Para los largometrajes con autorizaciones se usa el elemento HTML5 video o un iframe autorizado y limitado mediante sandbox (sin popups ni navegación de nivel superior). Los errores se informan dentro de la app con botón de reintento.
+
+Los MP4 de Blender están enlazados desde su webseed oficial; las obras que ofrecen solo WebM se ocultan automáticamente si el navegador no admite ese formato. En iPhone/Smart TV la compatibilidad real debe verificarse en el dispositivo. Ni LUMEN ni Render alojan los archivos originales. La disponibilidad nunca puede garantizarse al 100% cuando la fuente depende de un servidor ajeno. Para tener garantía plena hace falta distribución propia bajo licencias expresas, almacenamiento y CDN.
+
+La lista de películas comerciales de la etapa anterior se conserva en el código fuente histórico, pero **no aparece en la interfaz** porque no existe una autorización de distribución directa. La lista "Dónde verla" y los partners externos se retiraron de la interfaz.
+
 Webapp independiente en español, sin build ni servicios de pago. Incluye catálogo legal (Blender Studio / Blender Foundation), películas comerciales con enlaces de disponibilidad externos, diseño responsive, favoritos y progreso en localStorage, biblioteca local de archivos, subtítulos WebVTT y PWA.
 
 ## Archivos
